@@ -1,3 +1,10 @@
+# V1.5 Automation-first UX candidate (not merged to main)
+
+- The primary sidebar and initial landing page is **문서 업로드 · 자동 처리**; Dashboard has upload CTA.
+- Safe tenant-filtered upload preview queue (`GET /api/imports/queue`), no source document bytes included.
+- **Only structured order documents are actually imported today**; quote, delivery, invoice, payment are planned and explicitly unsupported rather than auto-recorded incorrectly.
+- Read `V1_5_AUTOMATION_FIRST_DESIGN.md` for the approved end-to-end workflow and phased implementations.
+
 # JARVIS WORKS — 웹 전용 B2B 업무관리 V1.4 보완 검토 후보
 
 기업용 **거래처 → 견적 → 수주·발주 → 문서 간 차이 검증 → 청구·입금 → 대시보드** 웹앱입니다. 기업 PC의 Chrome·Edge 등 웹 브라우저를 주 사용 환경으로 하는 한국어 화면을 제공합니다. 앱 설치는 필요하지 않으며 개발·관리 작업은 모바일 브라우저에서도 진행할 수 있습니다. 계정·거래 문서는 현재 API 수준에서 **회사 ID 필터로 논리적으로 분리**합니다. 물리적인 회사별 DB 분리는 아직 구현되지 않았습니다.

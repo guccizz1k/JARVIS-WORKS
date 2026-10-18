@@ -49,3 +49,37 @@
 .import-supplement-grid input{width:100%;border:1px solid #bfccd3;border-radius:8px;padding:11px 12px;background:#fff;color:#122e41;font:inherit}
 .import-supplement button{justify-self:start}
 .import-supplement .notice{margin:0}
+
+/* V1.5 – automation is primary, manual editing is exception handling. */
+.nav-primary{margin:7px 6px 9px;background:#dcf4ee!important;color:#124d47!important;border:1px solid #87cbbc!important;min-height:66px;display:flex;align-items:center;box-shadow:0 5px 17px #092f2522}
+.nav-primary.active{background:#2b786f!important;color:white!important;border-color:#398e83!important}
+.nav-primary small{display:block;font-size:10px;letter-spacing:.12em;font-weight:650;opacity:.7;padding-top:4px;text-transform:uppercase}
+.nav-primary .nav-ico{font-size:23px}
+.side-secondary-label{margin-top:10px!important}
+.import-hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(250px,.9fr);background:linear-gradient(122deg,#102e3e,#166b69);color:#fff;border-radius:18px;padding:30px;gap:24px;margin-bottom:22px;box-shadow:0 12px 25px #123c4e1a}
+.import-eyebrow{display:block;font-size:10px;letter-spacing:.16em;color:#9de5cf;font-weight:750;margin-bottom:12px}
+.import-hero h2{font-size:28px;line-height:1.35;margin:0 0 12px;letter-spacing:-.04em}
+.import-hero p{font-size:14px;line-height:1.8;color:#d5e5e9;max-width:650px;margin:0}
+.import-workflow{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px}
+.import-workflow span{background:#ffffff1c;border:1px solid #ffffff38;padding:9px 11px;border-radius:8px;font-size:12px;white-space:nowrap}
+.import-hero-side{display:grid;align-content:center;gap:8px;background:#ffffff13;border:1px solid #ffffff2c;border-radius:13px;padding:20px}
+.import-hero-side .badge{justify-self:start}
+.import-hero-side b{font-size:14px;color:#fff}
+.import-hero-side small{font-size:12px;color:#cbdfdf;margin-bottom:10px}
+.import-upload-panel{border:2px solid #58a69b}
+.import-upload-panel .panel-body{background:#fbfefe}
+.import-dashboard-cta{display:flex;justify-content:space-between;gap:20px;align-items:center;padding:21px 24px;margin-bottom:22px;border:1px solid #82c0b4;background:#edf8f5;border-radius:13px}
+.import-dashboard-cta strong{display:block;font-size:18px;color:#164e46}
+.import-dashboard-cta p{font-size:13px;margin:7px 0;color:#345f61}
+.import-dashboard-cta small{font-size:11px;color:#628085}
+.import-dashboard-cta .btn{flex-shrink:0}
+.import-queue{margin-top:20px}
+@media(max-width:1060px){.import-hero{grid-template-columns:1fr}.import-dashboard-cta{flex-direction:column;align-items:flex-start}}
+@media(max-width:730px){.import-hero{padding:20px}.import-hero h2{font-size:23px}.import-workflow{gap:6px}.import-workflow span{font-size:11px}}
+
+.import-stats-details{margin-top:20px;background:#fff;border:1px solid #e5edf0;border-radius:13px;padding:0 18px}
+.import-stats-details summary{padding:19px 0;cursor:pointer;font-size:15px;font-weight:750;color:#26485a;list-style-position:inside}
+.import-stats-details summary:focus-visible{outline:3px solid #168b81;outline-offset:2px}
+.import-stats-details[open] summary{border-bottom:1px solid #e7eff3}
+.import-stats-hint{font-size:12px;font-weight:400;color:#8296a5;margin-left:14px}
+.import-stats-details .import-summary{margin:15px 0;border:0;box-shadow:none}

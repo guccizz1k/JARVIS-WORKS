@@ -60,6 +60,8 @@ with TemporaryDirectory() as temp:
         page.locator('#login-form [type=submit]').click()
 
 
+        page.get_by_role('heading',name='문서 업로드 · 자동 처리').wait_for(timeout=10000)
+        go('dashboard')
         page.get_by_role('heading',name='업무 대시보드').wait_for(timeout=10000)
         assert page.locator('.cards .card').count()==4
         page.screenshot(path=str(screenshot_dir/f'{device}_jw_dashboard.png'),full_page=True)

@@ -773,6 +773,28 @@ async def upload_order_preview(file:UploadFile=File(...),user=Depends(current_us
         return import_preview_response(document,ident_new,digest,existing)
 
 
+@app.get('/api/imports/queue')
+def import_review_queue(user=Depends(current_user)):
+    # Read-only, tenant scoped; original document bytes are not stored.
+    with conn() as c:
+        params=(user['org_id'],) if user['role']=='admin' else (user['org_id'],user['id'])
+        owner_clause='' if user['role']=='admin' else ' AND uploaded_by=?'
+        rows=c.execute('''SELECT id,filename,status,normalized_json,created_at,confirmed_at,order_id
+           FROM import_previews WHERE org_id=?'''+owner_clause+'''
+           ORDER BY created_at DESC, rowid DESC LIMIT 100''',params).fetchall()
+        pending=[];confirmed=[]
+        for row in rows:
+            d=json.loads(row['normalized_json'])
+            item={'id':row['id'],'filename':row['filename'],'status':row['status'],
+                  'document_kind':d.get('document_kind',''),'company':d.get('company'),
+                  'missing_fields':d.get('missing_fields',[]),'created_at':row['created_at'],
+                  'confirmed_at':row['confirmed_at'],'order_id':row['order_id']}
+            (pending if row['status']=='pending' else confirmed).append(item)
+        return {'pending':pending,'confirmed':confirmed,
+                'pending_count':len(pending),'confirmed_count':len(confirmed),
+                'limited_to_last':100,'source_bytes_stored':False}
+
+
 @app.get('/api/imports/{preview_id}')
 def read_order_preview(preview_id:str,user=Depends(current_user)):
     with conn() as c:

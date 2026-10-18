@@ -38,7 +38,7 @@ with TemporaryDirectory() as temp:
         page.add_script_tag(content=(ROOT/'app/static/app.js').read_text())
         page.get_by_role('button',name='한빛테크').click()
         page.locator('#login-form [type=submit]').click()
-        page.get_by_role('heading',name='업무 대시보드').wait_for()
+        page.get_by_role('heading',name='문서 업로드 · 자동 처리').wait_for()
         page.locator('nav [data-page=imports]').click()
         page.locator('#import-file').set_input_files({'name':'incomplete.xlsx','mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','buffer':make_xlsx({'거래처':'','납기일':''})})
         page.get_by_role('button',name='파일 분석 및 검증').click()
