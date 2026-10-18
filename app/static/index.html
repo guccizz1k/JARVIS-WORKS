@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light"><meta name="theme-color" content="#f5f7fa"><meta name="description" content="JARVIS WORKS - 거래처, 견적, 발주, 청구, 입금 검증을 한곳에서 관리하는 기업용 업무 앱">
+<title>JARVIS WORKS · 기업 업무 자동화</title><link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<section id="login-view" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">JW</div><div class="eyebrow">B2B WORK MANAGEMENT</div>
+    <h1>기업 업무의 흐름을<br>하나로 연결하세요.</h1>
+    <p>거래처부터 견적·발주·청구·입금까지. 금액을 정확히 계산하고 변경 사항을 추적합니다.</p>
+    <form id="login-form" autocomplete="on">
+      <label>이메일<input name="email" type="email" autocomplete="username" required /></label>
+      <label>비밀번호<input name="password" type="password" autocomplete="current-password" required /></label>
+      <button type="submit" class="btn primary large">로그인 <span aria-hidden="true">→</span></button>
+    </form>
+    <div class="demo-box"><strong>데모 계정</strong><p>두 회사의 데이터 분리 확인이 가능합니다.</p>
+      <div class="demo-actions"><button class="btn ghost small" data-demo="demo@hanbit.example">한빛테크</button><button class="btn ghost small" data-demo="demo@bada.example">바다유통</button></div>
+      <span>공통 비밀번호: Demo!2026secure</span></div>
+    <p class="fineprint">DEMO_SEED=1 상태에서만 제공되는 체험 계정입니다. 실제 기업 데이터를 입력하지 마세요.</p>
+  </div>
+  <div class="login-side"><div class="login-preview"><div class="mini-top">업무 통합 대시보드 <span>● 시스템 정상</span></div><div class="mini-figure">₩ 12,540,000</div><div class="mini-label">거래 흐름을 한눈에</div><div class="mini-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="mini-notice">✓ 문서 금액 자동 대조</div><div class="mini-notice">✓ 변경 이력 보존</div><div class="mini-notice">✓ 미수금과 지연 거래 추적</div></div></div>
+</section>
+<div id="app-shell" class="app-shell hidden">
+  <aside class="sidebar" id="sidebar"><div class="brand"><span class="brand-symbol">JW</span><span><b>JARVIS WORKS</b><small>BUSINESS WORKSPACE</small></span></div>
+    <div class="side-group-label">WORKSPACE</div>
+    <nav id="nav" aria-label="업무 메뉴">
+      <button data-page="dashboard" class="nav-item active"><span class="nav-ico">◫</span> 대시보드</button>
+      <button data-page="customers" class="nav-item"><span class="nav-ico">♧</span> 거래처 관리</button>
+      <button data-page="quotes" class="nav-item"><span class="nav-ico">▤</span> 견적 관리</button>
+      <button data-page="orders" class="nav-item"><span class="nav-ico">≡</span> 수주·발주 관리</button>
+      <button data-page="invoices" class="nav-item"><span class="nav-ico">▣</span> 청구·입금 관리</button>
+      <button data-page="audit" class="nav-item"><span class="nav-ico">◷</span> 변경 이력</button>
+      <div class="side-group-label side-security-label">SECURITY</div>
+      <button data-page="security" class="nav-item" id="security-nav" hidden><span class="nav-ico">◇</span> 보안 관제 센터</button>
+    </nav>
+    <div class="side-bottom"><div class="environment">● 로컬 / 테스트 환경</div><div class="side-org" id="side-org"></div><button id="logout" class="btn ghost small">로그아웃</button></div>
+  </aside>
+  <div class="main-area"><header class="topbar"><button id="toggle-menu" class="menu-toggle" aria-label="메뉴 열기">☰</button><div class="breadcrumbs">WORKSPACE <span>/</span> <b id="crumb-title">대시보드</b></div><div class="top-right"><span class="topdate" id="today-label"></span><span class="user-circle" id="user-circle">관</span></div></header>
+  <main id="main-content" class="main-content" tabindex="-1"></main><footer>JARVIS WORKS v1.2 · 금액 단위 KRW · 부가세 10%는 공급가액 합계 기준 반올림</footer></div>
+</div>
+<div id="modal-root"></div><div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js" defer></script>
+</body></html>
