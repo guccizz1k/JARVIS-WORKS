@@ -19,10 +19,11 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, File, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .import_engine import extract, DocumentError, MAX_FILE_SIZE, supplement_review
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get('JARVIS_DB_PATH', str(ROOT.parent / 'data' / 'works.db')))
@@ -201,6 +202,18 @@ CREATE TABLE IF NOT EXISTS security_events (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_security_events_org ON security_events(org_id,created_at);
+CREATE TABLE IF NOT EXISTS import_previews (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES organizations(id),
+  uploaded_by TEXT NOT NULL REFERENCES users(id),
+  file_sha256 TEXT NOT NULL, filename TEXT NOT NULL,
+  normalized_json TEXT NOT NULL, preview_digest TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending','confirmed')),
+  created_at TEXT NOT NULL, confirmed_at TEXT,
+  order_id TEXT UNIQUE REFERENCES orders(id)
+);
+CREATE INDEX IF NOT EXISTS idx_import_previews_org ON import_previews(org_id,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_imports_single_confirmed_file
+  ON import_previews(org_id,file_sha256) WHERE status='confirmed';
 
 '''
 
@@ -225,6 +238,14 @@ def init_db():
         cols={r['name'] for r in c.execute('PRAGMA table_info(payments)')}
         if 'reversed_at' not in cols: c.execute('ALTER TABLE payments ADD COLUMN reversed_at TEXT')
         if 'reversed_by' not in cols: c.execute('ALTER TABLE payments ADD COLUMN reversed_by TEXT REFERENCES users(id)')
+        order_cols={r['name'] for r in c.execute('PRAGMA table_info(orders)')}
+        if 'order_date' not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN order_date TEXT NOT NULL DEFAULT ''")
+        if 'source_import_id' not in order_cols:
+            c.execute('ALTER TABLE orders ADD COLUMN source_import_id TEXT')
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_source_import ON orders(source_import_id)')
+        if 'source_document_meta' not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN source_document_meta TEXT NOT NULL DEFAULT '{}'")
         for table in ('quotes','orders','invoices'):
             old_cols={r['name'] for r in c.execute(f'PRAGMA table_info({table})')}
             if 'customer_name_snapshot' not in old_cols:
@@ -376,6 +397,19 @@ def retrieve_items(c, kind, parent_id):
 def detail_doc(c, kind, doc):
     items=retrieve_items(c,kind,doc['id'])
     result={**doc, 'items':items, 'money':money(items,doc['vat_mode'])}
+    if kind=='order' and doc.get('source_import_id'):
+        try:
+            source_doc=json.loads(doc.get('source_document_meta') or '{}')
+        except (TypeError, ValueError):
+            source_doc={}
+        result['import_source']={
+            'filename':source_doc.get('filename'),
+            'document_kind':source_doc.get('document_kind'),
+            'reference_number':source_doc.get('additional_fields',{}).get('reference_number'),
+            'additional_fields':source_doc.get('additional_fields',{}),
+            'source_items':source_doc.get('items',[]),
+            'quantity_by_unit':source_doc.get('quantity_by_unit',{}),
+        }
     if kind=='invoice':
         result['paid']=c.execute('SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id=? AND reversed_at IS NULL',(doc['id'],)).fetchone()[0]
         result['payments']=[dict(r) for r in c.execute('''SELECT id,amount,paid_at,note,created_at,reference,reversed_at
@@ -430,7 +464,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app=FastAPI(title='JARVIS WORKS v1', version='1.2.0', docs_url='/docs' if os.getenv('ENABLE_API_DOCS')=='1' else None,
+app=FastAPI(title='JARVIS WORKS v1', version='1.3.0', docs_url='/docs' if os.getenv('ENABLE_API_DOCS')=='1' else None,
             redoc_url=None, lifespan=lifespan)
 
 
@@ -463,7 +497,7 @@ def config():
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'1.2.0'}
+    return {'status':'ok','version':'1.3.0'}
 
 
 @app.post('/api/login')
@@ -684,6 +718,204 @@ def change_quote_status(quote_id:str,body:QuoteStatus,user=Depends(current_user)
         return detail_doc(c,'quote',get_row(c,'quotes',quote_id,user['org_id']))
 
 
+class ImportSupplement(Strict):
+    preview_digest: str = Field(min_length=64,max_length=64)
+    fields: dict[Literal['company','ordered_at','due_date'], str] = Field(min_length=1,max_length=3)
+
+
+class ImportConfirmation(Strict):
+    preview_digest: str = Field(min_length=64, max_length=64)
+    confirmed_customer: str = Field(min_length=1,max_length=120)
+    confirmed_order_date: date
+    confirmed_total: int = Field(ge=0,strict=True)
+    approve: Literal[True]
+
+
+def import_preview_response(doc, preview_id, digest, existing):
+    return {'id':preview_id,'digest':digest,'status':'pending','document':doc,
+            'customer_status':'existing' if existing else 'new',
+            'existing_customer_id':existing['id'] if existing else None,
+            'confirmation_required':True,'ready_to_confirm':not bool(doc.get('missing_fields'))}
+
+
+def match_import_customer(c, org, doc):
+    name=doc['company']
+    if not name:return None
+    business=doc['business_number']
+    same_name=c.execute('SELECT * FROM customers WHERE org_id=? AND name=?',(org,name)).fetchone()
+    if business:
+        by_number=c.execute('SELECT * FROM customers WHERE org_id=? AND business_number=? AND business_number!=\'\'',(org,business)).fetchall()
+        if len(by_number)>1:fail('같은 사업자번호에 여러 거래처가 존재하여 자동 등록할 수 없습니다',409)
+        if by_number and by_number[0]['name']!=name:fail('사업자번호는 같지만 상호가 다릅니다. 거래처를 먼저 확인하세요',409)
+        if same_name and same_name['business_number'] != business:fail('상호는 같지만 사업자번호가 불일치하거나 기존에 누락되어 있습니다. 거래처를 먼저 확인하세요',409)
+    return same_name
+
+
+@app.post('/api/imports/preview',status_code=201)
+async def upload_order_preview(file:UploadFile=File(...),user=Depends(current_user)):
+    # Do not persist file bytes; reject oversized uploads while streaming a bounded amount.
+    raw=await file.read(MAX_FILE_SIZE+1)
+    await file.close()
+    try:document=extract(file.filename or '',raw,allow_missing=True)
+    except DocumentError as exc:fail(str(exc),422)
+    digest=hashlib.sha256(json.dumps(document,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    checksum=hashlib.sha256(raw).hexdigest()
+    with transaction() as c:
+        if c.execute("SELECT 1 FROM import_previews WHERE org_id=? AND file_sha256=? AND status='confirmed'",(user['org_id'],checksum)).fetchone():
+            fail('이미 승인·등록된 동일 문서입니다',409)
+        existing=match_import_customer(c,user['org_id'],document)
+        ident_new=ident()
+        c.execute('''INSERT INTO import_previews
+          (id,org_id,uploaded_by,file_sha256,filename,normalized_json,preview_digest,status,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?)''',
+          (ident_new,user['org_id'],user['id'],checksum,document['filename'],json.dumps(document,ensure_ascii=False,sort_keys=True),digest,'pending',now()))
+        audit(c,user,'document_import',ident_new,'preview',{'format':document['format'],'items':document['item_count']})
+        return import_preview_response(document,ident_new,digest,existing)
+
+
+@app.get('/api/imports/{preview_id}')
+def read_order_preview(preview_id:str,user=Depends(current_user)):
+    with conn() as c:
+        row=get_row(c,'import_previews',preview_id,user['org_id'])
+        if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로드한 사용자만 검토할 수 있습니다',403)
+        doc=json.loads(row['normalized_json'])
+        existing=match_import_customer(c,user['org_id'],doc)
+        return {**import_preview_response(doc,row['id'],row['preview_digest'],existing),'status':row['status'],'order_id':row['order_id']}
+
+
+@app.patch('/api/imports/{preview_id}/supplement')
+def supplement_order_import(preview_id: str, body: ImportSupplement, user=Depends(current_user)):
+    """Only user-supplied missing metadata; a new digest invalidates earlier approvals."""
+    with transaction() as c:
+        row=get_row(c,'import_previews',preview_id,user['org_id'])
+        if row['uploaded_by']!=user['id'] and user['role']!='admin':
+            fail('업로드한 사용자만 보완할 수 있습니다',403)
+        if row['status']!='pending':fail('이미 완료된 문서는 보완할 수 없습니다',409)
+        if (datetime.now(KST)-datetime.fromisoformat(row['created_at'])).total_seconds()>24*3600:
+            fail('검토 기간이 지났습니다. 문서를 다시 업로드하세요',409)
+        if body.preview_digest!=row['preview_digest']:
+            fail('검토 중 다른 변경이 발생했습니다. 최신 내용을 다시 확인하세요',409)
+        doc=json.loads(row['normalized_json'])
+        try:changed=supplement_review(doc,body.fields)
+        except DocumentError as exc:fail(str(exc),422)
+        digest=hashlib.sha256(json.dumps(changed,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        existing=match_import_customer(c,user['org_id'],changed)
+        c.execute('UPDATE import_previews SET normalized_json=?,preview_digest=? WHERE id=? AND org_id=?',
+                  (json.dumps(changed,ensure_ascii=False,sort_keys=True),digest,preview_id,user['org_id']))
+        audit(c,user,'document_import',preview_id,'supplement',
+              {'supplied_fields':sorted(body.fields),'remaining_missing':changed['missing_fields'],
+               'source_values_preserved':True})
+        return import_preview_response(changed,preview_id,digest,existing)
+
+
+@app.post('/api/imports/{preview_id}/confirm',status_code=201)
+def confirm_order_import(preview_id:str,body:ImportConfirmation,user=Depends(current_user)):
+    with transaction() as c:
+        row=get_row(c,'import_previews',preview_id,user['org_id'])
+        if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로드한 사용자만 승인할 수 있습니다',403)
+        if row['status']!='pending':fail('이미 승인 처리된 문서입니다',409)
+        if (datetime.now(KST)-datetime.fromisoformat(row['created_at'])).total_seconds()>24*3600:
+            fail('검토 기간 24시간이 지났습니다. 문서를 다시 업로드하세요',409)
+        doc=json.loads(row['normalized_json'])
+        if doc.get('missing_fields') or any(not doc.get(f) for f in ('company','ordered_at','due_date')):
+            fail('필수 누락 항목을 모두 보완해야 발주 생성이 가능합니다',409)
+        if (body.preview_digest!=row['preview_digest'] or
+            body.confirmed_customer!=doc['company'] or
+            body.confirmed_order_date.isoformat()!=doc['ordered_at'] or
+            body.confirmed_total!=doc['money']['total']):
+            fail('확인한 문서 정보가 검토 자료와 일치하지 않습니다. 다시 검토하세요',409)
+        if c.execute("SELECT 1 FROM import_previews WHERE org_id=? AND file_sha256=? AND status='confirmed'",(user['org_id'],row['file_sha256'])).fetchone():
+            fail('이미 승인·등록된 동일 파일입니다',409)
+        cust=match_import_customer(c,user['org_id'],doc)
+        # An external purchase-order number is a business identifier, even if file bytes differ.
+        # Reject duplicate confirmations for the same tenant/customer/PO inside this transaction.
+        reference=(doc.get('additional_fields') or {}).get('reference_number')
+        if reference:
+            duplicate=c.execute('''SELECT o.id FROM orders o WHERE o.org_id=?
+             AND o.customer_name_snapshot=? AND
+             json_extract(o.source_document_meta,'$.additional_fields.reference_number')=?
+             LIMIT 1''',(user['org_id'],doc['company'],reference)).fetchone()
+            if duplicate:
+                fail('이미 동일 거래처·발주번호로 등록된 문서입니다. 원본을 확인하세요',409)
+        if not cust:
+            customer_id=ident()
+            c.execute('INSERT INTO customers VALUES(?,?,?,?,?,?,?,?)',
+                      (customer_id,user['org_id'],doc['company'],doc['business_number'],'','','',now()))
+            audit(c,user,'customer',customer_id,'create',{'source':'confirmed_import','privacy':'contact values omitted'})
+        else:customer_id=cust['id']
+        # This quote is an internal imported-source record, not a claim of external quote acceptance.
+        quote_id=ident(); order_id=ident()
+        qnum=f'Q-{datetime.now(KST):%Y%m%d}-{quote_id[:10].upper()}'
+        onum=f'O-{datetime.now(KST):%Y%m%d}-{order_id[:10].upper()}'
+        c.execute('INSERT INTO quotes VALUES(?,?,?,?,?,?,?,?,?,?)',
+                  (quote_id,user['org_id'],customer_id,doc['company'],qnum,'[내부 연결용·외부 승인 아님] '+doc['title'][:110],
+                   'accepted',doc['vat_mode'],now(),now()))
+        c.execute('''INSERT INTO orders
+          (id,org_id,customer_id,quote_id,customer_name_snapshot,doc_no,title,status,
+           review_state,vat_mode,due_date,created_at,updated_at,order_date,source_import_id,source_document_meta)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+          (order_id,user['org_id'],customer_id,quote_id,doc['company'],onum,doc['title'],
+           'received','clean',doc['vat_mode'],doc['due_date'],now(),now(),doc['ordered_at'],preview_id,
+           json.dumps(doc,ensure_ascii=False,sort_keys=True)))
+        for i,x in enumerate(doc['items']):
+            itemid=ident()
+            c.execute('INSERT INTO quote_items VALUES(?,?,?,?,?,?)',(itemid,quote_id,x['name'],x['quantity'],x['unit_price'],i))
+            c.execute('INSERT INTO order_items VALUES(?,?,?,?,?,?,?)',
+                      (ident(),order_id,itemid,x['name'],x['quantity'],x['unit_price'],i))
+        c.execute('UPDATE import_previews SET status=?,confirmed_at=?,order_id=? WHERE id=? AND org_id=?',
+                  ('confirmed',now(),order_id,preview_id,user['org_id']))
+        audit(c,user,'document_import',preview_id,'confirm',{'order_id':order_id,'quote_id':quote_id,
+              'ordered_at':doc['ordered_at'],'amount':doc['money']['total'],'quantity':doc['ordered_quantity']})
+        audit(c,user,'order',order_id,'create',{'quote_id':quote_id,'number':onum,'source':'explicitly_confirmed_file_import'})
+        return {'order':detail_doc(c,'order',get_row(c,'orders',order_id,user['org_id'])),
+                'quote_id':quote_id,'import_id':preview_id}
+
+
+@app.get('/api/order-analytics')
+def order_analytics(start_date:date|None=None,end_date:date|None=None,user=Depends(current_user)):
+    if start_date and end_date and start_date>end_date:fail('시작일은 종료일보다 이전이어야 합니다')
+    with conn() as c:
+        rows=c.execute('''SELECT o.*,COALESCE(NULLIF(o.order_date,''),substr(o.created_at,1,10)) AS recorded_order_date
+          FROM orders o WHERE o.org_id=? ORDER BY recorded_order_date DESC,o.id DESC''',(user['org_id'],)).fetchall()
+        summary={};by_date={};by_item={};by_unit={};warnings=[]
+        totals={'order_count':0,'ordered_quantity':0,'subtotal':0,'vat':0,'total':0}
+        for o in rows:
+            day=o['recorded_order_date']
+            if (start_date and day<start_date.isoformat()) or (end_date and day>end_date.isoformat()):continue
+            if o['status']=='cancelled':continue
+            items=retrieve_items(c,'order',o['id']);m=money(items,o['vat_mode']);qty=sum(x['quantity'] for x in items)
+            entry=summary.setdefault(o['customer_name_snapshot'],{'company':o['customer_name_snapshot'],
+                    'order_count':0,'ordered_quantity':0,'subtotal':0,'vat':0,'total':0})
+            daily=by_date.setdefault(day,{'date':day,'order_count':0,'ordered_quantity':0,'subtotal':0,'vat':0,'total':0})
+            source_items=[]
+            if o['source_import_id']:
+                try:source_items=json.loads(o['source_document_meta'] or '{}').get('items',[])
+                except (ValueError,TypeError):source_items=[]
+            same_items=(len(source_items)==len(items) and all(
+                source_items[i][f]==item[f] for i,item in enumerate(items) for f in ('name','quantity','unit_price')))
+            if o['source_import_id'] and not same_items:
+                warnings.append({'order_id':o['id'],'reason':'원본 파일과 발주 품목이 변경되어 단위를 재확인해야 합니다'})
+            for i,item in enumerate(items):
+                unit=(source_items[i].get('unit') or '단위 미기재') if same_items else '단위 확인 필요'
+                src=source_items[i] if same_items else {}
+                sku=src.get('sku','')
+                spec=src.get('spec','')
+                key=(sku,item['name'],spec,unit)
+                prod=by_item.setdefault(key,{'item':item['name'],'sku':sku,'spec':spec,
+                    'unit':unit,'ordered_quantity':0,'subtotal':0})
+                prod['ordered_quantity']+=item['quantity']
+                prod['subtotal']+=item['quantity']*item['unit_price']
+                by_unit[unit]=by_unit.get(unit,0)+item['quantity']
+            for target in (entry,daily,totals):
+                target['order_count']+=1;target['ordered_quantity']+=qty
+                for k in ('subtotal','vat','total'):target[k]+=m[k]
+        return {'period':{'start_date':str(start_date) if start_date else None,'end_date':str(end_date) if end_date else None},
+                'totals':totals,'companies':sorted(summary.values(),key=lambda x:(-x['total'],x['company'])),
+                'by_date':sorted(by_date.values(),key=lambda x:x['date'],reverse=True),
+                'by_item':sorted(by_item.values(),key=lambda x:(-x['subtotal'],x['item'],x['unit'])),
+                'quantity_by_unit':by_unit,'mixed_units':len(by_unit)>1,'warnings':warnings}
+
+
 @app.get('/api/orders')
 def orders(user=Depends(current_user)):
     with conn() as c:
@@ -699,11 +931,12 @@ def create_order(body:OrderFromQuote,user=Depends(current_user)):
             fail('이미 발주로 전환된 견적서입니다',409)
         if body.due_date.isoformat()<today(): fail('납기일은 오늘 이후여야 합니다')
         key=ident();doc=f'O-{datetime.now(KST):%Y%m%d}-{key[:10].upper()}'
-        c.execute('INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        c.execute('''INSERT INTO orders (id,org_id,customer_id,quote_id,customer_name_snapshot,doc_no,title,status,review_state,vat_mode,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                   (key,user['org_id'],q['customer_id'],q['id'],q['customer_name_snapshot'],doc,q['title'],'received','clean',q['vat_mode'],body.due_date.isoformat(),now(),now()))
         for i,x in enumerate(retrieve_items(c,'quote',q['id'])):
             c.execute('INSERT INTO order_items VALUES(?,?,?,?,?,?,?)',
                       (ident(),key,x['id'],x['name'],x['quantity'],x['unit_price'],i))
+        c.execute('UPDATE orders SET order_date=? WHERE id=?',(today(),key))
         audit(c,user,'order',key,'create',{'quote_id':q['id'],'number':doc})
         return detail_doc(c,'order',get_row(c,'orders',key,user['org_id']))
 

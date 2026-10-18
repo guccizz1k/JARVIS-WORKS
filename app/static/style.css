@@ -23,3 +23,29 @@
 .security-panels+.panel{margin-bottom:20px}
 @media(max-width:1090px){.security-panels{grid-template-columns:1fr}}
 @media(max-width:730px){.security-kpis{grid-template-columns:1fr 1fr;gap:10px}.security-kpis .card:last-child{grid-column:span 2}.security-check-list{grid-template-columns:1fr}.list-tools{padding:12px}.search-count{margin-left:0}.list-search-label{min-width:100%}}
+
+/* SMART IMPORT: dedicated PC-first file review and analytics */
+.import-review,.import-summary{margin-top:20px}
+.import-review .table-scroll{margin:12px 0}
+.import-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 30px;margin-bottom:20px}
+.import-label{display:grid;gap:10px;font-weight:700;margin-bottom:15px}
+.import-label input{padding:15px;background:#f8fafc;border:1px dashed #abc5cd;border-radius:10px;width:100%}
+.import-confirm{display:flex;gap:11px;align-items:start;margin:22px 0;padding:15px;background:#eef6f4;border-radius:10px;font-size:14px;font-weight:650}
+.import-confirm input{width:19px;height:19px;flex:none}
+.import-actions{display:flex;justify-content:flex-end}
+.import-period{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:20px}
+.import-period label{display:grid;gap:6px;color:#596d7f;font-size:13px}
+.import-period input{border:1px solid #d5e2e8;padding:9px;border-radius:8px}
+.import-summary .cards{margin-bottom:18px}
+.import-summary .number{font-size:24px}
+@media(max-width:900px){.import-meta{grid-template-columns:1fr}}
+
+.import-source-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0 22px}.import-source-tools .muted{font-size:12px}.import-review .table{min-width:750px}.import-review .detail-row strong{max-width:70%}
+
+/* V1.4 – missing metadata is visually distinct from trusted parsed source fields. */
+.import-supplement{border:1px solid #e6c782;border-radius:12px;background:#fffcf3;padding:18px;margin:18px 0;display:grid;gap:14px}
+.import-supplement-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.import-supplement-grid label{display:grid;gap:7px;font-weight:650;font-size:14px;color:#243d51}
+.import-supplement-grid input{width:100%;border:1px solid #bfccd3;border-radius:8px;padding:11px 12px;background:#fff;color:#122e41;font:inherit}
+.import-supplement button{justify-self:start}
+.import-supplement .notice{margin:0}
