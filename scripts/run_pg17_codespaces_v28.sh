@@ -52,6 +52,12 @@ python3 -m venv "$WORK/venv" || notrun 'Cannot create temporary Python environme
 "$WORK/venv/bin/python" -m pip --disable-pip-version-check -q install -r requirements-postgres-check.txt \
   || notrun 'psycopg installation unavailable'
 
+# V3.5 extends the V2.8 disposable suite without changing normal V2.8 behavior.
+if [[ "${JW_PG_LAB_V35:-}" == 'ONLY_DISPOSABLE_LAB' ]]; then
+  "$WORK/venv/bin/python" -m pip --disable-pip-version-check -q install -r requirements-postgres-lab-v35.txt \
+    || notrun 'V3.5 FastAPI integration dependencies unavailable'
+fi
+
 # Use only a fresh, randomly named, disposable postgres:17 container.
 # Docker publishes a random localhost-only host port. No production credentials.
 PGPASSWORD="$(python3 -c 'import secrets;print(secrets.token_urlsafe(36))')"

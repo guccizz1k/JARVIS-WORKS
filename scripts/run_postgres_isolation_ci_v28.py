@@ -124,6 +124,12 @@ def main():
         from scripts.test_postgres_messenger_v28 import run as v28_attack_run
         if v28_attack_run() != 0:
             raise AssertionError('V2.8 isolated attachment/read integrity gate failed')
+        # V3.5 opt-in FastAPI TestClient-to-real-PostgreSQL integration gate.
+        # The earlier V2.8 baseline gate is unchanged when this flag is absent.
+        if os.getenv('JW_PG_LAB_V35') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_api_lab_v35 import run as api_lab_run
+            if api_lab_run() != 0:
+                raise AssertionError('V3.5 isolated FastAPI/PostgreSQL gate failed')
         success_marker = True
         return 0
     except Exception as exc:
