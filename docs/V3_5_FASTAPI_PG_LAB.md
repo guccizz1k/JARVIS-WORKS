@@ -25,3 +25,19 @@ Results must show `PASS: V3.5 FastAPI TestClient + real PG17 ...`, followed by t
 - V3.5 here is a **lab integration, not a production FastAPI adapter rollout**. Main app authorization is still SQLite. No full-history/attachment/document transfer to PostgreSQL, migration/rollback, binary file scanning, durable production PG session issuer, MFA onboarding, production backups, resilience/load audit, external security review or deployment has been implemented.
 - Real PG17 TestClient integration remains **NOT RUN until actual Codespaces terminal proof**. Offline mock tests and the prior successful V2.8 database security test do not prove these new HTTP endpoints.
 - No real user files or customer information are permitted. No deployment, main merge, PR, or billable job is authorized by this review candidate.
+
+## Actual live execution evidence — 2026-10-20 (user-provided Codespaces screenshot)
+
+**Observed outcome: PASS for the disposable PostgreSQL 17 laboratory only.** In a Codespace on the V3.5 review candidate (local short branch `v35`, after fetching the remote V3.5 tip), the terminal showed:
+
+- `PASS: V2.8 live checksum, sender binding, message kinds, server read-time, monotonic cursors`
+- `PASS: V3.5 FastAPI TestClient + real PG17 tenant isolation, writes, reads, idempotency, revocation`
+- `PASS: ephemeral PG legacy + V2.7 + V2.8 integrity attacks; cleanup confirmed`
+- `PASS: PostgreSQL 17 live RLS attacks and ephemeral cleanup completed`
+
+This is **user-supplied terminal screenshot evidence**, not a directly retrieved machine-verifiable log or CI run. It validates the specific disposable lab test, not the production FastAPI/SQLite application's PostgreSQL integration, production credentials, actual company enrollment, scalability, migration, backup/restore or customer data handling.
+
+The terminal's editor warning about an unrelated older test-encoding file is not proof of a code or test failure. The actual V3.5 test process exited back to the shell after printing PASS and cleanup; the test was not left running.
+
+Next gating work: verify a synthetic SQLite→PostgreSQL migration with exact data and attachment hashes, a rollback path, and full API behavior using transaction-bound identity. Keep the production/main SQLite runtime unchanged until these tests pass.
+
