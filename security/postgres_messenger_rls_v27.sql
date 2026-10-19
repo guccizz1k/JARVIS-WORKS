@@ -212,7 +212,8 @@ CREATE POLICY jw_v27_read_pos_update ON public.messenger_read_positions FOR UPDA
 ALTER TABLE public.messenger_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messenger_receipts FORCE ROW LEVEL SECURITY;
 CREATE POLICY jw_v27_receipt_read ON public.messenger_receipts FOR SELECT TO jw_app
-  USING (EXISTS(SELECT 1 FROM public.messenger_messages m WHERE m.id=message_id));
+  USING (jw_guard.current_tenant() IS NOT NULL
+    AND EXISTS(SELECT 1 FROM public.messenger_messages m WHERE m.id=message_id));
 CREATE POLICY jw_v27_receipt_write ON public.messenger_receipts FOR INSERT TO jw_app
   WITH CHECK (receiver_org=jw_guard.current_tenant()
     AND receiver_user=jw_guard.current_actor()

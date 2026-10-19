@@ -37,6 +37,17 @@ def test_shared_thread_read_and_sender_write_require_verified_actor():
     assert 'FOREIGN KEY(sender_user,sender_org) REFERENCES public.users(id,org_id)' in SQL
 
 
+def test_receipt_read_requires_direct_verified_tenant_and_message_visibility():
+    # The live catalog gate requires an explicit session/tenant predicate on
+    # every receipt policy, not only inherited message-table RLS.
+    read_policy = SQL.split('CREATE POLICY jw_v27_receipt_read ', 1)[1].split(';', 1)[0]
+    assert 'jw_guard.current_tenant() IS NOT NULL' in read_policy
+    assert 'SELECT 1 FROM public.messenger_messages m WHERE m.id=message_id' in read_policy
+    write_policy = SQL.split('CREATE POLICY jw_v27_receipt_write ', 1)[1].split(';', 1)[0]
+    assert 'receiver_org=jw_guard.current_tenant()' in write_policy
+    assert 'receiver_user=jw_guard.current_actor()' in write_policy
+
+
 def test_sequence_allocation_requires_serial_transaction_counter():
     assert 'CREATE TABLE jw_guard.messenger_counters' in SQL
     assert 'BEFORE INSERT ON public.messenger_messages' in SQL
