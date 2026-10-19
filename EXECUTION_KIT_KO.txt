@@ -1,0 +1,27 @@
+JARVIS WORKS V2.1 — PostgreSQL 17 실DB 보안 공격 시험 실행 키트
+
+이 파일은 임시 PostgreSQL 17 Docker 컨테이너를 사용해 실제 RLS 공격 시험을 수행합니다.
+기존 GitHub 저장소, 데이터베이스, 서버를 수정하지 않습니다. 가상 기업 데이터만 사용합니다.
+
+조건: Docker 이용 가능한 기존 GitHub Codespace, python3, 인터넷(최초 postgres:17 이미지 및 psycopg 설치).
+절대 실제 고객/회사 데이터나 운영 DB 연결 정보를 입력하지 마세요.
+
+1) 이 ZIP을 기존 Codespace 작업공간에 업로드합니다.
+2) 새 폴더에 압축을 풉니다(기존 원본을 덮어쓰지 않습니다).
+3) 압축을 푼 폴더에서 실행합니다:
+
+   bash scripts/run_pg17_codespaces.sh
+
+실행기는 원본 110개 파일 SHA-256 확인 → 임시 Python venv → localhost 전용 Docker PostgreSQL17
+→ 비공개 테스트 DB/사용자 생성 → RLS 정책 적용 → 기업 간 접근·권한 공격
+→ 테스트 DB·Docker 컨테이너 정리 → pg17_rls_gate_result.txt 보존 순으로 동작합니다.
+
+종료 코드:
+  0 = 전체 실행 및 정리 PASS
+  1 = 실제 검증 실패 또는 정리 실패
+  2 = 환경 제약 등으로 NOT RUN
+
+중요: PASS라도 현재 운영 앱은 SQLite 기반입니다. PostgreSQL 운영 데이터 이전,
+웹서버 연결, MFA 통합, 침투 시험은 별도의 필수 검증입니다.
+
+월 GitHub 비용을 줄이려면 새 Codespace 대신 기존 Codespace 사용, 시험 후 중지.

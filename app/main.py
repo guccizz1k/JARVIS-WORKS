@@ -6,6 +6,7 @@ not an externally audited production finance/accounting system.
 from __future__ import annotations
 
 import hashlib
+import base64
 import hmac
 import json
 import os
@@ -19,10 +20,13 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, File, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .import_engine import DocumentError, MAX_FILE_SIZE, supplement_review
+from .messenger import install_schema as install_messenger_schema, demo_company_profiles, register_routes as register_messenger_routes
+from .security_hardening import (data_cipher, match_totp, secret_for_user, limited_extract, install_tenant_relationship_guards, install_item_link_guards, sealed_json, unseal_json, migrate_evidence_encryption, issue_recovery_codes, recovery_hash)
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get('JARVIS_DB_PATH', str(ROOT.parent / 'data' / 'works.db')))
@@ -77,8 +81,14 @@ def verify_password(password: str, stored: str) -> bool:
 
 @contextmanager
 def conn():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if DB_PATH.is_symlink():
+        raise RuntimeError('Database path cannot be a symlink')
+    if not DB_PATH.parent.exists():
+        DB_PATH.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     c = sqlite3.connect(DB_PATH, timeout=10, isolation_level=None)
+    # On local POSIX deployments the database file must not be world-readable.
+    if os.name=='posix':
+        os.chmod(DB_PATH,0o600)
     c.row_factory = sqlite3.Row
     c.execute('PRAGMA foreign_keys = ON')
     c.execute('PRAGMA busy_timeout = 10000')
@@ -201,6 +211,18 @@ CREATE TABLE IF NOT EXISTS security_events (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_security_events_org ON security_events(org_id,created_at);
+CREATE TABLE IF NOT EXISTS import_previews (
+  id TEXT PRIMARY KEY, org_id TEXT NOT NULL REFERENCES organizations(id),
+  uploaded_by TEXT NOT NULL REFERENCES users(id),
+  file_sha256 TEXT NOT NULL, filename TEXT NOT NULL,
+  normalized_json TEXT NOT NULL, preview_digest TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('pending','confirmed')),
+  created_at TEXT NOT NULL, confirmed_at TEXT,
+  order_id TEXT UNIQUE REFERENCES orders(id)
+);
+CREATE INDEX IF NOT EXISTS idx_import_previews_org ON import_previews(org_id,created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_imports_single_confirmed_file
+  ON import_previews(org_id,file_sha256) WHERE status='confirmed';
 
 '''
 
@@ -221,10 +243,34 @@ def init_db():
             c.execute("ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
         for session in c.execute('SELECT token_hash FROM sessions WHERE id IS NULL').fetchall():
             c.execute('UPDATE sessions SET id=? WHERE token_hash=?', (ident(), session['token_hash']))
+        # Separate denylist preserves the 7-column historical user schema and
+        # avoids invalidating existing inserts, exports and legacy test data.
+        c.execute('''CREATE TABLE IF NOT EXISTS staff_disabled (
+            user_id TEXT PRIMARY KEY REFERENCES users(id),
+            org_id TEXT NOT NULL REFERENCES organizations(id),
+            disabled_at TEXT NOT NULL
+        )''')
+        quote_cols={r['name'] for r in c.execute('PRAGMA table_info(quotes)')}
+        if 'quote_date' not in quote_cols:c.execute('ALTER TABLE quotes ADD COLUMN quote_date TEXT')
+        if 'source_import_id' not in quote_cols:c.execute('ALTER TABLE quotes ADD COLUMN source_import_id TEXT')
+        if 'source_document_meta' not in quote_cols:
+            c.execute("ALTER TABLE quotes ADD COLUMN source_document_meta TEXT NOT NULL DEFAULT '{}'")
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_quotes_source_import ON quotes(source_import_id)')
+        import_cols={r['name'] for r in c.execute('PRAGMA table_info(import_previews)')}
+        if 'quote_id' not in import_cols:
+            c.execute('ALTER TABLE import_previews ADD COLUMN quote_id TEXT REFERENCES quotes(id)')
         # Forward-only additive migration preserves existing user invoices and receipts.
         cols={r['name'] for r in c.execute('PRAGMA table_info(payments)')}
         if 'reversed_at' not in cols: c.execute('ALTER TABLE payments ADD COLUMN reversed_at TEXT')
         if 'reversed_by' not in cols: c.execute('ALTER TABLE payments ADD COLUMN reversed_by TEXT REFERENCES users(id)')
+        order_cols={r['name'] for r in c.execute('PRAGMA table_info(orders)')}
+        if 'order_date' not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN order_date TEXT NOT NULL DEFAULT ''")
+        if 'source_import_id' not in order_cols:
+            c.execute('ALTER TABLE orders ADD COLUMN source_import_id TEXT')
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_source_import ON orders(source_import_id)')
+        if 'source_document_meta' not in order_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN source_document_meta TEXT NOT NULL DEFAULT '{}'")
         for table in ('quotes','orders','invoices'):
             old_cols={r['name'] for r in c.execute(f'PRAGMA table_info({table})')}
             if 'customer_name_snapshot' not in old_cols:
@@ -234,10 +280,44 @@ def init_db():
                 c.execute(f'''UPDATE {table} SET customer_name_snapshot=(
                     SELECT name FROM customers WHERE customers.id={table}.customer_id
                 ) WHERE customer_name_snapshot='' ''')
+    # Defensive relationship constraints, not row-level security.
+    with conn() as c:
+        c.execute("""CREATE TABLE IF NOT EXISTS mfa_credentials (
+            user_id TEXT PRIMARY KEY REFERENCES users(id),
+            secret_encrypted TEXT NOT NULL DEFAULT '',
+            pending_encrypted TEXT NOT NULL DEFAULT '',
+            last_counter INTEGER NOT NULL DEFAULT -1
+        )""")
+        # Random one-time recovery codes are stored only as SHA-256 digests;
+        # no plaintext recovery codes are stored in the database or audit logs.
+        c.execute("""CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            code_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            consumed_at TEXT,
+            PRIMARY KEY (user_id, code_hash)
+        )""")
+        install_tenant_relationship_guards(c)
+        install_item_link_guards(c)
+        install_messenger_schema(c)
+    if os.environ.get('JW_ENV','').lower() == 'production' and os.environ.get('DEMO_SEED') == '1':
+        raise RuntimeError('DEMO_SEED must never be used with JW_ENV=production')
+    if os.environ.get('JW_ENV','').lower() == 'production':
+        # Required before deploying even a restricted production preview.
+        data_cipher()
+        if os.environ.get('JW_UPLOAD_SCAN','clamav')!='clamav':
+            raise RuntimeError('Production requires antivirus scanning')
+        with conn() as c:
+            count=c.execute("SELECT count(*) FROM users u LEFT JOIN mfa_credentials m ON m.user_id=u.id WHERE u.role='admin' AND COALESCE(m.secret_encrypted,'')='' ").fetchone()[0]
+            if count:
+                raise RuntimeError('All administrator accounts must enroll MFA before production starts')
+        raise RuntimeError('Production remains BLOCKED: DB row-level tenant isolation and other safeguards not certified')
     if os.environ.get('DEMO_SEED') == '1':
         if os.environ.get('JW_ENV', '').lower() == 'production':
             raise RuntimeError('DEMO_SEED must never be used with JW_ENV=production')
         seed_demo()
+        with conn() as c:
+            demo_company_profiles(c)
     elif all(os.environ.get(k) for k in ('BOOTSTRAP_EMAIL', 'BOOTSTRAP_PASSWORD', 'BOOTSTRAP_ORG')):
         pw = os.environ['BOOTSTRAP_PASSWORD']
         if len(pw) < 12:
@@ -265,7 +345,7 @@ def seed_demo():
             c.execute('INSERT INTO customers VALUES(?,?,?,?,?,?,?,?)',
                       (customer,org,customer_name,'','','','',now()))
             quote=ident()
-            c.execute('INSERT INTO quotes VALUES(?,?,?,?,?,?,?,?,?,?)',
+            c.execute('INSERT INTO quotes (id,org_id,customer_id,customer_name_snapshot,doc_no,title,status,vat_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
                       (quote,org,customer,customer_name,f'Q-{uuid.uuid4().hex[:8].upper()}','10월 샘플 견적','draft','taxable',now(),now()))
             c.execute('INSERT INTO quote_items VALUES(?,?,?,?,?,?)',
                       (ident(),quote,'산업용 부품 A',12,125000,0))
@@ -278,6 +358,22 @@ class Strict(BaseModel):
 class LoginBody(Strict):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=1, max_length=1000)
+    otp: str | None = Field(default=None, min_length=6, max_length=6)
+    recovery_code: str | None = Field(default=None, min_length=32, max_length=32, pattern=r'^[0-9a-fA-F]{32}$')
+
+
+class MFAStartBody(Strict):
+    password: str = Field(min_length=1, max_length=1000)
+
+
+class MFAVerifyBody(Strict):
+    otp: str = Field(min_length=6, max_length=6)
+
+
+class MFARecoveryRotateBody(Strict):
+    password: str = Field(min_length=1, max_length=1000)
+    otp: str | None = Field(default=None, min_length=6, max_length=6)
+    recovery_code: str | None = Field(default=None, min_length=32, max_length=32, pattern=r'^[0-9a-fA-F]{32}$')
 
 
 class CustomerBody(Strict):
@@ -376,6 +472,19 @@ def retrieve_items(c, kind, parent_id):
 def detail_doc(c, kind, doc):
     items=retrieve_items(c,kind,doc['id'])
     result={**doc, 'items':items, 'money':money(items,doc['vat_mode'])}
+    if kind=='order' and doc.get('source_import_id'):
+        try:
+            source_doc=unseal_json(doc.get('source_document_meta') or '{}')
+        except (TypeError, ValueError):
+            source_doc={}
+        result['import_source']={
+            'filename':source_doc.get('filename'),
+            'document_kind':source_doc.get('document_kind'),
+            'reference_number':source_doc.get('additional_fields',{}).get('reference_number'),
+            'additional_fields':source_doc.get('additional_fields',{}),
+            'source_items':source_doc.get('items',[]),
+            'quantity_by_unit':source_doc.get('quantity_by_unit',{}),
+        }
     if kind=='invoice':
         result['paid']=c.execute('SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id=? AND reversed_at IS NULL',(doc['id'],)).fetchone()[0]
         result['payments']=[dict(r) for r in c.execute('''SELECT id,amount,paid_at,note,created_at,reference,reversed_at
@@ -430,7 +539,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app=FastAPI(title='JARVIS WORKS v1', version='1.2.0', docs_url='/docs' if os.getenv('ENABLE_API_DOCS')=='1' else None,
+app=FastAPI(title='JARVIS WORKS v1', version='1.7.0', docs_url='/docs' if os.getenv('ENABLE_API_DOCS')=='1' else None,
             redoc_url=None, lifespan=lifespan)
 
 
@@ -463,7 +572,7 @@ def config():
 
 @app.get('/api/health')
 def health():
-    return {'status':'ok','version':'1.2.0'}
+    return {'status':'ok','version':'2.2.0-candidate'}
 
 
 @app.post('/api/login')
@@ -477,8 +586,33 @@ def login(body:LoginBody,response:Response):
             record = None
         if record and record['attempts'] >= LOGIN_FAILURE_LIMIT:
             fail('로그인 시도가 많습니다. 15분 후 다시 시도하세요', 429)
-        user=c.execute('SELECT u.*,o.name as org_name FROM users u JOIN organizations o ON o.id=u.org_id WHERE lower(u.email)=?',(email,)).fetchone()
-        if not user or not verify_password(body.password,user['password_hash']):
+        user=c.execute('''SELECT u.*,o.name as org_name,d.disabled_at
+            FROM users u JOIN organizations o ON o.id=u.org_id
+            LEFT JOIN staff_disabled d ON d.user_id=u.id
+            WHERE lower(u.email)=?''',(email,)).fetchone()
+        mfa=c.execute('SELECT * FROM mfa_credentials WHERE user_id=?',(user['id'],)).fetchone() if user else None
+        mfa_enabled=bool(mfa and mfa['secret_encrypted'])
+        second_factor_ok=True
+        used_counter=None
+        used_recovery_hash=None
+        password_ok=bool(user and user['disabled_at'] is None and
+                         verify_password(body.password,user['password_hash']))
+        if not mfa_enabled and (body.otp or body.recovery_code):
+            second_factor_ok=False
+        if mfa_enabled and password_ok:
+            if body.recovery_code and not body.otp:
+                candidate=recovery_hash(user['id'],body.recovery_code)
+                row=c.execute('''SELECT 1 FROM mfa_recovery_codes
+                    WHERE user_id=? AND code_hash=? AND consumed_at IS NULL''',(user['id'],candidate)).fetchone()
+                used_recovery_hash=candidate if row else None
+                second_factor_ok=used_recovery_hash is not None
+            elif body.otp and not body.recovery_code:
+                secret=secret_for_user(mfa['secret_encrypted'])
+                used_counter=match_totp(secret,body.otp,mfa['last_counter'])
+                second_factor_ok=used_counter is not None
+            else:
+                second_factor_ok=False
+        if not password_ok or not second_factor_ok:
             if record:
                 c.execute('UPDATE login_failures SET attempts=attempts+1 WHERE email=?', (email,))
             else:
@@ -492,6 +626,15 @@ def login(body:LoginBody,response:Response):
         else:
             failed = False
             c.execute('DELETE FROM login_failures WHERE email=?', (email,))
+            if mfa_enabled and used_counter is not None:
+                c.execute('UPDATE mfa_credentials SET last_counter=? WHERE user_id=?',(used_counter,user['id']))
+            if mfa_enabled and used_recovery_hash is not None:
+                changed=c.execute("""UPDATE mfa_recovery_codes SET consumed_at=?
+                    WHERE user_id=? AND code_hash=? AND consumed_at IS NULL""",
+                    (now(),user['id'],used_recovery_hash)).rowcount
+                if changed!=1:raise RuntimeError('Recovery code concurrent use detected')
+                c.execute('INSERT INTO security_events VALUES(?,?,?,?,?)',
+                          (ident(),user['org_id'],user['id'],'mfa_recovery_login',now()))
         if failed:
             result = None
         else:
@@ -519,7 +662,9 @@ def current_user(request:Request):
         result=c.execute('''SELECT u.id,u.org_id,u.email,u.name,u.role,o.name AS org_name,
                s.expires_at,s.csrf_token
             FROM sessions s JOIN users u ON u.id=s.user_id JOIN organizations o ON o.id=u.org_id
-            WHERE s.token_hash=?''',(hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
+            LEFT JOIN staff_disabled d ON d.user_id=u.id
+            WHERE s.token_hash=? AND d.user_id IS NULL''',
+            (hashlib.sha256(token.encode()).hexdigest(),)).fetchone()
         if not result or datetime.fromisoformat(result['expires_at'])<=datetime.now(KST):
             fail('세션이 만료되었거나 유효하지 않습니다',401)
         if request.method not in ('GET','HEAD','OPTIONS'):
@@ -534,6 +679,91 @@ def need_admin(user):
     if user['role']!='admin':
         fail('관리자 권한이 필요합니다',403)
 
+
+
+
+@app.post('/api/security/mfa/start')
+def mfa_start(body:MFAStartBody,user=Depends(current_user)):
+    if not os.environ.get('JW_DATA_KEY'):
+        fail('MFA 등록을 위한 안전한 암호화 키가 구성되지 않았습니다',503)
+    with transaction() as c:
+        u=c.execute('SELECT password_hash,email FROM users WHERE id=? AND org_id=?',(user['id'],user['org_id'])).fetchone()
+        if not u or not verify_password(body.password,u['password_hash']):
+            fail('현재 비밀번호가 올바르지 않습니다',403)
+        prior=c.execute('SELECT secret_encrypted FROM mfa_credentials WHERE user_id=?',(user['id'],)).fetchone()
+        if prior and prior['secret_encrypted']:fail('이미 MFA가 설정되어 있습니다',409)
+        secret=base64.b32encode(secrets.token_bytes(20)).decode('ascii').rstrip('=')
+        encrypted=data_cipher().encrypt(secret.encode('ascii')).decode('ascii')
+        c.execute("INSERT INTO mfa_credentials(user_id,pending_encrypted) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET pending_encrypted=excluded.pending_encrypted",
+                  (user['id'],encrypted))
+        audit(c,user,'security','mfa','setup_started',{'secret_logged':False})
+    import urllib.parse
+    url='otpauth://totp/'+urllib.parse.quote('JARVIS WORKS:'+u['email'])+'?'+urllib.parse.urlencode({'secret':secret,'issuer':'JARVIS WORKS','digits':6,'period':30})
+    return {'secret':secret,'otpauth_uri':url,'action':'Store the code in an authenticator app, then confirm the next OTP'}
+
+
+@app.post('/api/security/mfa/confirm')
+def mfa_confirm(body:MFAVerifyBody,user=Depends(current_user)):
+    with transaction() as c:
+        row=c.execute('SELECT * FROM mfa_credentials WHERE user_id=?',(user['id'],)).fetchone()
+        if not row or not row['pending_encrypted']:fail('먼저 MFA 등록을 시작해야 합니다',409)
+        secret=secret_for_user(row['pending_encrypted'])
+        counter=match_totp(secret,body.otp)
+        if counter is None:fail('인증번호가 올바르지 않습니다',403)
+        c.execute('UPDATE mfa_credentials SET secret_encrypted=?,pending_encrypted=?,last_counter=? WHERE user_id=?',
+                  (row['pending_encrypted'],'',counter,user['id']))
+        # New recovery codes replace any existing set, and must be shown exactly once.
+        codes=issue_recovery_codes()
+        c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=?',(user['id'],))
+        c.executemany('INSERT INTO mfa_recovery_codes VALUES(?,?,?,NULL)',
+                      [(user['id'],recovery_hash(user['id'],code),now()) for code in codes])
+        # Invalidate other sessions after activation; current session must log out too.
+        c.execute('DELETE FROM sessions WHERE user_id=?',(user['id'],))
+        audit(c,user,'security','mfa','enabled',{'secret_logged':False})
+    return {'enabled':True,'must_login_again':True,'recovery_codes':codes,'warning':'Codes are shown once. Store them offline.'}
+
+
+@app.get('/api/security/mfa/status')
+def mfa_status(user=Depends(current_user)):
+    with conn() as c:
+        row=c.execute('SELECT secret_encrypted,pending_encrypted FROM mfa_credentials WHERE user_id=?',(user['id'],)).fetchone()
+        result={'enabled':bool(row and row['secret_encrypted']), 'pending_setup':bool(row and row['pending_encrypted'])}
+        if result['enabled']:
+            result['recovery_codes_remaining']=c.execute("""SELECT count(*) FROM mfa_recovery_codes
+                WHERE user_id=? AND consumed_at IS NULL""",(user['id'],)).fetchone()[0]
+        return result
+
+
+@app.post('/api/security/mfa/recovery/rotate')
+def rotate_mfa_recovery(body:MFARecoveryRotateBody,user=Depends(current_user)):
+    # Require a fresh password AND a new valid MFA proof for a sensitive rotation.
+    # CSRF checks are performed by current_user; all state changes are atomic.
+    if bool(body.otp)==bool(body.recovery_code):
+        fail('인증 앱 코드 또는 복구 코드 하나만 입력하세요',422)
+    with transaction() as c:
+        row=c.execute('''SELECT m.secret_encrypted,m.last_counter,u.password_hash
+            FROM mfa_credentials m JOIN users u ON u.id=m.user_id
+            WHERE m.user_id=? AND u.org_id=?''',(user['id'],user['org_id'])).fetchone()
+        if not row or not row['secret_encrypted'] or not verify_password(body.password,row['password_hash']):
+            fail('인증할 수 없습니다',403)
+        if body.otp:
+            secret=secret_for_user(row['secret_encrypted'])
+            step=match_totp(secret,body.otp,row['last_counter'])
+            if step is None:fail('인증할 수 없습니다',403)
+            c.execute('UPDATE mfa_credentials SET last_counter=? WHERE user_id=?',(step,user['id']))
+        else:
+            code_hash=recovery_hash(user['id'],body.recovery_code)
+            consumed=c.execute('''UPDATE mfa_recovery_codes SET consumed_at=?
+                WHERE user_id=? AND code_hash=? AND consumed_at IS NULL''',
+                (now(),user['id'],code_hash)).rowcount
+            if consumed!=1:fail('인증할 수 없습니다',403)
+        codes=issue_recovery_codes()
+        c.execute('DELETE FROM mfa_recovery_codes WHERE user_id=?',(user['id'],))
+        c.executemany('INSERT INTO mfa_recovery_codes VALUES(?,?,?,NULL)',
+                      [(user['id'],recovery_hash(user['id'],code),now()) for code in codes])
+        c.execute('DELETE FROM sessions WHERE user_id=?',(user['id'],))
+        audit(c,user,'security','mfa','recovery_rotated',{'plaintext_logged':False})
+    return {'recovery_codes':codes,'must_login_again':True}
 
 @app.get('/api/me')
 def me(user=Depends(current_user)):
@@ -558,8 +788,9 @@ def security_overview(request: Request, user=Depends(current_user)):
     need_admin(user)
     token_hash=hashlib.sha256(request.cookies.get(SESSION_COOKIE,'').encode()).hexdigest()
     with conn() as c:
-        users=[dict(r) for r in c.execute('''SELECT id,name,role FROM users WHERE org_id=?
-                                               ORDER BY created_at,id''',(user['org_id'],))]
+        users=[dict(r) for r in c.execute('''SELECT u.id,u.name,u.role,d.disabled_at
+            FROM users u LEFT JOIN staff_disabled d ON d.user_id=u.id
+            WHERE u.org_id=? ORDER BY u.created_at,u.id''',(user['org_id'],))]
         sessions=[dict(r) for r in c.execute('''SELECT s.id,s.user_id,u.name AS user_name,s.created_at,s.expires_at
                  FROM sessions s JOIN users u ON s.user_id=u.id
                  WHERE u.org_id=? AND s.expires_at>? ORDER BY s.expires_at DESC''',
@@ -571,8 +802,10 @@ def security_overview(request: Request, user=Depends(current_user)):
                 WHERE e.org_id=? ORDER BY e.created_at DESC,e.rowid DESC LIMIT 50''',(user['org_id'],))]
         failures=c.execute('''SELECT count(*) FROM security_events WHERE org_id=? AND event_type='login_failed'
                AND created_at>=?''',(user['org_id'],(datetime.now(KST)-timedelta(hours=24)).isoformat(timespec='seconds'))).fetchone()[0]
+        active=c.execute('''SELECT count(*) FROM users u JOIN mfa_credentials m ON m.user_id=u.id
+                          WHERE u.org_id=? AND m.secret_encrypted!='' ''',(user['org_id'],)).fetchone()[0]
         return {'users':users,'sessions':[{**s,'is_current':s['id']==(current['id'] if current else None)} for s in sessions],
-                'events':events,'failed_logins_24h':failures,'mfa_enabled':False,
+                'events':events,'failed_logins_24h':failures,'mfa_enabled':bool(active),'mfa_enabled_user_count':active,'mfa_setup_available':bool(os.environ.get('JW_DATA_KEY')),
                 'db_row_level_security_enabled':False,'security_monitoring_automated':False}
 
 
@@ -593,6 +826,61 @@ def revoke_session(session_id: str, request: Request, user=Depends(current_user)
                   (ident(),user['org_id'],user['id'],'session_revoked',now()))
     return {'ok':True}
 
+
+
+
+class StaffStatusChange(Strict):
+    # Reauthentication protects high-impact offboarding/reenabling operations.
+    admin_password: str = Field(min_length=1,max_length=1000)
+
+
+@app.post('/api/security/users/{target_id}/disable')
+def disable_staff(target_id: str, body: StaffStatusChange, user=Depends(current_user)):
+    need_admin(user)
+    if target_id == user['id']:
+        fail('현재 로그인한 관리자 계정은 비활성화할 수 없습니다',409)
+    with transaction() as c:
+        admin=c.execute('SELECT password_hash FROM users WHERE id=? AND org_id=?',
+                        (user['id'],user['org_id'])).fetchone()
+        if not admin or not verify_password(body.admin_password,admin['password_hash']):
+            fail('관리자 재인증에 실패했습니다',403)
+        target=c.execute('''SELECT u.id,u.role,d.disabled_at FROM users u
+                         LEFT JOIN staff_disabled d ON d.user_id=u.id
+                         WHERE u.id=? AND u.org_id=?''',
+                         (target_id,user['org_id'])).fetchone()
+        if target is None:fail('직원을 찾을 수 없습니다',404)
+        if target['disabled_at'] is not None:fail('이미 비활성화된 계정입니다',409)
+        if target['role']=='admin':
+            count=c.execute("""SELECT count(*) FROM users u LEFT JOIN staff_disabled d ON d.user_id=u.id
+                WHERE u.org_id=? AND u.role='admin' AND d.user_id IS NULL""",
+                            (user['org_id'],)).fetchone()[0]
+            if count<=1:fail('마지막 활성 관리자는 비활성화할 수 없습니다',409)
+        c.execute('INSERT INTO staff_disabled (user_id,org_id,disabled_at) VALUES(?,?,?)',
+                  (target_id,user['org_id'],now()))
+        c.execute('DELETE FROM sessions WHERE user_id=?',(target_id,))
+        c.execute('INSERT INTO security_events VALUES(?,?,?,?,?)',
+                  (ident(),user['org_id'],user['id'],'staff_disabled',now()))
+    return {'ok':True,'sessions_revoked':True}
+
+
+@app.post('/api/security/users/{target_id}/enable')
+def enable_staff(target_id: str, body: StaffStatusChange, user=Depends(current_user)):
+    need_admin(user)
+    with transaction() as c:
+        admin=c.execute('SELECT password_hash FROM users WHERE id=? AND org_id=?',
+                        (user['id'],user['org_id'])).fetchone()
+        if not admin or not verify_password(body.admin_password,admin['password_hash']):
+            fail('관리자 재인증에 실패했습니다',403)
+        target=c.execute('''SELECT u.id,d.disabled_at FROM users u
+            LEFT JOIN staff_disabled d ON d.user_id=u.id WHERE u.id=? AND u.org_id=?''',
+                         (target_id,user['org_id'])).fetchone()
+        if target is None:fail('직원을 찾을 수 없습니다',404)
+        if target['disabled_at'] is None:fail('이미 활성화된 계정입니다',409)
+        c.execute('DELETE FROM staff_disabled WHERE user_id=? AND org_id=?',
+                  (target_id,user['org_id']))
+        c.execute('INSERT INTO security_events VALUES(?,?,?,?,?)',
+                  (ident(),user['org_id'],user['id'],'staff_enabled',now()))
+    return {'ok':True,'login_required':True}
 
 @app.get('/api/customers')
 def customers(user=Depends(current_user)):
@@ -642,7 +930,7 @@ def create_quote(body:QuoteBody,user=Depends(current_user)):
         customer_name=get_row(c,'customers',body.customer_id,user['org_id'])['name']
         key=ident()
         doc=f'Q-{datetime.now(KST):%Y%m%d}-{key[:10].upper()}'
-        c.execute('INSERT INTO quotes VALUES(?,?,?,?,?,?,?,?,?,?)',
+        c.execute('INSERT INTO quotes (id,org_id,customer_id,customer_name_snapshot,doc_no,title,status,vat_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
                   (key,user['org_id'],body.customer_id,customer_name,doc,body.title,'draft',body.vat_mode,now(),now()))
         for i,it in enumerate(body.items):
             c.execute('INSERT INTO quote_items VALUES(?,?,?,?,?,?)',(ident(),key,it.name,it.quantity,it.unit_price,i))
@@ -684,6 +972,288 @@ def change_quote_status(quote_id:str,body:QuoteStatus,user=Depends(current_user)
         return detail_doc(c,'quote',get_row(c,'quotes',quote_id,user['org_id']))
 
 
+class ImportSupplement(Strict):
+    preview_digest: str = Field(min_length=64,max_length=64)
+    fields: dict[Literal['company','ordered_at','due_date','quote_date'], str] = Field(min_length=1,max_length=3)
+
+
+class ImportConfirmation(Strict):
+    preview_digest: str = Field(min_length=64, max_length=64)
+    confirmed_customer: str = Field(min_length=1,max_length=120)
+    confirmed_order_date: date | None = None
+    confirmed_quote_date: date | None = None
+    confirmed_total: int = Field(ge=0,strict=True)
+    approve: Literal[True]
+
+
+def import_preview_response(doc, preview_id, digest, existing):
+    return {'id':preview_id,'digest':digest,'status':'pending','document':doc,
+            'customer_status':'existing' if existing else 'new',
+            'existing_customer_id':existing['id'] if existing else None,
+            'confirmation_required':True,'ready_to_confirm':not bool(doc.get('missing_fields'))}
+
+
+def match_import_customer(c, org, doc):
+    name=doc['company']
+    if not name:return None
+    business=doc['business_number']
+    same_name=c.execute('SELECT * FROM customers WHERE org_id=? AND name=?',(org,name)).fetchone()
+    if business:
+        by_number=c.execute('SELECT * FROM customers WHERE org_id=? AND business_number=? AND business_number!=\'\'',(org,business)).fetchall()
+        if len(by_number)>1:fail('같은 사업자번호에 여러 거래처가 존재하여 자동 등록할 수 없습니다',409)
+        if by_number and by_number[0]['name']!=name:fail('사업자번호는 같지만 상호가 다릅니다. 거래처를 먼저 확인하세요',409)
+        if same_name and same_name['business_number'] != business:fail('상호는 같지만 사업자번호가 불일치하거나 기존에 누락되어 있습니다. 거래처를 먼저 확인하세요',409)
+    return same_name
+
+
+@app.post('/api/imports/preview',status_code=201)
+async def upload_order_preview(file:UploadFile=File(...),user=Depends(current_user)):
+    # Do not persist file bytes; reject oversized uploads while streaming a bounded amount.
+    raw=await file.read(MAX_FILE_SIZE+1)
+    await file.close()
+    try:document=limited_extract(file.filename or '',raw)
+    except (DocumentError,ValueError) as exc:fail(str(exc),422)
+    except RuntimeError:
+        fail('파일 보안 검사가 완료되지 않아 업로드를 차단했습니다',503)
+    digest=hashlib.sha256(json.dumps(document,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    checksum=hashlib.sha256(raw).hexdigest()
+    with transaction() as c:
+        if c.execute("SELECT 1 FROM import_previews WHERE org_id=? AND file_sha256=? AND status='confirmed'",(user['org_id'],checksum)).fetchone():
+            fail('이미 승인·등록된 동일 문서입니다',409)
+        # XLSX metadata timestamps may change while business facts stay identical.
+        # Reject an exact semantic duplicate, not merely a byte-for-byte duplicate.
+        def business_facts(source):
+            return {k:v for k,v in source.items() if k not in ('filename','format','user_filled_fields','missing_fields')}
+        for stored in c.execute("SELECT normalized_json FROM import_previews WHERE org_id=? AND status='confirmed'",(user['org_id'],)):
+            previous=unseal_json(stored['normalized_json'])
+            if business_facts(previous)==business_facts(document):
+                fail('이미 동일한 거래 내용의 문서가 승인·등록되어 있습니다',409)
+        existing=match_import_customer(c,user['org_id'],document)
+        ident_new=ident()
+        c.execute('''INSERT INTO import_previews
+          (id,org_id,uploaded_by,file_sha256,filename,normalized_json,preview_digest,status,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?)''',
+          (ident_new,user['org_id'],user['id'],checksum,document['filename'],sealed_json(document),digest,'pending',now()))
+        audit(c,user,'document_import',ident_new,'preview',{'format':document['format'],'items':document['item_count']})
+        return import_preview_response(document,ident_new,digest,existing)
+
+
+@app.get('/api/imports/queue')
+def import_review_queue(user=Depends(current_user)):
+    # Read-only, tenant scoped; original document bytes are not stored.
+    with conn() as c:
+        params=(user['org_id'],) if user['role']=='admin' else (user['org_id'],user['id'])
+        owner_clause='' if user['role']=='admin' else ' AND uploaded_by=?'
+        rows=c.execute('''SELECT id,filename,status,normalized_json,created_at,confirmed_at,order_id,quote_id
+           FROM import_previews WHERE org_id=?'''+owner_clause+'''
+           ORDER BY created_at DESC, rowid DESC LIMIT 100''',params).fetchall()
+        pending=[];confirmed=[]
+        for row in rows:
+            d=unseal_json(row['normalized_json'])
+            item={'id':row['id'],'filename':row['filename'],'status':row['status'],
+                  'document_kind':d.get('document_kind',''),'company':d.get('company'),
+                  'missing_fields':d.get('missing_fields',[]),'created_at':row['created_at'],
+                  'confirmed_at':row['confirmed_at'],'order_id':row['order_id'],'quote_id':row['quote_id']}
+            (pending if row['status']=='pending' else confirmed).append(item)
+        return {'pending':pending,'confirmed':confirmed,
+                'pending_count':len(pending),'confirmed_count':len(confirmed),
+                'limited_to_last':100,'source_bytes_stored':False}
+
+
+@app.get('/api/imports/{preview_id}')
+def read_order_preview(preview_id:str,user=Depends(current_user)):
+    with conn() as c:
+        row=get_row(c,'import_previews',preview_id,user['org_id'])
+        if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로드한 사용자만 검토할 수 있습니다',403)
+        doc=unseal_json(row['normalized_json'])
+        existing=match_import_customer(c,user['org_id'],doc)
+        return {**import_preview_response(doc,row['id'],row['preview_digest'],existing),'status':row['status'],'order_id':row['order_id'],'quote_id':row['quote_id']}
+
+
+@app.patch('/api/imports/{preview_id}/supplement')
+def supplement_order_import(preview_id: str, body: ImportSupplement, user=Depends(current_user)):
+    """Only user-supplied missing metadata; a new digest invalidates earlier approvals."""
+    with transaction() as c:
+        row=get_row(c,'import_previews',preview_id,user['org_id'])
+        if row['uploaded_by']!=user['id'] and user['role']!='admin':
+            fail('업로드한 사용자만 보완할 수 있습니다',403)
+        if row['status']!='pending':fail('이미 완료된 문서는 보완할 수 없습니다',409)
+        if (datetime.now(KST)-datetime.fromisoformat(row['created_at'])).total_seconds()>24*3600:
+            fail('검토 기간이 지났습니다. 문서를 다시 업로드하세요',409)
+        if body.preview_digest!=row['preview_digest']:
+            fail('검토 중 다른 변경이 발생했습니다. 최신 내용을 다시 확인하세요',409)
+        doc=unseal_json(row['normalized_json'])
+        try:changed=supplement_review(doc,body.fields)
+        except DocumentError as exc:fail(str(exc),422)
+        digest=hashlib.sha256(json.dumps(changed,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        existing=match_import_customer(c,user['org_id'],changed)
+        c.execute('UPDATE import_previews SET normalized_json=?,preview_digest=? WHERE id=? AND org_id=?',
+                  (sealed_json(changed),digest,preview_id,user['org_id']))
+        audit(c,user,'document_import',preview_id,'supplement',
+              {'supplied_fields':sorted(body.fields),'remaining_missing':changed['missing_fields'],
+               'source_values_preserved':True})
+        return import_preview_response(changed,preview_id,digest,existing)
+
+
+@app.post('/api/imports/{preview_id}/confirm',status_code=201)
+def confirm_order_import(preview_id:str,body:ImportConfirmation,user=Depends(current_user)):
+    with transaction() as c:
+        row=get_row(c,'import_previews',preview_id,user['org_id'])
+        if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로드한 사용자만 승인할 수 있습니다',403)
+        if row['status']!='pending':fail('이미 승인 처리된 문서입니다',409)
+        if (datetime.now(KST)-datetime.fromisoformat(row['created_at'])).total_seconds()>24*3600:
+            fail('검토 기간 24시간이 지났습니다. 문서를 다시 업로드하세요',409)
+        doc=unseal_json(row['normalized_json'])
+        quote_import=doc.get('record_type')=='quote'
+        required=('company','quote_date') if quote_import else ('company','ordered_at','due_date')
+        if doc.get('missing_fields') or any(not doc.get(f) for f in required):
+            fail('필수 누락 항목을 모두 보완해야 문서 등록이 가능합니다',409)
+        expected_date=doc['quote_date'] if quote_import else doc['ordered_at']
+        submitted_date=body.confirmed_quote_date if quote_import else body.confirmed_order_date
+        if (body.preview_digest!=row['preview_digest'] or
+            body.confirmed_customer!=doc['company'] or
+            submitted_date is None or submitted_date.isoformat()!=expected_date or
+            body.confirmed_total!=doc['money']['total']):
+            fail('확인한 회사·날짜·금액이 검토 자료와 일치하지 않습니다',409)
+        if c.execute("SELECT 1 FROM import_previews WHERE org_id=? AND file_sha256=? AND status='confirmed'",(user['org_id'],row['file_sha256'])).fetchone():
+            fail('이미 승인·등록된 동일 파일입니다',409)
+        cust=match_import_customer(c,user['org_id'],doc)
+        if quote_import:
+            # No order, invoice or payment state is implied by a quotation attachment.
+            reference=(doc.get('additional_fields') or {}).get('reference_number')
+            if reference:
+                candidates=c.execute('''SELECT q.source_document_meta FROM quotes q WHERE q.org_id=?
+                    AND q.customer_name_snapshot=? AND q.source_import_id IS NOT NULL''',
+                    (user['org_id'],doc['company'])).fetchall()
+                if any((unseal_json(q['source_document_meta']).get('additional_fields') or {}).get('reference_number')==reference for q in candidates):
+                    fail('이미 같은 거래처·원본 견적번호가 등록되어 있습니다',409)
+            else:
+                # Without a source reference, identical business facts in a changed file
+                # are still a potential duplicate. Fail closed rather than silently re-entering.
+                candidates=c.execute('''SELECT source_document_meta FROM quotes
+                    WHERE org_id=? AND customer_name_snapshot=? AND quote_date=?
+                    AND source_import_id IS NOT NULL''',
+                    (user['org_id'],doc['company'],doc['quote_date'])).fetchall()
+                for candidate in candidates:
+                    prior=unseal_json(candidate['source_document_meta'])
+                    identity=lambda d:(d.get('business_number'),d.get('vat_mode'),
+                                       d.get('money'),d.get('items'))
+                    if identity(prior)==identity(doc):
+                        fail('문서번호가 없는 동일 견적이 이미 등록되었습니다. 원본을 확인하세요',409)
+            if not cust:
+                customer_id=ident()
+                c.execute('INSERT INTO customers VALUES(?,?,?,?,?,?,?,?)',
+                    (customer_id,user['org_id'],doc['company'],doc['business_number'],'','','',now()))
+                audit(c,user,'customer',customer_id,'create',{'source':'approved_quotation','privacy':'contact values omitted'})
+            else:customer_id=cust['id']
+            quote_id=ident()
+            qnum=f'Q-{datetime.now(KST):%Y%m%d}-{quote_id[:10].upper()}'
+            c.execute('''INSERT INTO quotes
+                (id,org_id,customer_id,customer_name_snapshot,doc_no,title,status,vat_mode,created_at,
+                 updated_at,quote_date,source_import_id,source_document_meta)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (quote_id,user['org_id'],customer_id,doc['company'],qnum,doc['title'],'draft',
+                 doc['vat_mode'],now(),now(),doc['quote_date'],preview_id,
+                 sealed_json(doc)))
+            for i,x in enumerate(doc['items']):
+                c.execute('INSERT INTO quote_items VALUES(?,?,?,?,?,?)',
+                    (ident(),quote_id,x['name'],x['quantity'],x['unit_price'],i))
+            c.execute('UPDATE import_previews SET status=?,confirmed_at=?,quote_id=? WHERE id=? AND org_id=?',
+                      ('confirmed',now(),quote_id,preview_id,user['org_id']))
+            audit(c,user,'document_import',preview_id,'confirm',
+                  {'record_type':'quote','quote_id':quote_id,'date':doc['quote_date'],
+                   'amount':doc['money']['total'],'status':'draft','external_acceptance':False})
+            return {'record_type':'quote',
+                    'quote':detail_doc(c,'quote',get_row(c,'quotes',quote_id,user['org_id'])),
+                    'import_id':preview_id}
+        # An external purchase-order number is a business identifier, even if file bytes differ.
+        # Reject duplicate confirmations for the same tenant/customer/PO inside this transaction.
+        reference=(doc.get('additional_fields') or {}).get('reference_number')
+        if reference:
+            candidates=c.execute('''SELECT source_document_meta FROM orders
+                WHERE org_id=? AND customer_name_snapshot=? AND source_import_id IS NOT NULL''',
+                (user['org_id'],doc['company'])).fetchall()
+            if any((unseal_json(o['source_document_meta']).get('additional_fields') or {}).get('reference_number')==reference for o in candidates):
+                fail('이미 동일 거래처·발주번호로 등록된 문서입니다. 원본을 확인하세요',409)
+        if not cust:
+            customer_id=ident()
+            c.execute('INSERT INTO customers VALUES(?,?,?,?,?,?,?,?)',
+                      (customer_id,user['org_id'],doc['company'],doc['business_number'],'','','',now()))
+            audit(c,user,'customer',customer_id,'create',{'source':'confirmed_import','privacy':'contact values omitted'})
+        else:customer_id=cust['id']
+        # This quote is an internal imported-source record, not a claim of external quote acceptance.
+        quote_id=ident(); order_id=ident()
+        qnum=f'Q-{datetime.now(KST):%Y%m%d}-{quote_id[:10].upper()}'
+        onum=f'O-{datetime.now(KST):%Y%m%d}-{order_id[:10].upper()}'
+        c.execute('INSERT INTO quotes (id,org_id,customer_id,customer_name_snapshot,doc_no,title,status,vat_mode,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                  (quote_id,user['org_id'],customer_id,doc['company'],qnum,'[내부 연결용·외부 승인 아님] '+doc['title'][:110],
+                   'accepted',doc['vat_mode'],now(),now()))
+        c.execute('''INSERT INTO orders
+          (id,org_id,customer_id,quote_id,customer_name_snapshot,doc_no,title,status,
+           review_state,vat_mode,due_date,created_at,updated_at,order_date,source_import_id,source_document_meta)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+          (order_id,user['org_id'],customer_id,quote_id,doc['company'],onum,doc['title'],
+           'received','clean',doc['vat_mode'],doc['due_date'],now(),now(),doc['ordered_at'],preview_id,
+           sealed_json(doc)))
+        for i,x in enumerate(doc['items']):
+            itemid=ident()
+            c.execute('INSERT INTO quote_items VALUES(?,?,?,?,?,?)',(itemid,quote_id,x['name'],x['quantity'],x['unit_price'],i))
+            c.execute('INSERT INTO order_items VALUES(?,?,?,?,?,?,?)',
+                      (ident(),order_id,itemid,x['name'],x['quantity'],x['unit_price'],i))
+        c.execute('UPDATE import_previews SET status=?,confirmed_at=?,order_id=? WHERE id=? AND org_id=?',
+                  ('confirmed',now(),order_id,preview_id,user['org_id']))
+        audit(c,user,'document_import',preview_id,'confirm',{'order_id':order_id,'quote_id':quote_id,
+              'ordered_at':doc['ordered_at'],'amount':doc['money']['total'],'quantity':doc['ordered_quantity']})
+        audit(c,user,'order',order_id,'create',{'quote_id':quote_id,'number':onum,'source':'explicitly_confirmed_file_import'})
+        return {'order':detail_doc(c,'order',get_row(c,'orders',order_id,user['org_id'])),
+                'quote_id':quote_id,'import_id':preview_id}
+
+
+@app.get('/api/order-analytics')
+def order_analytics(start_date:date|None=None,end_date:date|None=None,user=Depends(current_user)):
+    if start_date and end_date and start_date>end_date:fail('시작일은 종료일보다 이전이어야 합니다')
+    with conn() as c:
+        rows=c.execute('''SELECT o.*,COALESCE(NULLIF(o.order_date,''),substr(o.created_at,1,10)) AS recorded_order_date
+          FROM orders o WHERE o.org_id=? ORDER BY recorded_order_date DESC,o.id DESC''',(user['org_id'],)).fetchall()
+        summary={};by_date={};by_item={};by_unit={};warnings=[]
+        totals={'order_count':0,'ordered_quantity':0,'subtotal':0,'vat':0,'total':0}
+        for o in rows:
+            day=o['recorded_order_date']
+            if (start_date and day<start_date.isoformat()) or (end_date and day>end_date.isoformat()):continue
+            if o['status']=='cancelled':continue
+            items=retrieve_items(c,'order',o['id']);m=money(items,o['vat_mode']);qty=sum(x['quantity'] for x in items)
+            entry=summary.setdefault(o['customer_name_snapshot'],{'company':o['customer_name_snapshot'],
+                    'order_count':0,'ordered_quantity':0,'subtotal':0,'vat':0,'total':0})
+            daily=by_date.setdefault(day,{'date':day,'order_count':0,'ordered_quantity':0,'subtotal':0,'vat':0,'total':0})
+            source_items=[]
+            if o['source_import_id']:
+                try:source_items=unseal_json(o['source_document_meta'] or '{}').get('items',[])
+                except (ValueError,TypeError):source_items=[]
+            same_items=(len(source_items)==len(items) and all(
+                source_items[i][f]==item[f] for i,item in enumerate(items) for f in ('name','quantity','unit_price')))
+            if o['source_import_id'] and not same_items:
+                warnings.append({'order_id':o['id'],'reason':'원본 파일과 발주 품목이 변경되어 단위를 재확인해야 합니다'})
+            for i,item in enumerate(items):
+                unit=(source_items[i].get('unit') or '단위 미기재') if same_items else '단위 확인 필요'
+                src=source_items[i] if same_items else {}
+                sku=src.get('sku','')
+                spec=src.get('spec','')
+                key=(sku,item['name'],spec,unit)
+                prod=by_item.setdefault(key,{'item':item['name'],'sku':sku,'spec':spec,
+                    'unit':unit,'ordered_quantity':0,'subtotal':0})
+                prod['ordered_quantity']+=item['quantity']
+                prod['subtotal']+=item['quantity']*item['unit_price']
+                by_unit[unit]=by_unit.get(unit,0)+item['quantity']
+            for target in (entry,daily,totals):
+                target['order_count']+=1;target['ordered_quantity']+=qty
+                for k in ('subtotal','vat','total'):target[k]+=m[k]
+        return {'period':{'start_date':str(start_date) if start_date else None,'end_date':str(end_date) if end_date else None},
+                'totals':totals,'companies':sorted(summary.values(),key=lambda x:(-x['total'],x['company'])),
+                'by_date':sorted(by_date.values(),key=lambda x:x['date'],reverse=True),
+                'by_item':sorted(by_item.values(),key=lambda x:(-x['subtotal'],x['item'],x['unit'])),
+                'quantity_by_unit':by_unit,'mixed_units':len(by_unit)>1,'warnings':warnings}
+
+
 @app.get('/api/orders')
 def orders(user=Depends(current_user)):
     with conn() as c:
@@ -699,11 +1269,12 @@ def create_order(body:OrderFromQuote,user=Depends(current_user)):
             fail('이미 발주로 전환된 견적서입니다',409)
         if body.due_date.isoformat()<today(): fail('납기일은 오늘 이후여야 합니다')
         key=ident();doc=f'O-{datetime.now(KST):%Y%m%d}-{key[:10].upper()}'
-        c.execute('INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        c.execute('''INSERT INTO orders (id,org_id,customer_id,quote_id,customer_name_snapshot,doc_no,title,status,review_state,vat_mode,due_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                   (key,user['org_id'],q['customer_id'],q['id'],q['customer_name_snapshot'],doc,q['title'],'received','clean',q['vat_mode'],body.due_date.isoformat(),now(),now()))
         for i,x in enumerate(retrieve_items(c,'quote',q['id'])):
             c.execute('INSERT INTO order_items VALUES(?,?,?,?,?,?,?)',
                       (ident(),key,x['id'],x['name'],x['quantity'],x['unit_price'],i))
+        c.execute('UPDATE orders SET order_date=? WHERE id=?',(today(),key))
         audit(c,user,'order',key,'create',{'quote_id':q['id'],'number':doc})
         return detail_doc(c,'order',get_row(c,'orders',key,user['org_id']))
 
@@ -891,6 +1462,10 @@ def audit_list(user=Depends(current_user)):
     with conn() as c:
         return [dict(r) for r in c.execute('''SELECT a.*,u.name AS actor_name FROM audit_logs a JOIN users u ON u.id=a.actor_id
               WHERE a.org_id=? ORDER BY a.created_at DESC,a.rowid DESC LIMIT 30''',(user['org_id'],))]
+
+
+register_messenger_routes(app, current_user=current_user, conn=conn, transaction=transaction,
+                          ident=ident, now=now, fail=fail, need_admin=need_admin, detail_doc=detail_doc)
 
 
 @app.get('/')

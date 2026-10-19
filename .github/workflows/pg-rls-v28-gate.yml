@@ -1,0 +1,45 @@
+name: PostgreSQL V2.8 RLS + attachment integrity gate (manual, isolated)
+
+on:
+  workflow_dispatch:
+  # Intentionally manual-only: no accidental billable execution on push.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-pg-v28-rls-integrity-gate
+  cancel-in-progress: true
+
+jobs:
+  isolated-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PostgreSQL client
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Run isolated real PostgreSQL tenant-isolation attacks
+        run: PYTHONPATH=. python -m scripts.run_postgres_isolation_ci_v28

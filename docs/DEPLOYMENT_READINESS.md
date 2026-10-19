@@ -28,3 +28,18 @@ node --check app/static/app.js
 - GitHub 소스 확인
 - Codespaces에서 private port 8000 로 데모 수행. **Public 포트 전환 금지.**
 - 운영 환경은 별도의 설계/검증 이후 승인받고 배포
+
+
+## V1.7 hard stop
+
+`JW_ENV=production` explicitly fails on startup even with a valid MFA key and antivirus because database-enforced tenant read isolation and other critical controls are not implemented. This must **not** be bypassed with a different environment name to serve real customers.
+
+`JW_DATA_KEY` must be a secret-manager-supplied Fernet key, identical across workers and backups. Loss of this key makes already encrypted import metadata and MFA credentials unrecoverable. Key rotation and MFA recovery are outstanding.
+
+For historical source JSON stored before encryption, stop the service, take an additional offsite encrypted backup, then run `PYTHONPATH=. python scripts/migrate_evidence_encryption.py` with `JARVIS_DB_PATH` and `JW_DATA_KEY`. The script refuses to overwrite its `.pre-encryption.bak` backup and verifies SQLite integrity. Keep that backup protected, as it contains plaintext historical data.
+
+Do not claim ClamAV is deployed unless `JW_UPLOAD_SCAN=clamav` and successful scanner/virus-definition checks have been demonstrated. Default development mode (`off`) does not perform malware scanning.
+
+## V1.9 advanced RLS release blocker
+
+The V1.8 policy based only on writable `jw.org_id` was forgeable by SQL injection and has been replaced **in this V1.9 candidate only**. The PostgreSQL policy now requires an MFA-bound, transaction-specific DB-signed tenant claim. SQLite application remains unchanged and production-blocked. **No PostgreSQL server was available in the working environment:** policy syntax, functional SQL behavior, transaction pool reuse, schema migration, and cross-tenant integration are NOT RUN. Do not enable external traffic or import real data. See `docs/V1_9_RLS_HARDENING.md`.

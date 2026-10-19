@@ -356,9 +356,13 @@ def test_consistent_sqlite_backup(tmp_path,api,monkeypatch):
     spec=spec_from_file_location('backup_db_test',target)
     module=module_from_spec(spec)
     spec.loader.exec_module(module)
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv('JW_BACKUP_KEY',Fernet.generate_key().decode())
     backup_path=module.backup()
-    assert backup_path.is_file()
+    assert backup_path.is_file() and backup_path.suffix=='.jwbackup'
+    from scripts.secure_backup import verify_backup
     import sqlite3
-    with sqlite3.connect(backup_path) as b:
+    with sqlite3.connect(':memory:') as b:
+        b.deserialize(verify_backup(backup_path))
         assert b.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
         assert b.execute('SELECT count(*) FROM organizations').fetchone()[0]==2
