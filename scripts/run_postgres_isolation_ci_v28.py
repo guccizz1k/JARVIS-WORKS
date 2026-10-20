@@ -136,6 +136,12 @@ def main():
             from scripts.test_postgres_migration_v36 import run as migration_shadow_run
             if migration_shadow_run() != 0:
                 raise AssertionError('V3.6 synthetic shadow/rollback gate failed')
+        # V3.7: SQLite legacy semantic compatibility schema, private to this
+        # disposable PG17 test database; no production DDL or data migration.
+        if os.getenv('JW_PG_LAB_V37') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_migration_v37 import run as compat_run
+            if compat_run() != 0:
+                raise AssertionError('V3.7 operational-shape semantic/RLS gate failed')
         success_marker = True
         return 0
     except Exception as exc:
