@@ -153,6 +153,12 @@ def main():
             from scripts.test_postgres_driver_v39 import run as driver_run
             if driver_run() != 0:
                 raise AssertionError('V3.9 isolated Psycopg driver gate failed')
+        # V4.0: verified-tenant PG17 writes and idempotent concurrent retries.
+        # Synthetic sessions only; never attaches to the live SQLite FastAPI.
+        if os.getenv('JW_PG_LAB_V40') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_writer_v40 import run as writer_run
+            if writer_run() != 0:
+                raise AssertionError('V4.0 isolated PG17 idempotent write gate failed')
         success_marker = True
         return 0
     except Exception as exc:
