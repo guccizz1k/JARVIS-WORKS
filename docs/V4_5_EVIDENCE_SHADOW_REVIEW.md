@@ -112,3 +112,35 @@ legacy `starlette.testclient`/`httpx` import path. It is a *warning*, not proof
 of data corruption, but must be investigated against a supported official
 Starlette/httpx combination before removal. V4.5 does not suppress it or make
 an unsupported dependency upgrade merely to obtain a cosmetically clean log.
+
+## V4.5 real PG17 failure: primary diagnostic must survive cleanup (2026-10-20)
+
+The owner ran the isolated Codespaces V4.5 PostgreSQL 17 gate. Historical
+V2.7–V4.4 tests succeeded, but V4.5 returned FAIL with:
+`stage=cleanup-compatibility-schema type=AssertionError`. This reported
+stage is **not reliable**: the previous runner assigned `stage='cleanup-compatibility-schema'`
+inside a `finally` block *before* re-raising a prior assertion. Cleanup
+problems could also be swallowed, and primary and cleanup errors could not
+be distinguished from this log. No success or database corruption should be
+inferred from the mislabeled stage.
+
+The repaired runner retains the actual primary phase (`immutable-V3.7-typed-compat-stage`,
+`RLS-full-evidence-HTTP-parity`, `byte-and-receipt-tamper-detection`,
+`PG-session-revocation`, etc.). It reports stable error identifiers such as
+`BASELINE_HTTP_503_PG_UNAVAILABLE`, `EVIDENCE_STATUS_MISMATCH`, or
+`EVIDENCE_COUNT_MESSENGER_RECEIPTS`; only a fixed allowlist of response codes
+can appear in diagnostics. Token values, private message content, SQL,
+exception message strings and PostgreSQL DSNs are never printed. A cleanup
+failure is separately reported, while both primary and cleanup failures block
+PASS. It preserves all existing RLS/database guards and full historical gates.
+
+Local regression: **47/47 PASS** using V4.4 support modules, current V4.5
+code and simulated psycopg/HTTP failure injection. Two new tests prove that
+an HTTP 503 is labeled at the failing HTTP phase (not as cleanup), and an
+independent cleanup failure is reported without leaking secret exception text.
+The local environment cannot run the user's isolated PostgreSQL 17 container,
+so **the actual cause of the original AssertionError is still unresolved**.
+This is a diagnostic repair, NOT a passing V4.5 integration or permission to
+advance to production. Re-run Codespaces on this commit; if any live assertion
+fails, use the stable diagnostic code to correct the exact cause, and repeat
+the entire suite until FAIL=0 and SKIP=0.

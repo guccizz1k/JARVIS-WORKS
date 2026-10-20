@@ -17,6 +17,18 @@ import sys
 import tempfile
 
 
+class AuditAssertion(AssertionError):
+    """Deterministic synthetic fixture failure label; never contains user data."""
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+def require(ok: bool, code: str) -> None:
+    if not ok:
+        raise AuditAssertion(code)
+
+
 def run() -> int:
     if (os.getenv('JW_ENV', '').casefold() == 'production'
             or os.getenv('JW_PG_CI_ALLOW') != 'ONLY_EPHEMERAL_LOCAL_DATABASE'
@@ -54,6 +66,9 @@ def run() -> int:
     installed=False
     cleanup_ok=True
     passed=False
+    failed_stage=None
+    failed_code=None
+    cleanup_error=None
     with tempfile.TemporaryDirectory(prefix='jw-v45-synthetic-') as d:
         dbpath=Path(d)/'evidence.db'
         original=fixture()
@@ -65,7 +80,7 @@ def run() -> int:
             original.execute('UPDATE messenger_read_positions SET connection_id=? WHERE connection_id=?',(thread,'thread_ab'))
             original.commit()
             original.execute('PRAGMA foreign_keys=ON')
-            assert original.execute('PRAGMA foreign_key_check').fetchone() is None
+            require(original.execute('PRAGMA foreign_key_check').fetchone() is None, 'SOURCE_FOREIGN_KEY')
             with sqlite3.connect(dbpath) as site:
                 original.backup(site)
             original.close()
@@ -76,7 +91,7 @@ def run() -> int:
                 try:
                     stage_compat(pg,records)
                     installed=True
-                    assert verify_compat(pg,records)['rows']==len(records)
+                    require(verify_compat(pg,records)['rows']==len(records), 'PG_TYPED_STAGE_PARITY')
                     with pg.cursor() as cur:
                         cur.execute('''INSERT INTO jw_guard.authenticated_sessions
                             (token_digest,org_id,user_id,mfa_verified,expires_at)
@@ -101,55 +116,77 @@ def run() -> int:
                     stage='RLS-full-evidence-HTTP-parity'
                     with TestClient(isolated,base_url='https://testserver') as client:
                         endpoint='/lab45/threads/'+thread+'/evidence'
-                        assert client.get(endpoint).status_code==401
-                        assert client.get(endpoint,headers={'X-JW-Lab-Session':token}).status_code==401
+                        require(client.get(endpoint).status_code==401, 'COOKIE_REQUIRED')
+                        require(client.get(endpoint,headers={'X-JW-Lab-Session':token}).status_code==401, 'FORGED_HEADER_REJECTED')
                         client.cookies.set('jw_v45_synthetic_cookie',cookie)
                         baseline=client.get(endpoint)
-                        assert baseline.status_code==200,baseline.text
+                        # Only a fixed allowlist from our own API may enter logs.
+                        # Never print response.text, SQL, cookies, tokens or DSNs.
+                        if baseline.status_code != 200:
+                            try:
+                                code = baseline.json().get('code', 'UNKNOWN')
+                            except (ValueError, AttributeError, TypeError):
+                                code = 'UNKNOWN'
+                            if code not in ('PG_UNAVAILABLE', 'AUTH_DENIED',
+                                            'THREAD_NOT_FOUND', 'INVALID_THREAD'):
+                                code = 'UNKNOWN'
+                            raise AuditAssertion('BASELINE_HTTP_'+str(baseline.status_code)
+                                                 +'_'+code)
                         response=baseline.json()
-                        assert response['status']=='MATCH' and response['evidence_parity']
-                        assert response['cutover_approved'] is False
-                        assert response['counts']['messenger_messages']==3
-                        assert response['counts']['messenger_attachments']==1
-                        assert response['counts']['messenger_edits']==1
-                        assert response['counts']['messenger_receipts']==1
-                        assert response['counts']['messenger_read_positions']==1
-                        assert token not in baseline.text and 'PG' not in baseline.text
-                        assert client.post(endpoint).status_code==405
+                        state = response.get('status')
+                        if state not in ('MATCH', 'MISMATCH', 'INCOMPLETE',
+                                         'EMPTY_EVIDENCE', 'EMPTY_UNVERIFIED', 'UNSUPPORTED'):
+                            state = 'UNKNOWN'
+                        require(response.get('status')=='MATCH' and response.get('evidence_parity') is True,
+                                'EVIDENCE_STATUS_'+state)
+                        require(response.get('cutover_approved') is False, 'CUTOVER_PROTECTION')
+                        require(response.get('counts',{}).get('messenger_messages')==3, 'EVIDENCE_COUNT_MESSENGER_MESSAGES')
+                        require(response.get('counts',{}).get('messenger_attachments')==1, 'EVIDENCE_COUNT_MESSENGER_ATTACHMENTS')
+                        require(response.get('counts',{}).get('messenger_edits')==1, 'EVIDENCE_COUNT_MESSENGER_EDITS')
+                        require(response.get('counts',{}).get('messenger_receipts')==1, 'EVIDENCE_COUNT_MESSENGER_RECEIPTS')
+                        require(response.get('counts',{}).get('messenger_read_positions')==1, 'EVIDENCE_COUNT_MESSENGER_READ_POSITIONS')
+                        require(token not in baseline.text and 'PG' not in baseline.text, 'RESPONSE_PRIVACY')
+                        require(client.post(endpoint).status_code==405, 'WRITE_ROUTE_REFUSED')
                         stage='byte-and-receipt-tamper-detection'
                         with sqlite3.connect(dbpath) as site:
                             site.execute("UPDATE messenger_attachments SET filename='FORGED.png' WHERE message_id='msg_file'")
                         bad=client.get(endpoint)
-                        assert bad.status_code==200 and bad.json()['status']=='MISMATCH'
+                        require(bad.status_code==200 and bad.json().get('status')=='MISMATCH', 'ATTACHMENT_TAMPER_DETECTION')
                         with sqlite3.connect(dbpath) as site:
                             site.execute("UPDATE messenger_attachments SET filename='synthetic-한글.png' WHERE message_id='msg_file'")
                             site.execute("DELETE FROM messenger_receipts WHERE message_id='msg_order'")
-                        assert client.get(endpoint).json()['status']=='MISMATCH'
+                        require(client.get(endpoint).json().get('status')=='MISMATCH', 'RECEIPT_REMOVAL_DETECTION')
                         stage='PG-session-revocation'
                         with pg.cursor() as cur:
                             cur.execute('UPDATE jw_guard.authenticated_sessions SET revoked_at=clock_timestamp() WHERE token_digest=%s',(digest,))
-                            assert cur.rowcount==1
+                            require(cur.rowcount==1, 'SESSION_REVOKE_ROWS')
                         denied=client.get(endpoint)
-                        assert denied.status_code in (403,503)
-                        assert not denied.json().get('evidence_parity')
+                        require(denied.status_code in (403,503), 'SESSION_REVOKE_HTTP_'+str(denied.status_code))
+                        require(not denied.json().get('evidence_parity'), 'REVOKED_SESSION_PARITY')
                     passed=True
                 finally:
+                    # Preserve the ACTUAL failed test stage. A finally block must
+                    # never mask the primary assertion with a cleanup phase name.
                     if installed:
-                        stage='cleanup-compatibility-schema'
                         try:
                             drop_compat(pg)
                             with pg.cursor() as cur:
                                 cur.execute('SELECT to_regnamespace(%s)',('jw_migration_v37',))
-                                assert cur.fetchone()==(None,)
-                        except Exception:
+                                require(cur.fetchone()==(None,), 'SCHEMA_STILL_EXISTS')
+                        except Exception as exc:
                             cleanup_ok=False
+                            cleanup_error=(exc.code if isinstance(exc, AuditAssertion)
+                                           else type(exc).__name__)
         except Exception as exc:
-            print('FAIL: V4.5 PG17 evidence stage='+stage+' type='+type(exc).__name__+
+            failed_stage=stage
+            failed_code=exc.code if isinstance(exc, AuditAssertion) else type(exc).__name__
+            print('FAIL: V4.5 PG17 evidence stage='+failed_stage+' code='+failed_code+
                   ' (details redacted)',file=sys.stderr)
     if not cleanup_ok:
-        print('FAIL: V4.5 ephemeral evidence-schema cleanup failed',file=sys.stderr)
+        print('FAIL: V4.5 ephemeral evidence-schema cleanup code='+
+              str(cleanup_error)+' (details redacted)',file=sys.stderr)
         return 1
-    if passed:
+    if passed and failed_stage is None:
         print('PASS: V4.5 PG17 RLS evidence bytes, edits, receipts, order snapshot and requester read position; cleanup')
         return 0
     return 1
