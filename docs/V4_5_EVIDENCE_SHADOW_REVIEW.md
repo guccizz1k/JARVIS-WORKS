@@ -144,3 +144,33 @@ This is a diagnostic repair, NOT a passing V4.5 integration or permission to
 advance to production. Re-run Codespaces on this commit; if any live assertion
 fails, use the stable diagnostic code to correct the exact cause, and repeat
 the entire suite until FAIL=0 and SKIP=0.
+
+## V4.5 synthetic cookie dependency HTTP 422 correction (2026-10-20)
+
+An actual Codespaces PG17 run failed at `RLS-full-evidence-HTTP-parity`
+with diagnostic `COOKIE_REQUIRED`. Root cause reproduced locally using a real
+FastAPI TestClient: the nested `website_cookie(req: Request)` dependency
+was defined in a module with `from __future__ import annotations`, but
+`Request` was imported inside `run()` rather than at module scope. FastAPI
+resolves postponed dependency annotation types against **module globals**;
+the parameter was incorrectly treated as a required query parameter (`422`)
+instead of a Starlette `Request`. This did **not** establish that the database
+or cookie verification itself was broken.
+
+The repair imports `Request` at module scope without changing auth or trust
+policy. Missing, forged-header, and invalid synthetic cookies must return
+`401`, a valid synthetic cookie must return `200`, and removing it must again
+return `401`. The new regression file
+`tests/test_v45_cookie_dependency_contract.py` compiles the **actual** nested
+cookie dependency from the production-unregistered V4.5 review runner into a
+minimal FastAPI TestClient, preventing regression without connecting to a DB.
+The existing review fixture and the V4.4 real-cookie/Pg17 review test remain
+untouched; all historical integrity manifests and `app/main.py` remain intact.
+
+Local 5-gate development evidence: **93/93 isolated relevant tests PASS, 0
+SKIP** in the assembled V4.4/V4.5 test workspace (not the private full
+repository), including real HTTP cookie-dependency tests. No container or
+actual PostgreSQL service is present in the authoring runtime; therefore
+**V4.5 full Codespaces regression and live PostgreSQL 17 evidence gate remain
+NOT RUN for this commit**. Do not report this as a production cutover or
+claim 0 SKIP for Codespaces without actual output.

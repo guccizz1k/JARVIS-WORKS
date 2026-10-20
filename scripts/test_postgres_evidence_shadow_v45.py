@@ -16,6 +16,10 @@ import sqlite3
 import sys
 import tempfile
 
+# FastAPI resolves deferred dependency annotations from this module's globals.
+# Do not import Request only inside run(); that makes req a query parameter (422).
+from fastapi import Request
+
 
 class AuditAssertion(AssertionError):
     """Deterministic synthetic fixture failure label; never contains user data."""
@@ -40,7 +44,7 @@ def run() -> int:
     try:
         import psycopg
         from psycopg.conninfo import conninfo_to_dict
-        from fastapi import HTTPException, Request
+        from fastapi import HTTPException
         from fastapi.testclient import TestClient
         from app.pg_evidence_shadow_v45 import create_review_app
         from app.pg_cookie_shadow_v44 import ReviewBinding
