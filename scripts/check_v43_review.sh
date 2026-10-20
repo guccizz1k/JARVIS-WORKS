@@ -57,5 +57,40 @@ if ! python3 -c 'from reportlab.pdfgen import canvas' >/dev/null 2>&1; then
 fi
 "$TEST_PYTHON" -c 'from reportlab.pdfgen import canvas' >/dev/null 2>&1 \
   || { echo 'NOT RUN: ReportLab unavailable for full PDF regression' >&2; exit 2; }
-PYTHONPATH=. "$TEST_PYTHON" -m pytest -q --disable-warnings
+# Codespaces' system image may lack NanumGothic.ttf. Historical PDF tests
+# require its exact path; don't skip failed fixtures or proceed to PG17.
+ensure_korean_pdf_font() {
+  local font_file='/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
+  if [[ ! -s "$font_file" || ! -r "$font_file" ]]; then
+    command -v apt-get >/dev/null 2>&1 || { echo 'NOT RUN: fonts-nanum package manager unavailable' >&2; return 2; }
+    local -a apt_cmd
+    if [[ "$(id -u)" == 0 ]]; then
+      apt_cmd=(env DEBIAN_FRONTEND=noninteractive apt-get)
+    else
+      command -v sudo >/dev/null 2>&1 || { echo 'NOT RUN: font installation requires noninteractive sudo' >&2; return 2; }
+      sudo -n true >/dev/null 2>&1 || { echo 'NOT RUN: noninteractive sudo denied for font setup' >&2; return 2; }
+      apt_cmd=(sudo -n env DEBIAN_FRONTEND=noninteractive apt-get)
+    fi
+    echo 'INFO: installing missing Korean PDF fixture font (fonts-nanum)' >&2
+    if ! "${apt_cmd[@]}" update -qq -o Acquire::Retries=2; then
+      echo 'NOT RUN: system package metadata unavailable for Korean PDF font' >&2
+      return 2
+    fi
+    if ! "${apt_cmd[@]}" install -y -qq --no-install-recommends fonts-nanum; then
+      echo 'NOT RUN: Korean PDF fixture font installation failed' >&2
+      return 2
+    fi
+  fi
+  if [[ ! -s "$font_file" || ! -r "$font_file" ]]; then
+    echo 'FAIL: NanumGothic.ttf absent or unreadable after setup' >&2
+    return 1
+  fi
+  if ! "$TEST_PYTHON" -c 'from reportlab.pdfbase.ttfonts import TTFont; TTFont("JW_Korean_PDF_fixture", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf")'; then
+    echo 'FAIL: Korean PDF fixture font cannot be parsed by ReportLab' >&2
+    return 1
+  fi
+  echo 'PASS: Korean PDF font readable and accepted by ReportLab' >&2
+}
+ensure_korean_pdf_font || exit $?
+PYTHONPATH=. "$TEST_PYTHON" -m pytest -q --disable-warnings -rs
 printf 'PASS: local full-repository V4.3 syntax, UI script and regression (not live PostgreSQL)\n'

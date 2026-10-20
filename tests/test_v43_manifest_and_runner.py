@@ -360,3 +360,24 @@ exit 0
     else:
         assert 'venv -m pytest' not in output
         assert 'PASS: local full-repository V4.3' not in result.stdout
+
+def test_korean_pdf_font_preflight_before_full_regression():
+    """Missing test fixture must not masquerade as a passing PDF regression."""
+    source = Path('scripts/check_v43_review.sh').read_text()
+    font = '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
+    for name in ('tests/test_import_supplement.py',
+                 'tests/test_quote_import.py', 'tests/test_smart_import.py'):
+        assert font in Path(name).read_text()
+    assert 'ensure_korean_pdf_font() {' in source
+    assert 'fonts-nanum' in source
+    assert 'TTFont("JW_Korean_PDF_fixture"' in source
+    assert source.index('ensure_korean_pdf_font || exit $?') < source.index(
+        'PYTHONPATH=. "$TEST_PYTHON" -m pytest')
+
+def test_korean_pdf_font_preflight_rejects_unverified_fonts():
+    source = Path('scripts/check_v43_review.sh').read_text()
+    assert 'NanumGothic.ttf absent or unreadable after setup' in source
+    assert 'Korean PDF fixture font cannot be parsed by ReportLab' in source
+    assert "apt_cmd=(sudo -n env DEBIAN_FRONTEND=noninteractive apt-get)" in source
+    assert 'install -y -qq --no-install-recommends fonts-nanum' in source
+    assert 'ensure_korean_pdf_font || exit $?' in source

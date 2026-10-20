@@ -132,3 +132,22 @@ an isolated V4.3 bridge test for a production SQLite-to-PostgreSQL migration.
 
 **Live Codespaces retest, full regression, and PG17 integration are NOT RUN for
 this patched commit** until independent owner-run results are provided.
+
+## V4.3 Codespaces Korean PDF font fixture recovery
+
+After the ReportLab dependency repair, the owner Codespaces log reported
+**448 passed, 2 failed, 3 skipped**. Two remaining failures attempted to load
+`/usr/share/fonts/truetype/nanum/NanumGothic.ttf` in PDF tests. Other PDF
+tests also skipped their Korean fixture when that same font was absent.
+These outcomes are not PASS, and PG17 V4.3 is still NOT RUN.
+
+`scripts/check_v43_review.sh` now checks the original font file before pytest.
+If missing, it installs Debian `fonts-nanum` using noninteractive apt in the
+Codespaces development container, with either root or noninteractive sudo.
+It then verifies the file is readable, nonempty and parseable by ReportLab.
+Package manager, network and permission failures remain NOT RUN; a missing
+or invalid font after installation is FAIL. None can allow PG17 to run.
+Original PDF tests, production requirements, previous PostgreSQL manifests
+and `app/main.py` remain untouched. Local simulated installer tests covered
+successful setup and four negative outcomes, but the real Codespaces replay
+and PG17 V4.3 integration must still be observed before claiming PASS.
