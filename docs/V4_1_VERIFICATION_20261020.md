@@ -32,3 +32,18 @@
 
 **Local candidate PASS; independent V4.1 real PostgreSQL 17 evidence still required.**
 No automatic GitHub Actions, paid tasks, PR, merge, production deploy, real data migration or customer interactions occurred.
+
+## Subsequent independent Codespaces PG17 live gate — owner screenshot
+
+The owner provided a screenshot on **2026-10-20 (KST)** showing completion of `git fetch origin review/v41` and a **detached temporary Git worktree** running `bash scripts/*v41.sh` on the isolated Codespaces PostgreSQL 17 environment. The screenshot's actual terminal output includes:
+
+- `PASS: V4.1 real PG17 recreated-app durable replay, bilateral read, injected rollback, retry exactly once, revocation and partner recovery`
+- `PASS: V4.0 real PG17 idempotent writes, concurrent retries, monotonic sequence uniqueness, tenant RLS, revocation and rollback`
+- `PASS: ephemeral PG legacy + V2.7 + V2.8 integrity attacks; cleanup confirmed`
+- `PASS: PostgreSQL 17 live RLS attacks and ephemeral cleanup completed`
+
+The preceding V3.5–V3.9 gate summaries were also PASS on the same screenshot. This **upgrades V4.1 real isolated PostgreSQL 17 verification to PASS**, independently of the prior local verification table. The terminal returned to a shell prompt, but the exact shell exit code is not explicitly shown; the runner prints its final PASS only after cleanup succeeds.
+
+**Evidence boundary:** screenshot demonstrates durable replay across recreated FastAPI app-factory instances and connections, not a killed/restarted OS process, power-loss durability, cross-host failover, real production backup/restore, production migration, public API routing or customer data. The `BLOCKED` production cutover notices remain valid. The original screenshot is in the user's conversation, not in this GitHub repository.
+
+**Review conclusion:** V4.1 synthetic PG17 app-instance recovery, rollback, idempotency, tenant isolation and ephemeral cleanup **PASS**. Production cutover **BLOCKED until separately designed, verified and approved**.
