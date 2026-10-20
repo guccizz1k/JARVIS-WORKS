@@ -159,6 +159,12 @@ def main():
             from scripts.test_postgres_writer_v40 import run as writer_run
             if writer_run() != 0:
                 raise AssertionError('V4.0 isolated PG17 idempotent write gate failed')
+        # V4.1: app factory recreation, durable replay and interrupted transaction.
+        # Only on the same throwaway PG17 instance after the V4.0 suite.
+        if os.getenv('JW_PG_LAB_V41') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_recovery_v41 import run as recovery_run
+            if recovery_run() != 0:
+                raise AssertionError('V4.1 isolated PG17 recovery gate failed')
         success_marker = True
         return 0
     except Exception as exc:
