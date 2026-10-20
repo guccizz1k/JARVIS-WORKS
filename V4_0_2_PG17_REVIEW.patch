@@ -1,0 +1,154 @@
+--- a/app/pg_write_api_v40.py
++++ b/app/pg_write_api_v40.py
+@@ -39,7 +39,13 @@
+             raise HTTPException(409, 'Idempotency key conflicts with original request') from None
+         except (ValueError, PostgreSQLUnverified):
+             raise HTTPException(403, 'Synthetic request denied') from None
+-        except Exception:
++        except Exception as exc:
++            # The database rejects an unverified/revoked actor or a company
++            # outside the thread using SQLSTATE P0001 / 42501. Keep the real
++            # failure class private; unexpected database errors remain 503.
++            # Do not reclassify arbitrary uniqueness or driver failures as 403.
++            if getattr(exc, 'sqlstate', None) in {'P0001', '42501'}:
++                raise HTTPException(403, 'Synthetic request denied') from None
+             # No tenant IDs, SQL, token, DSN, or customer evidence in errors.
+             raise HTTPException(503, 'Isolated test database request failed') from None
+     return app
+--- a/tests/test_pg_writer_v40.py
++++ b/tests/test_pg_writer_v40.py
+@@ -213,3 +213,41 @@
+              'host':'::1','password':'synthetic','port':'5432'}
+     app = {**admin, 'user':'jw_app'}
+     assert _verified_lab_uri(admin, app).startswith('postgresql://jw_app:synthetic@[::1]:5432/')
++
++
++@pytest.mark.parametrize('sqlstate', ['P0001', '42501'])
++def test_database_rls_and_revocation_are_denied_without_detail_leak(enabled, sqlstate):
++    class Denied(Exception):
++        pass
++    class Fake:
++        def send_text(self, **kw):
++            denied = Denied('private postgres DSN and auth token must not leak')
++            denied.sqlstate = sqlstate
++            raise denied
++    app = create_lab_app(GOOD, writer=Fake())
++    with TestClient(app) as client:
++        response = client.post('/lab40/threads/chat_ab/messages',
++                               json={'content':'hello','request_id':ID},
++                               headers={'X-JW-Lab-Session':TOKEN})
++        assert response.status_code == 403
++        assert response.json() == {'detail':'Synthetic request denied'}
++        assert 'postgres' not in response.text and TOKEN not in response.text
++
++
++@pytest.mark.parametrize('sqlstate', ['23505', '40P01', '57014', None])
++def test_unexpected_database_error_is_not_misclassified_as_denial(enabled, sqlstate):
++    class Failed(Exception):
++        pass
++    class Fake:
++        def send_text(self, **kw):
++            error = Failed('unexpected detail must not be exposed')
++            error.sqlstate = sqlstate
++            raise error
++    app = create_lab_app(GOOD, writer=Fake())
++    with TestClient(app) as client:
++        response = client.post('/lab40/threads/chat_ab/messages',
++                               json={'content':'hello','request_id':ID},
++                               headers={'X-JW-Lab-Session':TOKEN})
++        assert response.status_code == 503
++        assert response.json() == {'detail':'Isolated test database request failed'}
++        assert 'unexpected detail' not in response.text
+--- a/scripts/test_postgres_writer_v40.py
++++ b/scripts/test_postgres_writer_v40.py
+@@ -66,6 +66,7 @@
+         return 2
+ 
+     tokens = {org: secrets.token_urlsafe(40) for org in ('tenant_a', 'tenant_b', 'tenant_c')}
++    stage = 'synthetic-session-fixture'
+     try:
+         with psycopg.connect(admin, connect_timeout=5) as db:
+             with db.cursor() as cur:
+@@ -75,29 +76,37 @@
+                          VALUES(%s,%s,%s,true,%s)''',
+                          (sha256(tokens[org].encode()).digest(), org, actor,
+                           datetime.now(timezone.utc) + timedelta(minutes=10)))
++        stage = 'app-factory'
+         app = create_lab_app(app_uri)
+         def h(org): return {'X-JW-Lab-Session': tokens[org]}
+         path = '/lab40/threads/chat_ab/messages'
+         key=secrets.token_hex(16)
+         body={'content':'synthetic v40 once only', 'request_id':key}
+         with TestClient(app) as client:
++            stage = 'first-write'
+             a=client.post(path,json=body,headers=h('tenant_a'))
+             assert a.status_code==201, f'First send refused ({a.status_code})'
++            stage = 'exact-replay'
+             duplicate=client.post(path,json=body,headers=h('tenant_a'))
+             assert duplicate.status_code==200 and duplicate.json()['id']==a.json()['id']
+             assert duplicate.json()['message_seq']==a.json()['message_seq']
+             assert duplicate.json()['replayed'] is True
++            stage = 'conflicting-replay'
+             mismatch=client.post(path,json={**body,'content':'altered'},headers=h('tenant_a'))
+             assert mismatch.status_code==409, 'Reused request ID with mismatched content accepted'
++            stage = 'cross-tenant-denial'
+             outsider=client.post(path,json={**body,'request_id':secrets.token_hex(16)},headers=h('tenant_c'))
+             assert outsider.status_code==403, 'Third-party company wrote to shared thread'
++            stage = 'api-input-authentication'
+             assert client.post(path,json=body).status_code==401
+             assert client.post(path,json={**body,'sender_org':'tenant_b'},headers=h('tenant_a')).status_code==422
+             assert client.get(path,headers=h('tenant_a')).status_code==405
++            stage = 'unaffected-partner-after-revoke'
+             assert client.post(path,json={**body,'request_id':secrets.token_hex(16)},headers=h('tenant_b')).status_code==201
+             # Two overlapping HTTP worker writes with the SAME idempotency key.
+             race_key=secrets.token_hex(16)
+             race_body={'content':'racing V4.0 duplicate', 'request_id':race_key}
++            stage = 'concurrent-exact-replay'
+             with ThreadPoolExecutor(max_workers=2) as pool:
+                 futures=[pool.submit(client.post,path,json=race_body,headers=h('tenant_a')) for _ in range(2)]
+                 result=[future.result(timeout=20) for future in futures]
+@@ -106,12 +115,14 @@
+             assert len(ids)==1 and len(seqs)==1, 'Concurrent duplication or counter disagreement'
+             # Two distinct messages under same thread must receive unique sequences.
+             unique_keys=[secrets.token_hex(16) for _ in range(2)]
++            stage = 'concurrent-distinct-messages'
+             with ThreadPoolExecutor(max_workers=2) as pool:
+                 jobs=[pool.submit(client.post,path,json={'content':'parallel-'+str(i),'request_id':key},headers=h('tenant_a'))
+                       for i,key in enumerate(unique_keys)]
+                 distinct=[job.result(timeout=20) for job in jobs]
+             assert all(r.status_code==201 for r in distinct)
+             assert len({r.json()['message_seq'] for r in distinct})==2
++            stage = 'committed-row-and-revoke'
+             with psycopg.connect(admin,connect_timeout=5) as pg:
+                 with pg.cursor() as cur:
+                     cur.execute('''SELECT COUNT(*) FROM public.messenger_messages
+@@ -123,6 +134,7 @@
+                     cur.execute('''UPDATE jw_guard.authenticated_sessions SET revoked_at=clock_timestamp()
+                                    WHERE token_digest=%s''',(sha256(tokens['tenant_a'].encode()).digest(),))
+                     assert cur.rowcount==1
++            stage = 'revoked-actor-denial'
+             revoked=client.post(path,json={**body,'request_id':secrets.token_hex(16)},headers=h('tenant_a'))
+             assert revoked.status_code==403, 'Revoked actor posted a new message'
+             assert client.post(path,json={**body,'request_id':secrets.token_hex(16)},headers=h('tenant_b')).status_code==201
+@@ -131,7 +143,7 @@
+               'monotonic sequence uniqueness, tenant RLS, revocation and rollback')
+         return 0
+     except Exception as exc:
+-        print('FAIL: V4.0 isolated idempotent writer gate '+type(exc).__name__+' (details redacted)')
++        print('FAIL: V4.0 isolated writer stage='+stage+' type='+type(exc).__name__+' (details redacted)')
+         return 1
+ 
+ 
+--- a/V4_0_PG_GATE_SHA256.txt
++++ b/V4_0_PG_GATE_SHA256.txt
+@@ -1,7 +1,7 @@
+ 511848e98fbd5855a5810466b0572d6d191b8c4886dfea2328cbae1395dc856a  app/pg_write_replay_v40.py
+-a60c9939f2d7340d1318da6c700c79680028018924ca808182ae5d79f1f1ad19  app/pg_write_api_v40.py
+-a6925da85fa4d170351bfda60c4cad42f56fba26590a0ad232ebafd923a63eb2  tests/test_pg_writer_v40.py
+-87fc2f67aaf574d4726da14e2b6ed87c282d0c687092982a1bc72ce6586ca4c1  scripts/test_postgres_writer_v40.py
++0cdba282af6b995146b39f5933f0e6d51cb69487cbd86bc3b2919267136b32e7  app/pg_write_api_v40.py
++991a3eb3a6840a5f454c83bb4cc200ffd789ff09014627e86f1d782655ff7aa1  tests/test_pg_writer_v40.py
++0f45b4129360e99f966009d4abd49c4c5b306aee7e2c242b7eca9e576028557b  scripts/test_postgres_writer_v40.py
+ a75b7daf5b6ff6402a78dec8f6ded8f2c916608ed852716c07aabec1376ff4fe  scripts/run_postgres_isolation_ci_v28.py
+ e371e66c43aad246436c4551d484011696a2c8f8aca1f718cd4f843e3e8b8fd9  scripts/run_pg17_codespaces_v40.sh
+ 4e26c10ed3381d936693bbb9f5e6b3cd406071595c2b488a48318b8398f689e5  docs/V4_0_IDEMPOTENT_PG_WRITER_REVIEW.md
