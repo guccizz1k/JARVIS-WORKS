@@ -47,3 +47,27 @@ The wrapper is fail-closed: a V4.3 failed gate prevents execution of V4.4. Sourc
 ## Next necessary gate
 
 After the V4.4 synthetic integration actually passes Codespaces, plan and validate an independently approved, provisioned PG auth session issuer with immutable site-principal mapping; a full schema migration with byte-exact attachments; public API/cookie/CSRF compatibility; immutable order evidence; parity across finance, receipts and edit histories; lock/resilience/load tests; backup/recovery and a reversible gradual rollout. Never switch `app.main` to PostgreSQL on the strength of the V4.4 shadow lab alone.
+
+## Full-suite runner test import-cache failure (2026-10-20)
+
+Owner Codespaces V4.4 regression: **493 passed, 3 failed, 1 skipped,
+1 warning**. The three failures were solely in the *V4.4 wrapper unit
+tests*. The synthetic fake V4.3 module was inserted into
+`sys.modules`, but full-suite tests had already populated `scripts` package
+attributes with the actual V4.3 module. Python `from scripts import ...`
+continued to resolve the preloaded package attribute, causing the real V4.3
+lab authorization gate to return 2 in a non-lab unit-test context.
+
+The V4.4 test fixture now sets every historical lab flag expected by the
+real disposable launcher and patches both `sys.modules` and the `scripts`
+package attributes using pytest `monkeypatch` (automatically restored at
+teardown). Extra regression tests inject a preloaded V4.3 package module,
+prove its main function is *never called*, enforce prior-gate NOT RUN
+propagation, and verify restoration after injected supervisor exceptions.
+The actual V4.3 gate, V4.4 runtime supervisor, Docker runner, production
+web application and all historical evidence remain **unchanged**.
+
+Local V4.4 wrapper subset after repair: 9/9 PASS both in a fresh interpreter
+and in a simulated preimported-module environment. The complete Codespaces
+regression and real PG17 V4.4 test are still **NOT RUN** for the repaired
+commit. Do not infer PG17 or cutover success from isolated mocked tests.

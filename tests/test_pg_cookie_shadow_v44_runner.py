@@ -2,6 +2,7 @@
 from pathlib import Path
 from types import ModuleType
 import sys
+import scripts as scripts_package
 
 import pytest
 
@@ -11,7 +12,10 @@ from scripts import run_postgres_isolation_ci_v44 as wrapper
 def _setup(monkeypatch, outcome=0, new_outcome=0):
     monkeypatch.delenv('JW_ENV', raising=False)
     monkeypatch.setenv('JW_PG_CI_ALLOW', 'ONLY_EPHEMERAL_LOCAL_DATABASE')
-    monkeypatch.setenv('JW_PG_LAB_V44', 'ONLY_DISPOSABLE_LAB')
+    # Match the *actual* V4.4 Codespaces launcher. The previous supervisor
+    # requires every earlier lab gate, not just the V4.4 flag.
+    for version in range(35, 45):
+        monkeypatch.setenv(f'JW_PG_LAB_V{version}', 'ONLY_DISPOSABLE_LAB')
     history=[]
     old=ModuleType('scripts.test_postgres_web_v43')
     nxt=ModuleType('scripts.test_postgres_cookie_shadow_v44')
@@ -24,6 +28,10 @@ def _setup(monkeypatch, outcome=0, new_outcome=0):
                          ('scripts.test_postgres_cookie_shadow_v44',nxt),
                          ('scripts.run_postgres_isolation_ci_v43',supervisor)]:
         monkeypatch.setitem(sys.modules,path,module)
+        # Importing through `from scripts import xyz` checks cached package
+        # attributes. Tests that loaded the actual V4.3 module earlier leave
+        # those attributes populated; patching sys.modules alone is insufficient.
+        monkeypatch.setattr(scripts_package, path.rsplit('.',1)[1], module, raising=False)
     return history,old,saved
 
 
@@ -75,3 +83,35 @@ def test_no_write_routes_or_production_database_support():
     assert "'cutover_approved': False" in app_src
     assert 'verified_transaction(binding.pg_token, readonly=True)' in app_src
     assert 'JW_PG_LAB_V44' in app_src
+
+
+def test_already_cached_legacy_module_cannot_escape_mock(monkeypatch):
+    # Simulate full-suite import order: another test has already imported V4.3.
+    stale=ModuleType('scripts.run_postgres_isolation_ci_v43')
+    invoked=[]
+    stale.main=lambda: (invoked.append('real supervisor') or 2)
+    monkeypatch.setattr(scripts_package,'run_postgres_isolation_ci_v43',stale,raising=False)
+    monkeypatch.setitem(sys.modules,'scripts.run_postgres_isolation_ci_v43',stale)
+    events,module,original=_setup(monkeypatch)
+    assert wrapper.main()==0
+    assert events==['supervisor','v43','v44']
+    assert not invoked
+    assert module.run is original
+
+
+def test_previous_notrun_blocks_v44_and_restores_callback(monkeypatch):
+    events,module,original=_setup(monkeypatch,outcome=2)
+    assert wrapper.main()==2
+    assert events==['supervisor','v43']
+    assert module.run is original
+
+
+def test_supervisor_exception_still_restores_callback(monkeypatch):
+    events,module,original=_setup(monkeypatch)
+    def crash():
+        raise RuntimeError('synthetic prior gate failure')
+    monkeypatch.setattr(scripts_package.run_postgres_isolation_ci_v43,'main',crash)
+    with pytest.raises(RuntimeError,match='synthetic prior gate failure'):
+        wrapper.main()
+    assert module.run is original
+    assert events==[]
