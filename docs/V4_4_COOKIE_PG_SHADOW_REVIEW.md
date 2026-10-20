@@ -71,3 +71,24 @@ Local V4.4 wrapper subset after repair: 9/9 PASS both in a fresh interpreter
 and in a simulated preimported-module environment. The complete Codespaces
 regression and real PG17 V4.4 test are still **NOT RUN** for the repaired
 commit. Do not infer PG17 or cutover success from isolated mocked tests.
+
+## V4.4 single SKIP elimination — Docker Node syntax checks (2026-10-20)
+
+The owner's Codespaces run verified V4.4 PostgreSQL 17 integration and all
+historical live database gates. One Python test remained skipped:
+`tests/test_v43_manifest_and_runner.py::test_node_syntax_stdin_supported_by_real_node_when_available`.
+It only looked for a native Node executable, while Codespaces already provided
+a validated, isolated Docker `node:22-alpine`.
+
+The V4.4 review preflight now supplies a private temporary `node` executable
+only if native Node is absent. It supports precisely `node --check -` and
+`node --check app/static/app.js`, and streams syntax input into the same
+no-network, read-only, capability-free Docker image. No Docker-in-Docker path
+mount is used. Failed syntax, missing Docker, failed image pull or failed
+cleanup cannot produce PASS or an ignored SKIP. V4.3 files and all historical
+SHA256 manifests are untouched.
+
+Local deterministic tests: **5/5 PASS** (valid syntax, missing daemon,
+engine failure, invalid JS, privilege/hash/scope guard). Additional local
+Bash + real Node simulation: **4/4 PASS**. This is **not** evidence of 0 skips
+in Codespaces until the owner executes the revised complete suite.
