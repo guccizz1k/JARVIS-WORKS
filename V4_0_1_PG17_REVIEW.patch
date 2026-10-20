@@ -1,0 +1,127 @@
+--- a/scripts/test_postgres_writer_v40.py
++++ b/scripts/test_postgres_writer_v40.py
+@@ -8,6 +8,33 @@
+ import re
+ import secrets
+ from urllib.parse import quote
++
++
++def _verified_lab_uri(admin_opts: dict, app_opts: dict) -> str:
++    """Translate the ephemeral runner's libpq key/value DSN into a validated URI.
++
++    The existing MessengerReviewAdapter intentionally accepts URIs only. Do
++    not broaden its production-safety gate to support arbitrary DSN formats.
++    """
++    db = admin_opts.get('dbname', '')
++    ahost = admin_opts.get('host')
++    host = app_opts.get('host')
++    aport = str(admin_opts.get('port', '5432'))
++    port = str(app_opts.get('port', '5432'))
++    if (not re.fullmatch(r'jw_v20_test_[a-f0-9]{12}', db)
++            or app_opts.get('dbname') != db
++            or admin_opts.get('user') != 'postgres'
++            or app_opts.get('user') != 'jw_app'
++            or ahost not in ('127.0.0.1', 'localhost', '::1')
++            or host != ahost
++            or not admin_opts.get('password') or not app_opts.get('password')
++            or not port.isdecimal() or not 1 <= int(port) <= 65535
++            or port != aport):
++        raise ValueError('Invalid disposable V4.0 database target')
++    authority_host = '[::1]' if host == '::1' else host
++    return ('postgresql://' + quote('jw_app', safe='') + ':'
++            + quote(app_opts['password'], safe='') + '@' + authority_host
++            + ':' + port + '/' + db)
+ 
+ 
+ def run() -> int:
+@@ -26,17 +53,16 @@
+         app_dsn = os.getenv('JW_PG_TEST_APP_DSN', '')
+         options = conninfo_to_dict(admin)
+         app_opts = conninfo_to_dict(app_dsn)
+-        if (not re.fullmatch(r'jw_v20_test_[a-f0-9]{12}', options.get('dbname', ''))
+-                or options.get('dbname') != app_opts.get('dbname')
+-                or options.get('user') != 'postgres'
+-                or options.get('host') not in ('127.0.0.1','localhost','::1')
+-                or not options.get('password')
+-                or app_opts.get('user') != 'jw_app'
+-                or app_opts.get('host') not in ('127.0.0.1','localhost','::1')):
+-            raise ValueError('Invalid lab DSN')
+-        writer = LabWriterV40(app_dsn)
+-    except (ImportError, RuntimeError, ValueError, TypeError):
+-        print('NOT RUN: V4.0 Psycopg/FastAPI or safe disposable DB unavailable')
++        app_uri = _verified_lab_uri(options, app_opts)
++        # The supervisor returns libpq-style connection keywords; the V3.5
++        # messenger adapter has always required a percent-encoded URI.
++        # Keep admin/app roles separate and never print the connection string.
++        LabWriterV40(app_uri)
++    except ImportError:
++        print('NOT RUN: V4.0 Psycopg or FastAPI dependency unavailable')
++        return 2
++    except (RuntimeError, ValueError, TypeError):
++        print('NOT RUN: V4.0 disposable DSN validation failed')
+         return 2
+ 
+     tokens = {org: secrets.token_urlsafe(40) for org in ('tenant_a', 'tenant_b', 'tenant_c')}
+@@ -49,7 +75,7 @@
+                          VALUES(%s,%s,%s,true,%s)''',
+                          (sha256(tokens[org].encode()).digest(), org, actor,
+                           datetime.now(timezone.utc) + timedelta(minutes=10)))
+-        app = create_lab_app(app_dsn)
++        app = create_lab_app(app_uri)
+         def h(org): return {'X-JW-Lab-Session': tokens[org]}
+         path = '/lab40/threads/chat_ab/messages'
+         key=secrets.token_hex(16)
+--- a/tests/test_pg_writer_v40.py
++++ b/tests/test_pg_writer_v40.py
+@@ -177,3 +177,39 @@
+     with pytest.raises(Unique):
+         LabWriterV40(GOOD,adapter=a).send_text(token=TOKEN,thread='chat_ab',content='hello',request_id=ID)
+     assert a.calls==[(TOKEN,False)]
++
++
++def test_v40_runner_converts_ephemeral_libpq_dsn_without_widening_adapter_gate():
++    from scripts.test_postgres_writer_v40 import _verified_lab_uri
++    import urllib.parse
++    admin = {'dbname': 'jw_v20_test_abcdef123456', 'user': 'postgres',
++             'host': '127.0.0.1', 'port': '5432', 'password': 'admin-only'}
++    app = {**admin, 'user': 'jw_app', 'password': 'reserved@:/# word'}
++    uri = _verified_lab_uri(admin, app)
++    assert uri.startswith('postgresql://jw_app:') and '@127.0.0.1:5432/' in uri
++    assert urllib.parse.unquote(urllib.parse.urlsplit(uri).password) == 'reserved@:/# word'
++    # The actual caller enforces the existing URL-only, loopback, jw_app gate.
++    LabWriterV40(uri)
++    with pytest.raises(PostgreSQLUnverified):
++        LabWriterV40(' '.join(f'{k}={v}' for k,v in app.items()))
++
++
++@pytest.mark.parametrize('patch', [
++    {'host': 'example.org'}, {'user': 'postgres'}, {'dbname': 'production'},
++    {'port': '9999'}, {'password': ''}, {'port': 'not-a-port'},
++])
++def test_v40_runner_rejects_mismatched_or_unsafe_app_target(patch):
++    from scripts.test_postgres_writer_v40 import _verified_lab_uri
++    admin = {'dbname': 'jw_v20_test_abcdef123456', 'user': 'postgres',
++             'host': '127.0.0.1', 'port': '5432', 'password': 'admin-only'}
++    app = {**admin, 'user': 'jw_app', 'password': 'synthetic', **patch}
++    with pytest.raises(ValueError):
++        _verified_lab_uri(admin, app)
++
++
++def test_v40_runner_supports_loopback_ipv6_uri_format():
++    from scripts.test_postgres_writer_v40 import _verified_lab_uri
++    admin = {'dbname':'jw_v20_test_abcdef123456','user':'postgres',
++             'host':'::1','password':'synthetic','port':'5432'}
++    app = {**admin, 'user':'jw_app'}
++    assert _verified_lab_uri(admin, app).startswith('postgresql://jw_app:synthetic@[::1]:5432/')
+--- a/V4_0_PG_GATE_SHA256.txt
++++ b/V4_0_PG_GATE_SHA256.txt
+@@ -1,7 +1,7 @@
+ 511848e98fbd5855a5810466b0572d6d191b8c4886dfea2328cbae1395dc856a  app/pg_write_replay_v40.py
+ a60c9939f2d7340d1318da6c700c79680028018924ca808182ae5d79f1f1ad19  app/pg_write_api_v40.py
+-86a2e7a2ab2b29c9139c632fb1166fd794d2b7cb1c3d16e9321a0ed8a8bd3029  tests/test_pg_writer_v40.py
+-4e2e6f08c7c745043d8654154e2d3d9faa4e304788096f2740f7916ea802629f  scripts/test_postgres_writer_v40.py
++a6925da85fa4d170351bfda60c4cad42f56fba26590a0ad232ebafd923a63eb2  tests/test_pg_writer_v40.py
++87fc2f67aaf574d4726da14e2b6ed87c282d0c687092982a1bc72ce6586ca4c1  scripts/test_postgres_writer_v40.py
+ a75b7daf5b6ff6402a78dec8f6ded8f2c916608ed852716c07aabec1376ff4fe  scripts/run_postgres_isolation_ci_v28.py
+ e371e66c43aad246436c4551d484011696a2c8f8aca1f718cd4f843e3e8b8fd9  scripts/run_pg17_codespaces_v40.sh
+ 4e26c10ed3381d936693bbb9f5e6b3cd406071595c2b488a48318b8398f689e5  docs/V4_0_IDEMPOTENT_PG_WRITER_REVIEW.md
