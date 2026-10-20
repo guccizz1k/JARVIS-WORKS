@@ -165,6 +165,12 @@ def main():
             from scripts.test_postgres_recovery_v41 import run as recovery_run
             if recovery_run() != 0:
                 raise AssertionError('V4.1 isolated PG17 recovery gate failed')
+        # V4.2: transactional logical mirror restore and checkpoint integrity.
+        # Both the mirror schema and full cluster are disposable; NOT physical backup.
+        if os.getenv('JW_PG_LAB_V42') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_restore_v42 import run as restore_run
+            if restore_run() != 0:
+                raise AssertionError('V4.2 isolated PG17 logical restore gate failed')
         success_marker = True
         return 0
     except Exception as exc:
