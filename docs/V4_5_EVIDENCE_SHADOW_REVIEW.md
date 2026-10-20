@@ -70,7 +70,10 @@ bash scripts/check_v45_review.sh
 bash scripts/run_pg17_codespaces_v45.sh
 ```
 
-Both scripts must succeed. Any skipped *required* test, error, unsuccessful
+Both scripts must succeed. **V4.5 enforces zero pytest SKIPs with a per-run
+`pytest_sessionfinish` plugin**; it is activated only while executing the
+complete old pytest suite and never changes any V4.3/V4.4 source or manifest.
+Any skipped *required* test, error, unsuccessful
 Docker/Python setup, leftover PG schema or failed cleanup must block PASS.
 `check_v45_review.sh` enforces its own manifest then the entire V4.4 full
 regression, including the prior Node.js Docker fallback that addresses the
@@ -79,13 +82,15 @@ V2.8–V4.5 SHA256 manifests, recreates PG17, replays V4.4 and appends V4.5.
 
 ## Local verification performed
 
-* Local pytest unit + runner failure-injection: **41 PASS, 0 FAIL, 0 SKIP**.
+* Local pytest unit + runner failure-injection: **45 PASS, 0 FAIL, 0 SKIP**.
   The local runtime used genuine FastAPI TestClient and an in-memory SQLite
   fixture with a synthetic **PG cursor simulation**, not a live PG server.
 * Attacker/negative cases: wrong or missing session, forged header, cross-thread
   access, invalid IDs, tenant binding mismatch, invalid agent context,
   missing partner verification, unexpected PG failure, 12 kinds of evidence
   mutation/loss, oversized thread and aggregate bytes, disabled review flag.
+* Strict no-SKIP pytest plugin tests: PASS; forces a nonzero exit even
+  when pytest otherwise considers skipped tests successful.
 * `python -m compileall` and `bash -n`: PASS for the V4.5 files.
 * Prior V4.4 isolated real PG17 test: PASS from user-provided Codespaces log.
   **V4.5 actual Codespaces PG17 test: NOT RUN** at authoring time.
@@ -95,7 +100,7 @@ V2.8–V4.5 SHA256 manifests, recreates PG17, replays V4.4 and appends V4.5.
 | Gate | Decision | Evidence |
 |---|---|---|
 | 1 — Code/environment | PARTIAL | New scripts parse/compile and hashes checked; no complete private repo local reproduction |
-| 2 — Correctness | PARTIAL | 41 focused local tests PASS, actual PG17 V4.5 NOT RUN |
+| 2 — Correctness | PARTIAL | 45 focused local tests PASS, actual PG17 V4.5 NOT RUN |
 | 3 — Regression/data integrity | PARTIAL | Explicit fail-closed chain, typed/canonical deep parity, full repo rerun pending |
 | 4 — UI/UX | NOT RUN | Production UI unchanged; actual iPhone/Safari review not exercised |
 | 5 — Ops/deployment | BLOCKED | V4.5 live gate pending, no production schema compatibility or cutover approval |
