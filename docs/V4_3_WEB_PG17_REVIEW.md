@@ -56,13 +56,16 @@ The **V2.8–V4.2 existing runner and ALL versioned SHA256 manifests remain byte
 
 **Important scope statement:** V4.2 owner Codespaces screenshot reports V4.2 live PG17 PASS, **not V4.3**. There is no Docker CLI, PG17 server, or Psycopg installed in the current isolated file-production runtime. Running mocked HTTP tests cannot upgrade the real PostgreSQL gate to PASS. We did **not** obtain evidence of a complete full-project test run for V4.3.
 
-## Steps for approved existing Codespaces environment
+## Steps for the published `review/v43` branch (Codespaces)
 
-1. Start a detached worktree at the exact `review/v42` baseline SHA, protect current `main` and local changes. Add the kit's files to the existing repository at their matching paths; **never replace the repository with the kit**. Do not commit the new files before manifest preflight.
-2. Run once: `python scripts/build_v43_manifest.py` → expect new `V4_3_PG_GATE_SHA256.txt` and a single PASS message. Any failure is BLOCKED and does not alter historic evidence.
-3. After dependencies are present, run `bash scripts/check_v43_review.sh`. This checks all baseline manifests, new manifest, compilation, JavaScript syntax and the actual entire existing project's pytest suite. If this FAILs, do not run live PG or deploy.
-4. Only with suitable free Codespaces Docker quota and explicit local testing approval, run `bash scripts/run_pg17_codespaces_v43.sh`. Expect **V4.3 real PG17 explicit PASS + historical gates PASS + Docker cleanup PASS + exit 0**. Failed or missing prerequisites are FAIL/NOT RUN, not PASS.
-5. Review evidence, then consider **separately** authorized trusted session/identity mapping, production-grade migration/backup/rollout and system-level Safari verification. No operational migration until the safety and verification blockers are closed.
+This review branch already contains the exact generated `V4_3_PG_GATE_SHA256.txt` manifest. **Do not run `build_v43_manifest.py` again on this branch**: its creation guard deliberately accepts only an unmodified pre-commit `review/v42` worktree and will return BLOCKED on a completed commit. This is expected, not an application failure.
+
+1. In a clean Codespaces checkout, select `review/v43` (commit must match the reviewed head) without discarding existing local changes. Do not merge into `main`.
+2. With development dependencies available, run `bash scripts/check_v43_review.sh`. It verifies nine legacy SHA-256 manifests plus V4.3, compiles Python, checks JavaScript, and runs the **full** application pytest regression. STOP on any FAIL or NOT RUN.
+3. Only if step 2 passes and the existing free Codespaces Docker allotment is available, run `bash scripts/run_pg17_codespaces_v43.sh`. It starts a new localhost-only disposable PG17 container, runs legacy test gates and the V4.3 real HTTP/PG test, checks cleanup and prints final PASS only on exit code 0.
+4. The browser-facing `app.main` still uses SQLite; this is a synthetic bridge compatibility gate, not website PostgreSQL production cutover. Validate trusted login/session mapping, attachments, actual web browser, and full finance schema separately before any production approval.
+
+The manifest builder remains available *only* for future pre-commit source kit reassembly at its pinned original V4.2 SHA. The published GitHub branch must use the committed manifest and never regenerate it.
 
 ## Remaining known gaps, deliberately not hidden
 
