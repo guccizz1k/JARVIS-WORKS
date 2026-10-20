@@ -12,6 +12,8 @@ for version in V2_8 V3_5 V3_6 V3_7 V3_8 V3_9 V4_0 V4_1 V4_2 V4_3; do
 done
 python3 -m compileall -q app scripts tests
 bash -n scripts/run_pg17_codespaces_v43.sh
+# A missing or replaced frontend asset must never be silently accepted.
+[[ -f "$ROOT/app/static/app.js" && ! -L "$ROOT/app/static/app.js" ]] || { echo 'NOT RUN: expected JavaScript source missing or symlinked' >&2; exit 2; }
 # Node is not a default dependency of the Python 3.12 Codespaces image.
 # Never skip JavaScript verification: use a read-only, network-disabled,
 # capability-free disposable Node container only when the host lacks Node.
@@ -23,10 +25,11 @@ else
   if ! docker image inspect node:22-alpine >/dev/null 2>&1; then
     docker pull node:22-alpine >/dev/null || { echo 'NOT RUN: verified Node image unavailable' >&2; exit 2; }
   fi
-  if ! docker run --rm --network none --read-only --cap-drop ALL \
+  # DinD's daemon may not share the Codespaces /tmp worktree filesystem.
+  # Node reads syntax-only JS from stdin; no host bind mount or shared path.
+  if ! docker run --rm -i --network none --read-only --cap-drop ALL \
       --security-opt no-new-privileges --pids-limit 128 --memory 256m \
-      --mount "type=bind,src=$ROOT/app/static,dst=/source,readonly" \
-      node:22-alpine node --check /source/app.js; then
+      node:22-alpine node --check - < "$ROOT/app/static/app.js"; then
     echo 'FAIL: isolated Node syntax check failed' >&2
     exit 1
   fi

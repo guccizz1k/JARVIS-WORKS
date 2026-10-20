@@ -186,7 +186,7 @@ def test_node_fallback_executes_or_fails_closed(tmp_path, scenario, expected):
     import shutil
     import subprocess
 
-    lab = tmp_path / 'check'
+    lab = tmp_path / 'check with spaces'
     folder = lab / 'scripts'
     folder.mkdir(parents=True)
     (lab / 'app' / 'static').mkdir(parents=True)
@@ -220,6 +220,10 @@ if [ "$1" = 'image' ]; then
 fi
 if [ "$1" = 'pull' ]; then exit 1; fi
 if [ "$1" = 'run' ]; then
+  # The daemon cannot access a Codespaces worktree path in this fake.
+  # The verifier must pass the actual JavaScript bytes through stdin.
+  IFS= read -r first_line || exit 34
+  [ "$first_line" = 'let x = 1;' ] || exit 35
   if [ "$DOCKER_SCENARIO" = 'docker_check_failure' ]; then exit 1; fi
   exit 0
 fi
@@ -240,7 +244,33 @@ exit 1
         recorded = trace.read_text()
         assert 'info' in recorded and 'image inspect node:22-alpine' in recorded
         if scenario in ('docker_success', 'docker_check_failure'):
-            assert 'run --rm --network none --read-only --cap-drop ALL' in recorded
+            assert 'run --rm -i --network none --read-only --cap-drop ALL' in recorded
             assert '--security-opt no-new-privileges' in recorded
-            assert 'dst=/source,readonly' in recorded
-            assert 'node --check /source/app.js' in recorded
+            assert '--mount' not in recorded and '--volume' not in recorded
+            assert 'node --check -' in recorded
+
+
+def test_node_syntax_stdin_supported_by_real_node_when_available():
+    """Node 22 syntax-only STDIN contract, independent of Docker mounts."""
+    import subprocess
+    import shutil
+    import pytest
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node not installed in Python Codespaces')
+    good = subprocess.run([node,'--check','-'],input='let count = 1;\n',
+                          capture_output=True,text=True,timeout=5)
+    bad = subprocess.run([node,'--check','-'],input='let = ;\n',
+                         capture_output=True,text=True,timeout=5)
+    assert good.returncode == 0
+    assert bad.returncode != 0
+
+
+def test_node_docker_fallback_never_uses_host_bind_mount():
+    """Prevents regression to a path inaccessible inside Docker-in-Docker."""
+    source = Path('scripts/check_v43_review.sh').read_text()
+    assert 'node --check - < "$ROOT/app/static/app.js"' in source
+    assert 'docker run --rm -i' in source
+    assert '--network none' in source and '--read-only' in source
+    assert '--mount' not in source and '-v "$ROOT' not in source
+    assert 'node --check /source/app.js' not in source

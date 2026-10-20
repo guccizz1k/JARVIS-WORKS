@@ -91,3 +91,22 @@ Preflight fallback tests: native Node, Docker fallback, Docker syntax failure,
 missing Docker, and failed image pull each return the intended exit status
 (5/5 PASS using network-free simulated executables). This does not substitute
 for Codespaces Docker image execution or a live PostgreSQL gate.
+
+
+## V4.3 Node Docker-in-Docker file visibility repair (2026-10-20)
+
+The owner-reported Codespaces log shows Node.js 22.23.3 started in a disposable
+Docker container but `node --check /source/app.js` returned `MODULE_NOT_FOUND`.
+This occurred during preflight, before any PostgreSQL integration test ran.
+A Docker daemon in a nested container may see a different filesystem from the
+Codespaces terminal's `/tmp` detached Git worktree. Mounting that path is not
+reliable. The V4.3 preflight now checks that the frontend file exists and is
+not a symlink, then streams its exact bytes through stdin to `node --check -`
+inside the same hardened Docker Node image, without bind mounts, network
+or filesystem mutation. A malformed source still fails; missing source/image/
+Docker remains NOT RUN. Tests cover shell invocation in paths with spaces,
+negative/failure paths and native Node stdin syntax checks when available.
+This patch changes only the review preflight/tests/docs/own manifest. No changes
+to `app/main.py`, older manifests, PostgreSQL migrations or real business data.
+**Actual Codespaces execution and PG17 V4.3 remain NOT RUN** until separately
+observed in a new Codespaces run.
