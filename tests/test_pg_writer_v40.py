@@ -177,3 +177,77 @@ def test_other_unique_constraint_must_not_be_treated_as_duplicate(enabled):
     with pytest.raises(Unique):
         LabWriterV40(GOOD,adapter=a).send_text(token=TOKEN,thread='chat_ab',content='hello',request_id=ID)
     assert a.calls==[(TOKEN,False)]
+
+
+def test_v40_runner_converts_ephemeral_libpq_dsn_without_widening_adapter_gate():
+    from scripts.test_postgres_writer_v40 import _verified_lab_uri
+    import urllib.parse
+    admin = {'dbname': 'jw_v20_test_abcdef123456', 'user': 'postgres',
+             'host': '127.0.0.1', 'port': '5432', 'password': 'admin-only'}
+    app = {**admin, 'user': 'jw_app', 'password': 'reserved@:/# word'}
+    uri = _verified_lab_uri(admin, app)
+    assert uri.startswith('postgresql://jw_app:') and '@127.0.0.1:5432/' in uri
+    assert urllib.parse.unquote(urllib.parse.urlsplit(uri).password) == 'reserved@:/# word'
+    # The actual caller enforces the existing URL-only, loopback, jw_app gate.
+    LabWriterV40(uri)
+    with pytest.raises(PostgreSQLUnverified):
+        LabWriterV40(' '.join(f'{k}={v}' for k,v in app.items()))
+
+
+@pytest.mark.parametrize('patch', [
+    {'host': 'example.org'}, {'user': 'postgres'}, {'dbname': 'production'},
+    {'port': '9999'}, {'password': ''}, {'port': 'not-a-port'},
+])
+def test_v40_runner_rejects_mismatched_or_unsafe_app_target(patch):
+    from scripts.test_postgres_writer_v40 import _verified_lab_uri
+    admin = {'dbname': 'jw_v20_test_abcdef123456', 'user': 'postgres',
+             'host': '127.0.0.1', 'port': '5432', 'password': 'admin-only'}
+    app = {**admin, 'user': 'jw_app', 'password': 'synthetic', **patch}
+    with pytest.raises(ValueError):
+        _verified_lab_uri(admin, app)
+
+
+def test_v40_runner_supports_loopback_ipv6_uri_format():
+    from scripts.test_postgres_writer_v40 import _verified_lab_uri
+    admin = {'dbname':'jw_v20_test_abcdef123456','user':'postgres',
+             'host':'::1','password':'synthetic','port':'5432'}
+    app = {**admin, 'user':'jw_app'}
+    assert _verified_lab_uri(admin, app).startswith('postgresql://jw_app:synthetic@[::1]:5432/')
+
+
+@pytest.mark.parametrize('sqlstate', ['P0001', '42501'])
+def test_database_rls_and_revocation_are_denied_without_detail_leak(enabled, sqlstate):
+    class Denied(Exception):
+        pass
+    class Fake:
+        def send_text(self, **kw):
+            denied = Denied('private postgres DSN and auth token must not leak')
+            denied.sqlstate = sqlstate
+            raise denied
+    app = create_lab_app(GOOD, writer=Fake())
+    with TestClient(app) as client:
+        response = client.post('/lab40/threads/chat_ab/messages',
+                               json={'content':'hello','request_id':ID},
+                               headers={'X-JW-Lab-Session':TOKEN})
+        assert response.status_code == 403
+        assert response.json() == {'detail':'Synthetic request denied'}
+        assert 'postgres' not in response.text and TOKEN not in response.text
+
+
+@pytest.mark.parametrize('sqlstate', ['23505', '40P01', '57014', None])
+def test_unexpected_database_error_is_not_misclassified_as_denial(enabled, sqlstate):
+    class Failed(Exception):
+        pass
+    class Fake:
+        def send_text(self, **kw):
+            error = Failed('unexpected detail must not be exposed')
+            error.sqlstate = sqlstate
+            raise error
+    app = create_lab_app(GOOD, writer=Fake())
+    with TestClient(app) as client:
+        response = client.post('/lab40/threads/chat_ab/messages',
+                               json={'content':'hello','request_id':ID},
+                               headers={'X-JW-Lab-Session':TOKEN})
+        assert response.status_code == 503
+        assert response.json() == {'detail':'Isolated test database request failed'}
+        assert 'unexpected detail' not in response.text

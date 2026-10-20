@@ -39,7 +39,13 @@ def create_lab_app(dsn: str, *, writer=None) -> FastAPI:
             raise HTTPException(409, 'Idempotency key conflicts with original request') from None
         except (ValueError, PostgreSQLUnverified):
             raise HTTPException(403, 'Synthetic request denied') from None
-        except Exception:
+        except Exception as exc:
+            # The database rejects an unverified/revoked actor or a company
+            # outside the thread using SQLSTATE P0001 / 42501. Keep the real
+            # failure class private; unexpected database errors remain 503.
+            # Do not reclassify arbitrary uniqueness or driver failures as 403.
+            if getattr(exc, 'sqlstate', None) in {'P0001', '42501'}:
+                raise HTTPException(403, 'Synthetic request denied') from None
             # No tenant IDs, SQL, token, DSN, or customer evidence in errors.
             raise HTTPException(503, 'Isolated test database request failed') from None
     return app
