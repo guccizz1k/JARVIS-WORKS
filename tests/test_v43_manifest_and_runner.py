@@ -167,3 +167,80 @@ def test_manifest_builder_refuses_tampered_history(tmp_path,monkeypatch):
     monkeypatch.setattr(manifest,'_git',lambda *a: '' if a[0]=='status' or a[0]=='branch' else manifest.BASE_COMMIT)
     assert manifest.build()==2
     assert not manifest.OUT.exists()
+
+
+@pytest.mark.parametrize('scenario,expected', [
+    ('host_node', 0),
+    ('docker_success', 0),
+    ('docker_check_failure', 1),
+    ('no_docker', 2),
+    ('docker_pull_failure', 2),
+])
+def test_node_fallback_executes_or_fails_closed(tmp_path, scenario, expected):
+    """Actual Bash preflight with fake tools, no image/network/PG side effects.
+
+    Fake Python and SHA commands focus this test ONLY on Node fallback dispatch;
+    normal full-repository testing still uses the real commands.
+    """
+    import os
+    import shutil
+    import subprocess
+
+    lab = tmp_path / 'check'
+    folder = lab / 'scripts'
+    folder.mkdir(parents=True)
+    (lab / 'app' / 'static').mkdir(parents=True)
+    (lab / 'app' / 'static' / 'app.js').write_text('let x = 1;\n')
+    script = folder / 'check_v43_review.sh'
+    script.write_bytes(Path('scripts/check_v43_review.sh').read_bytes())
+    (folder / 'run_pg17_codespaces_v43.sh').write_text('#!/bin/bash\n')
+    fake = tmp_path / 'fakebin'
+    fake.mkdir()
+    for name in ('bash', 'dirname'):
+        binary = shutil.which(name)
+        assert binary is not None
+        (fake / name).symlink_to(binary)
+    for name in ('python3', 'sha256sum'):
+        target = fake / name
+        target.write_text('#!/bin/sh\nexit 0\n')
+        target.chmod(0o755)
+    trace = tmp_path / 'docker.trace'
+    if scenario == 'host_node':
+        node = fake / 'node'
+        node.write_text('#!/bin/sh\nexit 0\n')
+        node.chmod(0o755)
+    if scenario not in ('no_docker', 'host_node'):
+        docker = fake / 'docker'
+        docker.write_text('''#!/bin/sh
+printf '%s\\n' "$*" >> "$DOCKER_TRACE"
+if [ "$1" = 'info' ]; then exit 0; fi
+if [ "$1" = 'image' ]; then
+  if [ "$DOCKER_SCENARIO" = 'docker_pull_failure' ]; then exit 1; fi
+  exit 0
+fi
+if [ "$1" = 'pull' ]; then exit 1; fi
+if [ "$1" = 'run' ]; then
+  if [ "$DOCKER_SCENARIO" = 'docker_check_failure' ]; then exit 1; fi
+  exit 0
+fi
+exit 1
+''')
+        docker.chmod(0o755)
+    environment = {**os.environ, 'PATH': str(fake), 'DOCKER_TRACE': str(trace),
+                   'DOCKER_SCENARIO': scenario}
+    execution = subprocess.run([str(fake / 'bash'), str(script)],
+                               cwd=lab, env=environment,
+                               capture_output=True, text=True, timeout=10)
+    assert execution.returncode == expected, (execution.stdout, execution.stderr)
+    if scenario in ('host_node', 'docker_success'):
+        assert 'PASS: local full-repository V4.3' in execution.stdout
+    else:
+        assert 'PASS: local full-repository V4.3' not in execution.stdout
+    if scenario not in ('no_docker', 'host_node'):
+        recorded = trace.read_text()
+        assert 'info' in recorded and 'image inspect node:22-alpine' in recorded
+        if scenario in ('docker_success', 'docker_check_failure'):
+            assert 'run --rm --network none --read-only --cap-drop ALL' in recorded
+            assert '--security-opt no-new-privileges' in recorded
+            assert 'dst=/source,readonly' in recorded
+            assert 'node --check /source/app.js' in recorded

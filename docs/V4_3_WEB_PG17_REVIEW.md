@@ -73,3 +73,21 @@ The manifest builder remains available *only* for future pre-commit source kit r
 - Existing website rate-limit (20 messages/minute per user), file/photos, edit window, receipts, order snapshots, directory, employee lifecycle, verified enrollment, all quote/order/invoice/payment transactions and their PostgreSQL migration are out of this lab gate.
 - Operational transaction pooling, staged encrypted backups, independent PG dump/restore, network browser, WAL recovery, performance and service RTO/RPO need separate real test evidence.
 - A POST committed before a connection failure must be retried with its **original idempotency key and identical body**. The current browser regenerates the key on a new button submission, so browser-side retry state persistence still requires an explicit reviewed enhancement **before any real migration**.
+
+## V4.3 Node.js missing in Python Codespaces — additive preflight repair
+
+The Python 3.12 Codespaces devcontainer need not provide a `node` executable.
+A `NOT RUN: Node missing` result means the preflight did not reach PostgreSQL;
+it does not indicate a PostgreSQL failure. `check_v43_review.sh` retains the
+mandatory JavaScript syntax gate: native Node when present, otherwise
+`node:22-alpine` in a restricted, disposable Docker container with network
+disabled, read-only source mount, read-only filesystem, no capabilities,
+no-new-privileges, and memory/PID limits. Pulling the image may require
+registry access. Missing Docker/failed image pull is NOT RUN, and a failed
+syntax check is FAIL, never a silent PASS. Existing historical gate files,
+`main`, `app/main.py`, and production databases remain unchanged.
+
+Preflight fallback tests: native Node, Docker fallback, Docker syntax failure,
+missing Docker, and failed image pull each return the intended exit status
+(5/5 PASS using network-free simulated executables). This does not substitute
+for Codespaces Docker image execution or a live PostgreSQL gate.
