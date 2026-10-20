@@ -34,5 +34,28 @@ else
     exit 1
   fi
 fi
-PYTHONPATH=. python3 -m pytest -q --disable-warnings
+# The full repository has PDF test fixtures that construct PDFs with ReportLab.
+# ReportLab is a test-only dependency; the Python devcontainer may not have it
+# even when the application/pytest packages were installed earlier.
+# Keep any missing dependency installation confined to a temporary venv.
+TEST_PYTHON=python3
+TEST_WORK=""
+cleanup_test_env() {
+  if [[ -n "$TEST_WORK" ]]; then
+    rm -rf -- "$TEST_WORK" || { echo 'FAIL: temporary test environment cleanup failed' >&2; return 1; }
+  fi
+}
+trap cleanup_test_env EXIT
+if ! python3 -c 'from reportlab.pdfgen import canvas' >/dev/null 2>&1; then
+  [[ -f requirements-dev.txt ]] || { echo 'NOT RUN: development dependency manifest missing' >&2; exit 2; }
+  TEST_WORK="$(mktemp -d "${TMPDIR:-/tmp}/jw-v43-test-deps.XXXXXXXX")" || { echo 'NOT RUN: unable to allocate isolated Python environment' >&2; exit 2; }
+  chmod 700 "$TEST_WORK"
+  python3 -m venv --system-site-packages "$TEST_WORK/venv" || { echo 'NOT RUN: isolated Python venv unavailable' >&2; exit 2; }
+  TEST_PYTHON="$TEST_WORK/venv/bin/python"
+  "$TEST_PYTHON" -m pip --disable-pip-version-check --no-input install -r requirements-dev.txt \
+      || { echo 'NOT RUN: PDF test dependency installation unavailable' >&2; exit 2; }
+fi
+"$TEST_PYTHON" -c 'from reportlab.pdfgen import canvas' >/dev/null 2>&1 \
+  || { echo 'NOT RUN: ReportLab unavailable for full PDF regression' >&2; exit 2; }
+PYTHONPATH=. "$TEST_PYTHON" -m pytest -q --disable-warnings
 printf 'PASS: local full-repository V4.3 syntax, UI script and regression (not live PostgreSQL)\n'

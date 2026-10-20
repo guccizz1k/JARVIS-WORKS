@@ -274,3 +274,89 @@ def test_node_docker_fallback_never_uses_host_bind_mount():
     assert '--network none' in source and '--read-only' in source
     assert '--mount' not in source and '-v "$ROOT' not in source
     assert 'node --check /source/app.js' not in source
+
+
+def test_reportlab_fixture_declared_as_dev_only_dependency():
+    from pathlib import Path
+    content = Path('requirements-dev.txt').read_text()
+    assert 'reportlab>=4.2,<5' in content
+    assert 'reportlab' not in Path('scripts/run_pg17_codespaces_v43.sh').read_text()
+    assert 'requirements-dev.txt' in manifest.FILES
+    script = Path('scripts/check_v43_review.sh').read_text()
+    assert 'from reportlab.pdfgen import canvas' in script
+    assert '--system-site-packages' in script
+    assert 'install -r requirements-dev.txt' in script
+    assert 'trap cleanup_test_env EXIT' in script
+    assert 'PYTHONPATH=. "$TEST_PYTHON" -m pytest -q --disable-warnings' in script
+
+
+@pytest.mark.parametrize('scenario,expected', [
+    ('success', 0),
+    ('venv_failure', 2),
+    ('pip_failure', 2),
+])
+def test_reportlab_missing_creates_isolated_environment_or_fails_closed(tmp_path, scenario, expected):
+    """Execute the Bash preflight with fake Python/Node; no actual install/network.
+
+    The host reports ReportLab absent; only the temporary venv interpreter
+    may install dependencies and run pytest. Failure must stop before PG17.
+    """
+    import os
+    import shutil
+    import subprocess
+
+    src = Path('scripts/check_v43_review.sh')
+    work = tmp_path / 'fixture checkout with spaces'
+    (work / 'scripts').mkdir(parents=True)
+    (work / 'app' / 'static').mkdir(parents=True)
+    (work / 'app' / 'static' / 'app.js').write_text('const ok = true;\n')
+    (work / 'requirements-dev.txt').write_text('reportlab>=4.2,<5\n')
+    (work / 'scripts' / 'check_v43_review.sh').write_bytes(src.read_bytes())
+    (work / 'scripts' / 'run_pg17_codespaces_v43.sh').write_text('#!/bin/bash\n')
+    fake = tmp_path / 'fakebin'
+    fake.mkdir()
+    for name in ('node', 'sha256sum'):
+        entry = fake / name
+        entry.write_text('#!/bin/sh\nexit 0\n')
+        entry.chmod(0o755)
+    python = fake / 'python3'
+    python.write_text('''#!/bin/sh
+printf 'host %s\\n' "$*" >> "$TEST_TRACE"
+if [ "$1" = '-c' ]; then exit 1; fi
+if [ "$1" = '-m' ] && [ "$2" = 'venv' ]; then
+  if [ "$TEST_SCENARIO" = 'venv_failure' ]; then exit 1; fi
+  for dest do :; done
+  mkdir -p "$dest/bin"
+  cat > "$dest/bin/python" <<'VENV_PYTHON'
+#!/bin/sh
+printf 'venv %s\\n' "$*" >> "$TEST_TRACE"
+if [ "$1" = '-m' ] && [ "$2" = 'pip' ] && [ "$TEST_SCENARIO" = 'pip_failure' ]; then
+  exit 1
+fi
+exit 0
+VENV_PYTHON
+  chmod +x "$dest/bin/python"
+  exit 0
+fi
+exit 0
+''')
+    python.chmod(0o755)
+    scratch = tmp_path / 'scratch'
+    scratch.mkdir()
+    trace = tmp_path / 'trace.log'
+    env = {**os.environ, 'PATH': str(fake) + os.pathsep + os.environ['PATH'],
+           'TMPDIR': str(scratch), 'TEST_TRACE': str(trace),
+           'TEST_SCENARIO': scenario}
+    result = subprocess.run(['/bin/bash', str(work / 'scripts' / 'check_v43_review.sh')],
+                            cwd=work, env=env, capture_output=True, text=True, timeout=25)
+    assert result.returncode == expected, (result.stdout, result.stderr)
+    output = trace.read_text()
+    assert 'host -m venv --system-site-packages' in output
+    assert not list(scratch.iterdir()), 'temporary environment was not destroyed'
+    if scenario == 'success':
+        assert 'venv -m pip' in output
+        assert 'venv -m pytest -q --disable-warnings' in output
+        assert 'PASS: local full-repository V4.3' in result.stdout
+    else:
+        assert 'venv -m pytest' not in output
+        assert 'PASS: local full-repository V4.3' not in result.stdout

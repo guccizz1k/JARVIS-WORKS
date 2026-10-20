@@ -110,3 +110,25 @@ This patch changes only the review preflight/tests/docs/own manifest. No changes
 to `app/main.py`, older manifests, PostgreSQL migrations or real business data.
 **Actual Codespaces execution and PG17 V4.3 remain NOT RUN** until separately
 observed in a new Codespaces run.
+
+## V4.3 PDF fixture dependency recovery (2026-10-20)
+
+Owner-run Codespaces full regression reported **444 passed, 4 failed, 1 skipped**.
+All four failures were `ModuleNotFoundError: No module named 'reportlab'` in
+`tests/test_quote_import.py` and `tests/test_smart_import.py`. This occurred
+**after** the Node.js preflight was fixed, and **before** the live PostgreSQL 17
+integration runner was invoked. No PostgreSQL malfunction has been observed.
+
+ReportLab is now explicitly declared as **test-only** in `requirements-dev.txt`;
+`requirements.txt`, live web routes, archived manifests and `main` stay intact.
+`check_v43_review.sh` checks that the PDF fixture import actually works. If
+missing, it creates a private, temporary `--system-site-packages` virtualenv,
+installs the declared development dependencies there and runs the COMPLETE
+pytest suite through that interpreter. It removes the temporary environment at
+process exit, including failure; unavailable tools, pip/network/install or
+unverified import are **NOT RUN**, never a false PASS. Existing installed
+ReportLab needs no install. Do not skip the four PDF tests, and do not mistake
+an isolated V4.3 bridge test for a production SQLite-to-PostgreSQL migration.
+
+**Live Codespaces retest, full regression, and PG17 integration are NOT RUN for
+this patched commit** until independent owner-run results are provided.

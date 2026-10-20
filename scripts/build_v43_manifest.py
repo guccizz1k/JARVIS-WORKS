@@ -23,6 +23,7 @@ FILES=(
   'docs/V4_3_WEB_PG17_REVIEW.md',
   'scripts/run_postgres_isolation_ci_v28.py',
   'V4_2_PG_GATE_SHA256.txt',
+  'requirements-dev.txt',
 )
 OUT=Path('V4_3_PG_GATE_SHA256.txt')
 
