@@ -142,6 +142,11 @@ def main():
             from scripts.test_postgres_migration_v37 import run as compat_run
             if compat_run() != 0:
                 raise AssertionError('V3.7 operational-shape semantic/RLS gate failed')
+        # V3.8 synthetic-only compatibility read API; not mounted on main.
+        if os.getenv('JW_PG_LAB_V38') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_api_compat_v38 import run as compat_api_run
+            if compat_api_run() != 0:
+                raise AssertionError('V3.8 typed read-only FastAPI/PG17 gate failed')
         success_marker = True
         return 0
     except Exception as exc:
