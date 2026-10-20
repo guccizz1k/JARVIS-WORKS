@@ -60,18 +60,16 @@ def create_lab_app(dsn: str) -> FastAPI:
             raise HTTPException(401, 'Synthetic session required')
         check_dsn(dsn)
         try:
-            from psycopg import connect, Error as PGError
-            # A new PostgreSQL session per API request: bind, read, roll back.
-            # No HTTP client can submit a claimed organization/actor identity.
-            with connect(dsn, connect_timeout=5) as pg:
-                with pg.transaction():
-                    with pg.cursor() as cur:
-                        cur.execute('SELECT jw_guard.bind_session(%s)', (token,))
-                        cur.execute('''SELECT 1 FROM jw_migration_v37.messenger_connections
-                                       WHERE id=%s AND status='active' ''', (thread,))
-                        if cur.fetchone() is None:
-                            raise HTTPException(404, 'Conversation not found')
-                        return operation(cur)
+            from psycopg import Error as PGError
+            from app.pg_driver_v39 import verified_read_cursor
+            # V3.9: single verified transaction boundary for every endpoint.
+            # The driver always rolls back and closes even after a successful GET.
+            with verified_read_cursor(dsn, token) as cur:
+                cur.execute('''SELECT 1 FROM jw_migration_v37.messenger_connections
+                               WHERE id=%s AND status='active' ''', (thread,))
+                if cur.fetchone() is None:
+                    raise HTTPException(404, 'Conversation not found')
+                return operation(cur)
         except HTTPException:
             raise
         except ImportError:

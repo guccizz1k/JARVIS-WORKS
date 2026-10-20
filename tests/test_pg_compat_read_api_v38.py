@@ -44,7 +44,8 @@ def test_public_payload_never_accepts_tenant_from_client(monkeypatch):
 
 def test_no_unsafe_sql_interpolation():
     s=Path('app/pg_compat_read_api_v38.py').read_text()
-    assert 'jw_guard.bind_session(%s)' in s
+    assert 'with verified_read_cursor(dsn, token) as cur' in s
+    assert 'jw_guard.bind_session(%s)' in Path('app/pg_driver_v39.py').read_text()
     assert 'jw_guard.current_tenant()' in s
     assert 'application/octet-stream' in s and 'nosniff' in s
     assert 'UPDATE jw_migration' not in s and 'INSERT INTO jw_migration' not in s

@@ -147,6 +147,12 @@ def main():
             from scripts.test_postgres_api_compat_v38 import run as compat_api_run
             if compat_api_run() != 0:
                 raise AssertionError('V3.8 typed read-only FastAPI/PG17 gate failed')
+        # V3.9 opt-in: verify Psycopg driver lifecycle after the V3.8 API.
+        # Both previous gates and this test use only the disposable PG17 DB.
+        if os.getenv('JW_PG_LAB_V39') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_driver_v39 import run as driver_run
+            if driver_run() != 0:
+                raise AssertionError('V3.9 isolated Psycopg driver gate failed')
         success_marker = True
         return 0
     except Exception as exc:
