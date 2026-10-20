@@ -130,6 +130,12 @@ def main():
             from scripts.test_postgres_api_lab_v35 import run as api_lab_run
             if api_lab_run() != 0:
                 raise AssertionError('V3.5 isolated FastAPI/PostgreSQL gate failed')
+        # V3.6: lossless shadow/rollback drill in the SAME disposable PG17 DB.
+        # This is NOT an operational migration into public.messenger_*.
+        if os.getenv('JW_PG_LAB_V36') == 'ONLY_DISPOSABLE_LAB':
+            from scripts.test_postgres_migration_v36 import run as migration_shadow_run
+            if migration_shadow_run() != 0:
+                raise AssertionError('V3.6 synthetic shadow/rollback gate failed')
         success_marker = True
         return 0
     except Exception as exc:
