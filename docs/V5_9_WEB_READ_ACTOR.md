@@ -29,8 +29,11 @@ recover read actors from this mutable organization-level cursor.
   readback tests before any operational DB switch.
 
 ## Gates
-`bash scripts/check_v59_review.sh` requires full historical source + UI
-regression and real FastAPI HTTP tests, then
-`bash scripts/run_pg17_codespaces_v59.sh` requires historical PG17 Docker gates.
+`bash scripts/check_v59_review.sh` checks V5.9 new-source SHA256, JS syntax
+and mandatory FastAPI HTTP tests; `bash scripts/run_pg17_codespaces_v59.sh`
+creates a **separate worktree pinned to immutable V5.8 commit**
+`e8ea684c9af78debdfc26179641e3094f2d2ef20` to run unchanged historic
+source SHA256/regressions and PostgreSQL 17 Docker gates. This preserves the
+original V5.1 messenger checksum rather than weakening historical manifests.
 
 Neither command may skip failed stages or authorize cutover. `jw 59` runs both.
