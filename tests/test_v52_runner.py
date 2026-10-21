@@ -98,3 +98,27 @@ def test_new_stage_exception_restores_original(monkeypatch):
     monkeypatch.setattr(supervisor,'main',lambda:prev.run())
     with pytest.raises(ZeroDivisionError):main()
     assert prev.run is old
+
+
+def test_v52_pg17_environment_guard_unset_and_production():
+    """A missing JW_ENV must not fail under nounset; all production case variants deny."""
+    import subprocess
+    script = Path('scripts/run_pg17_codespaces_v52.sh').read_text()
+    assert '[[ "${JW_ENV,,}"' not in script
+    begin = script.index('JW_ENV_SAFE="${JW_ENV:-}"')
+    end = script.index('for version in 35', begin)
+    guard = script[begin:end]
+    for value, expected in (
+        (None, 0), ('', 0), ('development', 0), ('staging', 0),
+        ('production', 2), ('PRODUCTION', 2), ('PrOdUcTiOn', 2),
+    ):
+        env = os.environ.copy()
+        env.pop('JW_ENV', None)
+        if value is not None:
+            env['JW_ENV'] = value
+        result = subprocess.run(
+            ['bash', '-c', 'set -Eeuo pipefail\n' + guard + '\nprintf "GUARD_REACHED\\n"'],
+            env=env, capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == expected, (value, result.stderr)
+        assert ('GUARD_REACHED' in result.stdout) == (expected == 0)

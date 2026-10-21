@@ -9,7 +9,8 @@ for version in V2_8 V3_5 V3_6 V3_7 V3_8 V3_9 V4_0 V4_1 V4_2 V4_3 V4_4 V4_5 V4_6 
   [[ -f "$manifest" ]] || { echo 'NOT RUN: historical manifest absent' >&2; exit 2; }
   sha256sum --check --status "$manifest" || { echo 'FAIL: source integrity altered' >&2; exit 1; }
 done
-[[ "${JW_ENV,,}" != 'production' ]] || { echo 'NOT RUN: production environment refused' >&2; exit 2; }
+JW_ENV_SAFE="${JW_ENV:-}"
+[[ "${JW_ENV_SAFE,,}" != 'production' ]] || { echo 'NOT RUN: production environment refused' >&2; exit 2; }
 for version in 35 36 37 38 39 40 41 42 43 44 45 46 47 48 50 52; do
   export "JW_PG_LAB_V${version}=ONLY_DISPOSABLE_LAB"
 done
