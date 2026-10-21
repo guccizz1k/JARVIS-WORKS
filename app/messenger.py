@@ -21,6 +21,7 @@ from typing import Callable
 from fastapi import Depends, File, Form, UploadFile, Response, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import StreamingResponse
+from .pg_read_actor_journal_v59 import install_read_actor_schema, record_actor_read
 
 KST = ZoneInfo('Asia/Seoul')
 ATTACHMENT_MAX = 5 * 1024 * 1024
@@ -207,6 +208,8 @@ def install_schema(c):
     except BaseException:
         if c.in_transaction:c.execute('ROLLBACK')
         raise
+    # V5.9: capture authenticated read advances before the isolated outbox.
+    install_read_actor_schema(c)
     # V5.1: optional transactionally co-located source events; production off.
     # Do not construct triggers or write anything unless explicitly in lab.
     if os.environ.get('JW_PG_OUTBOX_V51') is not None:
@@ -442,12 +445,11 @@ def register_routes(app, *, current_user: Callable, conn: Callable,
             last=c.execute('''SELECT message_seq FROM messenger_messages
                    WHERE id=? AND connection_id=?''',(body.last_message_id,connection_id)).fetchone()
             if not last:fail('이 대화에 속한 메시지가 아닙니다',404)
-            c.execute('''INSERT INTO messenger_read_positions
-                    (connection_id,org_id,last_read_rowid,last_read_seq,updated_at) VALUES(?,?,0,?,?)
-                    ON CONFLICT(connection_id,org_id) DO UPDATE SET
-                    last_read_seq=MAX(COALESCE(messenger_read_positions.last_read_seq,0),excluded.last_read_seq),
-                    updated_at=excluded.updated_at''',
-                    (connection_id,user['org_id'],last['message_seq'],now()))
+            # Capture the authenticated staff ID and exact monotonic cursor
+            # in the SAME SQLite transaction; a journal failure rolls back both.
+            record_actor_read(c, connection_id=connection_id, org_id=user['org_id'],
+                              actor_user=user['id'], target_seq=last['message_seq'],
+                              recorded_at=now())
             return {'status':'read'}
 
     @app.post('/api/messenger/threads/{connection_id}/messages',status_code=201)
