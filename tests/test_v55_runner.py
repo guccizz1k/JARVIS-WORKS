@@ -70,3 +70,24 @@ def test_missing_authorization_blocks_before_previous(monkeypatch):
     from scripts import run_postgres_isolation_ci_v55 as wrapper
     monkeypatch.setenv('JW_ENV','production')
     assert wrapper.main()==2
+
+
+def test_v55_disposable_v54_prerequisite_environment():
+    """The exact CLI stage must pass isolated authorization without global export."""
+    src=(ROOT/'scripts/run_pg17_codespaces_v55.sh').read_text()
+    assert src.count('JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE ' + chr(92) + '\n' + 'python3 -m scripts.test_mutation_snapshot_v54') == 1
+    assert 'export JW_PG_CI_ALLOW=' not in src
+    pre=src[src.index('JW_ENV_SAFE='):src.index('CONTAINER=""')]
+    env=os.environ.copy()
+    env.pop('JW_PG_CI_ALLOW',None)
+    env.pop('JW_ENV',None)
+    test=subprocess.run(['bash','-c','set -Eeuo pipefail\n'+pre],cwd=ROOT,
+                        capture_output=True,text=True,env=env,timeout=25)
+    assert test.returncode == 0, test.stderr + test.stdout
+    assert 'PASS: V5.4 SQLite mutation-time' in test.stdout
+    # The preflight must still reject a production setting.
+    env['JW_ENV']='PrOdUcTiOn'
+    refusal=subprocess.run(['bash','-c','set -Eeuo pipefail\n'+pre],cwd=ROOT,
+                           capture_output=True,text=True,env=env,timeout=25)
+    assert refusal.returncode != 0
+    assert 'PASS: V5.4 SQLite mutation-time' not in refusal.stdout

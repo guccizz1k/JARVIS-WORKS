@@ -17,6 +17,7 @@ done
 [[ "${JW_PG_LAB_V55:-}" == 'ONLY_DISPOSABLE_LAB' ]] || { echo 'NOT RUN: V5.5 signed relay lab flag missing' >&2; exit 2; }
 export JW_PG_OUTBOX_V51=ONLY_DISPOSABLE_LAB
 export JW_PG_RELAY_V52=ONLY_DISPOSABLE_LAB
+JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE \
 python3 -m scripts.test_mutation_snapshot_v54 || { echo 'FAIL: V5.4 source snapshot prerequisite'; exit 1; }
 CONTAINER=""
 WORK=""
