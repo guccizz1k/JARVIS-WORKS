@@ -42,3 +42,26 @@ def test_shell_order_preserved():
     assert 'JW_PG_LAB_V${v}=ONLY_DISPOSABLE_LAB' in content
     assert 'JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE python3 -m scripts.test_mutation_snapshot_v54' in content
     assert 'JW_ENV:-' in content
+
+
+def test_pg_entrypoint_without_pytest_available():
+    """PG entrypoint must import without pytest or optional site packages."""
+    import subprocess
+    import sys
+    result = subprocess.run(
+        [sys.executable, '-S', '-c',
+         'from scripts.test_postgres_receipt_identity_v58 import SCHEMA; '
+         'import sqlite3; c=sqlite3.connect(":memory:"); '
+         'c.executescript(SCHEMA); '
+         'assert len(c.execute("SELECT name FROM sqlite_master WHERE type=\'table\'").fetchall()) >= 7'],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_shared_receipt_schema_same_for_local_and_pg():
+    from scripts.receipt_schema_v58 import SCHEMA as shared
+    from scripts.test_postgres_receipt_identity_v58 import SCHEMA as live
+    from tests.test_pg_receipt_identity_v58 import SCHEMA as local
+    assert shared == live == local

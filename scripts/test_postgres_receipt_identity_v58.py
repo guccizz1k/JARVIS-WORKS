@@ -12,7 +12,7 @@ import tempfile
 from app.pg_transition_outbox_v51 import install_disposable_outbox
 from app.pg_mutation_snapshot_v54 import install_lab_snapshots
 from app.pg_receipt_identity_v58 import Pg17ReceiptLabSink,relay_receipts,STATE,RelayRefused
-from tests.test_pg_receipt_identity_v58 import SCHEMA
+from scripts.receipt_schema_v58 import SCHEMA
 
 
 def run():

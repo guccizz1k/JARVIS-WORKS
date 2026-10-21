@@ -1,0 +1,7 @@
+"""Shared V5.8 disposable SQLite fixture. Standard library only; no pytest import.
+
+Keep the exact source structure identical between local pytest and live PG17 rehearsal.
+This module never connects to production data.
+"""
+
+SCHEMA = "\nCREATE TABLE messenger_connections(id TEXT PRIMARY KEY,org_a TEXT,org_b TEXT);\nCREATE TABLE messenger_messages(id TEXT PRIMARY KEY,sender_org TEXT,sender_user TEXT,\n connection_id TEXT, kind TEXT NOT NULL,body TEXT NOT NULL,version INTEGER NOT NULL,\n created_at TEXT NOT NULL, edited_at TEXT,order_id TEXT,immutable_order_snapshot TEXT,\n actor_name TEXT NOT NULL DEFAULT '');\nCREATE TABLE messenger_edits(id TEXT PRIMARY KEY,message_id TEXT,previous_body TEXT,\n new_body TEXT,actor_user TEXT,edited_at TEXT,version INTEGER);\nCREATE TABLE messenger_attachments(message_id TEXT PRIMARY KEY,data BLOB);\nCREATE TABLE messenger_receipts(message_id TEXT PRIMARY KEY,receiver_org TEXT,receiver_user TEXT,actor_name TEXT,received_at TEXT);\nCREATE TABLE messenger_read_positions(connection_id TEXT,org_id TEXT,last_read_seq INTEGER,\n PRIMARY KEY(connection_id,org_id));\nCREATE TRIGGER messenger_edit_no_update BEFORE UPDATE ON messenger_edits\n BEGIN SELECT RAISE(ABORT,'protected');END;\nCREATE TRIGGER messenger_edit_no_delete BEFORE DELETE ON messenger_edits\n BEGIN SELECT RAISE(ABORT,'protected');END;\n\nCREATE TABLE users(id TEXT PRIMARY KEY,org_id TEXT NOT NULL);\nCREATE TRIGGER messenger_no_delete BEFORE DELETE ON messenger_messages\n BEGIN SELECT RAISE(ABORT,'protected'); END;\n"

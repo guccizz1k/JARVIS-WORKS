@@ -6,12 +6,7 @@ import pytest
 from app.pg_transition_outbox_v51 import install_disposable_outbox,OUTBOX
 from app.pg_mutation_snapshot_v54 import install_lab_snapshots
 from app.pg_receipt_identity_v58 import relay_receipts,RelayRefused,STATE
-from tests.test_pg_message_payload_v55 import SCHEMA as SIMPLE
-SCHEMA=SIMPLE+'''\nCREATE TABLE users(id TEXT PRIMARY KEY,org_id TEXT NOT NULL);\nCREATE TRIGGER messenger_no_delete BEFORE DELETE ON messenger_messages\n BEGIN SELECT RAISE(ABORT,'protected'); END;\n'''
-# V5.4 demands immutable receipt triggers; installs them itself.
-# Existing SIMPLE fixture contains a receiver-only receipt table: replace it.
-SCHEMA=SCHEMA.replace('messenger_receipts(message_id TEXT PRIMARY KEY,receiver_org TEXT)',
- 'messenger_receipts(message_id TEXT PRIMARY KEY,receiver_org TEXT,receiver_user TEXT,actor_name TEXT,received_at TEXT)')
+from scripts.receipt_schema_v58 import SCHEMA
 
 class Sink:
     def __init__(self,identity=('tenant_b','ub')):self.identity=identity;self.rows={};self.revoked=False;self.fail=False
