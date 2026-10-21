@@ -1,0 +1,13 @@
+{
+  "schema": "jw-release-evidence-v1",
+  "gates": {
+    "01_evidence_relay": {"status": "PARTIAL", "evidence": ["V5.2 disposable PG17 reference relay verified by user screenshot, 2026-10-21", "V5.3 attachment/edit/receipt digest code and isolated unit QA; real PG17 V5.3 NOT RUN", "Mutable body_changed/read_position remain intentionally unsupported"]},
+    "02_backfill_restore": {"status": "BLOCKED", "evidence": ["Historical messages predating V5.1 outbox have no verified backfill; production RPO/RTO not measured"]},
+    "03_web_postgresql": {"status": "BLOCKED", "evidence": ["app.main still uses SQLite; PG17 adapter isolated; no end-to-end operational database routing"]},
+    "04_company_onboarding": {"status": "PARTIAL", "evidence": ["Staff suspension and session revocation available; independently verified business registration, staff invitations and recovery not proved"]},
+    "05_attachment_storage": {"status": "BLOCKED", "evidence": ["5 MB SQLite BLOB demo attachment storage; production object storage, malware scanning, quotas/retention not independently verified"]},
+    "06_product_ux": {"status": "PARTIAL", "evidence": ["Company search, plus-menu attachment and SSE/polling are implemented; production PC browser and multi-company acceptance NOT RUN"]},
+    "07_security_operations": {"status": "BLOCKED", "evidence": ["Isolated RLS and rollback attacks passed; production load, independent penetration test, live alerts, offsite restore not demonstrated"]},
+    "08_beta_release": {"status": "BLOCKED", "evidence": ["No real customer beta acceptance, privacy/legal approval, go-live review or authorized deployment"]}
+  }
+}
