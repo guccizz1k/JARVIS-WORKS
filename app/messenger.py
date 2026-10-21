@@ -207,7 +207,8 @@ def install_schema(c):
     except BaseException:
         if c.in_transaction:c.execute('ROLLBACK')
         raise
-    # V5.1 review lab only; production starts with outbox disabled.
+    # V5.1: optional transactionally co-located source events; production off.
+    # Do not construct triggers or write anything unless explicitly in lab.
     if os.environ.get('JW_PG_OUTBOX_V51') is not None:
         from .pg_transition_outbox_v51 import install_disposable_outbox
         install_disposable_outbox(c)
