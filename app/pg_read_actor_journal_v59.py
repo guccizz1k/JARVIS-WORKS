@@ -8,6 +8,7 @@ transaction after checking its authenticated, entitled org/thread and cursor.
 from __future__ import annotations
 
 import sqlite3
+import os
 
 TABLE = 'messenger_read_actor_history_v59'
 
@@ -18,6 +19,8 @@ class ReadActorRefused(ValueError):
 
 def install_read_actor_schema(c: sqlite3.Connection) -> None:
     """Idempotent additive install. No rewriting of existing read positions."""
+    if os.getenv('JW_ENV','').casefold() == 'production':
+        raise ReadActorRefused('operational database integration not authorized')
     if c.in_transaction:
         raise ReadActorRefused('schema install requires no open transaction')
     if c.execute('PRAGMA foreign_keys').fetchone()[0] != 1:
@@ -53,6 +56,8 @@ def record_actor_read(c: sqlite3.Connection, *, connection_id: str,
     ROLLBACK. Returns True only for a strictly new read position. No fabricated
     journal event for a duplicate, old, or historical pre-V5.9 cursor.
     """
+    if os.getenv('JW_ENV','').casefold() == 'production':
+        raise ReadActorRefused('operational database integration not authorized')
     if not isinstance(c, sqlite3.Connection) or not c.in_transaction:
         raise ReadActorRefused('read journal requires the web transaction')
     if c.execute('PRAGMA foreign_keys').fetchone()[0] != 1:

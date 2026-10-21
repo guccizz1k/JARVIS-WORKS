@@ -132,3 +132,14 @@ def test_external_preexisting_cursor_does_not_invent_actor():
     assert rows(c)==[]
     assert read(c,seq=4) is True
     assert rows(c)==[('A','ua',3,4)]
+
+
+def test_production_switch_refuses_schema_and_write_before_data_change(monkeypatch):
+    c=connection()
+    monkeypatch.setenv('JW_ENV','PrOdUcTiOn')
+    with pytest.raises(ReadActorRefused):
+        install_read_actor_schema(c)
+    with pytest.raises(ReadActorRefused):
+        read(c)
+    assert rows(c)==[]
+    assert positions(c)==[]

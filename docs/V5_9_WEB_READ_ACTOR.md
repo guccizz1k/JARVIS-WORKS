@@ -23,6 +23,8 @@ recover read actors from this mutable organization-level cursor.
 - Journal uses SQLite write protections (triggers) and is not a tamper-proof
   substitute for immutable external storage or a complete audit system.
 - Earlier read positions already present on upgrade remain unattributed.
+- `JW_ENV=production` (case-insensitive) hard-refuses both install and write
+  before any V5.9 source changes.
 - No automatic migration of live customer data. Deploying a schema change to
   user databases requires backups, independent validation, and approval.
 - PG17 read-actor recipient signature semantics will need separate mapping and
