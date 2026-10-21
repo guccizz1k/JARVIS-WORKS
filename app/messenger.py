@@ -6,6 +6,7 @@ No deletion endpoint; the database rejects ordinary DELETE of message evidence.
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import io
 import asyncio
@@ -206,6 +207,10 @@ def install_schema(c):
     except BaseException:
         if c.in_transaction:c.execute('ROLLBACK')
         raise
+    # V5.1 review lab only; production starts with outbox disabled.
+    if os.environ.get('JW_PG_OUTBOX_V51') is not None:
+        from .pg_transition_outbox_v51 import install_disposable_outbox
+        install_disposable_outbox(c)
 
 
 def demo_company_profiles(c):
