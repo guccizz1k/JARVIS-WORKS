@@ -49,6 +49,7 @@ def site(tmp_path):
         c.executescript('''
             CREATE TABLE organizations (id TEXT PRIMARY KEY, name TEXT NOT NULL);
             CREATE TABLE users (id TEXT PRIMARY KEY, org_id TEXT REFERENCES organizations(id));
+            CREATE TABLE orders (id TEXT PRIMARY KEY);
             INSERT INTO organizations VALUES ('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','Org A'),
               ('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','Org B'),
               ('cccccccccccccccccccccccccccccccc','Org C');
