@@ -72,6 +72,8 @@ chmod +x "$old/scripts/run_pg17_codespaces_v511.sh"
   bash scripts/run_pg17_codespaces_v511.sh
 )
 echo '=== FINAL: no source branch changes, no cutover, no push, no merge ==='
+# Stop before embedded base64 fixture; EXIT trap validates worktree cleanup.
+exit 0
 __JW511_PAYLOAD__
 H4sIABJD2WoC/+19e3fbRpLv/M1PgcneOSAUiCblVyIPkivLtKMdRfJKcrKzXi0PREISYhJgANCy
 kuP72W89uoFuoAGCFOXM7IgzJxZB9Lu6uh6/qvbn80fzq1ES+JORP87iZBR8msdJNvr4dNDvzW//
