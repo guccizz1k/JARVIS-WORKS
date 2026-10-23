@@ -183,3 +183,13 @@ V8.9 original commit/archive and 565 historical tests missing; actual independen
 - Actual Chromium browser E2E remains BLOCKED by environment administrator policy; no workaround attempted.
 - GitHub Actions remote CI does not report statuses; no Actions workflow/paid job has been started.
 - **Disposition remains DRAFT / PARTIAL.** Existing `main`, production, users and customer data remain unchanged.
+
+
+## 2026-10-24 — Browser UI gate partially unblocked and UUID compatibility fix
+
+- Current local V9 stage harness rerun: **54 Python PASS + 26 Node PASS = 80 PASS**, no failures. Historical 565-suite has NOT been recovered or run.
+- **Real headless Chromium 144** rendered the exact standalone `messenger_stage_v90.html` via `page.set_content` without navigating to restricted localhost URLs. Browser API and WS were **synthetic stubs**. Expanded **9 Chromium DOM tests PASS**: search/layout, click-to-chat, text send, Enter duplicate prevention, company-switch stale event protection, edit-before-base ordering, PDF file-data encoding, HTML injection rendered as text, mobile horizontal overflow. Separate published compact `test_chromium_gate_v90.py`: **4 PASS** (a subset); opt-in runner: `python -m pytest -q test_chromium_gate_v90.py`.
+- Reproduced a browser-only exception in a non-secure context (about:blank) when send called `crypto.randomUUID()`. After three failing targeted checks, added **CSPRNG-backed UUID v4 fallback using `crypto.getRandomValues`**. Chromium test no longer polyfills `randomUUID`; all 9 UI cases PASS. The change preserves the original `randomUUID` path on HTTPS.
+- Exact GitHub HTML SHA-1 blob `6580beec7b493d980421a495eb8e971f6c2b3f46` matches the locally executed HTML, and published compact browser test blob `f1fdbd546aa79dabd3a49646c8293b433d7ca74e` matches the locally executed test file.
+- Screenshot of real DOM rendering was captured with **synthetic chat data**; it is not evidence of a deployed application.
+- **Status classification:** Chromium DOM/JS behavior **PASS with mocked services**; actual deployed server navigation and browser-to-FastAPI-to-independent-PostgreSQL E2E remain **BLOCKED / NOT RUN**. No administrator policy bypass, no auth-role change, no SQL migrations, no production deployment and no merge.
