@@ -10,8 +10,6 @@
 
 BEGIN;
 
-SET LOCAL lock_timeout = '5s';
-
 CREATE OR REPLACE FUNCTION jw_dev.v90_send_text(p_connection_id text, p_request_id text, p_body text, p_filename text DEFAULT NULL::text, p_mime text DEFAULT NULL::text, p_data bytea DEFAULT NULL::bytea)
  RETURNS TABLE(message_id text, message_cursor bigint, replayed boolean)
  LANGUAGE plpgsql
