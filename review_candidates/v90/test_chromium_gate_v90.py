@@ -115,3 +115,22 @@ def test_company_switch_with_inflight_send_never_transfers_payload(browser_page)
     assert page.locator('#message').input_value() == ''
     assert page.evaluate('__qa.sends.length') == 1
     assert page.evaluate('__qa.sends[0].body') == 'B only confidential payload'
+
+def test_burst_messages_coalesce_read_receipt_requests(browser_page):
+    page=browser_page
+    open_chat(page)
+    page.evaluate("""() => {
+      window.__reads=[];
+      const originalFetch=window.fetch;
+      window.fetch=(url,opts={})=>{
+        if(String(url).endsWith('/read'))__reads.push(JSON.parse(opts.body));
+        return originalFetch(url,opts);
+      };
+      const ws=__qa.ws.at(-1);
+      for(let i=1;i<=40;i++){
+        ws.onmessage({data:JSON.stringify({type:'message',data:{message_id:'burst-'+i,message_cursor:i,sender_org:'B',body:'notice '+i,version:1}})});
+      }
+    }""")
+    page.wait_for_timeout(440)
+    assert page.evaluate('__reads.length') <= 2, 'Unbounded read receipt POSTs from one WS message batch'
+    assert page.evaluate('__reads.at(-1)?.cursor') == 40
