@@ -70,3 +70,26 @@ Do **NOT** merge until all missing gates receive independent evidence.
 - CSP integration for inline UI JS, production attachment scanning and multi-process performance remain unresolved. Do not enable privileged credential workarounds.
 
 **Integrate only after V8.9 authoritative source recovered and complete regressions pass. No merge, production deploy or paid resources.**
+
+
+## 2026-10-23 continued staging work (subsequent turn)
+
+**Source-integrity baseline:** Verified Draft PR remains open; authoritative V8.9 archive / local commit `a3783ef` is still inaccessible. Production application and GitHub `main` are untouched.
+
+### Verified additions
+
+- `messenger_stage_v90.html`: fixed asynchronous chat-change race (file-read and in-flight HTTP send) to prevent posting to or clearing the new conversation; fail-closed on WebSocket 1008 and stop reconnecting after 6 unsuccessful attempts. Manual reselect resets the retry budget. The browser UI remains an **isolated, unmounted staging artifact**.
+- `test_stage_ui_race_v90.cjs`: Node VM directly executes the actual UI handler source. **3 PASS** covering chat switch before upload, chat switch during HTTP send response and WS denied/limited retries. `node --check` also passed.
+- `migration_integrity_v90.py`: optional **read-only** SQLite vs `jw_dev` row-count/SHA-256 comparator, with explicit table whitelist, row cap, byte normalization and no row content in report. `test_migration_integrity_v90.py`: **8 PASS** (synthetic/mocked target only). An actual V8.9 data migration and read-only live PG comparison are NOT RUN. Optional psycopg dependency is not installed in the available local environment; never claim a live migration result.
+- Existing local HTTP/WebSocket pytest contract regression **26 PASS**. Combined independent local stage checks: **34 pytest PASS + 3 Node PASS = 37 PASS**, **0 FAIL** on selected commands. This is NOT the missing V8.9 suite of 565 tests.
+- SHA-1 Git blob comparisons confirm GitHub staging files exactly match locally executed source/tests.
+- Chromium Playwright local-loopback navigation returned `ERR_BLOCKED_BY_ADMINISTRATOR` in the test environment. Three browser navigation attempts failed due to this environment restriction; it was NOT circumvented. Browser E2E remains **BLOCKED**, not PASS. The temporary isolated Playwright attempt is not part of the passing unit-test artifact.
+- Supabase SQL query was independently **BLOCKED by tool safety review** on this continued turn; do not reroute or bypass the check. No additional live DB test can be claimed. The previous turn's attachment ACL and SQL synthetic transaction evidence remains the latest successful DB validation.
+
+### Open launch-critical engineering risks
+
+1. **Commit-order cursor risk:** `nextval()` yields a sequence before a message transaction commits; two independent concurrent writers could commit out of order and make a late-committing lower cursor invisible to cursor-only reconnect. Must validate and address with serialization/transactional committed ordering before launch. **CONCURRENCY TEST NOT RUN**.
+2. A timestamp+edit-id edit cursor likewise needs independent-connection race review. **NOT RUN**.
+3. WebSocket uses database polling (two queries every 300 ms/connection by default), not a measured scalable event-broadcast service. Load, recovery and latency NOT MEASURED.
+4. PostgreSQL login roles remain `NOLOGIN`; genuine user/tenant sessions, SSL verification, payment collision tests and browser end-to-end integration remain BLOCKED/NOT RUN.
+5. The genuine V8.9 archive, source files, 565-suite and data migration source are still absent. Do not merge or deploy this PR.
