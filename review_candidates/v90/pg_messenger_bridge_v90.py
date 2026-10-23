@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+from urllib.parse import quote
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 
@@ -71,6 +73,7 @@ SQL = {
     'edit': 'SELECT jw_dev.v90_edit_text(%s,%s,%s) AS version',
     'messages': 'SELECT * FROM jw_dev.v90_sync_messages(%s,%s,%s)',
     'edits': 'SELECT * FROM jw_dev.v90_sync_edits(%s,%s,%s,%s)',
+    'attachment': 'SELECT * FROM jw_dev.v90_download_attachment(%s,%s)',
 }
 
 
@@ -134,6 +137,27 @@ def create_router(gateway: SQLGateway, authorize: Callable[[Request], VerifiedSe
     def messages(request: Request, connection_id: str, after: int = Query(0, ge=0),
                  limit: int = Query(50, ge=1, le=100)):
         return invoke(request, 'messages', connection_id, after, limit)
+
+    @router.get('/chats/{connection_id}/attachments/{message_id}')
+    def download(request: Request, connection_id: str, message_id: str):
+        items = invoke(request, 'attachment', connection_id, message_id)
+        if not items:
+            raise HTTPException(404, 'Attachment not found')
+        item = items[0]
+        data = bytes(item['data'])
+        if len(data) != item['size_bytes'] or hashlib.sha256(data).hexdigest() != item['content_hash']:
+            raise HTTPException(503, 'Attachment integrity check failed')
+        # Prevent header injection / inline HTML, PDF, SVG or script execution.
+        basename = str(item['filename']).replace(chr(92),'/').split('/')[-1]
+        if not basename or any(ord(ch) < 32 or ord(ch) == 127 for ch in basename):
+            raise HTTPException(503, 'Invalid stored attachment name')
+        disposition = "attachment; filename=\"download\"; filename*=UTF-8''" + quote(basename, safe='')
+        return Response(content=data, media_type='application/octet-stream', headers={
+            'Content-Disposition': disposition,
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': 'sandbox',
+        })
 
     @router.get('/chats/{connection_id}/edits')
     def edits(request: Request, connection_id: str, after_at: datetime = Query(default=datetime(1970,1,1,tzinfo=timezone.utc)),
