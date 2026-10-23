@@ -93,3 +93,29 @@ Do **NOT** merge until all missing gates receive independent evidence.
 3. WebSocket uses database polling (two queries every 300 ms/connection by default), not a measured scalable event-broadcast service. Load, recovery and latency NOT MEASURED.
 4. PostgreSQL login roles remain `NOLOGIN`; genuine user/tenant sessions, SSL verification, payment collision tests and browser end-to-end integration remain BLOCKED/NOT RUN.
 5. The genuine V8.9 archive, source files, 565-suite and data migration source are still absent. Do not merge or deploy this PR.
+
+## 2026-10-23 22:08 KST — Cursor commit-order review candidate (THIS TURN)
+
+### Direct implementation
+
+- `006_commit_order_cursor_guard_candidate.sql` adds the same **transaction-scoped advisory lock per conversation** inside `v90_send_text` and `v90_edit_text`. Send acquires the lock before `nextval('jw_dev.messenger_seq_v90')` and message insertion; edit acquires it before update + immutable edit history insertion.
+- To close timestamp tie-loss in the existing `(edited_at, edit_id)` cursor, the edit function computes `greatest(clock_timestamp(), max(previous chat edit timestamp) + interval '1 microsecond')` **under the conversation lock**. This avoids equal-time UUID ordering inversions even when system clock stalls; currently O(chat edit history), pending a performance benchmark/index redesign.
+- The SQL file is a **staging review candidate only** and has NOT been executed against the connected Supabase database. The installed `jw_dev` functions retain the previous behavior until the approved, source-reconciled migration executes. The prior Supabase SQL safety-review restriction was respected.
+- The extension is additive, schema-qualified and retains verified-company session checks, replay idempotency, <=30-minute edit window, immutable history, dedicated `jw_app_dev` grant, and restricted public-role execution.
+
+### Evidence from this run
+
+- `test_commit_order_model_v90.py`: **4 PASS**, deterministic concurrency simulator: reproduces original lower-cursor late-commit skip; per-chat lock prevents skip; distinct chats can progress independently; frozen-clock edit timestamps strictly advance. 5 separate repeats of the same four model tests passed.
+- The full available *staged* local suite: **38 Python pytest PASS + 3 JavaScript Node tests PASS, 0 FAIL**, with Python compile PASS. The 38 include existing HTTP / WebSocket mock / data-migration comparator tests + four new concurrency-model tests. These are not live PostgreSQL independent-connection tests.
+- Actual newly committed SQL was inspected via GitHub and passed **10 structural ordering/security invariants** (authorization before lock, advisory lock before sequence and writes, same namespace for send/edit, monotonically increasing edit timestamp, permissions preserved).
+- Exact GitHub SHA-1 blob for the committed model test matches the tested local file: `1cf4bb893cb580d447badf6548e2b8c5da35bf3e`.
+- PostgreSQL 17 official advisory-lock semantics were consulted. An actual SQL parser, SQL apply, independent two-connection execution and browser E2E **were NOT RUN**, so the new patch is not a production-verified fix.
+
+### Blocking acceptance tests
+
+1. Recover authoritative V8.9 commit/package and integrate without modifying older `main`.
+2. Get an approved non-superuser PostgreSQL connection and run independent **two-transaction** A/B send/edit + rollback/idempotency/visibility tests; verify deadlocks and lock timeout handling. Do not bypass denied Supabase SQL operations.
+3. Benchmark the O(edit history) max-timestamp query at realistic chat volumes; prefer an indexed per-chat edit ordinal if too slow.
+4. Re-run historical 565 and all real API/browser E2E; operating deploy remains unapproved.
+
+**Judgment: DRAFT PATCH + ISOLATED MODEL TESTS PASS; LIVE DATABASE CONCURRENCY BLOCKED; OPERATIONAL RELEASE BLOCKED.**
