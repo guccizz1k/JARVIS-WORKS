@@ -83,7 +83,7 @@
       if(e.type==='message'){render(e.data);st.cursor=Math.max(st.cursor,e.data.message_cursor);void markRead()}
       if(e.type==='edit'){applyEdit(e.data);st.editAt=e.data.edited_at;st.editId=e.data.edit_id}
    };
-   sock.onclose=()=>{if(local!==st.nonce)return;connected('재연결 중');const wait=Math.min(8000,500*Math.pow(2,Math.min(st.attempt++,4)));setTimeout(()=>{if(local===st.nonce)join()},wait)};
+   sock.onclose=event=>{if(local!==st.nonce)return;if(event.code===1008){connected('접근 차단');msg('로그인이 만료되었거나 대화 접근 권한이 없습니다. 다시 로그인하세요.');return;}connected('재연결 중');const wait=Math.min(8000,500*Math.pow(2,Math.min(st.attempt++,4)));setTimeout(()=>{if(local===st.nonce)join()},wait)};
    sock.onerror=()=>{msg('일시적인 연결 오류가 발생했습니다. 자동 재연결합니다.')};
  };
  const selectCompany=async(item)=>{
@@ -114,18 +114,20 @@
    try{await request(API+'/messages/'+encodeURIComponent(item.message_id),{method:'PATCH',body:JSON.stringify({body:input,expected_version:item.version})});msg('수정 요청이 저장됐습니다.');}catch(err){msg(err.message)}
  };
  const send=async()=>{
-   if(!st.chat)return;const text=el('message').value;const file=st.file;
+   if(!st.chat)return;const chat=st.chat,nonce=st.nonce;const text=el('message').value;const file=st.file;
    if(!text.trim()&&!file)return;
    el('send').disabled=true;msg('');
    try{
     const key=st.pending?.key||crypto.randomUUID();const payload=st.pending?.payload||{request_id:key,body:text};
     if(file&&!st.pending){payload.filename=file.name;payload.mime=file.type;payload.data_base64=await readfile(file)}
+    if(nonce!==st.nonce||chat!==st.chat)return;
     st.pending={key,payload};
-    await request(API+'/chats/'+encodeURIComponent(st.chat)+'/messages',{method:'POST',body:JSON.stringify(payload)});
+    await request(API+'/chats/'+encodeURIComponent(chat)+'/messages',{method:'POST',body:JSON.stringify(payload)});
+    if(nonce!==st.nonce||chat!==st.chat)return;
     st.pending=null;el('message').value='';el('fileInput').value='';st.file=null;el('fileInfo').textContent='';
-    if(!st.socket||st.socket.readyState!==WebSocket.OPEN)await sync(st.nonce);
-   }catch(err){msg(err.message+' · 다시 전송하면 동일 요청번호를 사용합니다.');}
-   finally{el('send').disabled=false}
+    if(!st.socket||st.socket.readyState!==WebSocket.OPEN)await sync(nonce);
+   }catch(err){if(nonce===st.nonce)msg(err.message+' · 다시 전송하면 동일 요청번호를 사용합니다.');}
+   finally{if(nonce===st.nonce)el('send').disabled=false}
  };
  const allowed=new Set(['image/jpeg','image/png','image/webp','image/gif','application/pdf','text/plain','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
  el('fileInput').onchange=()=>{const file=el('fileInput').files?.[0];if(!file)return;
