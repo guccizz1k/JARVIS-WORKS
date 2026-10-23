@@ -144,7 +144,15 @@
    const ticket={nonce,chat};st.sending=ticket;
    el('send').disabled=true;msg('');
    try{
-    const key=st.pending?.key||crypto.randomUUID();
+    // randomUUID is HTTPS-only in some browsers. For isolated HTTP preview,
+    // use the equally CSPRNG-backed getRandomValues without weakening IDs.
+    const key=st.pending?.key||(()=>{
+      if(typeof crypto.randomUUID==='function')return crypto.randomUUID();
+      const bytes=new Uint8Array(16);crypto.getRandomValues(bytes);
+      bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+      const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+      return [hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-');
+    })();
     const payload=st.pending?.payload||{request_id:key,body:text};
     if(file&&!st.pending){payload.filename=file.name;payload.mime=file.type;payload.data_base64=await readfile(file)}
     if(nonce!==st.nonce||chat!==st.chat)return;
