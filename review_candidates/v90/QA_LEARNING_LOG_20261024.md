@@ -72,3 +72,12 @@ These failures were observed with `node --test test_ui_submission_integrity_v90.
 - No merge, deployment, database mutation or CI paid jobs performed.
 
 **Scope of current PASS:** isolated browser-handler Node VM, FastAPI TestClient with stubs, synthetic concurrency model, and static syntax/contract validations. Not a live multiuser launch acceptance.
+
+## 2026-10-24 — correcting a false-negative DB lock verification
+
+- **Failure mechanism:** psycopg opens an implicit transaction for the privilege SELECT when `autocommit=False`; the next `connection.transaction()` can become a savepoint and will not commit or release transaction-scoped advisory locks. Therefore a correct DB would be reported as a lock failure.
+- **Failing first evidence:** `test_pg_probe_transaction_scope_v90.py` failed 2/3 before the patch, passed 3/3 with the patch. Fake implementation emulates implicit-transaction and savepoint semantics; this is not a Postgres server test.
+- **Minimal fix:** both independent fresh connections set `autocommit=True` before the first privilege SELECT, while each advisory lock acquisition still runs under an explicit `with conn.transaction():`.
+- **Stage network evidence:** actual Uvicorn server opened a loopback HTTP port, real httpx HTTP requests and real websockets handshake exercised the isolated FastAPI routers. `test_loopback_smoke_v90.py`: 2 PASS and published; `test_loopback_transport_v90.py`: 6 PASS archive-only. Both use an explicit simulated backend and synthetic signed session; no real DB or V8.9 auth.
+- **Acceptance proof:** 43 Python + 26 JS = 69 published-source cases PASS; 54 Python + 26 JS = 80 archive-complete local cases PASS. Focused 11 new/local Postgres-model + network cases repeated 3x PASS.
+- **Never inflate coverage:** real PostgreSQL two-connection `pg_advisory_probe_v90.py` returns BLOCKED without approved isolated credentials; V8.9 565, browser Chromium, DB RLS E2E, remote CI are not verified.
