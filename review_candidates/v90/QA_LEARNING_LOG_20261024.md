@@ -47,3 +47,28 @@ These failures were observed with `node --test test_ui_submission_integrity_v90.
 - No production deploy, no merge, no customer-data mutation, no paid infrastructure change.
 
 **No claim of equivalence to Claude's internal learning process or capabilities is made.**
+## 2026-10-24 — out-of-order edit replay & socket checkpoint invariants
+
+### Reproductions against pre-patch source
+- **4/4 FAIL**, followed by **7/7 PASS after patch**, in `test_client_edit_order_v90.cjs`:
+  - Delayed v1 message snapshot overwrote already-applied v2 edit.
+  - Out-of-order v2 edit downgraded already-applied v3.
+  - Edit arriving before its base message was discarded forever.
+  - Queued higher-version edits were not retained when the base arrived.
+  - Additional positive counterexamples: equal-version idempotency, newer base superseding queued older edit, and 500-entry pending-edit memory cap.
+- **3/4 FAIL**, followed by **4/4 PASS**, in `test_ws_cursor_guard_v90.cjs`:
+  - Events delivered by superseded WS socket were accepted despite same chat nonce.
+  - Edit replay checkpoint could move backward on delayed edit.
+  - Equal timestamp but smaller edit ID could move checkpoint backward.
+  - Positive case: strictly higher edit ID advances checkpoint.
+- Fix: monotonic message version comparisons, bounded pending edit map, reset pending edits on company switch, drop events unless `st.socket === sock`, and compare normalized ISO edit timestamps + edit IDs before advancing checkpoint.
+- The **local** `stage_verify_v90.py` observed Python **38 PASS**, JavaScript **20 PASS**, Python syntax PASS and inline JS syntax PASS, FAIL 0, SKIP 0. Repeated the complete suite **5 consecutive times** with the same 58/58 result.
+- Exact committed GitHub blobs were compared with the locally executed files: HTML `a7cfa3188d954c1e493a332d02f4744fe34dfa50`, edit-order tests `3ff71a41b75fc7cfbcc9b8d856148a3fb2d69fe3`, WS cursor tests `49c22dd1258610605ebd9e45daa29125701d2c32`, harness `9a5868c4216413be1f411d94a50a6841a2fa8b01`.
+
+### Remaining open gates (unchanged)
+- The **real V8.9 source/565-test baseline** is missing. The old GitHub `main` is NOT equivalent to that baseline.
+- The cursor-order SQL `006_commit_order_cursor_guard_candidate.sql` remains **not applied**; multi-connection Postgres conflict, commit inversion, isolation, rollback, throughput remain **NOT RUN**. The Supabase service role/NOLOGIN configuration has not been modified.
+- Actual Chromium end-to-end, independent-tenant login/CSRF and load/performance, back-end/wire protocol E2E and production migration are **NOT RUN/BLOCKED**.
+- No merge, deployment, database mutation or CI paid jobs performed.
+
+**Scope of current PASS:** isolated browser-handler Node VM, FastAPI TestClient with stubs, synthetic concurrency model, and static syntax/contract validations. Not a live multiuser launch acceptance.
