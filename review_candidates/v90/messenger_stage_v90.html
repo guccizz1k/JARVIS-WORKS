@@ -22,7 +22,7 @@
  'use strict';
  const API='/api/pg-stage/v90';
  const el=id=>document.getElementById(id);
- const st={orgId:'',csrf:'',chat:'',cursor:0,editAt:'1970-01-01T00:00:00+00:00',editId:'',socket:null,nonce:0,attempt:0,selected:null,companies:[],offset:0,hasMore:false,file:null,pending:null,sending:null,messages:new Map()};
+ const st={orgId:'',csrf:'',chat:'',cursor:0,editAt:'1970-01-01T00:00:00+00:00',editId:'',socket:null,nonce:0,attempt:0,selected:null,companies:[],offset:0,hasMore:false,file:null,pending:null,sending:null,messages:new Map(),pendingEdits:new Map()};
  const msg=txt=>{el('notice').textContent=txt||''};
  const connected=(label,live=false)=>{el('status').textContent=label;el('status').classList.toggle('live',live)};
  const request=async(path,options={})=>{
@@ -47,12 +47,34 @@
  };
  const render=(item)=>{
   if(!item.message_id)return;
+  const old=st.messages.get(item.message_id);
+  const oldVersion=Number(old?.version||1),incomingVersion=Number(item.version||1);
+  // Delayed HTTP snapshots must never revert a newer WS edit.
+  if(old && oldVersion>=incomingVersion)return;
+  const queued=st.pendingEdits.get(item.message_id);
+  if(queued){
+   if(Number(queued.version)>incomingVersion)item={...item,body:queued.new_body,version:queued.version};
+   st.pendingEdits.delete(item.message_id);
+  }
   st.messages.set(item.message_id,item);
-  const old=Array.from(el('messages').children).find(n=>n.dataset.messageId===item.message_id);
-  const node=nodeFor(item);if(old)old.replaceWith(node);else el('messages').appendChild(node);
+  const previous=Array.from(el('messages').children).find(n=>n.dataset.messageId===item.message_id);
+  const node=nodeFor(item);if(previous)previous.replaceWith(node);else el('messages').appendChild(node);
   el('blank')?.remove();el('messages').scrollTop=el('messages').scrollHeight;
  };
- const applyEdit=item=>{const old=st.messages.get(item.message_id);if(old){render({...old,body:item.new_body,version:item.version});}};
+ const applyEdit=item=>{
+  const old=st.messages.get(item.message_id);
+  if(old){
+   if(Number(item.version)>Number(old.version||1))render({...old,body:item.new_body,version:item.version});
+   return;
+  }
+  // An edit can arrive before its base message in separate polling queries.
+  // Queue only the highest version until that base message is received.
+  const prior=st.pendingEdits.get(item.message_id);
+  if(!prior||Number(item.version)>Number(prior.version)){
+   st.pendingEdits.set(item.message_id,item);
+   if(st.pendingEdits.size>500)st.pendingEdits.delete(st.pendingEdits.keys().next().value);
+  }
+ };
  const markRead=async()=>{if(!st.chat||!st.cursor)return;try{await request(API+'/chats/'+encodeURIComponent(st.chat)+'/read',{method:'POST',body:JSON.stringify({cursor:st.cursor})});}catch{ /* reconnect sync independently repeats read */ }};
  const sync=async(nonce)=>{
    let next=0,rows=[];
@@ -87,7 +109,7 @@
    sock.onerror=()=>{msg('일시적인 연결 오류가 발생했습니다. 자동 재연결합니다.')};
  };
  const selectCompany=async(item)=>{
-   st.nonce++;const nonce=st.nonce;st.attempt=0;st.sending=null;el('message').disabled=true;el('send').disabled=true;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.selected=item;st.file=null;st.pending=null;el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
+   st.nonce++;const nonce=st.nonce;st.attempt=0;st.sending=null;el('message').disabled=true;el('send').disabled=true;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.pendingEdits.clear();st.selected=item;st.file=null;st.pending=null;el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
    try{const result=await request(API+'/chats',{method:'POST',body:JSON.stringify({other_org_id:item.org_id})});if(nonce!==st.nonce)return;
     st.chat=result.connection_id;el('message').disabled=false;el('send').disabled=false;
     await sync(nonce);if(nonce===st.nonce)join();
