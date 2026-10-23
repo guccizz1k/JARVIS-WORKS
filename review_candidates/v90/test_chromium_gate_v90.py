@@ -14,7 +14,7 @@ window.__qa={sends:[],ws:[]};
 window.fetch=async(url,options={})=>{
  const ok=data=>new Response(JSON.stringify(data),{status:200,headers:{'content-type':'application/json'}});
  const p=String(url);
- if(p==='/api/me')return ok({org_id:'A',csrf_token:'c'});
+ if(p==='/api/pg-stage/v90/me')return ok({org_id:'A',csrf_token:'c'});
  if(p.includes('/companies?'))return ok([{org_id:'B',company_name:'인증 기업 B'},{org_id:'C',company_name:'기업 C'}]);
  if(p.endsWith('/chats'))return ok({connection_id:'chat-B'});
  if(p.includes('/edits?')||p.endsWith('/read'))return ok([]);
