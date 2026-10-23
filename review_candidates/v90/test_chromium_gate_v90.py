@@ -90,3 +90,28 @@ def test_company_switch_clears_draft_before_other_company_can_send(browser_page)
     expect(page.locator('#message')).to_be_enabled()
     assert page.locator('#message').input_value()=='' , 'Prior company draft leaks into next recipient'
     assert page.evaluate('__qa.sends.length')==0
+
+def test_company_switch_removes_previous_attachment(browser_page):
+    page=browser_page
+    open_chat(page)
+    page.locator('#fileInput').set_input_files({'name':'confidential.pdf','mimeType':'application/pdf','buffer':b'%PDF-1.7 test'})
+    expect(page.locator('#fileInfo')).to_contain_text('confidential.pdf')
+    page.locator('.company').nth(1).click()
+    expect(page.locator('#message')).to_be_enabled()
+    assert page.locator('#fileInfo').inner_text() == ''
+    assert page.locator('#fileInput').evaluate('(el) => el.files.length') == 0
+    assert page.evaluate('__qa.sends.length')==0
+
+
+def test_company_switch_with_inflight_send_never_transfers_payload(browser_page):
+    page=browser_page
+    open_chat(page)
+    page.locator('#message').fill('B only confidential payload')
+    page.locator('#send').click()
+    page.locator('.company').nth(1).click()
+    expect(page.locator('#message')).to_be_enabled()
+    assert page.locator('#message').input_value() == ''
+    page.wait_for_timeout(180)
+    assert page.locator('#message').input_value() == ''
+    assert page.evaluate('__qa.sends.length') == 1
+    assert page.evaluate('__qa.sends[0].body') == 'B only confidential payload'
