@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Response, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .security_hardening import match_totp, recovery_hash, secret_for_user
 
@@ -25,11 +25,17 @@ FAKE_HASH = 'pbkdf2_sha256$260000$' + ('a1' * 16) + '$' + ('a2' * 32)
 
 
 class LoginPayload(BaseModel):
-    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    model_config = ConfigDict(extra='forbid')
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=1, max_length=1000)
     otp: str | None = Field(default=None, pattern=r'^\d{6}$')
     recovery_code: str | None = Field(default=None, pattern=r'^[a-fA-F0-9]{32}$')
+
+    @field_validator('email', 'otp', 'recovery_code', mode='before')
+    @classmethod
+    def trim_nonsecret_fields(cls, value):
+        # Password bytes must reach PBKDF2 unchanged, including whitespace.
+        return value.strip() if isinstance(value, str) else value
 
 
 def auth_stage_enabled() -> bool:
@@ -195,7 +201,7 @@ def make_auth_router() -> APIRouter:
             cur.execute('SELECT jw_dev.v85_auth_revoke_session(%s)', (hashed,))
             if cur.fetchone() != (True,):
                 raise HTTPException(401, 'PostgreSQL session invalid')
-        response.delete_cookie(COOKIE, path='/')
+        response.delete_cookie(COOKIE, path='/', secure=True, httponly=True, samesite='strict')
         response.headers['Cache-Control'] = 'no-store'
         return {'ok': True}
 
