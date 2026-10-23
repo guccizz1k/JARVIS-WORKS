@@ -119,3 +119,13 @@ Do **NOT** merge until all missing gates receive independent evidence.
 4. Re-run historical 565 and all real API/browser E2E; operating deploy remains unapproved.
 
 **Judgment: DRAFT PATCH + ISOLATED MODEL TESTS PASS; LIVE DATABASE CONCURRENCY BLOCKED; OPERATIONAL RELEASE BLOCKED.**
+
+
+## 2026-10-24 — failing-first UI/send QA extension
+
+- Found **three reproducible failures on the original staging HTML**: repeated Enter while reading a file issued three sends; a delayed successful response erased a newly typed draft; replacing a file during a request lost the newly chosen attachment. Initial failure proof: 3 FAIL / 1 PASS in a new adversarial test file.
+- Applied scoped `messenger_stage_v90.html` changes: synchronous in-flight guard, captured chat nonce, immutable retry request key/payload, conditional clearing only of the original draft/file, and stale completion isolation when changing chats.
+- Extended counterexamples for retries after timeout and an old chat's `finally` during a new chat send.
+- **Actual local smoke proof:** Python pytest **38 PASS**, Node browser-handler VM tests **9 PASS**, FAIL 0. Python compile and inline JS `node --check` PASS. `stage_verify_v90.py` repeats those checks with a machine-readable result and keeps live DB / browser E2E / 565 historical tests explicitly NOT RUN.
+- GitHub blobs for UI/new tests/runner match files tested locally, recorded in `QA_LEARNING_LOG_20261024.md`.
+- **Important not done:** authoritative V8.9 source reconciliation, any SQL write/apply of the cursor guard, independent Postgres two-connection contention, live tenant API, actual Chromium, historical 565 regression, formal migration, production deployment. These gates remain BLOCKED/NOT RUN.
