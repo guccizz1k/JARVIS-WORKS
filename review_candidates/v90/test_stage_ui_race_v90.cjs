@@ -45,8 +45,9 @@ test('switching chats during HTTP reply cannot wipe next chat message draft',asy
 test('policy denial 1008 must not trigger reconnection retry',()=>{
  const line=script.split('\n').find(l=>l.includes('sock.onclose=event=>'));
  assert(line, 'onclose handler missing');
- const sock={},st={nonce:12,attempt:0},labels=[],notices=[];
+ const sock={},st={nonce:12,attempt:0,socket:null},labels=[],notices=[];
  let retryCount=0;
+ st.socket=sock;
  const sandbox={sock,st,local:12,connected:s=>labels.push(s),msg:s=>notices.push(s),setTimeout:()=>retryCount++,join:()=>retryCount++};
  vm.runInNewContext(line,sandbox);
  sock.onclose({code:1008});
