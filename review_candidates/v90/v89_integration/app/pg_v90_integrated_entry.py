@@ -13,7 +13,7 @@ import os
 from contextlib import contextmanager
 from typing import Any
 
-from fastapi import HTTPException, Request, WebSocket
+from fastapi import HTTPException, Request, Response, WebSocket
 
 from . import pg_api_v84 as stage
 from . import pg_auth_v85 as auth
@@ -109,6 +109,15 @@ def register_v90_messenger(app) -> bool:
         return False
     origins = _origins()  # fail before creating any routes
     gateway = ScopedMessengerGateway()
+
+    def current_pg_identity(request: Request, response: Response):
+        # Legacy /api/me verifies a *SQLite* session; V9 requires the PG session.
+        # Never accept a browser-supplied org/actor identifier.
+        with _pg_validated_cursor(_session_hash(request)) as (_, identity):
+            response.headers['Cache-Control'] = 'no-store'
+            return {'org_id': identity[2], 'csrf_token': identity[4]}
+
+    app.add_api_route('/api/pg-stage/v90/me', current_pg_identity, methods=['GET'])
     app.include_router(create_router(gateway, _authorize))
     app.include_router(create_realtime_router(gateway, _authorize, allowed_origins=origins))
     return True
