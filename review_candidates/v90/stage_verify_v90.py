@@ -20,7 +20,7 @@ PY_FILES = [
     'test_commit_order_model_v90.py',
 ]
 TESTS_PY = [n for n in PY_FILES if n.startswith('test_')]
-TESTS_JS = ['test_stage_ui_race_v90.cjs', 'test_ui_submission_integrity_v90.cjs', 'test_client_edit_order_v90.cjs']
+TESTS_JS = ['test_stage_ui_race_v90.cjs', 'test_ui_submission_integrity_v90.cjs', 'test_client_edit_order_v90.cjs', 'test_ws_cursor_guard_v90.cjs']
 
 
 def run(args: list[str], cwd: Path) -> dict[str, object]:
