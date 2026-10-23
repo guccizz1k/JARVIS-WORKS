@@ -22,7 +22,7 @@
  'use strict';
  const API='/api/pg-stage/v90';
  const el=id=>document.getElementById(id);
- const st={orgId:'',csrf:'',chat:'',cursor:0,editAt:'1970-01-01T00:00:00+00:00',editId:'',socket:null,nonce:0,attempt:0,selected:null,companies:[],offset:0,hasMore:false,file:null,pending:null,messages:new Map()};
+ const st={orgId:'',csrf:'',chat:'',cursor:0,editAt:'1970-01-01T00:00:00+00:00',editId:'',socket:null,nonce:0,attempt:0,selected:null,companies:[],offset:0,hasMore:false,file:null,pending:null,sending:null,messages:new Map()};
  const msg=txt=>{el('notice').textContent=txt||''};
  const connected=(label,live=false)=>{el('status').textContent=label;el('status').classList.toggle('live',live)};
  const request=async(path,options={})=>{
@@ -87,7 +87,7 @@
    sock.onerror=()=>{msg('일시적인 연결 오류가 발생했습니다. 자동 재연결합니다.')};
  };
  const selectCompany=async(item)=>{
-   st.nonce++;const nonce=st.nonce;st.attempt=0;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.selected=item;st.file=null;st.pending=null;el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
+   st.nonce++;const nonce=st.nonce;st.attempt=0;st.sending=null;el('message').disabled=true;el('send').disabled=true;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.selected=item;st.file=null;st.pending=null;el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
    try{const result=await request(API+'/chats',{method:'POST',body:JSON.stringify({other_org_id:item.org_id})});if(nonce!==st.nonce)return;
     st.chat=result.connection_id;el('message').disabled=false;el('send').disabled=false;
     await sync(nonce);if(nonce===st.nonce)join();
@@ -114,20 +114,27 @@
    try{await request(API+'/messages/'+encodeURIComponent(item.message_id),{method:'PATCH',body:JSON.stringify({body:input,expected_version:item.version})});msg('수정 요청이 저장됐습니다.');}catch(err){msg(err.message)}
  };
  const send=async()=>{
-   if(!st.chat)return;const chat=st.chat,nonce=st.nonce;const text=el('message').value;const file=st.file;
-   if(!text.trim()&&!file)return;
+   // A disabled button is not a concurrency guard: Enter can trigger this handler.
+   if(!st.chat||st.sending)return;
+   const chat=st.chat,nonce=st.nonce,text=el('message').value,file=st.file;
+   if(!text.trim()&&!file&&!st.pending)return;
+   const ticket={nonce,chat};st.sending=ticket;
    el('send').disabled=true;msg('');
    try{
-    const key=st.pending?.key||crypto.randomUUID();const payload=st.pending?.payload||{request_id:key,body:text};
+    const key=st.pending?.key||crypto.randomUUID();
+    const payload=st.pending?.payload||{request_id:key,body:text};
     if(file&&!st.pending){payload.filename=file.name;payload.mime=file.type;payload.data_base64=await readfile(file)}
     if(nonce!==st.nonce||chat!==st.chat)return;
     st.pending={key,payload};
     await request(API+'/chats/'+encodeURIComponent(chat)+'/messages',{method:'POST',body:JSON.stringify(payload)});
     if(nonce!==st.nonce||chat!==st.chat)return;
-    st.pending=null;el('message').value='';el('fileInput').value='';st.file=null;el('fileInfo').textContent='';
+    // Do not erase an edited draft or a newly selected file while a request was in-flight.
+    if(st.pending?.key===key)st.pending=null;
+    if(el('message').value===payload.body)el('message').value='';
+    if(st.file===file){el('fileInput').value='';st.file=null;el('fileInfo').textContent='';}
     if(!st.socket||st.socket.readyState!==WebSocket.OPEN)await sync(nonce);
    }catch(err){if(nonce===st.nonce)msg(err.message+' · 다시 전송하면 동일 요청번호를 사용합니다.');}
-   finally{if(nonce===st.nonce)el('send').disabled=false}
+   finally{if(st.sending===ticket){st.sending=null;if(nonce===st.nonce)el('send').disabled=false}}
  };
  const allowed=new Set(['image/jpeg','image/png','image/webp','image/gif','application/pdf','text/plain','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
  el('fileInput').onchange=()=>{const file=el('fileInput').files?.[0];if(!file)return;
