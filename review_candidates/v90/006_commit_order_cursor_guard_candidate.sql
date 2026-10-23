@@ -79,6 +79,7 @@ CREATE OR REPLACE FUNCTION jw_dev.v90_edit_text(p_message_id text, p_new_body te
  SET search_path TO 'pg_catalog'
 AS $function$
 DECLARE v_org text; v_actor text; v_m jw_dev.messenger_messages%ROWTYPE; v_version bigint;
+  v_event_at timestamptz;
 BEGIN
   v_org:=jw_dev.current_org_from_session(); v_actor:=jw_dev.current_actor_from_session_v82();
   IF v_org IS NULL OR v_actor IS NULL OR p_new_body IS NULL
@@ -98,11 +99,22 @@ BEGIN
   THEN RAISE EXCEPTION 'Version conflict' USING ERRCODE='40001'; END IF;
   IF v_m.body IS NOT DISTINCT FROM p_new_body THEN RETURN v_m.version; END IF;
   v_version:=v_m.version+1;
+  -- Existing edit cursor is (edited_at, edit_id). Ensure a STRICTLY increasing
+  -- timestamp within this conversation, including equal-clock-tick commits.
+  -- This query is protected by the per-conversation advisory transaction lock.
+  -- Its O(edit history) cost must be benchmarked before production.
+  SELECT greatest(clock_timestamp(),
+         coalesce(max(e.edited_at::timestamptz) + interval '1 microsecond',
+                  clock_timestamp()))
+    INTO v_event_at
+    FROM jw_dev.messenger_edits e
+    JOIN jw_dev.messenger_messages historical ON historical.id=e.message_id
+    WHERE historical.connection_id=v_m.connection_id;
   UPDATE jw_dev.messenger_messages SET body=p_new_body,version=v_version,
-    edited_at=clock_timestamp()::text WHERE id=p_message_id;
+    edited_at=v_event_at::text WHERE id=p_message_id;
   INSERT INTO jw_dev.messenger_edits
     (id,message_id,previous_body,new_body,actor_user,edited_at,version)
-  VALUES(gen_random_uuid()::text,p_message_id,v_m.body,p_new_body,v_actor,clock_timestamp()::text,v_version);
+  VALUES(gen_random_uuid()::text,p_message_id,v_m.body,p_new_body,v_actor,v_event_at::text,v_version);
   RETURN v_version;
 END $function$;
 
