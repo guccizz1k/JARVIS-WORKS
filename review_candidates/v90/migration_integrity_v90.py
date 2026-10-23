@@ -79,10 +79,10 @@ def audit(sqlite_path: str, pg_conn: Any, tables: Iterable[str]) -> dict[str, An
         pg.execute('SET TRANSACTION READ ONLY')
         for table in names:
             # SQL names ONLY from the fixed TABLES whitelist, never request values.
-            src=[dict(r) for r in source.execute('SELECT * FROM "'+table+'"')]
-            pg.execute('SELECT * FROM jw_dev."'+table+'"')
+            src=[dict(r) for r in source.execute('SELECT * FROM "'+table+'" LIMIT '+str(LIMIT+1))]
+            pg.execute('SELECT * FROM jw_dev."'+table+'" LIMIT '+str(LIMIT+1))
             fields=[desc.name for desc in pg.description]
-            dst=[dict(zip(fields,row)) for row in pg.fetchall()]
+            dst=[dict(zip(fields,row)) for row in pg.fetchmany(LIMIT+1)]
             details[table]=compare(src,dst)
     return {'status':'PASS' if all(v['status']=='PASS' for v in details.values()) else 'FAIL',
             'tables':details, 'mode':'READ_ONLY_COMPARISON'}
