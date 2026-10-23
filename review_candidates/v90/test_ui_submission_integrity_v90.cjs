@@ -56,3 +56,38 @@ test('failure retry reuses request ID and clears only after eventual success',as
  assert.equal(x.st.pending,null);
  assert.equal(x.els.message.value,'');
 });
+
+test('pending failed send is replayed unchanged even after draft edit',async()=>{
+ const sent=[];
+ const x=env(async()=> 'ZGF0YQ==',async(path,opts)=>{
+  sent.push(JSON.parse(opts.body));
+  if(sent.length===1)throw Error('timeout');
+  return {message_id:'ok'};
+ });
+ await x.send();assert.equal(sent.length,1);
+ x.els.message.value='draft after timeout';
+ await x.send();
+ assert.equal(sent.length,2);
+ assert.deepEqual(sent[0],sent[1]);
+ assert.equal(x.els.message.value,'draft after timeout');
+});
+
+test('old send finalizer cannot unlock the new chat sending ticket',async()=>{
+ const old=deferred(),next=deferred(),sent=[];
+ const x=env(async()=> 'ZGF0YQ==',async(path,opts)=>{
+  sent.push(path);
+  return sent.length===1?old.promise:next.promise;
+ });
+ const first=x.send();for(let i=0;i<20&&sent.length<1;i++)await Promise.resolve();
+ x.st.chat='chat-A-C';x.st.nonce=2;x.st.sending=null;x.st.pending=null;
+ x.st.file=null;x.els.message.value='second chat draft';
+ const second=x.send();for(let i=0;i<20&&sent.length<2;i++)await Promise.resolve();
+ assert.equal(sent.length,2);
+ assert.match(sent[1],/chat-A-C/);
+ const ticket=x.st.sending;
+ old.resolve({});await first;
+ assert.equal(x.st.sending,ticket,'old send cleared active ticket');
+ assert.equal(x.els.message.value,'second chat draft');
+ next.resolve({});await second;
+ assert.equal(x.st.sending,null);
+});
