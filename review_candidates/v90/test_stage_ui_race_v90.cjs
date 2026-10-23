@@ -54,4 +54,7 @@ test('policy denial 1008 must not trigger reconnection retry',()=>{
  assert.match(labels[0],/접근 차단/);
  sock.onclose({code:1006});
  assert.equal(retryCount,1);
+ st.attempt=6; sock.onclose({code:1006});
+ assert.equal(retryCount,1);
+ assert.match(labels.at(-1),/연결 중단/);
 });
