@@ -38,6 +38,12 @@ def probe(connect: Any) -> dict[str, bool]:
     try:
         b = connect()
         try:
+            # Psycopg SELECT starts an implicit transaction when autocommit is
+            # disabled. The transaction() block would then be a nested
+            # savepoint, which does NOT release advisory locks on exit.
+            # Configure BEFORE the first role/security SELECT.
+            a.autocommit = True
+            b.autocommit = True
             assert_nonprivileged(a)
             assert_nonprivileged(b)
             with a.transaction():
