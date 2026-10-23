@@ -76,6 +76,13 @@
   }
  };
  const markRead=async()=>{if(!st.chat||!st.cursor)return;try{await request(API+'/chats/'+encodeURIComponent(st.chat)+'/read',{method:'POST',body:JSON.stringify({cursor:st.cursor})});}catch{ /* reconnect sync independently repeats read */ }};
+ let readAckTimer=null;
+ const scheduleRead=()=>{
+   // A burst of messages should generate one latest-cursor acknowledgement, not N POSTs.
+   if(readAckTimer!==null)return;
+   const chat=st.chat,nonce=st.nonce;
+   readAckTimer=setTimeout(()=>{readAckTimer=null;if(chat===st.chat&&nonce===st.nonce)void markRead()},200);
+ };
  const sync=async(nonce)=>{
    let next=0,rows=[];
    do{
@@ -103,14 +110,14 @@
    sock.onopen=()=>{if(local!==st.nonce||st.socket!==sock){sock.close();return;}connected('실시간 연결',true)};
    sock.onmessage=event=>{if(local!==st.nonce||st.socket!==sock)return;let e;try{e=JSON.parse(event.data)}catch{return}
       if(e.type==='heartbeat'){st.attempt=0;return;}
-      if(e.type==='message'){render(e.data);st.cursor=Math.max(st.cursor,e.data.message_cursor);void markRead()}
+      if(e.type==='message'){render(e.data);st.cursor=Math.max(st.cursor,e.data.message_cursor);scheduleRead()}
       if(e.type==='edit'){const next=Date.parse(e.data.edited_at),prev=Date.parse(st.editAt);const id=String(e.data.edit_id||'');if(!Number.isFinite(next)||!id||next<prev||(next===prev&&id<=st.editId))return;applyEdit(e.data);st.editAt=e.data.edited_at;st.editId=id}
    };
    sock.onclose=event=>{if(local!==st.nonce||st.socket!==sock)return;if(event.code===1008){connected('접근 차단');msg('로그인이 만료되었거나 대화 접근 권한이 없습니다. 다시 로그인하세요.');return;}if(st.attempt>=6){connected('연결 중단');msg('연결을 여러 번 시도했으나 실패했습니다. 기업을 다시 선택하면 재시도합니다.');return;}connected('재연결 중');const wait=Math.min(8000,500*Math.pow(2,Math.min(st.attempt++,4)));setTimeout(()=>{if(local===st.nonce&&st.socket===sock)join()},wait)};
    sock.onerror=()=>{if(local===st.nonce&&st.socket===sock)msg('일시적인 연결 오류가 발생했습니다. 자동 재연결합니다.')};
  };
  const selectCompany=async(item)=>{
-   st.nonce++;const nonce=st.nonce;st.attempt=0;st.sending=null;el('message').disabled=true;el('send').disabled=true;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.pendingEdits.clear();st.selected=item;st.file=null;st.pending=null;el('message').value='';el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
+   st.nonce++;const nonce=st.nonce;if(readAckTimer!==null){clearTimeout(readAckTimer);readAckTimer=null;}st.attempt=0;st.sending=null;el('message').disabled=true;el('send').disabled=true;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.pendingEdits.clear();st.selected=item;st.file=null;st.pending=null;el('message').value='';el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
    try{const result=await request(API+'/chats',{method:'POST',body:JSON.stringify({other_org_id:item.org_id})});if(nonce!==st.nonce)return;
     st.chat=result.connection_id;el('message').disabled=false;el('send').disabled=false;
     await sync(nonce);if(nonce===st.nonce)join();
