@@ -177,7 +177,7 @@
  let timer;el('search').oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>void search(),260)};
  el('more').onclick=()=>void search(false);
  el('fileInput').addEventListener('change',()=>{st.pending=null});
- (async()=>{try{const me=await request('/api/me');st.orgId=me.org_id;st.csrf=me.csrf_token;await search()}catch(err){msg('로그인 세션을 확인할 수 없습니다. '+err.message)}})();
+ (async()=>{try{const me=await request(API+'/me');st.orgId=me.org_id;st.csrf=me.csrf_token;await search()}catch(err){msg('로그인 세션을 확인할 수 없습니다. '+err.message)}})();
 })();
 </script>
 </body>
