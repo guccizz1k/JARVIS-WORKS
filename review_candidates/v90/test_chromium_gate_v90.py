@@ -134,3 +134,21 @@ def test_burst_messages_coalesce_read_receipt_requests(browser_page):
     page.wait_for_timeout(440)
     assert page.evaluate('__reads.length') <= 2, 'Unbounded read receipt POSTs from one WS message batch'
     assert page.evaluate('__reads.at(-1)?.cursor') == 40
+
+def test_company_switch_cancels_queued_old_chat_read_receipt(browser_page):
+    page=browser_page
+    open_chat(page)
+    page.evaluate("""() => {
+       window.__reads=[];
+       const previous=window.fetch;
+       window.fetch=(url,opts={})=>{
+         if(String(url).endsWith('/read'))__reads.push({url:String(url),body:JSON.parse(opts.body)});
+         return previous(url,opts);
+       };
+       const socket=__qa.ws.at(-1);
+       socket.onmessage({data:JSON.stringify({type:'message',data:{message_id:'oldB',message_cursor:7,sender_org:'B',body:'sensitive',version:1}})});
+    }""")
+    page.locator('.company').nth(1).click()
+    expect(page.locator('#message')).to_be_enabled()
+    page.wait_for_timeout(350)
+    assert page.evaluate('__reads.length') == 0, 'Read acknowledgement of previous chat leaked after company switch'
