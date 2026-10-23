@@ -156,3 +156,30 @@ See `QA_LEARNING_LOG_20261024.md` for detailed root-cause evidence.
 
 ### Unresolved launch blockers
 V8.9 original commit/archive and 565 historical tests missing; actual independent Postgres messenger-RPC concurrency A/B/C E2E NOT RUN; `006_commit_order_cursor_guard_candidate.sql` UNAPPLIED; Chromium browser E2E blocked; GitHub remote CI statuses absent; no merge, deployment or real customer changes. **PARTIAL / NOT RELEASE-READY**.
+
+## 2026-10-24 — NOT RUN gate triage and actual socket-level evidence
+
+### Defect found, reproduced, fixed, published
+- `pg_advisory_probe_v90.py` previously queried current-user privileges before entering `connection.transaction()` on a default psycopg connection. That first SELECT begins an implicit outer transaction; subsequent transaction context becomes a SAVEPOINT, which fails to release transaction-scoped advisory locks when the context exits. The probe could falsely report an unlock failure against a correct PostgreSQL server.
+- New `test_pg_probe_transaction_scope_v90.py` models psycopg's implicit-transaction/savepoint behavior. **Before patch: 2 FAIL / 1 PASS. After patch: 3 PASS.**
+- Fix sets `a.autocommit = b.autocommit = True` on the fresh DB sessions **before** the privilege SELECT. The actual lock assertions remain inside explicit `with conn.transaction():` blocks; nonprivileged-role check and no-customer-data policy retained.
+- Published source and new regression test Git blob SHA-1 match files executed locally: probe `a6065ec499b8418d616f29fae8502bbce8f8adb7`, test `fe30ea9789cc01cccf1f1b0cd395d27b8c4607ac`.
+
+### Previously NOT RUN network transport gate: partially unblocked
+- Added `test_loopback_smoke_v90.py`. Executed an actual **Uvicorn HTTP TCP server on 127.0.0.1**, `httpx` real HTTP requests and `websockets.sync.client` real WebSocket upgrades.
+- Synthetic signed session-cookie validation, CSRF failures, A/B authorized delivery, C denied, WebSocket reception and reconnect replay: **2/2 network smoke cases PASS** in the published GitHub source.
+- Also ran a **local archive-only extended suite** `test_loopback_transport_v90.py` with **6/6 PASS** including attachment bytes, session forgery, websocket Origin checks and cursor replay. Extended suite was not published on GitHub, but is preserved in the review ZIP.
+- These use an in-memory **simulated gateway**; they do NOT establish genuine Supabase PostgreSQL RLS, actual V8.9 authentication, independent Postgres connections or full real-browser E2E.
+
+### Repeatable results, separated by source location
+- GitHub-publication-equivalent staging runner executed locally against published source set: **43 Python + 26 Node = 69 PASS**, syntax PASS. (PR contains the published smoke and implicit-transaction tests.)
+- Full local review pack additionally includes 5 previous fake-driver tests and 6 extended loopback cases: **54 Python + 26 Node = 80 PASS**, syntax PASS, 0 FAIL, 0 SKIP.
+- Focused 11-case transaction-scope + HTTP/WebSocket suite repeated **3 complete times**, each **11 PASS**.
+
+### Still unresolved / cannot safely label PASS
+- `pg_advisory_probe_v90.py` actual two-connection run returned **BLOCKED / NOT RUN** because `JW_V90_ISOLATED_PG_DSN` and required explicit isolated-stage approval were absent; psycopg not installed. No privileged login, database mutation, bypass or deployment attempted.
+- The `006_commit_order_cursor_guard_candidate.sql` patch remains **UNAPPLIED** and its live independent-connection transaction ordering/tenant isolation is **NOT RUN**.
+- V8.9 authoritative local commit `a3783ef` and its archive were **NOT FOUND** in currently accessible GitHub/Library; historical 565 regressions NOT RUN.
+- Actual Chromium browser E2E remains BLOCKED by environment administrator policy; no workaround attempted.
+- GitHub Actions remote CI does not report statuses; no Actions workflow/paid job has been started.
+- **Disposition remains DRAFT / PARTIAL.** Existing `main`, production, users and customer data remain unchanged.
