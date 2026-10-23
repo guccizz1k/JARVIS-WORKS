@@ -139,3 +139,20 @@ Do **NOT** merge until all missing gates receive independent evidence.
 - All deployment gates unchanged: V8.9 latest commit/archive unavailable, historical 565 tests not run, `006` SQL concurrency guard unapplied, multi-connection PostgreSQL and Chromium end-to-end blocked/not run, remote GitHub CI results unavailable. No merge, deployment, or customer-data mutation.
 
 See `QA_LEARNING_LOG_20261024.md` for detailed root-cause evidence.
+
+
+## 2026-10-24 — reconnect lifecycle and isolated DB acceptance gate
+
+### Demonstrated failure and patch
+- Actual previous staging HTML was tested with `test_ws_reconnect_lifecycle_v90.cjs`: **5 FAIL / 1 PASS**. The stale socket `onclose` scheduled duplicate reconnects; stale `onopen` reset retry state; open-then-immediate-close reset retry attempts indefinitely; stale `onerror` displayed misleading user notices.
+- `messenger_stage_v90.html` now checks `st.socket === sock` alongside chat nonce on open, close, error and delayed timers. It resets the reconnect budget only after a received server heartbeat rather than TCP/WebSocket open. Same six tests **6/6 PASS**, and previous policy-closure test adapted to represent the current socket.
+- Original local regression suite with these changes: **38 Python + 26 Node = 64 PASS / 0 FAIL**, syntax checks PASS; all four changed source/test Git blobs match locally verified file hashes.
+
+### Next operational gate prepared
+- New `pg_advisory_probe_v90.py` (GitHub blob matches locally tested file) is a **read-only-in-terms-of-table-data**, opt-in check for transaction-scoped Postgres advisory locks using **two independent DB connections**. It denies superuser/BYPASSRLS roles, verifies competing chat lock, unrelated chat progress, and release after commit. Requires `JW_V90_ISOLATED_PG_APPROVED=yes` plus an approved isolated `JW_V90_ISOLATED_PG_DSN` and psycopg; does **not** test messenger RPCs end-to-end.
+- Its five local fake-driver contract tests passed. Source archive contains test file, but the GitHub upload of that test file was **blocked by a tool safety gate** and is **NOT published to this PR**. Consequently this PR's existing `stage_verify_v90.py` runs the 64 available tests, not the full 69-case local candidate suite.
+- Local full candidate suite including unpublished probe tests: **43 Python + 26 Node = 69 PASS / 0 FAIL**, repeated three times. The actual DB probe terminated with `BLOCKED / NOT RUN` (no approved isolated DSN and no psycopg driver).
+- PostgreSQL server package was not installed and the local package repository update timed out. No remote SQL mutation, remote permission change, bypass or production connection was attempted.
+
+### Unresolved launch blockers
+V8.9 original commit/archive and 565 historical tests missing; actual independent Postgres messenger-RPC concurrency A/B/C E2E NOT RUN; `006_commit_order_cursor_guard_candidate.sql` UNAPPLIED; Chromium browser E2E blocked; GitHub remote CI statuses absent; no merge, deployment or real customer changes. **PARTIAL / NOT RELEASE-READY**.
