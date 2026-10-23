@@ -129,3 +129,13 @@ Do **NOT** merge until all missing gates receive independent evidence.
 - **Actual local smoke proof:** Python pytest **38 PASS**, Node browser-handler VM tests **9 PASS**, FAIL 0. Python compile and inline JS `node --check` PASS. `stage_verify_v90.py` repeats those checks with a machine-readable result and keeps live DB / browser E2E / 565 historical tests explicitly NOT RUN.
 - GitHub blobs for UI/new tests/runner match files tested locally, recorded in `QA_LEARNING_LOG_20261024.md`.
 - **Important not done:** authoritative V8.9 source reconciliation, any SQL write/apply of the cursor guard, independent Postgres two-connection contention, live tenant API, actual Chromium, historical 565 regression, formal migration, production deployment. These gates remain BLOCKED/NOT RUN.
+
+## 2026-10-24 — high-assurance replay/edit client integrity
+
+- New UI bug class resolved in isolated `messenger_stage_v90.html`: stale message snapshots cannot downgrade edited text; edits received before base messages are queued and applied; pending edits are bounded to 500 and reset on chat switch. Current source hash: `a7cfa3188d954c1e493a332d02f4744fe34dfa50`.
+- WebSocket guard rejects superseded socket deliveries even when chat nonce is unchanged, and normalizes edit timestamps before progressing the `(edited_at, edit_id)` reconnect cursor. Older/equal cursors cannot roll back the resume position.
+- Failing-first evidence: 4 failing edit-order scenarios before changes, 3 failing WS cursor scenarios before changes. Post-change dedicated test files: **7 PASS + 4 PASS**. Existing 38 Python + 9 JS checks stayed passing.
+- Local fail-closed stage harness: **38 Python + 20 JS = 58 PASS, 0 FAIL, 0 SKIP**, source syntax passes. **Five complete consecutive runs** returned the same result. GitHub blobs of the actual files match locally verified sources. Tests are Node VM / FastAPI stub + synthetic model, not real-browser/live-DB E2E.
+- All deployment gates unchanged: V8.9 latest commit/archive unavailable, historical 565 tests not run, `006` SQL concurrency guard unapplied, multi-connection PostgreSQL and Chromium end-to-end blocked/not run, remote GitHub CI results unavailable. No merge, deployment, or customer-data mutation.
+
+See `QA_LEARNING_LOG_20261024.md` for detailed root-cause evidence.
