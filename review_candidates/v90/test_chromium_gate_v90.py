@@ -81,3 +81,12 @@ def test_chromium_page_has_no_desktop_overflow(browser_page):
  page=browser_page
  assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
  assert page.locator('#companies').bounding_box()['width']>250
+
+def test_company_switch_clears_draft_before_other_company_can_send(browser_page):
+    page=browser_page
+    open_chat(page)
+    page.locator('#message').fill('기업 B 전용 영업비밀')
+    page.locator('.company').nth(1).click()
+    expect(page.locator('#message')).to_be_enabled()
+    assert page.locator('#message').input_value()=='' , 'Prior company draft leaks into next recipient'
+    assert page.evaluate('__qa.sends.length')==0
