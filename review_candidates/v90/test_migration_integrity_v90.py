@@ -44,9 +44,11 @@ def test_sqlite_read_only_and_pg_connection_is_query_only():
         def __enter__(self):return self
         def __exit__(self,*x):pass
         def execute(self,q):
-            assert q=='SET TRANSACTION READ ONLY' or q=='SELECT * FROM jw_dev."organizations"'
+            assert q=='SET TRANSACTION READ ONLY' or q=='SELECT * FROM jw_dev."organizations" LIMIT 100001'
         description=[type('D',(),{'name':'id'})(),type('D',(),{'name':'name'})()]
-        def fetchall(self):return [('o1','가온')]
+        def fetchmany(self,n):
+            assert n==100001
+            return [('o1','가온')]
     class DB:
         def cursor(self):return Cursor()
     with tempfile.TemporaryDirectory() as d:
