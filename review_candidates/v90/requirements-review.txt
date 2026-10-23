@@ -1,0 +1,12 @@
+# V9.0 isolated review and loopback HTTP/WS tests only — NOT production lockfile.
+# Captures versions used in actual local PASS runs (2026-10-24).
+fastapi==0.128.2
+httpx==0.28.1
+starlette==0.50.0
+pydantic==2.13.5
+pytest==9.0.2
+anyio==4.13.0
+uvicorn==0.48.0
+websockets==16.0
+# psycopg is intentionally not claimed installed. Live DB tests require an
+# approved nonprivileged connection and independently reviewed driver setup.
