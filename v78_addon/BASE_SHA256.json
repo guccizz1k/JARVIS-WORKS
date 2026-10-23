@@ -1,0 +1,6 @@
+{
+  "app/evidence_quality_v70.py": "fcd94ae85a7fdc7ab3b7e6decfa8e90299f235a867a152fd6498619b827a7920",
+  "app/main.py": "7a09e24aae81ff1ce1795e8e15bc44399d17f65baab15463c6757c67436da6e0",
+  "app/pg_full_shadow_v76.py": "aad09bbcb54b0ed4dcf9a26b78bfb127796bab46e5f49e62c97b1212b8ff465a",
+  "tests/test_installer_v75.py": "e69b4efda2fb1db311250d20d5ca5ff47569e3e61bf5fcad752cd8c2beb42b09"
+}

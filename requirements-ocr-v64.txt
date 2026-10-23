@@ -1,0 +1,5 @@
+# V6.4 additional runtime dependencies. Use only in isolated review environments.
+# System Tesseract OCR with kor+eng language models must be installed separately.
+-r requirements.txt
+Pillow>=11,<13
+PyMuPDF>=1.24,<2
