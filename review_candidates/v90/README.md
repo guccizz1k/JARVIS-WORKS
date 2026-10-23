@@ -52,3 +52,21 @@
 5. Security staging RLS/roles: **PARTIAL** (verified grants, FORCE RLS, synthetic isolation); operating SSL/tenant connections/concurrency/rollout: **BLOCKED**.
 
 Do **NOT** merge until all missing gates receive independent evidence.
+
+## V9.0 next-stage increment (2026-10-23, review-only)
+
+### New in this increment
+- **Actual Supabase dev RPC**: `v90_download_attachment(connection_id,message_id)`, restricted to the two verified active-chat companies, with a valid unexpired session; revoked to anon/authenticated/service_role/PUBLIC. Saved as `004_jw_dev_attachment_download.sql`.
+- **Actual dev A/B/C test**: A and B download the same file, C cannot download, and an invalid session cannot download. `005_attachment_acl_regression.sql` was executed then ROLLED BACK.
+- **FastAPI**: attachment download route with SHA-256 integrity verification, octet-stream disposition, no-store cache and nosniff. Prior API routes kept intact.
+- **WebSocket**: new opt-in `pg_messenger_realtime_v90.py` (no production mount), server-side subscription authorization + exact Origin allowlist, cursor replay, edit replay, backpressure, periodic DB-based session rechecking, and forced close on revocation.
+- **Korean desktop-oriented messenger UI**: `messenger_stage_v90.html` with directory search, immediate chat, file attachment, download, read receipts, WebSocket reconnection, and safe DOM rendering. **Not integrated into legacy app**.
+- Local isolated FastAPI/ASGI WebSocket tests: **26 PASS, 0 FAIL, 0 SKIP**, using mocked gateway; JavaScript syntax parsed in Node. Exact local/GitHub blobs verified for Python and HTML stage files.
+- Live PostgreSQL ACL tests: PASS with rollback. No persistent test rows. Latest database inventory **35 FORCE RLS, 40 policies, 45 user triggers, zero tenant/message/attachment rows**.
+- Browser E2E: **BLOCKED**. Chromium launched, but loopback ASGI navigation failed with `net::ERR_BLOCKED_BY_ADMINISTRATOR`. No attempts to circumvent. HTML was *not* verified visually/through a real browser.
+- Independent app-role PostgreSQL connections, V8.9 original archive `a3783ef`, full 565 regression, actual WebSocket-to-Postgres E2E, migrations/cutover and production release remain **BLOCKED/NOT RUN**.
+- NOTE: websocket uses authorized periodic PostgreSQL reads over an ASGI WebSocket; this is **not** Supabase Realtime Broadcast configuration and does not prove real cross-process fanout or throughput.
+- Supabase security advisor still reports 7 FORCE RLS auth/system tables with no SELECT policies; this is deny-by-default and must be reviewed against the V8.9 auth design before altering.
+- CSP integration for inline UI JS, production attachment scanning and multi-process performance remain unresolved. Do not enable privileged credential workarounds.
+
+**Integrate only after V8.9 authoritative source recovered and complete regressions pass. No merge, production deploy or paid resources.**
