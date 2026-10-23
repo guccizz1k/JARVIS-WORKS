@@ -1,0 +1,4 @@
+# Optional, isolated Chromium DOM review only (no production deployment).
+# Chromium binary must already be locally installed and approved.
+# The tests never navigate to restricted network/localhost URLs.
+playwright==1.57.0
