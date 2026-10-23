@@ -110,7 +110,7 @@
    sock.onerror=()=>{if(local===st.nonce&&st.socket===sock)msg('일시적인 연결 오류가 발생했습니다. 자동 재연결합니다.')};
  };
  const selectCompany=async(item)=>{
-   st.nonce++;const nonce=st.nonce;st.attempt=0;st.sending=null;el('message').disabled=true;el('send').disabled=true;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.pendingEdits.clear();st.selected=item;st.file=null;st.pending=null;el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
+   st.nonce++;const nonce=st.nonce;st.attempt=0;st.sending=null;el('message').disabled=true;el('send').disabled=true;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.pendingEdits.clear();st.selected=item;st.file=null;st.pending=null;el('message').value='';el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
    try{const result=await request(API+'/chats',{method:'POST',body:JSON.stringify({other_org_id:item.org_id})});if(nonce!==st.nonce)return;
     st.chat=result.connection_id;el('message').disabled=false;el('send').disabled=false;
     await sync(nonce);if(nonce===st.nonce)join();
