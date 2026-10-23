@@ -83,11 +83,11 @@
       if(e.type==='message'){render(e.data);st.cursor=Math.max(st.cursor,e.data.message_cursor);void markRead()}
       if(e.type==='edit'){applyEdit(e.data);st.editAt=e.data.edited_at;st.editId=e.data.edit_id}
    };
-   sock.onclose=event=>{if(local!==st.nonce)return;if(event.code===1008){connected('접근 차단');msg('로그인이 만료되었거나 대화 접근 권한이 없습니다. 다시 로그인하세요.');return;}connected('재연결 중');const wait=Math.min(8000,500*Math.pow(2,Math.min(st.attempt++,4)));setTimeout(()=>{if(local===st.nonce)join()},wait)};
+   sock.onclose=event=>{if(local!==st.nonce)return;if(event.code===1008){connected('접근 차단');msg('로그인이 만료되었거나 대화 접근 권한이 없습니다. 다시 로그인하세요.');return;}if(st.attempt>=6){connected('연결 중단');msg('연결을 여러 번 시도했으나 실패했습니다. 기업을 다시 선택하면 재시도합니다.');return;}connected('재연결 중');const wait=Math.min(8000,500*Math.pow(2,Math.min(st.attempt++,4)));setTimeout(()=>{if(local===st.nonce)join()},wait)};
    sock.onerror=()=>{msg('일시적인 연결 오류가 발생했습니다. 자동 재연결합니다.')};
  };
  const selectCompany=async(item)=>{
-   st.nonce++;const nonce=st.nonce;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.selected=item;st.file=null;st.pending=null;el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
+   st.nonce++;const nonce=st.nonce;st.attempt=0;st.socket?.close();st.chat='';st.cursor=0;st.editAt='1970-01-01T00:00:00+00:00';st.editId='';st.messages.clear();st.selected=item;st.file=null;st.pending=null;el('fileInput').value='';el('fileInfo').textContent='';el('messages').replaceChildren();connected('연결 중');msg('');el('chatTitle').textContent=item.company_name;el('chatMeta').textContent='별도 승인 없이 바로 대화합니다';
    try{const result=await request(API+'/chats',{method:'POST',body:JSON.stringify({other_org_id:item.org_id})});if(nonce!==st.nonce)return;
     st.chat=result.connection_id;el('message').disabled=false;el('send').disabled=false;
     await sync(nonce);if(nonce===st.nonce)join();
