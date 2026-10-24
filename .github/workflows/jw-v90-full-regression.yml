@@ -1,0 +1,72 @@
+name: JARVIS V8.9 to V9.0 full regression (review only)
+
+on:
+  push:
+    branches:
+      - review/v90-on-v89-20261024
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v90-recovered-history-review
+  cancel-in-progress: true
+
+jobs:
+  full-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JW_ENV: review
+    steps:
+      - name: Checkout exact reviewed V9.0 branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Confirm V8.9 historical ancestor
+        shell: bash
+        run: |
+          git fetch --no-tags origin a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338
+          git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
+          test "$(git rev-parse a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338:app/main.py)" = "$(git rev-parse HEAD:app/main.py)"
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install reviewed development requirements
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pip install 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+      - name: Install Korean OCR system prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+      - name: Reconstruct historical installer fixture, verify nine pinned hashes
+        run: python scripts/ci_rebuild_v79_overlay.py
+      - name: Fail if historical V7.9 installer suite cannot run
+        run: python -m pytest -q tests/test_installer_v79.py
+      - name: Complete regression suite, fail on any skip
+        run: |
+          python -m pytest -q tests -ra --junitxml=v90-ci-junit.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('v90-ci-junit.xml').getroot()
+          suite=root.find('testsuite') if root.tag=='testsuites' else root
+          actual=int(suite.attrib['tests'])
+          errors=int(suite.attrib.get('errors',0))
+          failed=int(suite.attrib.get('failures',0))
+          skipped=int(suite.attrib.get('skipped',0))
+          assert (actual,errors,failed,skipped)==(589,0,0,0), (actual,errors,failed,skipped)
+          print('PASS: remote 589 cases, 0 errors, 0 failures, 0 skips')
+          PY
+      - name: Upload JUnit even on failure
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v90-full-regression-junit
+          path: v90-ci-junit.xml
+          if-no-files-found: ignore
+          retention-days: 3

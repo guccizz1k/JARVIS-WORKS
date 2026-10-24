@@ -89,7 +89,7 @@ def _auth_cursor():
                     raise HTTPException(503, 'Unsafe PostgreSQL auth login')
                 # Auth login must not be able to adopt the trading role.
                 # Prevent one stolen credential from becoming both auth + data.
-                cur.execute("SELECT pg_catalog.pg_has_role(session_user,'jw_app_dev','SET')")
+                cur.execute("SELECT pg_catalog.pg_has_role(session_user,'jw_app_dev','MEMBER')")
                 if cur.fetchone() != (False,):
                     raise HTTPException(503, 'Auth login has unsafe trading-role membership')
                 cur.execute('SET LOCAL ROLE jw_auth_stage_v85')

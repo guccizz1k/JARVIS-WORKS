@@ -23,6 +23,7 @@ class FakeCursor:
         self.login=login
         self.role=role
         self.trading_membership=trading_membership
+        self.trading_member_inherited=False
         self.candidate=candidate or ('user01','org01',make_hash('testpass'),'',-1,False,0,None)
         self.result=None
         self.fail_issue=False
@@ -32,7 +33,7 @@ class FakeCursor:
     def execute(self,sql,params=None):
         self.calls.append((sql,params))
         if 'SELECT session_user' in sql: self.result=self.login
-        elif 'pg_has_role' in sql: self.result=(self.trading_membership,)
+        elif 'pg_has_role' in sql: self.result=(self.trading_membership if "'MEMBER'" in sql else (self.trading_membership and not self.trading_member_inherited),)
         elif sql.strip()=='SELECT current_user': self.result=self.role
         elif 'v85_auth_candidate' in sql: self.result=self.candidate
         elif 'v85_auth_issue_session' in sql:
@@ -242,3 +243,12 @@ def test_migration_sql_role_grants_and_no_password_exposure():
     assert 'NOLOGIN NOINHERIT NOBYPASSRLS' in sql
     assert 'CREATE POLICY' not in sql
     assert 'GRANT SELECT ON jw_dev.users' not in sql
+
+
+def test_auth_login_cannot_inherit_business_privilege_without_set_role(prepared):
+    prepared.cur.trading_membership = True
+    prepared.cur.trading_member_inherited = True
+    with pytest.raises(Exception) as caught:
+        auth.login_session(request())
+    assert getattr(caught.value, 'status_code', None) == 503
+    assert not any('SET LOCAL ROLE jw_auth_stage_v85' in sql for sql, _ in prepared.cur.calls)
