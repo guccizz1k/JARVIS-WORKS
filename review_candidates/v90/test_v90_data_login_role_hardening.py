@@ -5,7 +5,7 @@ mock-DB integration tests in the restored V8.9 tree.
 """
 from pathlib import Path
 
-SOURCE = (Path(__file__).parent / 'integration_src/app/pg_v90_integrated_entry.py').read_text()
+SOURCE = (Path(__file__).parent / 'v89_integration/app/pg_v90_integrated_entry.py').read_text()
 
 
 def test_server_refuses_business_login_with_auth_stage_membership():
