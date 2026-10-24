@@ -7,6 +7,7 @@ strict browser Origin allowlist, and real non-privileged PostgreSQL connections.
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -14,6 +15,19 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
 from pg_messenger_bridge_v90 import SQL, SQLGateway, VerifiedSession
+
+
+def next_poll_delay(poll_seconds: float, idle_rounds: int) -> float:
+    """Bound idle read pressure without slowing active conversations.
+
+    After eight empty polling cycles, exponentially back off to at most 4x
+    the configured interval, and never increase a long configured interval.
+    This is a bounded fallback, not a substitute for DB NOTIFY/realtime E2E.
+    """
+    if idle_rounds <= 8:
+        return poll_seconds
+    ceiling = max(poll_seconds, min(poll_seconds * 4, 1.2))
+    return min(ceiling, poll_seconds * (1.5 ** min(idle_rounds - 8, 12)))
 
 
 def create_realtime_router(
@@ -70,6 +84,8 @@ def create_realtime_router(
         edit_dt = edt
         edit_id = edit_after_id
         tick = 0
+        idle_rounds = 0
+        last_heartbeat_at = monotonic()
         try:
             # A checkpoint is always delivered, including to an empty chat.
             await ws.send_json({'type': 'ready', 'after': cursor, 'edit_after_at': edit_dt.isoformat(), 'edit_after_id': edit_id})
@@ -93,9 +109,12 @@ def create_realtime_router(
                     await ws.send_json({'type': 'edit', 'data': row})
                     edit_dt, edit_id = dt, new_id
                 tick += 1
-                if tick % heartbeat_every == 0:
+                # Backoff must not stretch heartbeat gaps and trigger proxy timeout.
+                if tick % heartbeat_every == 0 or monotonic() - last_heartbeat_at >= poll_seconds * heartbeat_every:
                     await ws.send_json({'type': 'heartbeat', 'after': cursor, 'edit_after_at': edit_dt.isoformat(), 'edit_after_id': edit_id})
-                await asyncio.sleep(poll_seconds)
+                    last_heartbeat_at = monotonic()
+                idle_rounds = 0 if (rows or edits) else idle_rounds + 1
+                await asyncio.sleep(next_poll_delay(poll_seconds, idle_rounds))
         except WebSocketDisconnect:
             return
         except asyncio.CancelledError:
