@@ -1,0 +1,48 @@
+name: JW V9 curated agent delivery methodology validation
+
+on:
+  push:
+    branches:
+      - review/v90-curated-agent-skills-20261024
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-curated-agent-skill-contract-review
+  cancel-in-progress: true
+
+jobs:
+  guardrails-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify review branch ancestry and preserve production app source
+        run: |
+          git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
+          git merge-base --is-ancestor df1c76bc705f19135758d32c8912a6562bfaa7f1 HEAD
+          git diff --exit-code df1c76bc705f19135758d32c8912a6562bfaa7f1 HEAD -- app/ db/ migrations/ requirements.txt app/static/
+      - name: Check new evidence code and negative tests
+        run: |
+          python -m compileall -q scripts/jw_evidence_gate.py tests/test_jw_evidence_gate.py
+          python -m pip install 'pytest==8.4.2'
+          python -m pytest -q tests/test_jw_evidence_gate.py -ra --junitxml=agent-methodology-results.xml
+          python scripts/jw_evidence_gate.py --check-project .
+      - name: Preserve evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-curated-agent-evidence
+          path: agent-methodology-results.xml
+          retention-days: 3
+          if-no-files-found: ignore
