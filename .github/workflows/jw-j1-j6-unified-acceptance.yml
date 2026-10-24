@@ -5,6 +5,7 @@ on:
     branches:
       - review/j1-j6-unified-acceptance-20261024
       - review/v91-live-pg-gateway-alignment-20261024
+      - review/v92-postgres-quote-write-j1j6-20261025
   workflow_dispatch:
 
 permissions:
@@ -32,12 +33,13 @@ jobs:
           git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
           git merge-base --is-ancestor efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD
           test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
-          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ db/ migrations/ security/ requirements.txt requirements-dev.txt
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt requirements-dev.txt
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql'
           python - <<'PY'
           import subprocess
           changed=set(subprocess.check_output(
             ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
-          assert changed <= {"app/pg_connection_gate_v87.py","app/pg_live_dryrun_v88.py"},changed
+          assert changed <= {"app/pg_connection_gate_v87.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_dev_entry_v92.py"},changed
           print("PASS: only explicitly reviewed V8.7/V8.8 gate changes, original product backend unchanged")
           PY
       - name: Install product regression prerequisites
@@ -256,8 +258,41 @@ jobs:
             receipt-new-contract.json
           retention-days: 3
 
+  pg17-v92-quote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 11
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Existing application and PG test dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: J2 J3 J4 J5 J6 real nonprivileged PG17 quote API and failure injection
+        run: python -m scripts.ci_pg_v92_quote_http
+
   j1-j6-independent-aggregate:
-    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, security-methodology]
+    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, pg17-v92-quote, security-methodology]
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
