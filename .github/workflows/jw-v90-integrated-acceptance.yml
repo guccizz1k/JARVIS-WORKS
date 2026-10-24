@@ -112,6 +112,13 @@ jobs:
           PYTHONPATH=. python -m scripts.run_postgres_isolation_ci_v28
           echo "NOTE: This proves legacy V2.8 ephemeral RLS attacks, NOT V9 production RLS/concurrency."
 
+      - name: Real PostgreSQL 17 two-connection V9 advisory lock semantics and rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. python -m scripts.ci_v90_advisory_two_sessions
+          echo "NOTE: advisory primitives verified in disposable PG17, NOT V9 live RPC/tenant E2E."
+
       - name: Upload failure/success evidence
         if: always()
         uses: actions/upload-artifact@v4
