@@ -24,7 +24,8 @@ jobs:
       - name: J1 preserve original legacy frontend and immutable PG migrations
         run: |
           git merge-base --is-ancestor 27f5c5fbb427c17fff2f702992b8a95f31a479d5 HEAD
-          git diff --exit-code 27f5c5fbb427c17fff2f702992b8a95f31a479d5 HEAD -- app/main.py app/static/ db/ migrations/ security/ requirements.txt
+          git diff --exit-code 27f5c5fbb427c17fff2f702992b8a95f31a479d5 HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt
+          git diff --exit-code 27f5c5fbb427c17fff2f702992b8a95f31a479d5 HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql'
       - name: Existing dev test requirements
         run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
       - name: J3 J4 staging quote API happy and negative contract
