@@ -17,7 +17,7 @@ PY_FILES = [
     'pg_messenger_bridge_v90.py', 'pg_messenger_realtime_v90.py',
     'migration_integrity_v90.py', 'test_pg_messenger_bridge_v90.py',
     'test_pg_messenger_realtime_v90.py', 'test_migration_integrity_v90.py',
-    'test_commit_order_model_v90.py', 'catalog_gate_v90.py', 'test_catalog_gate_v90.py', 'pg_advisory_probe_v90.py', 'test_pg_probe_transaction_scope_v90.py', 'test_loopback_smoke_v90.py',
+    'test_commit_order_model_v90.py', 'test_v90_data_login_role_hardening.py', 'catalog_gate_v90.py', 'test_catalog_gate_v90.py', 'pg_advisory_probe_v90.py', 'test_pg_probe_transaction_scope_v90.py', 'test_loopback_smoke_v90.py',
 ]
 TESTS_PY = [n for n in PY_FILES if n.startswith('test_')]
 TESTS_JS = ['test_stage_ui_race_v90.cjs', 'test_ui_submission_integrity_v90.cjs', 'test_client_edit_order_v90.cjs', 'test_ws_cursor_guard_v90.cjs', 'test_ws_reconnect_lifecycle_v90.cjs']
