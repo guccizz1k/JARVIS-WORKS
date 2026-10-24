@@ -43,6 +43,15 @@ BEGIN
   THEN RAISE EXCEPTION 'Invalid attachment' USING ERRCODE='23514'; END IF;
   -- Serialize writers per conversation until COMMIT; nextval must execute AFTER this lock.
   PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('jw_dev.v90.messenger/' || p_connection_id, 0));
+  -- Authorization can be revoked while waiting for the lock: check it AGAIN
+  -- under a new READ COMMITTED snapshot before writing or using the sequence.
+  IF jw_dev.current_org_from_session() IS DISTINCT FROM v_org
+    OR jw_dev.current_actor_from_session_v82() IS DISTINCT FROM v_actor
+    OR NOT EXISTS (
+      SELECT 1 FROM jw_dev.messenger_connections c WHERE c.id=p_connection_id
+      AND c.status='active' AND v_org IN(c.org_a,c.org_b)
+      AND EXISTS(SELECT 1 FROM jw_dev.messenger_companies mc WHERE mc.org_id=CASE WHEN c.org_a=v_org THEN c.org_b ELSE c.org_a END))
+  THEN RAISE EXCEPTION 'Chat or session revoked before send' USING ERRCODE='42501'; END IF;
   v_sha:=CASE WHEN p_data IS NULL THEN NULL ELSE encode(sha256(p_data),'hex') END;
   INSERT INTO jw_dev.messenger_messages
     (id,connection_id,sender_org,sender_user,kind,body,actor_name,
@@ -79,20 +88,33 @@ CREATE OR REPLACE FUNCTION jw_dev.v90_edit_text(p_message_id text, p_new_body te
  SET search_path TO 'pg_catalog'
 AS $function$
 DECLARE v_org text; v_actor text; v_m jw_dev.messenger_messages%ROWTYPE; v_version bigint;
-  v_event_at timestamptz;
+  v_event_at timestamptz; v_connection_id text;
 BEGIN
   v_org:=jw_dev.current_org_from_session(); v_actor:=jw_dev.current_actor_from_session_v82();
   IF v_org IS NULL OR v_actor IS NULL OR p_new_body IS NULL
     OR length(p_new_body)>5000 OR btrim(p_new_body)=''
   THEN RAISE EXCEPTION 'Invalid edit request or session' USING ERRCODE='42501'; END IF;
-  SELECT m.* INTO v_m FROM jw_dev.messenger_messages m
+  -- Read candidate chat WITHOUT taking a row lock. This is only a hint for
+  -- choosing a per-chat advisory lock, NOT authorization for the write.
+  SELECT m.connection_id INTO v_connection_id FROM jw_dev.messenger_messages m
   JOIN jw_dev.messenger_connections c ON c.id=m.connection_id
   WHERE m.id=p_message_id AND m.sender_org=v_org AND m.sender_user=v_actor
+    AND m.kind='text' AND c.status='active' AND v_org IN(c.org_a,c.org_b);
+  IF NOT FOUND THEN RAISE EXCEPTION 'Message not owned by actor' USING ERRCODE='42501'; END IF;
+  -- Global lock order: conversation advisory lock FIRST; message FOR UPDATE SECOND.
+  -- Never hold a message row lock while waiting for the conversation lock.
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('jw_dev.v90.messenger/' || v_connection_id, 0));
+  IF jw_dev.current_org_from_session() IS DISTINCT FROM v_org
+    OR jw_dev.current_actor_from_session_v82() IS DISTINCT FROM v_actor
+  THEN RAISE EXCEPTION 'Session revoked before edit' USING ERRCODE='42501'; END IF;
+  -- Recheck authorization, active chat and current version after any wait.
+  SELECT m.* INTO v_m FROM jw_dev.messenger_messages m
+  JOIN jw_dev.messenger_connections c ON c.id=m.connection_id
+  WHERE m.id=p_message_id AND m.connection_id=v_connection_id
+    AND m.sender_org=v_org AND m.sender_user=v_actor
     AND m.kind='text' AND c.status='active' AND v_org IN(c.org_a,c.org_b)
   FOR UPDATE OF m;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Message not owned by actor' USING ERRCODE='42501'; END IF;
-  -- Match the send-path conversation lock: edits must commit in cursor order.
-  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('jw_dev.v90.messenger/' || v_m.connection_id, 0));
+  IF NOT FOUND THEN RAISE EXCEPTION 'Message or chat revoked before edit' USING ERRCODE='42501'; END IF;
   IF clock_timestamp() > v_m.created_at::timestamptz + interval '30 minutes'
   THEN RAISE EXCEPTION 'Edit window expired' USING ERRCODE='42501'; END IF;
   IF p_expected_version IS DISTINCT FROM v_m.version
