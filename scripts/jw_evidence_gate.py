@@ -88,6 +88,7 @@ def verify_project(root: Path) -> list[str]:
         "AGENTS.md",
         "GLOSSARY.md",
         "docs/agents/JW_CURATED_SKILLS_V90.md",
+        "docs/agents/J6_EVIDENCE_GATED_ENGINEERING.md",
         ".agents/skills/jw-verified-delivery/SKILL.md",
         ".agents/skills/jw-evidence-retro/SKILL.md",
         "tests/test_jw_evidence_gate.py",
@@ -95,9 +96,14 @@ def verify_project(root: Path) -> list[str]:
     issues = [f"missing navigation file: {name}" for name in required if not (root / name).is_file()]
     if not issues:
         guide = (root / "AGENTS.md").read_text(encoding="utf-8")
-        for token in ("J1", "J5", "GLOSSARY.md", "main", "BLOCKED"):
+        for token in ("J1", "J5", "J6", "GLOSSARY.md", "main", "BLOCKED"):
             if token not in guide:
                 issues.append(f"AGENTS.md missing protected policy marker: {token}")
+    if not issues:
+        spec = (root / "docs/agents/J6_EVIDENCE_GATED_ENGINEERING.md").read_text(encoding="utf-8")
+        for token in ("J6", "J1", "J5", "RED", "GREEN", "BLOCKED", "Retro"):
+            if token not in spec:
+                issues.append(f"J6 spec missing invariant: {token}")
     return issues
 
 
