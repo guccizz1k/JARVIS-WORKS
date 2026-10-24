@@ -81,9 +81,9 @@ def main()->int:
     wrong=dict(payload(key))
     wrong["title"]="Changed after first POST"
     assert request(a,wrong).status_code==409
-    assert request(b,payload(req_id())).status_code==404
-    assert request(c,payload(req_id())).status_code==404
-    assert request(b,payload(req_id(),customer="ci-customer-b")).status_code==201
+    assert request(b,payload(req_id()),"B").status_code==404
+    assert request(c,payload(req_id()),"C").status_code==404
+    assert request(b,payload(req_id(),customer="ci-customer-b"),"B").status_code==201
     assert request(a,payload(req_id()),company="B").status_code==403
     no_csrf=a.post("/api/pg-stage/v92/quotes",json=payload(req_id()),
         headers={"origin":"https://testserver"})
