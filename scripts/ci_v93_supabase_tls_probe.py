@@ -6,6 +6,7 @@ Fail-closed on unavailable/untrusted endpoints, with one bounded attempt.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -17,6 +18,46 @@ import sys
 
 DEV_HOST = "db.rvymwwzclagvljnofyss.supabase.co"
 TIMEOUT = 5
+
+
+def dns_transport(host: str) -> dict[str, object]:
+    """Describe DNS address families, never retain/log resolved IP addresses.
+
+    A direct Supabase endpoint may expose only IPv6. An IPv4-only CI runner
+    cannot verify it; this is a network blocker, not a TLS trust success.
+    """
+    if host != DEV_HOST:
+        raise ValueError("Destination not allowlisted")
+    try:
+        answers = socket.getaddrinfo(host, 5432, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return {"dns": "FAILED", "address_family": "NONE"}
+    families = {answer[0] for answer in answers}
+    kind = ("DUAL_STACK" if socket.AF_INET in families and socket.AF_INET6 in families
+            else "IPV6_ONLY" if socket.AF_INET6 in families
+            else "IPV4_ONLY" if socket.AF_INET in families else "UNKNOWN")
+    return {"dns": "RESOLVED" if families else "FAILED", "address_family": kind}
+
+
+def error_category(exc: OSError) -> str:
+    """Classify network failure without exposing addresses or credentials."""
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return "TLS_CERTIFICATE_UNTRUSTED"
+    if isinstance(exc, ssl.SSLError):
+        return "TLS_HANDSHAKE_FAILED"
+    if isinstance(exc, socket.gaierror):
+        return "DNS_RESOLUTION_FAILED"
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return "CONNECT_TIMEOUT"
+    if exc.errno == errno.ENETUNREACH:
+        return "NETWORK_UNREACHABLE"
+    if exc.errno == errno.EHOSTUNREACH:
+        return "HOST_UNREACHABLE"
+    if exc.errno == errno.ECONNREFUSED:
+        return "CONNECT_REFUSED"
+    if exc.errno == errno.ETIMEDOUT:
+        return "CONNECT_TIMEOUT"
+    return "CONNECT_FAILED"
 
 
 def probe(host: str, ca_file: str = "") -> dict[str, object]:
@@ -31,6 +72,11 @@ def probe(host: str, ca_file: str = "") -> dict[str, object]:
     context.check_hostname = True
     result = {"host": DEV_HOST, "tls": "BLOCKED", "authenticated": False,
               "deployed_https": False, "production_cutover": False}
+    transport = dns_transport(host)
+    result.update(transport)
+    if transport["dns"] != "RESOLVED":
+        result["reason"] = "DNS_RESOLUTION_FAILED"
+        return result
     try:
         with socket.create_connection((host, 5432), timeout=TIMEOUT) as connection:
             connection.settimeout(TIMEOUT)
@@ -50,8 +96,10 @@ def probe(host: str, ca_file: str = "") -> dict[str, object]:
                 result["protocol"] = tls.version()
     except (socket.gaierror, socket.timeout, TimeoutError, OSError,
             ssl.SSLError) as exc:
-        # Do not leak network config or certificate contents.
-        result["reason"] = type(exc).__name__
+        # Never leak IP addresses, passwords, DSNs or certificate contents.
+        result["reason"] = error_category(exc)
+        if transport["address_family"] == "IPV6_ONLY":
+            result["network_hint"] = "IPV6_DIRECT_ENDPOINT_REQUIRES_IPV6_ROUTE"
     return result
 
 
