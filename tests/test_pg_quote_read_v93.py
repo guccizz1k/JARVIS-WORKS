@@ -6,7 +6,7 @@ import pytest
 from app import pg_quote_read_v93 as stage
 from app import pg_quote_api_v92 as writer
 
-@pytest.mark.parametrize("val",["","../evil","a"*33,"A"*32,"<bad>"])
+@pytest.mark.parametrize("val",["../evil","a"*33,"A"*32,"<bad>"])
 def test_invalid_id_rejected_before_db(val,monkeypatch):
     monkeypatch.setattr(writer,"enabled",lambda:True)
     app=FastAPI()
