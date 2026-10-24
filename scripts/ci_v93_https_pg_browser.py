@@ -78,6 +78,21 @@ def _ssl_files(path: Path) -> tuple[Path, Path]:
          "-addext","basicConstraints=critical,CA:TRUE"],
         check=True,capture_output=True,timeout=12)
     key.chmod(0o600)
+    if os.environ.get("JW_V93_TRUST_LOCAL_CA")!="EPHEMERAL_RUNNER_ONLY":
+        raise RuntimeError("Cannot add synthetic CA outside an ephemeral CI runner")
+    # Trust only this freshly generated localhost certificate on this isolated
+    # GitHub runner. Browser SSL checking stays ON; never ignore HTTPS errors.
+    subprocess.run(["sudo","cp",str(crt),"/usr/local/share/ca-certificates/jw-v93-ci.crt"],
+                   check=True,capture_output=True,timeout=8)
+    subprocess.run(["sudo","update-ca-certificates"],check=True,capture_output=True,timeout=15)
+    home=Path.home()/".pki"/"nssdb"
+    home.mkdir(parents=True,exist_ok=True)
+    if not (home/"cert9.db").exists():
+        subprocess.run(["certutil","-N","--empty-password","-d","sql:"+str(home)],
+                       check=True,capture_output=True,timeout=8)
+    subprocess.run(["certutil","-A","-d","sql:"+str(home),
+                    "-n","JARVIS V93 local CI only","-t","C,,","-i",str(crt)],
+                   check=True,capture_output=True,timeout=8)
     return key,crt
 
 
@@ -178,6 +193,8 @@ def main() -> int:
                   throw Error('Company A quote lost after switch');
                 return 'JW_V93_HTTPS_TENANT_B_DENIAL_AND_RECOVERY_PASS';
             }""","JW_V93_HTTPS_TENANT_B_DENIAL_AND_RECOVERY_PASS")
+            from scripts.ci_v93_finance_restore import restore_proof
+            restore_proof()
             print("PASS: real Chromium browser -> HTTPS -> V9.3 API -> PG17 nonprivileged session; quote form/GET/tenant denial",flush=True)
             print("LIMIT: localhost self-signed synthetic CA; QA-only cookie issuer; not hosted production HTTPS or real Supabase auth",flush=True)
             return 0
