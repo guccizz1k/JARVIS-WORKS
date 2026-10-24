@@ -22,7 +22,7 @@ from . import pg_v90_integrated_entry as v90
 
 _MODE = "ISOLATED_DEV_QUOTE_V92"
 _PREFIX = "/api/pg-stage/v92"
-_MAX_SUBTOTAL = 10 ** 16
+_MAX_SUBTOTAL = 10 ** 15
 
 
 class QuoteItem(BaseModel):
