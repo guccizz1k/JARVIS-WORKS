@@ -193,3 +193,23 @@ V8.9 original commit/archive and 565 historical tests missing; actual independen
 - Exact GitHub HTML SHA-1 blob `6580beec7b493d980421a495eb8e971f6c2b3f46` matches the locally executed HTML, and published compact browser test blob `f1fdbd546aa79dabd3a49646c8293b433d7ca74e` matches the locally executed test file.
 - Screenshot of real DOM rendering was captured with **synthetic chat data**; it is not evidence of a deployed application.
 - **Status classification:** Chromium DOM/JS behavior **PASS with mocked services**; actual deployed server navigation and browser-to-FastAPI-to-independent-PostgreSQL E2E remain **BLOCKED / NOT RUN**. No administrator policy bypass, no auth-role change, no SQL migrations, no production deployment and no merge.
+
+## 2026-10-24 — Real dev DB catalog gate / concurrency SQL review
+
+**Independent direct Supabase dev PostgreSQL catalog SELECTs performed, with no database writes or role changes.**
+- PostgreSQL 17; **35 tables FORCE RLS**; **7 V9 functions installed**.
+- `jw_app_dev` and `jw_auth_stage_v85` are both **NOLOGIN** (by design).
+- **ZERO** nonprivileged LOGIN roles currently have the ability to `SET ROLE jw_app_dev`: the V8.9/V9.0 server's real database login path is not configured.
+- Installed `jw_dev.v90_send_text` still calls `nextval` **without** a transaction-scoped advisory lock, and `jw_dev.v90_edit_text` likewise has **no** advisory lock. They remain vulnerable to commit/cursor-order inversion under parallel transactions. NO migration has been applied.
+- `anon` and `authenticated` have **no EXECUTE** on the two RPCs; `jw_app_dev` has EXECUTE. Real independent A/B/C role probes are STILL NOT RUN.
+- Existing messenger edit table lacks a chat/timestamp retrieval index; performance/scale evaluation is outstanding.
+- Supabase advisors: security INFO `rls_enabled_no_policy` (7); performance INFO `unindexed_foreign_keys` (36), `unused_index` (2). These are advisories, not a substitute for tenant attack testing.
+
+### Code-only remediation in this draft (NOT APPLIED)
+- `006_commit_order_cursor_guard_candidate.sql` revised to require **per-conversation transaction lock BEFORE row `FOR UPDATE`** in the edit function. The send function locks before `nextval`. Both functions revalidate the PG session and active conversation AFTER waiting on the lock before writing; edit performs its authorized `FOR UPDATE` after lock acquisition.
+- **12/12 read-only static assertions** passed against the actual GitHub SQL candidate text: lock order, post-wait session rechecks, owner/status rechecks, grant/revoke, and version/cursor ordering. These are not a Postgres parser result and do not certify runtime deadlock freedom.
+- `catalog_gate_v90.py` + `test_catalog_gate_v90.py`: **6/6 synthetic failure-mode tests PASS**. A real metadata export (with no credentials) in `db_catalog_observed_20261024.json` yields the correct **BLOCKED** verdict for four gates: absent safe login, missing send/edit locks, and absent independent-session E2E.
+- **Local isolated stage regression in assembled artifact:** 60 Python PASS + 26 JavaScript PASS = **86 PASS** (includes catalog contract tests). Actual restored V8.9/V9 source integration test rerun 16 PASS. The remote PR staged runner deliberately excludes old archive-only files, so its local-equivalent test inventory is 49 Python + 26 JS; do not conflate the two inventories. Historical integrated full-suite 581 PASS from previous step, NOT repeated in this exact step.
+- No DB DDL, privileged bypass, password reset, direct customer query, merge, CI dispatch or deployment performed.
+
+**Launch status: BLOCKED**. Next actual proving step requires an explicitly approved isolated, non-superuser, SSL-verified PG gateway login with `SET ROLE jw_app_dev`, separate auth-stage role, then actual two-connection SQL contention/RLS/revoke/rollback tests before candidate migration and production rollout.
