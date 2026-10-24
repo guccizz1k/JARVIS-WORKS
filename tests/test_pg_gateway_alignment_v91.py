@@ -114,3 +114,13 @@ def test_v88_real_gateway_account_uses_isolated_lock_and_releases_it(monkeypatch
     assert out["payment_race_e2e"]=="NOT_RUN"
     assert len(pool.items)==2 and all(x.rolled_back and x.closed for x in pool.items)
     assert not pool.held
+
+
+def test_unprivileged_login_probe_uses_catalog_oids_before_role_switch():
+    # When the gateway has NOINHERIT, string-to-regclass resolution of a
+    # private jw_dev table can raise SQLSTATE 42501. OIDs do not need USAGE.
+    from app.pg_connection_gate_v87 import LOGIN_PROBE
+    assert "pg_catalog.pg_class c" in LOGIN_PROBE
+    assert "c.oid" in LOGIN_PROBE
+    assert "format(" not in LOGIN_PROBE
+    assert "FROM jw_dev." not in LOGIN_PROBE

@@ -18,16 +18,21 @@ ALLOWED_GATEWAY_LOGINS = {
     'trade': frozenset(('jw_trade_login_v86', 'jw_trade_gateway_v90')),
 }
 
+# The raw NOINHERIT login must not require jw_dev schema USAGE just to
+# inspect direct grants. OID-based has_table_privilege() avoids regclass name
+# resolution before SET LOCAL ROLE. No customer records or grants are read.
 LOGIN_PROBE = """
 SELECT session_user, current_user,
        (r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole) AS privileged,
        pg_has_role(session_user,'jw_auth_stage_v85','SET') AS can_auth,
        pg_has_role(session_user,'jw_app_dev','SET') AS can_trade,
-       EXISTS (SELECT 1 FROM pg_tables t WHERE t.schemaname='jw_dev' AND
-         (has_table_privilege(session_user,format('%I.%I',t.schemaname,t.tablename),'SELECT')
-         OR has_table_privilege(session_user,format('%I.%I',t.schemaname,t.tablename),'INSERT')
-         OR has_table_privilege(session_user,format('%I.%I',t.schemaname,t.tablename),'UPDATE')
-         OR has_table_privilege(session_user,format('%I.%I',t.schemaname,t.tablename),'DELETE'))) AS direct_tables,
+       EXISTS (SELECT 1 FROM pg_catalog.pg_class c
+         JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')
+         AND (pg_catalog.has_table_privilege(session_user,c.oid,'SELECT')
+         OR pg_catalog.has_table_privilege(session_user,c.oid,'INSERT')
+         OR pg_catalog.has_table_privilege(session_user,c.oid,'UPDATE')
+         OR pg_catalog.has_table_privilege(session_user,c.oid,'DELETE'))) AS direct_tables,
        (SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()) AS ssl_active,
        current_setting('server_version_num')::integer / 10000 AS major,
        r.rolcanlogin AS can_login
