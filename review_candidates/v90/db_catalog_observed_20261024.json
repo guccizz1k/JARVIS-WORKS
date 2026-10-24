@@ -1,0 +1,25 @@
+{
+  "source": "Supabase connector catalog-only SELECT, project jarvis-works-dev",
+  "observed_date": "2026-10-24",
+  "postgresql_17": true,
+  "force_rls_tables": 35,
+  "app_role_nologin": true,
+  "safe_gateway_logins": 0,
+  "functions": {
+    "v90_send_text": {
+      "tx_lock": false,
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "app_execute": true
+    },
+    "v90_edit_text": {
+      "tx_lock": false,
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "app_execute": true
+    }
+  },
+  "auth_role_nologin": true,
+  "safe_auth_logins": 0,
+  "dual_role_login_count": 0
+}
