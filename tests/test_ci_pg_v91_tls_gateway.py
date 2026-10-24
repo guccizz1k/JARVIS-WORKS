@@ -18,3 +18,13 @@ def test_nonreview_environment_denied():
 def test_postgres_fixture_cannot_point_at_external_host_or_other_port():
     assert PG_IMAGE=="postgres:17"
     assert PORT=="55432"
+
+
+def test_runner_unprivileged_key_owner_recovery_is_explicit():
+    from pathlib import Path
+    import inspect
+    from scripts import ci_pg_v91_tls_gateway as module
+    body=inspect.getsource(module.build_local_certificates)
+    assert 'except PermissionError:' in body
+    assert '"sudo","chown","999:999"' in body
+    assert 'key.chmod(0o600)' in body

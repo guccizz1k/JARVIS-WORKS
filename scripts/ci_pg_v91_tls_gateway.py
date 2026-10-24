@@ -49,8 +49,14 @@ def build_local_certificates(folder: Path) -> Path:
                  str(root_key),"-CAcreateserial","-out",str(cert),
                  "-days","1","-sha256","-extfile",str(extension)])
     # postgres:17 official Docker image uses UID 999.
+    # GitHub-hosted runners are unprivileged. Set the key to PostgreSQL's
+    # container UID without making the secret world-readable, otherwise the
+    # Docker server refuses SSL private-key permissions.
     key.chmod(0o600)
-    os.chown(key,999,999)
+    try:
+        os.chown(key,999,999)
+    except PermissionError:
+        run_command(["sudo","chown","999:999",str(key)])
     folder.chmod(0o755)
     return ca
 
