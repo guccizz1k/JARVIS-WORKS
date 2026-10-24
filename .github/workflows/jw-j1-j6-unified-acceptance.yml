@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - review/j1-j6-unified-acceptance-20261024
-      - review/v91-live-pg-gateway-alignment-20261024
   workflow_dispatch:
 
 permissions:

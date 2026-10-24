@@ -151,6 +151,20 @@ def run() -> int:
             }
             preflight=check_two_connections(env=env)
             if preflight.get("result")!="PASS":
+                # J4 diagnosis only in this disposable, fully local CI fixture.
+                # Do not reveal DSNs, SQL text, server details or passwords.
+                from app.pg_connection_gate_v87 import _check_one
+                for kind, profile in (("auth","JW_PG_AUTH_STAGE_DSN"),
+                                      ("trade","JW_PG_STAGE_DSN")):
+                    try:
+                        with psycopg.connect(env[profile],connect_timeout=5,
+                                             sslmode="verify-full") as db:
+                            identity, issues=_check_one(db,kind=kind)
+                            db.rollback()
+                            print("J4 CI-only diagnostic",kind,"checks",issues,flush=True)
+                    except Exception as exc:
+                        print("J4 CI-only diagnostic",kind,type(exc).__name__,
+                              "SQLSTATE",getattr(exc,"sqlstate",None),flush=True)
                 raise AssertionError("Actual TLS gateway preflight rejected: "+str(preflight))
             locks=live_gate_v88(env=env)
             if locks.get("result")!="PASS" or locks.get("payment_race_e2e")!="NOT_RUN":
