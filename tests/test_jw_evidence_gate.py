@@ -95,3 +95,34 @@ def test_unknown_extra_gate_is_rejected():
     d = example()
     d["gates"]["fantasy_score"] = {"status": "PASS", "evidence": [{"kind":"claim","ref":"self"}]}
     assert "exactly the five" in errors(d)
+
+
+def test_j6_is_named_and_does_not_replace_previous_harness():
+    root = Path(__file__).resolve().parents[1]
+    guide = (root / "AGENTS.md").read_text(encoding="utf-8")
+    spec = (root / "docs/agents/J6_EVIDENCE_GATED_ENGINEERING.md").read_text(encoding="utf-8")
+    assert "J1–J6" in guide
+    for name in ("J1", "J2", "J3", "J4", "J5"):
+        assert name in spec
+    assert "J6" in spec and "NOT" in spec
+
+
+def test_j6_retro_is_event_triggered_not_unconditional():
+    root = Path(__file__).resolve().parents[1]
+    text = (root / ".agents/skills/jw-evidence-retro/SKILL.md").read_text(encoding="utf-8")
+    assert "J6" in text
+    assert "Trigger ONLY on:" in text
+    assert "never run compulsively" in text or "never run" in text.lower()
+
+
+def test_j6_protects_external_vendor_code_execution():
+    root = Path(__file__).resolve().parents[1]
+    spec = (root / "docs/agents/J6_EVIDENCE_GATED_ENGINEERING.md").read_text(encoding="utf-8")
+    assert "NO upstream auto-install" in spec
+    assert "cannot claim" in spec
+
+
+def test_j6_did_not_auto_approve_product_release():
+    root = Path(__file__).resolve().parents[1]
+    spec = (root / "docs/agents/J6_EVIDENCE_GATED_ENGINEERING.md").read_text(encoding="utf-8")
+    assert "BLOCKED" in spec and "production" in spec.lower()

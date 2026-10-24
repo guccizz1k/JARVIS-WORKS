@@ -1,4 +1,4 @@
-# JARVIS WORKS v9.0 — vetted external agent practices
+# J6 — JARVIS WORKS v9.0 vetted external agent practices
 
 **Status:** curated and project-integrated guidance, not installation of third-party execution environments. `main`/production unchanged. Sources are third-party material, treated as untrusted until reviewed.
 
@@ -23,7 +23,7 @@ All three were reported MIT by their GitHub metadata at review time. **No upstre
 - 04:06 legacy `CONTEXT.md` → `GLOSSARY.md`, `CONTEXT_MAP.md` → `GLOSSARY_MAP.md`: migration if those old files exist, with referential safety. No legacy files were present on this branch; created a new root `GLOSSARY.md` without destructive rename.
 
 ### Engineering decisions
-1. Keep **J1–J5 and existing 5-Gate** as the authoritative system; the skills are methodology layers only. Do not install 400+ skills or 100+ agent personas; plugin instructions cannot override user authorization.
+1. Keep **J1–J5 and existing 5-Gate** as the foundational system; J6 extends them; the skills are methodology layers only. Do not install 400+ skills or 100+ agent personas; plugin instructions cannot override user authorization.
 2. For significant changes: current SHA/branch → explicit acceptance examples/seams → dependency DAG → one red→green vertical slice → independent diff/spec/security review → existing full regression, actual PG/Chromium when applicable → evidence PR.
 3. Multi-agent delegation is **conditional** on actual isolated agent/worktree tooling. Otherwise one executor plus independent review checklist; never falsely claim subagent execution.
 4. Prioritize *real evidence*, not roleplay scores: Django-specific, Laravel-specific or marketing-oriented upstream persona instructions are not automatically appropriate to FastAPI+PostgreSQL.

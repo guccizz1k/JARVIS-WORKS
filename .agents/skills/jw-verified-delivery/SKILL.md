@@ -1,13 +1,13 @@
 ---
 name: jw-verified-delivery
-description: JARVIS WORKS project-local controlled spec-to-delivery, test-first implementation, 5-Gate evidence and safe Draft PR.
+description: J6 JARVIS WORKS project-local controlled spec-to-delivery, test-first implementation, 5-Gate evidence and safe Draft PR.
 ---
 
-# JARVIS WORKS — verified delivery
+# J6 — JARVIS WORKS verified delivery
 
 Scope: JARVIS WORKS only. This is a locally authored, reviewed adaptation of selected public methodologies; it does not delegate security or release approval.
 
-1. Determine verified branch/SHA and known baseline; preserve existing functionality. Read `AGENTS.md`, `GLOSSARY.md`, latest J1–J5 gates.
+1. Determine verified branch/SHA and known baseline; preserve existing functionality. Read `AGENTS.md`, `GLOSSARY.md`, latest J1–J5 gates and the J6 delivery contract.
 2. Translate user goal into acceptance examples with measurable outcomes and *actual* seams (HTTP, Postgres tenant RLS, browser DOM, job runner). Reuse confirmed requirements, do not grill with duplicate questions.
 3. For a multi-file change, model tickets as a dependency DAG with ready frontier; parallelize only if permitted independent worktrees/agents really exist.
 4. Create a failing, behavior-observable test before implementation for bug fixes; capture the genuine RED output. Make minimum change needed for GREEN. Refactor only after independent review.
