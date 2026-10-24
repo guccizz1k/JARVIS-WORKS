@@ -38,6 +38,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pytest -q tests/test_jw_evidence_gate.py -ra --junitxml=agent-methodology-results.xml
           python scripts/jw_evidence_gate.py --check-project .
+          python scripts/jw_evidence_gate.py --check docs/agents/V90_AGENT_ADOPTION_EVIDENCE.json
       - name: Preserve evidence
         uses: actions/upload-artifact@v4
         if: always()
