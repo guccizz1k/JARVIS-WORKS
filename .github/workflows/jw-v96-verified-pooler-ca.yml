@@ -1,0 +1,39 @@
+name: JW V9.6 test trusted Supabase root certificate (review only)
+on:
+  push:
+    branches:
+      - review/v96-supavisor-root-ca-tls-20261025
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verified-pooler-transport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      JW_SUPABASE_POOLER_CA_FILE: tests/certs/prod-ca-2021.crt
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate exact dashboard CA fingerprint and reject other connection targets
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pytest -q tests/test_ci_v96_supabase_ca.py tests/test_ci_v95_supavisor_session_tls.py -ra
+      - name: PostgreSQL SSLRequest and CA+hostname-verifying live TLS
+        run: |
+          python -m scripts.ci_v95_supavisor_session_tls > v96-pooler-transport.json
+          python - <<'PY'
+          import json
+          p=json.load(open("v96-pooler-transport.json"))
+          print("DNS",p.get("dns"),"family",p.get("address_family"),
+                "TCP",p.get("tcp"),"TLS",p.get("tls"),"reason",p.get("reason"))
+          assert p.get("authenticated") is False
+          assert p.get("sql_executed") is False
+          if p["tls"]!="VERIFIED_CA_AND_HOSTNAME":
+              raise SystemExit("BLOCKED: remote Supavisor CA/hostname validation not successful")
+          print("PASS: real remote PostgreSQL SSLRequest + trusted Supabase root CA + verified hostname")
+          PY
