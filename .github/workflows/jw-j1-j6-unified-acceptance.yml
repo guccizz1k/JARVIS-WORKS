@@ -8,6 +8,7 @@ on:
       - review/v92-postgres-quote-write-j1j6-20261025
       - review/v93-supabase-https-pg-read-recovery-20261025
       - review/v94-pg-tls-ipv6-preflight-20261025
+      - review/v95-supavisor-session-tls-20261025
   workflow_dispatch:
 
 permissions:
