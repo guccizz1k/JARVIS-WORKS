@@ -167,9 +167,16 @@ def main() -> int:
                 for(let i=0;i<80;i++){
                   const t=document.querySelector('#result').textContent;
                   if(t.includes('PG HTTPS 통합 저장 완료:')) {
-                    const body=document.querySelector('#list').innerText;
-                    if(!body.includes('J1-J6 HTTPS PG 견적'))throw Error('PG list render missing');
-                    return 'JW_V93_REAL_HTTPS_PG_CREATE_PASS';
+                    // The UI sets the success message before awaiting
+                    // the async GET/list refresh. Check the real DOM only
+                    // after that request completes, not in a race window.
+                    for(let k=0;k<50;k++) {
+                      const body=document.querySelector('#list').innerText;
+                      if(body.includes('J1-J6 HTTPS PG 견적'))
+                        return 'JW_V93_REAL_HTTPS_PG_CREATE_PASS';
+                      await new Promise(resolve=>setTimeout(resolve,100));
+                    }
+                    throw Error('PG list render missing after refresh deadline');
                   }
                   if(t.includes('FAIL'))throw Error(t);
                   await new Promise(resolve=>setTimeout(resolve,100));
