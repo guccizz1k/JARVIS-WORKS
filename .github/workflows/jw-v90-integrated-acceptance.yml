@@ -68,7 +68,17 @@ jobs:
           python -m pip install --disable-pip-version-check -r requirements-dev.txt
           python -m pip install --disable-pip-version-check -r requirements-ocr-v64.txt
           python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt
-          python -c "import fitz, PIL, pytest, psycopg; print('PASS: CI test imports')"
+          # V6.4 uses legacy "import fitz" inside a strict JSON-only subprocess.
+          # PyMuPDF 1.28.2 emits a stdout deprecation message, corrupting JSON.
+          # Use the independently tested 1.26.7 until worker output isolation is upgraded.
+          python -m pip install --disable-pip-version-check 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+          python - <<'PY'
+          import subprocess, sys
+          p = subprocess.run([sys.executable, '-c', 'import fitz'], capture_output=True, text=True, check=True)
+          assert not p.stdout.strip(), 'BLOCKED: PDF library polluted worker stdout'
+          import fitz, PIL, pytest, psycopg, reportlab
+          print('PASS: PDF subprocess stdout is JSON-safe; all CI test imports available')
+          PY
 
       - name: Prepare pinned V7.9 installer test fixture
         run: python scripts/ci_prepare_v79_overlay.py
