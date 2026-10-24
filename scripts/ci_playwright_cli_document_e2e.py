@@ -123,6 +123,7 @@ CROSS_TENANT = r"""async () => {
       body:payload===undefined?undefined:JSON.stringify(payload)});
     return r.status;
   };
+  const paidAt=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const checks=[
     ['quote',await probe('/quotes/'+p.quote)],
     ['order',await probe('/orders/'+p.order)],
@@ -134,7 +135,7 @@ CROSS_TENANT = r"""async () => {
     ['foreign-order',await probe('/orders/from-quote','POST',
       {quote_id:p.quote,due_date:'2099-12-30'})],
     ['foreign-payment',await probe('/invoices/'+p.invoice+'/payments','POST',
-      {amount:1,paid_at:'2099-12-30',reference:'jw-ci-forbidden'})],
+      {amount:1,paid_at:paidAt,reference:'jw-ci-forbidden'})],
   ];
   for(const [name,code] of checks)
     if(code!==404) throw new Error('Cross-tenant '+name+' returned '+code+', expected 404');
