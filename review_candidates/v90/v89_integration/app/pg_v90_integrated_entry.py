@@ -62,6 +62,11 @@ def _pg_validated_cursor(session_hash: str):
                 if (not login or login[0] in ('postgres','supabase_admin','service_role','jw_app_dev')
                         or any(login[1:])):
                     raise HTTPException(503, 'Unsafe PostgreSQL login configured')
+                # Both authentication and business credentials must be confined to
+                # their own role. The V8.5 auth route checks the reverse side.
+                cur.execute("SELECT pg_catalog.pg_has_role(session_user,'jw_auth_stage_v85','SET')")
+                if cur.fetchone() != (False,):
+                    raise HTTPException(503, 'Business login can adopt authentication role')
                 cur.execute('SET LOCAL ROLE jw_app_dev')
                 cur.execute("SELECT pg_catalog.set_config('jw.session_hash', %s, true)", (session_hash,))
                 cur.execute('''SELECT current_user, actor_id, org_id, actor_role,
