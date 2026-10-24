@@ -64,7 +64,7 @@ def _pg_validated_cursor(session_hash: str):
                     raise HTTPException(503, 'Unsafe PostgreSQL login configured')
                 # Both authentication and business credentials must be confined to
                 # their own role. The V8.5 auth route checks the reverse side.
-                cur.execute("SELECT pg_catalog.pg_has_role(session_user,'jw_auth_stage_v85','SET')")
+                cur.execute("SELECT pg_catalog.pg_has_role(session_user,'jw_auth_stage_v85','MEMBER')")
                 if cur.fetchone() != (False,):
                     raise HTTPException(503, 'Business login can adopt authentication role')
                 cur.execute('SET LOCAL ROLE jw_app_dev')
