@@ -1,0 +1,76 @@
+{
+  "project": "JARVIS-WORKS",
+  "change_mode": "review_only",
+  "source_commit": "36621d8ff674a17259629d0472b914ffa87736e9",
+  "baseline_commit": "df1c76bc705f19135758d32c8912a6562bfaa7f1",
+  "scope": "Agent instructions, glossary, evidence-declaration validator and review-only workflow. No runtime app/database mutations.",
+  "gates": {
+    "code_environment": {
+      "status": "PASS",
+      "evidence": [
+        {
+          "kind": "github-ci",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40091282839"
+        },
+        {
+          "kind": "git-diff",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/pull/7/files"
+        }
+      ]
+    },
+    "functionality": {
+      "status": "PASS",
+      "evidence": [
+        {
+          "kind": "pytest-24",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40091282839"
+        }
+      ]
+    },
+    "regression_recovery": {
+      "status": "PARTIAL",
+      "evidence": [
+        {
+          "kind": "protected-diff-check",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40091282839"
+        },
+        {
+          "kind": "previous-589-suite-on-parent",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40090309004"
+        }
+      ]
+    },
+    "ui_ux": {
+      "status": "NOT RUN",
+      "evidence": []
+    },
+    "operations_security": {
+      "status": "PARTIAL",
+      "evidence": [
+        {
+          "kind": "no-production-change-check",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40091282839"
+        }
+      ]
+    }
+  },
+  "release": {
+    "status": "BLOCKED",
+    "remaining_blockers": [
+      "Product-wide PostgreSQL + verified TLS E2E is unfinished.",
+      "Restore/cutover and authorized production approval not completed.",
+      "New methodology tests do not certify production app."
+    ],
+    "production_deployed": false
+  },
+  "test_results": {
+    "passed": 24,
+    "failed": 0,
+    "skipped": 0,
+    "run_ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40091282839"
+  },
+  "rollback": {
+    "method": "Revert the skill-adoption review commit(s) on the isolated review branch; no runtime/DB changes in this scope.",
+    "tested": false
+  }
+}
