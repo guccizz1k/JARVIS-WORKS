@@ -1,0 +1,39 @@
+name: JW V9.2 isolated PG quote API and J1-J6 contract
+on:
+  push:
+    branches:
+      - review/v92-postgres-quote-write-j1j6-20261025
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v92-isolated-quote
+  cancel-in-progress: true
+jobs:
+  finance-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: J1 preserve original legacy frontend and immutable PG migrations
+        run: |
+          git merge-base --is-ancestor 27f5c5fbb427c17fff2f702992b8a95f31a479d5 HEAD
+          git diff --exit-code 27f5c5fbb427c17fff2f702992b8a95f31a479d5 HEAD -- app/main.py app/static/ db/ migrations/ security/ requirements.txt
+      - name: Existing dev test requirements
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: J3 J4 staging quote API happy and negative contract
+        run: |
+          python -m py_compile app/pg_quote_api_v92.py app/pg_dev_entry_v92.py
+          python -m pytest -q tests/test_pg_quote_api_v92.py tests/test_pg_connection_gate_v87.py tests/test_pg_gateway_alignment_v91.py -ra --junitxml=jw-v92-quote-contract.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v92-quote-contract
+          path: jw-v92-quote-contract.xml
+          retention-days: 3
