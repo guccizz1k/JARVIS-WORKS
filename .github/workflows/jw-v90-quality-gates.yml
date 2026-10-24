@@ -84,7 +84,7 @@ jobs:
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           python scripts/ci_playwright_cli_smoke.py
           python -m py_compile scripts/ci_playwright_cli_document_e2e.py
-          python scripts/ci_playwright_cli_document_e2e.py
+          python -m scripts.ci_playwright_cli_document_e2e
       - name: Retain synthetic browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
