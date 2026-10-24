@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/v93-supabase-https-pg-read-recovery-20261025
+      - review/v94-pg-tls-ipv6-preflight-20261025
   workflow_dispatch:
 permissions:
   contents: read
@@ -23,7 +24,7 @@ jobs:
       - name: Fail-closed TLS/hostname contract
         run: |
           python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
-          python -m pytest -q tests/test_ci_v93_supabase_tls_probe.py tests/test_pg_quote_read_v93.py tests/test_ci_v93_finance_restore.py -ra --junitxml=v93-guard.xml
+          python -m pytest -q tests/test_ci_v93_supabase_tls_probe.py tests/test_pg_quote_read_v93.py tests/test_ci_v93_finance_restore.py tests/test_ci_v94_supabase_ipv6_preflight.py -ra --junitxml=v93-guard.xml
       - name: Passwordless read-only actual dev Supabase Postgres TLS SSLRequest
         run: |
           python -m scripts.ci_v93_supabase_tls_probe | tee v93-supabase-tls.json
@@ -34,6 +35,9 @@ jobs:
           assert j["production_cutover"] is False
           if j["tls"]!="VERIFIED_CA_AND_HOSTNAME":
               print("BLOCKED: actual Supabase CA/hostname or connectivity is NOT verified")
+              print("DIAGNOSIS: DNS family =",j.get("address_family","UNKNOWN"),
+                    "error =",j.get("reason","UNKNOWN"),
+                    "hint =",j.get("network_hint","NONE"))
           else:
               print("PASS: actual Supabase PG17 public TLS certificate/hostname verified WITHOUT login")
           PY
