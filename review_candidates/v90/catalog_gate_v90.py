@@ -20,6 +20,11 @@ def assess(catalog: dict, *, independent_pg_e2e: bool = False) -> dict:
         '35_force_rls_tables': catalog.get('force_rls_tables') == 35,
         'no_direct_app_login': catalog.get('app_role_nologin') is True,
         'safe_nonprivileged_gateway_login_exists': catalog.get('safe_gateway_logins', 0) >= 1,
+        # Authentication and business sessions require DIFFERENT, non-privileged
+        # credentials. A login able to SET both roles defeats the V8.5/V9 boundary.
+        'auth_stage_role_nologin': catalog.get('auth_role_nologin') is True,
+        'dedicated_nonprivileged_authentication_login_exists': catalog.get('safe_auth_logins', 0) >= 1,
+        'no_shared_business_and_authentication_login': catalog.get('dual_role_login_count') == 0,
         'send_function_has_tx_lock': funcs.get('v90_send_text', {}).get('tx_lock') is True,
         'edit_function_has_tx_lock': funcs.get('v90_edit_text', {}).get('tx_lock') is True,
         'function_execution_least_privilege': all(
