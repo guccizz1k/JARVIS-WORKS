@@ -22,7 +22,7 @@ jobs:
           python-version: '3.12'
       - name: Fail-closed TLS/hostname contract
         run: |
-          python -m pip install -r requirements-dev.txt
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
           python -m pytest -q tests/test_ci_v93_supabase_tls_probe.py tests/test_pg_quote_read_v93.py tests/test_ci_v93_finance_restore.py -ra --junitxml=v93-guard.xml
       - name: Passwordless read-only actual dev Supabase Postgres TLS SSLRequest
         run: |
