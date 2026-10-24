@@ -1,0 +1,73 @@
+{
+  "project": "JARVIS-WORKS",
+  "change_mode": "review_only",
+  "source_commit": "cd86cb0a09d6415a0b2739d52b135cff28db62bb",
+  "baseline_commit": "550ef6868a0476fafe31e2bf4df02d45e25def1d",
+  "gates": {
+    "code_environment": {
+      "status": "PASS",
+      "evidence": [
+        {
+          "kind": "github-ci",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40092504368"
+        }
+      ]
+    },
+    "functionality": {
+      "status": "PASS",
+      "evidence": [
+        {
+          "kind": "pytests-43",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40092504368"
+        }
+      ]
+    },
+    "regression_recovery": {
+      "status": "PARTIAL",
+      "evidence": [
+        {
+          "kind": "pg17-synthetic-restore",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40092504368"
+        }
+      ]
+    },
+    "ui_ux": {
+      "status": "PARTIAL",
+      "evidence": [
+        {
+          "kind": "chromium-ci-synthetic-auth",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40092504368"
+        }
+      ]
+    },
+    "operations_security": {
+      "status": "BLOCKED",
+      "evidence": [
+        {
+          "kind": "prior-live-development-and-role-test",
+          "ref": "https://github.com/guccizz1k/JARVIS-WORKS/pull/6"
+        }
+      ]
+    }
+  },
+  "release": {
+    "status": "BLOCKED",
+    "remaining_blockers": [
+      "verified Supabase TLS and full product API",
+      "real deployed HTTPS end-to-end",
+      "representative full-data restore and cutover",
+      "independent production authorization"
+    ],
+    "production_deployed": false
+  },
+  "test_results": {
+    "passed": 43,
+    "failed": 0,
+    "skipped": 0,
+    "run_ref": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/40092504368"
+  },
+  "rollback": {
+    "method": "revert isolated review commit; synthetic restored CI DB and dump were destroyed",
+    "tested": true
+  }
+}
