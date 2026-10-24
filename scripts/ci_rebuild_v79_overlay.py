@@ -35,7 +35,7 @@ for name, expected in payload.items():
     data = (root / name).read_bytes()
     if name == 'scripts/check_pg_rls_v79.py':
         data = data.replace(b'c.oid FROM pg_class c',b'c.oid::integer FROM pg_class c').replace(
-            b"('jw_app',f'public.\\\"{name}\\\"',grant)", b"('jw_app',oid,grant)")
+            b"""('jw_app',f'public."{name}"',grant)""", b"('jw_app',oid,grant)")
     if sha(data) != expected:
         raise RuntimeError("Untrusted overlay reconstruction: " + name)
     target = fixture / 'payload' / name
