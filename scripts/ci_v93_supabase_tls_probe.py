@@ -96,7 +96,7 @@ def probe(host: str, ca_file: str = "") -> dict[str, object]:
                 result["protocol"] = tls.version()
     except (socket.gaierror, socket.timeout, TimeoutError, OSError,
             ssl.SSLError) as exc:
-        # Never leak IP addresses, passwords, DSNs or certificate contents.
+        # Redact network addresses, secrets, DSNs and certificate contents.
         result["reason"] = error_category(exc)
         if transport["address_family"] == "IPV6_ONLY":
             result["network_hint"] = "IPV6_DIRECT_ENDPOINT_REQUIRES_IPV6_ROUTE"
