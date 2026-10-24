@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app import pg_quote_api_v92 as quote
+from app import pg_quote_read_v93 as reader
 from app import pg_v90_integrated_entry as v90
 from scripts import ci_v90_postgres_browser as fixture
 
@@ -66,6 +67,7 @@ def main()->int:
     assert quote.enabled()
     app=FastAPI()
     assert quote.register_v92_quote_api(app)
+    assert reader.register_v93_quote_reader(app)
     a=make_client(app,"A")
     b=make_client(app,"B")
     c=make_client(app,"C")
@@ -74,6 +76,21 @@ def main()->int:
     assert first.status_code==201, first.text
     result=first.json()
     assert result["money"]=={"subtotal":1309,"vat":131,"total":1440}
+    quote_id=result["quote_id"]
+    quote_detail=a.get("/api/pg-stage/v92/quotes/"+quote_id)
+    assert quote_detail.status_code==200,quote_detail.text
+    doc=quote_detail.json()
+    assert doc["money"]=={"subtotal":1309,"vat":131,"total":1440}
+    assert len(doc["items"])==2 and doc["items"][1]["unit_price"]==503
+    assert quote_detail.headers.get("cache-control")=="no-store"
+    list_a=a.get("/api/pg-stage/v92/quotes")
+    assert list_a.status_code==200 and any(x["id"]==quote_id for x in list_a.json())
+    foreign=b.get("/api/pg-stage/v92/quotes/"+quote_id)
+    assert foreign.status_code==404
+    assert all(x["id"]!=quote_id for x in b.get("/api/pg-stage/v92/quotes").json())
+    assert c.get("/api/pg-stage/v92/quotes/"+quote_id).status_code==404
+    assert a.get("/api/pg-stage/v92/quotes/"+("X"*32)).status_code==404
+    assert a.get("/api/pg-stage/v92/quotes?limit=0").status_code==422
     second=request(a,payload(key))
     assert second.status_code==200 and second.json()["quote_id"]==result["quote_id"]
     assert second.json()["created"] is False
@@ -151,7 +168,7 @@ def main()->int:
             WHERE n.nspname='jw_dev' AND c.relname IN ('customers','quotes','quote_items','audit_logs')
              AND c.relrowsecurity AND c.relforcerowsecurity""").fetchone()[0]
         assert policies==4
-    print("PASS: real PG17 V9.2 FastAPI POST with verified PG session, 2-tenant RLS, exact KRW/VAT, CSRF & Origin")
+    print("PASS: real PG17 V9.2+V9.3 FastAPI POST/GET/detail/list, tenant A/B/C RLS, exact KRW/VAT, CSRF & Origin")
     print("PASS: 2 genuine nonprivileged concurrent PostgreSQL transactions, unique request-id, one audit and two items")
     print("PASS: injected item SQL failure rolls back quote+items+audit atomically, no persisted residue")
     print("LIMIT: isolated DB, TestClient HTTPS origin; NOT deployed TLS, real Supabase CA, or production finance rollout")
