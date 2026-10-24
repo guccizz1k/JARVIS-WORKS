@@ -16,13 +16,13 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import pg_v90_integrated_entry as v90
 
 _MODE = "ISOLATED_DEV_QUOTE_V92"
 _PREFIX = "/api/pg-stage/v92"
-_MAX_SUBTOTAL = 10 ** 15
+_MAX_SUBTOTAL = 40 * 100000 * 1000000000  # Existing app.main maximum
 
 
 class QuoteItem(BaseModel):
@@ -30,6 +30,13 @@ class QuoteItem(BaseModel):
     name: str = Field(min_length=1, max_length=150)
     quantity: int = Field(ge=1, le=100000)
     unit_price: int = Field(ge=0, le=1000000000)
+
+    @field_validator('name')
+    @classmethod
+    def nonempty_item_name(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError('Item name is required')
+        return value.strip()
 
 
 class QuoteDraft(BaseModel):
@@ -39,6 +46,13 @@ class QuoteDraft(BaseModel):
     title: str = Field(min_length=1, max_length=150)
     vat_mode: str = Field(pattern=r"^(taxable|exempt)$")
     items: list[QuoteItem] = Field(min_length=1, max_length=40)
+
+    @field_validator('title')
+    @classmethod
+    def nonempty_quote_title(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError('Quote title is required')
+        return value.strip()
 
 
 def enabled() -> bool:

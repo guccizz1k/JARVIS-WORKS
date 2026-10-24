@@ -186,12 +186,33 @@ def test_exempt_quote_vat_is_zero(stage):
     assert r.json()["money"]=={"subtotal":1309,"vat":0,"total":1309}
 
 
-def test_overflow_raises_without_write(stage):
+def test_existing_main_upper_bound_is_accepted_with_exact_integer_math(stage):
     c,s,_=stage
     data=payload()
     data["items"]=[{"name":"bulk","quantity":100000,"unit_price":1000000000}]*40
+    r=request(c,data)
+    assert r.status_code==201,r.text
+    assert r.json()["money"]=={
+        "subtotal":4000000000000000,
+        "vat":400000000000000,
+        "total":4400000000000000,
+    }
+    assert len(s["quotes"])==1 and len(s["items"])==40
+
+
+@pytest.mark.parametrize("field,value",[
+    ("title","   "),
+    ("item-name","  "),
+])
+def test_whitespace_only_quote_fields_are_rejected(stage,field,value):
+    c,s,_=stage
+    data=payload()
+    if field=="title":
+        data["title"]=value
+    else:
+        data["items"][0]["name"]=value
     assert request(c,data).status_code==422
-    assert s["quotes"]=={}
+    assert not s["quotes"]
 
 
 def test_fail_closed_db_rollback_mid_items(stage,monkeypatch):
