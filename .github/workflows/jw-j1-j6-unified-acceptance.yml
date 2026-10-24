@@ -7,6 +7,7 @@ on:
       - review/v91-live-pg-gateway-alignment-20261024
       - review/v92-postgres-quote-write-j1j6-20261025
       - review/v93-supabase-https-pg-read-recovery-20261025
+      - review/v94-pg-tls-ipv6-preflight-20261025
   workflow_dispatch:
 
 permissions:
