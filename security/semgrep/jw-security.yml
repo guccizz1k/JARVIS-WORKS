@@ -1,0 +1,31 @@
+# Narrow, review-owned fail-closed patterns for JARVIS WORKS.
+# An empty result does NOT certify security or replace RLS/E2E/penetration tests.
+rules:
+  - id: jw-python-dangerous-eval
+    languages: [python]
+    severity: ERROR
+    message: Dynamic Python eval() may execute untrusted data; remove or replace it.
+    pattern: eval(...)
+  - id: jw-python-shell-true
+    languages: [python]
+    severity: ERROR
+    message: Avoid shell=True; pass a fixed argument list to subprocess.
+    pattern-either:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+      - pattern: subprocess.call(..., shell=True, ...)
+  - id: jw-python-insecure-pickle
+    languages: [python]
+    severity: ERROR
+    message: Pickle deserialization may execute code; use a safe typed format.
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+  - id: jw-python-requests-tls-bypass
+    languages: [python]
+    severity: ERROR
+    message: Do not disable TLS certificate validation.
+    pattern-either:
+      - pattern: requests.get(..., verify=False, ...)
+      - pattern: requests.post(..., verify=False, ...)
+      - pattern: requests.request(..., verify=False, ...)
