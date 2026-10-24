@@ -213,3 +213,27 @@ V8.9 original commit/archive and 565 historical tests missing; actual independen
 - No DB DDL, privileged bypass, password reset, direct customer query, merge, CI dispatch or deployment performed.
 
 **Launch status: BLOCKED**. Next actual proving step requires an explicitly approved isolated, non-superuser, SSL-verified PG gateway login with `SET ROLE jw_app_dev`, separate auth-stage role, then actual two-connection SQL contention/RLS/revoke/rollback tests before candidate migration and production rollout.
+
+## 2026-10-24 — bounded idle WebSocket polling and heartbeat proof
+
+### Failing-first / exact scope
+- Previous integrated `app.pg_messenger_realtime_v90` had fixed `await asyncio.sleep(poll_seconds)`, issuing two authorization-bound DB RPCs **every 0.3s per idle WebSocket** at the default, with no idle backoff. The new 4-case test initially failed at collection because the backoff primitive was absent.
+- On an **isolated V8.9-based review branch** (base `a3783ef`, integrated parent `98026b9`) add bounded idle backoff: first eight empty polls use normal latency, then backoff by 1.5x per empty cycle to a maximum 4x, capped to 1.2s at default settings. Any message/edit resets to normal polling. This is not LISTEN/NOTIFY and is NOT a true production push SLA.
+- Added a **wall-clock-based heartbeat condition** so backing off DB reads cannot silently postpone keepalives behind the original tick interval. Early session revocation still terminates WS with close code 1008.
+- Dedicated **ASGI WebSocket tests: 4 PASS** (idle traffic count; edit/message delivery; revoked-session failure; heartbeat under backoff). Existing standalone stage tests **38 PASS** and related restored integration/auth tests **44 PASS**.
+- **Fresh full V8.9+V9.0 combined regression after final source patch: 589 PASS / 0 FAIL / 0 SKIP, 197.57s**, JUnit in the artifact. The legacy `app/main.py` remains byte-identical. Integrated local Git commit `1b0aa66` remains a review-only local history; no production deployment.
+
+### Reproducible synthetic throughput (NOT live PG)
+- Run from the separately delivered bundle source: `PYTHONPATH=. python scripts/benchmark_pg_v90_idle.py`.
+- Real local TestClient WS server stack but **synthetic always-empty gateway**; accelerated 20ms base poll to compare algorithms, **not** a production traffic / latency measurement.
+- 1 idle WS, 3 samples: base **98.9** vs improved **38.3** synthetic queries/sec; **61.3% reduction**.
+- 10 idle WS, 2 samples: base **956.9** vs improved **420.0** synthetic queries/sec; **56.1% reduction**.
+- Configured normal active polling remains 0.3s. After long inactivity new data can be delayed up to 1.2s plus runtime/network overhead. Do not claim unchanged worst-case message latency.
+
+### Remote review commit evidence
+- `v89_integration/app/pg_messenger_realtime_v90.py`: tested Git blob `79e2fcba4d3ef6589ed6bb6e035b88a5caa2d40c`.
+- `pg_messenger_realtime_v90.py` standalone equivalent: tested Git blob `0ba09540c6eaa7d76bcaf1f25e4ca9740584df4d`.
+- `v89_integration/tests/test_pg_v90_adaptive_poll.py`: tested Git blob `3ed54329340482a0240feb655f4eaab2960f68a3`.
+- GitHub Draft PR remains isolated from remote `main`. No database role, SQL schema, auth secrets, CI billing, merge or production service changes.
+
+**Unchanged release blockers:** verified nonprivileged business/auth PostgreSQL logins absent; staging commit-order SQL not deployed; actual A/B/C tenant real-connection RLS and commit-inversion E2E not run; original V8.9 Git history not reconciled into remote main; real production-browser and migration/rollback acceptance blocked. Do not count synthetic benchmark as a live deployment PASS.
