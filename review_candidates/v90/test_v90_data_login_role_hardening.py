@@ -9,7 +9,7 @@ SOURCE = (Path(__file__).parent / 'v89_integration/app/pg_v90_integrated_entry.p
 
 
 def test_server_refuses_business_login_with_auth_stage_membership():
-    assert "pg_has_role(session_user,'jw_auth_stage_v85','SET')" in SOURCE
+    assert "pg_has_role(session_user,'jw_auth_stage_v85','MEMBER')" in SOURCE
     assert "if cur.fetchone() != (False,)" in SOURCE
     assert "Business login can adopt authentication role" in SOURCE
 
