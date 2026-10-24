@@ -10,6 +10,14 @@ import os
 from contextlib import closing
 from typing import Callable
 
+# Only role names from the reviewed V8.6 lineage and the verified V9.0
+# least-privileged dev gateways are accepted. V8.6 roles are NOLOGIN in the
+# actual dev database; rolcanlogin below rejects such accounts if supplied.
+ALLOWED_GATEWAY_LOGINS = {
+    'auth': frozenset(('jw_auth_login_v86', 'jw_auth_gateway_v90')),
+    'trade': frozenset(('jw_trade_login_v86', 'jw_trade_gateway_v90')),
+}
+
 LOGIN_PROBE = """
 SELECT session_user, current_user,
        (r.rolsuper OR r.rolbypassrls OR r.rolcreatedb OR r.rolcreaterole) AS privileged,
@@ -21,7 +29,8 @@ SELECT session_user, current_user,
          OR has_table_privilege(session_user,format('%I.%I',t.schemaname,t.tablename),'UPDATE')
          OR has_table_privilege(session_user,format('%I.%I',t.schemaname,t.tablename),'DELETE'))) AS direct_tables,
        (SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()) AS ssl_active,
-       current_setting('server_version_num')::integer / 10000 AS major
+       current_setting('server_version_num')::integer / 10000 AS major,
+       r.rolcanlogin AS can_login
 FROM pg_roles r WHERE r.rolname=session_user
 """
 
@@ -37,7 +46,7 @@ SELECT current_user,
 
 
 def _check_one(conn, *, kind: str) -> tuple[str | None, list[str]]:
-    expected_login = 'jw_auth_login_v86' if kind == 'auth' else 'jw_trade_login_v86'
+    allowed_logins = ALLOWED_GATEWAY_LOGINS[kind]
     expected_stage = 'jw_auth_stage_v85' if kind == 'auth' else 'jw_app_dev'
     flags: list[str] = []
     # psycopg connection defaults to an implicit transaction; only SELECT and
@@ -46,10 +55,11 @@ def _check_one(conn, *, kind: str) -> tuple[str | None, list[str]]:
         cur.execute('SET TRANSACTION READ ONLY')
         cur.execute(LOGIN_PROBE)
         row = cur.fetchone()
-        if not row or len(row) != 8:
+        if not row or len(row) != 9:
             return None, ['login_metadata_missing']
-        session_user, current_user, admin, can_auth, can_trade, direct, tls, major = row
-        if session_user != expected_login or current_user != session_user:
+        session_user, current_user, admin, can_auth, can_trade, direct, tls, major, can_login = row
+        if (session_user not in allowed_logins or current_user != session_user
+                or can_login is not True):
             flags.append('unexpected_login_identity')
         if admin or direct:
             flags.append('privilege_exposure')
