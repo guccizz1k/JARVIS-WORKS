@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from .pg_connection_gate_v87 import check_two_connections
+from .pg_connection_gate_v87 import check_two_connections, ALLOWED_GATEWAY_LOGINS
 
 # Fixed, namespaced advisory lock keys; transaction-scoped and automatically
 # released on rollback. This is a concurrency *primitive* drill, NOT an actual
@@ -58,8 +58,9 @@ def live_gate_v88(*, connector: Callable | None = None, env: dict | None = None)
             b.execute('SELECT pg_backend_pid(),current_user,session_user')
             left, right = a.fetchone(), b.fetchone()
             if (not left or not right or left[0] == right[0]
-                    or left[1:] != ('jw_app_dev', 'jw_trade_login_v86')
-                    or right[1:] != ('jw_app_dev', 'jw_trade_login_v86')):
+                    or left[1] != 'jw_app_dev' or right[1] != 'jw_app_dev'
+                    or left[2] not in ALLOWED_GATEWAY_LOGINS['trade']
+                    or right[2] != left[2]):
                 return {**denied, 'reason': 'Independent backend identities not verified'}
             a.execute('SELECT pg_try_advisory_xact_lock(%s,%s)', _LOCK_KEY)
             if a.fetchone() != (True,):

@@ -25,7 +25,8 @@ class Cursor:
                 self.behavior.get('can_auth',self.kind=='auth'),
                 self.behavior.get('can_trade',self.kind=='trade'),
                 self.behavior.get('direct',False),
-                self.behavior.get('ssl',True),self.behavior.get('major',17))
+                self.behavior.get('ssl',True),self.behavior.get('major',17),
+                self.behavior.get('canlogin',True))
         if self.which == 'role':
             return ('jw_auth_stage_v85' if self.kind == 'auth' else 'jw_app_dev',
                 self.behavior.get('read_users',False),False,
@@ -76,7 +77,8 @@ def test_read_only_role_switch_both_connections():
 
 @pytest.mark.parametrize('behavior',[{'admin':True},{'direct':True},{'ssl':False},
                                      {'can_trade':True},{'can_auth':False},
-                                     {'read_users':True},{'major':16}])
+                                     {'read_users':True},{'major':16},
+                                     {'canlogin':False}])
 def test_privilege_or_tls_violation_fails_closed(behavior):
     def connector(dsn,**kw):return Connection('auth' if dsn=='auth_secret' else 'trade',
                                               behavior if dsn=='auth_secret' else None)
