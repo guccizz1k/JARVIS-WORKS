@@ -153,17 +153,35 @@ def run() -> int:
             if preflight.get("result")!="PASS":
                 # J4 diagnosis only in this disposable, fully local CI fixture.
                 # Do not reveal DSNs, SQL text, server details or passwords.
-                from app.pg_connection_gate_v87 import _check_one
+                from app.pg_connection_gate_v87 import LOGIN_PROBE, ROLE_PROBE
                 for kind, profile in (("auth","JW_PG_AUTH_STAGE_DSN"),
                                       ("trade","JW_PG_STAGE_DSN")):
                     try:
                         with psycopg.connect(env[profile],connect_timeout=5,
                                              sslmode="verify-full") as db:
-                            identity, issues=_check_one(db,kind=kind)
+                            with db.cursor() as cur:
+                                checks=(
+                                    ("read-only","SET TRANSACTION READ ONLY"),
+                                    ("login-probe",LOGIN_PROBE),
+                                    ("role-switch","SET LOCAL ROLE jw_auth_stage_v85"
+                                     if kind=="auth" else "SET LOCAL ROLE jw_app_dev"),
+                                    ("effective-permissions",ROLE_PROBE),
+                                )
+                                for phase, statement in checks:
+                                    try:
+                                        cur.execute(statement)
+                                        if phase in ("login-probe","effective-permissions"):
+                                            result=cur.fetchone()
+                                            print("J4 CI-only diagnostic",kind,phase,
+                                                  "column_count",len(result) if result else 0,flush=True)
+                                    except Exception as exc:
+                                        print("J4 CI-only diagnostic",kind,phase,
+                                              type(exc).__name__,
+                                              "SQLSTATE",getattr(exc,"sqlstate",None),flush=True)
+                                        break
                             db.rollback()
-                            print("J4 CI-only diagnostic",kind,"checks",issues,flush=True)
                     except Exception as exc:
-                        print("J4 CI-only diagnostic",kind,type(exc).__name__,
+                        print("J4 CI-only diagnostic",kind,"connection",type(exc).__name__,
                               "SQLSTATE",getattr(exc,"sqlstate",None),flush=True)
                 raise AssertionError("Actual TLS gateway preflight rejected: "+str(preflight))
             locks=live_gate_v88(env=env)
