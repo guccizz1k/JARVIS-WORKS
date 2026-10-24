@@ -6,6 +6,7 @@ def valid_metadata():
     return {
         'postgresql_17': True, 'force_rls_tables': 35,
         'app_role_nologin': True, 'safe_gateway_logins': 1,
+        'auth_role_nologin': True, 'safe_auth_logins': 1, 'dual_role_login_count': 0,
         'functions': {name: {'tx_lock': True, 'anon_execute': False,
                              'authenticated_execute': False, 'app_execute': True}
                       for name in ('v90_send_text', 'v90_edit_text')},
@@ -40,3 +41,24 @@ def test_missing_fields_fails_closed():
     r = assess({})
     assert r['verdict'] == 'BLOCKED'
     assert len(r['blocking_checks']) >= 5
+
+
+def test_shared_business_and_authentication_login_is_blocked():
+    metadata = valid_metadata()
+    metadata['dual_role_login_count'] = 1
+    result = assess(metadata, independent_pg_e2e=True)
+    assert 'no_shared_business_and_authentication_login' in result['blocking_checks']
+
+
+def test_absent_authentication_only_login_is_blocked():
+    metadata = valid_metadata()
+    metadata['safe_auth_logins'] = 0
+    result = assess(metadata, independent_pg_e2e=True)
+    assert 'dedicated_nonprivileged_authentication_login_exists' in result['blocking_checks']
+
+
+def test_login_role_itself_must_not_be_an_auth_login():
+    metadata = valid_metadata()
+    metadata['auth_role_nologin'] = False
+    result = assess(metadata, independent_pg_e2e=True)
+    assert 'auth_stage_role_nologin' in result['blocking_checks']
