@@ -18,5 +18,8 @@
       "authenticated_execute": false,
       "app_execute": true
     }
-  }
+  },
+  "auth_role_nologin": true,
+  "safe_auth_logins": 0,
+  "dual_role_login_count": 0
 }
