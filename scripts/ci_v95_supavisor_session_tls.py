@@ -84,7 +84,7 @@ def probe(host: str = POOLER_HOST, port: int = POOLER_PORT,
             if response != b"S":
                 result["reason"] = "PG_SSL_NOT_ACCEPTED"
                 return result
-            # Never set CERT_NONE, disable hostname verification or use
+            # Never weaken certificate validation, skip hostname verification or use
             # plaintext fallback. Supavisor's certificate must chain to CA.
             with ctx.wrap_socket(sock, server_hostname=host) as tls:
                 cert = tls.getpeercert(binary_form=True)
