@@ -69,7 +69,8 @@ def create_realtime_router(
             edt = datetime.fromisoformat(edit_after_at)
             if edt.tzinfo is None:
                 raise ValueError('Naive datetime')
-            identity = authorize(ws)
+            # Session validation performs a PostgreSQL round trip. Never block the ASGI event loop.
+            identity = await run_in_threadpool(authorize, ws)
             if not isinstance(identity, VerifiedSession) or len(identity.session_hash) < 16:
                 raise PermissionError('Unauthenticated')
             # Authenticate the very first RPC BEFORE accepting the websocket.
