@@ -33,3 +33,19 @@ The earlier catalog release gate checked only a safe business gateway login. It 
 5. Perform real A/B/C tenant, attachment, login/logout, deployed browser and recovery E2E before release.
 
 **Final status: newly reproduced security check corrected and locally verified; real-DB release BLOCKED.**
+
+
+## 2026-10-24 — PostgreSQL 17 INHERIT bypass addressed (additional)
+
+PostgreSQL permits role membership with `INHERIT TRUE` and `SET FALSE`; a login can use role privileges without being able to change roles. Therefore an authorization check limited to `pg_has_role(...,'SET')` is insufficient for the mutually exclusive auth/data login invariant. Official documentation: https://www.postgresql.org/docs/17/role-membership.html
+
+Failing-first dynamic evidence with isolated V8.9 + V9.0 FastAPI mock driver:
+- Business login **member of auth stage** with SET disabled: **HTTP 200 instead of 503**, FAIL before patch.
+- Auth login **member of business stage** with SET disabled: issued authentication logic instead of rejecting login, FAIL before patch.
+- Fix both check paths with `pg_has_role(session_user, role, 'MEMBER')`. New business adapter source committed under `v89_integration/app/pg_v90_integrated_entry.py`. The V8.9 auth original remains unchanged; its 1-line fix is preserved under `v89_integration/patches/pg_auth_v85_member_boundary.patch` pending integration review.
+- Two relevant executable suites after candidate patch: **40 PASS / 0 FAIL**.
+- Role catalog local contract tests and GitHub source boundary checks: **13 PASS / 0 FAIL**.
+- Fresh full V8.9 + V9.0 suite (first SET-only candidate) previously finished **583 PASS / 0 FAIL / 0 SKIP**, 199.25 s. A separate full suite of final MEMBER-based candidate is scheduled/running; do not count it until result evidence exists.
+- The live development PostgreSQL has **no safe LOGIN gateways** and `v90_send_text` / `v90_edit_text` still lack the commit-order locks. No DB changes, user credentials, or migration were performed.
+
+**Do not merge/release** until the V8.9 auth MEMBER patch is integrated, independent-role login credentials are created safely, commit-order migration is rehearsed, and nonprivileged A/B/C real PostgreSQL E2E passes.
