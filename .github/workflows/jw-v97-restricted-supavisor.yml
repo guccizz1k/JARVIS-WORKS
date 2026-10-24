@@ -1,0 +1,46 @@
+name: JW V9.7 restricted Supavisor login readiness (review only)
+on:
+  push:
+    branches:
+      - review/v97-restricted-supavisor-login-20261025
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  restricted-role-readonly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      JW_ENV: review
+      JW_V97_LIVE_ACK: READ_ONLY_SUPAVISOR_ACCEPTANCE_V97
+      JW_V97_TRADE_DSN: ${{ secrets.JW_V97_TRADE_DSN }}
+      JW_V97_AUTH_DSN: ${{ secrets.JW_V97_AUTH_DSN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: V9.7 contract and original restricted role regressions
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pytest -q tests/test_ci_v97_supavisor_restricted_auth.py tests/test_pg_connection_gate_v87.py tests/test_ci_v96_supabase_ca.py -ra
+      - name: Check actual restricted Supavisor logins only if secrets are provisioned
+        run: |
+          python -m scripts.ci_v97_supavisor_restricted_auth > jw-v97-verdict.json
+          python - <<'PY'
+          import json
+          x=json.load(open("jw-v97-verdict.json"))
+          print("Read-only restricted Supavisor authentication:",x["decision"],
+                "reason:",x.get("reason"),"production_cutover:",x["production_cutover"])
+          if x["decision"]!="PASS":
+              print("BLOCKED: real DB login unverified. Do NOT release.")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v97-readonly-auth-proof
+          path: jw-v97-verdict.json
+          retention-days: 3
+          if-no-files-found: ignore
