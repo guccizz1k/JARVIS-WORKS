@@ -64,7 +64,7 @@ def stage(monkeypatch):
     app=FastAPI()
     assert mod.register_v92_quote_api(app)
     client=TestClient(app,base_url="https://testserver")
-    client.cookies.set("__Host-jw_session",TOKEN,secure=True)
+    client.cookies.set("__Host-jw_session",TOKEN)
     return client,store,org
 
 
