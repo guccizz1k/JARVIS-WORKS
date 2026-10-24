@@ -1,0 +1,42 @@
+name: V9.1 real gateway alignment focused J1-J6 regression
+
+on:
+  push:
+    branches:
+      - review/v91-live-pg-gateway-alignment-20261024
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v91-gateway-contract
+  cancel-in-progress: true
+
+jobs:
+  aligned-gateway-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact V9 heritage and original runtime protection
+        run: |
+          git merge-base --is-ancestor c29a955dc2afd28d4d283838bddef617b3487bc7 HEAD
+          git diff --exit-code c29a955dc2afd28d4d283838bddef617b3487bc7 HEAD -- app/main.py app/static/ db/ migrations/ security/
+      - name: Install existing approved dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: V9.0 actual login vs legacy role negative/positive regressions
+        run: |
+          python -m pytest -q tests/test_pg_gateway_alignment_v91.py tests/test_pg_connection_gate_v87.py tests/test_pg_live_dryrun_v88.py -ra --junitxml=jw-v91-gateway.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v91-gateway-xml
+          path: jw-v91-gateway.xml
+          retention-days: 3
