@@ -51,7 +51,8 @@ def diagnose(*, env=None, connector=None) -> dict:
                     # actual usernames, backend PID, SQL messages or secrets.
                     # Boolean-only transport diagnostics. Never print libpq
                     # parameters, URLs, usernames, secrets or certificate paths.
-                    params=db.info.get_parameters()  # psycopg 3, returns no plaintext password
+                    getter=getattr(getattr(db,"info",None),"get_parameters",None)
+                    params=getter() if callable(getter) else {}  # no passwords
                     evidence[kind]={"pg_major_17":major==17,
                                     "backend_pg_stat_ssl":bool(backend_ssl),
                                     "session_identity_consistent":same_identity is True,
