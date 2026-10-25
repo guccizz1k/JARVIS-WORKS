@@ -37,6 +37,7 @@ def create_realtime_router(
     allowed_origins: frozenset[str],
     poll_seconds: float = 0.3,
     heartbeat_every: int = 20,
+    wake_hub=None,
 ) -> APIRouter:
     """Auth checks are repeated by the Postgres RPC on every cycle.
 
@@ -65,6 +66,7 @@ def create_realtime_router(
         if after < 0 or len(connection_id) > 128 or not connection_id or len(edit_after_id) > 128:
             await ws.close(code=1008)
             return
+        subscriber = None
         try:
             edt = datetime.fromisoformat(edit_after_at)
             if edt.tzinfo is None:
@@ -76,11 +78,21 @@ def create_realtime_router(
             # Authenticate the very first RPC BEFORE accepting the websocket.
             await run_in_threadpool(gateway.query, identity.session_hash, SQL['messages'], (connection_id, after, 1))
             await run_in_threadpool(gateway.query, identity.session_hash, SQL['edits'], (connection_id, edt, edit_after_id, 1))
-        except (ValueError, PermissionError, Exception):
+            # Subscribe only after real PostgreSQL permission checks. Wake signals
+            # never replace tenant-scoped RPC checks or cursor replay.
+            if wake_hub is not None:
+                subscriber = wake_hub.subscribe(connection_id)
+        except Exception:
             await ws.close(code=1008)
             return
 
-        await ws.accept()
+        try:
+            await ws.accept()
+        except BaseException:
+            # Even failed handshakes/cancellation cannot leak hub subscriptions.
+            if subscriber is not None:
+                wake_hub.unsubscribe(connection_id, subscriber)
+            raise
         cursor = after
         edit_dt = edt
         edit_id = edit_after_id
@@ -91,6 +103,10 @@ def create_realtime_router(
             # A checkpoint is always delivered, including to an empty chat.
             await ws.send_json({'type': 'ready', 'after': cursor, 'edit_after_at': edit_dt.isoformat(), 'edit_after_id': edit_id})
             while True:
+                # Clear before reading from the DB, not afterwards: a wakeup
+                # concurrent with a SELECT stays signaled until the next wait.
+                if subscriber is not None:
+                    subscriber.clear()
                 # Offload psycopg to the worker pool; a synchronous cursor cannot block ASGI event loop.
                 rows = await run_in_threadpool(gateway.query, identity.session_hash, SQL['messages'], (connection_id, cursor, 50))
                 for row in rows:
@@ -115,7 +131,17 @@ def create_realtime_router(
                     await ws.send_json({'type': 'heartbeat', 'after': cursor, 'edit_after_at': edit_dt.isoformat(), 'edit_after_id': edit_id})
                     last_heartbeat_at = monotonic()
                 idle_rounds = 0 if (rows or edits) else idle_rounds + 1
-                await asyncio.sleep(next_poll_delay(poll_seconds, idle_rounds))
+                if subscriber is None:
+                    await asyncio.sleep(next_poll_delay(poll_seconds, idle_rounds))
+                else:
+                    # In addition to NOTIFY, perform periodic actual DB reads:
+                    # NOTIFY is not durable and session revocation must be seen.
+                    # On listener failure, bounded fallback polling resumes.
+                    reconciliation = 10.0 if wake_hub.connected else 2.0
+                    try:
+                        await asyncio.wait_for(subscriber.wait(), timeout=reconciliation)
+                    except asyncio.TimeoutError:
+                        pass
         except WebSocketDisconnect:
             return
         except asyncio.CancelledError:
@@ -126,5 +152,8 @@ def create_realtime_router(
                 await ws.close(code=1008)
             except RuntimeError:
                 pass
+        finally:
+            if subscriber is not None:
+                wake_hub.unsubscribe(connection_id, subscriber)
 
     return router
