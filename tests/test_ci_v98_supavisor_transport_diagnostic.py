@@ -30,7 +30,7 @@ def test_separate_tls_hops_with_mock_readonly():
     e={"JW_ENV":"review","JW_V97_LIVE_ACK":gate.ACK,
        "JW_V97_AUTH_DSN":dsn("auth"),"JW_V97_TRADE_DSN":dsn("trade")}
     out=x.diagnose(e,conn)
-    assert out["status"]=="DIAGNOSED"
+    assert out["status"]=="DIAGNOSED", out
     assert out["roles"]["auth"]["postgres_17"] is True
     assert out["roles"]["trade"]["upstream_ssl"]=="FALSE"
     assert "fake-only" not in str(out)
