@@ -5,7 +5,7 @@ Base verified at V9.8 head abc8c3acfd1ad4acc8580772ab65ed4e3ed202b7: 855 PASS / 
 ## Why this report cannot declare eight production phases DONE
 All 8 stages are evaluated, and NONE may become SKIP. Their statuses may be PARTIAL or BLOCKED if proof is missing. A successful CI audit of the stage table is NOT eight successful releases.
 
-1. **V9.9:** read-only *real Supabase* unknown-session RLS check under existing restricted trade gateway on ten tenant-scoped tables. It neither establishes real tenant A/B/C with valid sessions nor accesses customer rows. A/B/C fixture+record tests remain required in isolated staging, with explicit deterministic cleanup and independent actor identities.
+1. **V9.9:** read-only *real Supabase* unknown-session observation under existing restricted trade gateway on ten tenant-scoped tables. Live main business tables are empty; ten zero counts therefore do NOT prove RLS row isolation. It neither establishes real tenant A/B/C with valid sessions nor accesses customer rows. A/B/C fixture+record tests remain required in isolated staging, with explicit deterministic cleanup and independent actor identities.
 2. **V10.0:** two actual restricted login/role checks are PASS, but full SQLite→Postgres signup/logout/password reset/MFA/access/session lifecycle requires E2E and security approval.
 3. **V10.1:** synthetic PG17 invoice/quote read/write exists; quote→order→delivery→invoice→payment settlement end-to-end against actual service DB and reconciliation is NOT VERIFIED.
 4. **V10.2:** isolated PG17 synthetic messenger and WebSocket checks exist; real multiple enterprise users, upload limits, message correction, replay and bad network remain unresolved.
