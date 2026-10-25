@@ -33,7 +33,7 @@ def diagnose(env=None,connector=None):
                     return {**base,"reason":"LIBPQ_ROOT_CA_UNTRUSTED"}
                 # libpq get_parameters() omits parameters equal to defaults;
                 # ConnectionInfo.host/port report the actual connected target.
-                if db.info.host != gate.POOLER_HOST or str(db.info.port) != "5432":
+                if conn.info.host != gate.POOLER_HOST or str(conn.info.port) != "5432":
                     return {**base,"reason":"LIBPQ_PEER_ENDPOINT_MISMATCH"}
                 with conn.cursor() as cur:
                     cur.execute("SET TRANSACTION READ ONLY")
