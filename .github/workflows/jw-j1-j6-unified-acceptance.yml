@@ -11,6 +11,7 @@ on:
       - review/v95-supavisor-session-tls-20261025
       - review/v96-supavisor-root-ca-tls-20261025
       - review/v97-restricted-supavisor-login-20261025
+      - review/v98-supavisor-backend-tls-diagnosis-20261025
   workflow_dispatch:
 
 permissions:
