@@ -53,3 +53,18 @@ def test_missing_required_numbers_are_blocking():
         bad["payload"]["measurements"]=bad_measure
         bad["signature"]=hmac.new(KEY,json.dumps(bad["payload"],sort_keys=True,separators=(",",":"),ensure_ascii=False).encode(),hashlib.sha256).hexdigest()
         assert gate._verified_stages([bad],SHA,KEY)=={}
+
+
+def test_stage5_cannot_accept_signed_bool_as_accuracy_or_error_count():
+    for values in [
+        {"document_samples":100,"ground_truth_accuracy":True,"material_arithmetic_errors":0},
+        {"document_samples":100,"ground_truth_accuracy":1,"material_arithmetic_errors":False},
+        {"document_samples":True,"ground_truth_accuracy":1,"material_arithmetic_errors":0},
+        {"document_samples":100,"ground_truth_accuracy":"1","material_arithmetic_errors":0},
+    ]:
+        signed=_receipt(5)
+        signed["payload"]["measurements"]=values
+        signed["signature"]=hmac.new(KEY,json.dumps(signed["payload"],sort_keys=True,
+            separators=(",",":"),ensure_ascii=False,allow_nan=False).encode(),
+            hashlib.sha256).hexdigest()
+        assert gate._verified_stages([signed],SHA,KEY)=={}

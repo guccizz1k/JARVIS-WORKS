@@ -64,7 +64,7 @@ def _verified_stages(receipts, sha, key):
             return {}
         if stage == 3 and (type(measure.get("material_arithmetic_errors")) is not int or measure["material_arithmetic_errors"] != 0 or type(measure.get("unreconciled_krw")) is not int or measure["unreconciled_krw"] != 0):
             return {}
-        if stage == 5 and (type(measure.get("document_samples")) is not int or measure["document_samples"] < 50 or measure.get("ground_truth_accuracy") != 1 or measure.get("material_arithmetic_errors") != 0):
+        if stage == 5 and (type(measure.get("document_samples")) is not int or measure["document_samples"] < 50 or type(measure.get("ground_truth_accuracy")) not in (int,float) or measure["ground_truth_accuracy"] != 1 or type(measure.get("material_arithmetic_errors")) is not int or measure["material_arithmetic_errors"] != 0):
             return {}
         if stage == 7 and (any(type(measure.get(k)) not in (int,float) or not 0 <= measure[k] < 1e8 for k in ("rto_seconds","rpo_seconds","p95_ms","rto_target_seconds","rpo_target_seconds","p95_target_ms")) or any(measure.get(v,1e12) > measure.get(t,-1) for v,t in (("rto_seconds","rto_target_seconds"),("rpo_seconds","rpo_target_seconds"),("p95_ms","p95_target_ms")))):
             return {}
@@ -111,16 +111,16 @@ def report(rls: dict, login: dict, *, sha: str = "NOT_PROVIDED", receipts=None, 
                       if actual_login else "Two real restricted PG role logins not verified")
         elif number=="3":
             status="PARTIAL"
-            evidence="Staged PostgreSQL quote HTTP/reads exist; full live trade-to-payment E2E NOT VERIFIED"
+            evidence="Real isolated PG17 login-to-quote proof exists; full persistent trade-to-payment E2E NOT VERIFIED"
         elif number=="4":
             status="PARTIAL"
-            evidence="Synthetic PG17 messenger HTTP/WebSocket tests exist; real-user network E2E NOT VERIFIED"
+            evidence="Isolated PG17 HTTPS/WSS browser A/B proof exists; live multiuser/group/attachments NOT VERIFIED"
         elif number=="5":
             status="PARTIAL"
             evidence="Local import/approval/document tests exist; real production OCR accuracy NOT MEASURED"
         elif number=="6":
             status="BLOCKED"
-            evidence="No JARVIS WORKS external HTTPS staging deployment confirmed; real browser NOT RUN"
+            evidence="Public Render HTTPS transport-only confirmed; DB-backed auth/browser acceptance NOT VERIFIED"
         elif number=="7":
             status="PARTIAL"
             evidence="Synthetic small PG17 13-table restore only; customer-scale migration/RTO/RPO NOT MEASURED"
