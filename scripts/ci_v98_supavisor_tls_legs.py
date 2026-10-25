@@ -59,10 +59,10 @@ def diagnose(*, env=None, connector=None) -> dict:
                                     "login_role_expected":expected_role is True,
                                     "client_tls_attested":v97.verified_pooler_client_tls(db),
                                     "cfg_host_match":params.get("host")==v97.POOLER_HOST,
-                                    "cfg_port_match":str(params.get("port"))==str(v97.POOLER_PORT),
+                                    "cfg_port_match":str(getattr(getattr(db,"info",None),"port",None))==str(v97.POOLER_PORT),
                                     "cfg_verify_full":params.get("sslmode")=="verify-full",
                                     "cfg_ca_match":params.get("sslrootcert")==str(v97.CA),
-                                    "cfg_gss_disable":params.get("gssencmode")=="disable"}
+                                    "cfg_gss_disable":getattr(getattr(db,"pgconn",None),"used_gssapi",None) is False}
                 finally:
                     db.rollback()
         except Exception:

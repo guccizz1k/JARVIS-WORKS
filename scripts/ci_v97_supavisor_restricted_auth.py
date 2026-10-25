@@ -55,10 +55,10 @@ def verified_pooler_client_tls(connection)->bool:
     try:
         cfg=connection.info.get_parameters()  # psycopg3, not psycopg2 .dsn_parameters
         return (cfg.get("host")==POOLER_HOST
-                and str(cfg.get("port"))==str(POOLER_PORT)
+                and str(connection.info.port)==str(POOLER_PORT)
                 and cfg.get("sslmode")=="verify-full"
                 and cfg.get("sslrootcert")==str(CA)
-                and cfg.get("gssencmode")=="disable")
+                and connection.pgconn.used_gssapi is False)
     except (AttributeError,TypeError,ValueError):
         return False
 
