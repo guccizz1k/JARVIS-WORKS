@@ -50,7 +50,7 @@ SELECT current_user,
 """
 
 
-def _check_one(conn, *, kind: str) -> tuple[str | None, list[str]]:
+def _check_one(conn, *, kind: str, client_tls_guard=None) -> tuple[str | None, list[str]]:
     allowed_logins = ALLOWED_GATEWAY_LOGINS[kind]
     expected_stage = 'jw_auth_stage_v85' if kind == 'auth' else 'jw_app_dev'
     flags: list[str] = []
@@ -70,7 +70,13 @@ def _check_one(conn, *, kind: str) -> tuple[str | None, list[str]]:
             flags.append('privilege_exposure')
         if bool(can_auth) != (kind == 'auth') or bool(can_trade) != (kind == 'trade'):
             flags.append('role_overlap_or_missing')
-        if tls is not True or major != 17:
+        # Direct connections retain the original backend pg_stat_ssl gate.
+        # A trusted TLS-terminating pooler may report backend ssl=False even
+        # when libpq verified the external CA+hostname on the client leg.
+        # Do NOT accept this exception without an independent client guard.
+        client_tls_ok = (tls is True if client_tls_guard is None
+                         else client_tls_guard(conn) is True)
+        if not client_tls_ok or major != 17:
             flags.append('tls_or_postgres_mismatch')
         if flags:
             return None, flags
@@ -89,7 +95,7 @@ def _check_one(conn, *, kind: str) -> tuple[str | None, list[str]]:
     return str(session_user), flags
 
 
-def check_two_connections(*, connector: Callable | None = None, env: dict | None = None) -> dict:
+def check_two_connections(*, connector: Callable | None = None, env: dict | None = None, client_tls_guard=None) -> dict:
     """Safe verdict only. Does not reveal connection secrets, role names or PII.
 
     Connection errors and database exceptions are intentionally redacted.
@@ -116,7 +122,7 @@ def check_two_connections(*, connector: Callable | None = None, env: dict | None
     for kind, dsn in [('auth', auth), ('trade', trade)]:
         try:
             with closing(connector(dsn, sslmode='verify-full', connect_timeout=5)) as db:
-                identity, issues = _check_one(db, kind=kind)
+                identity, issues = _check_one(db, kind=kind, client_tls_guard=client_tls_guard)
                 # Always roll back. SET LOCAL ROLE is automatically reset.
                 db.rollback()
             flags.extend(issues)

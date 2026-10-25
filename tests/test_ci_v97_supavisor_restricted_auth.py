@@ -55,7 +55,8 @@ def test_production_or_no_approval_denied():
 
 def test_read_only_role_gate_wiring_and_redacted_failure(monkeypatch):
     seen=[]
-    def fake(*,connector,env):
+    def fake(*,connector,env,client_tls_guard=None):
+        assert callable(client_tls_guard)
         seen.append(env["JW_ENV"])
         assert env["JW_PG_V87_CONNECT_GATE"]=="ISOLATED_DEV_ONLY"
         return {"result":"BLOCKED","failed_checks":["connection_or_tenant_role_failed"]}
@@ -90,7 +91,8 @@ def test_real_connector_forces_read_only_and_bounded_statements(monkeypatch):
     import psycopg
     seen=[]
     monkeypatch.setattr(psycopg,"connect",lambda dsn,**kw:seen.append(kw))
-    def legacy(*,connector,env):
+    def legacy(*,connector,env,client_tls_guard=None):
+        assert callable(client_tls_guard)
         connector(env["JW_PG_STAGE_DSN"],sslmode="verify-full")
         return {"result":"PASS"}
     monkeypatch.setattr(r,"check_two_connections",legacy)
@@ -100,3 +102,18 @@ def test_real_connector_forces_read_only_and_bounded_statements(monkeypatch):
     assert seen[0]["sslrootcert"]==str(r.CA)
     assert "default_transaction_read_only=on" in seen[0]["options"]
     assert "statement_timeout=5000" in seen[0]["options"]
+
+def test_pooler_tls_attestation_requires_exact_libpq_config():
+    from types import SimpleNamespace
+    good={"host":r.POOLER_HOST,"port":"5432","sslmode":"verify-full",
+          "sslrootcert":str(r.CA),"gssencmode":"disable"}
+    conn=lambda fields:SimpleNamespace(info=SimpleNamespace(dsn_parameters=fields))
+    assert r.verified_pooler_client_tls(conn(good))
+    for key,bad in [("sslmode","require"),("sslmode","disable"),
+                    ("sslrootcert","/tmp/unapproved.crt"),
+                    ("host","evil.invalid"),("port","6543"),
+                    ("gssencmode","prefer")]:
+        fields=dict(good)
+        fields[key]=bad
+        assert not r.verified_pooler_client_tls(conn(fields)),key
+    assert not r.verified_pooler_client_tls(object())
