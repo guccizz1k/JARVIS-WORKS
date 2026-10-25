@@ -30,7 +30,7 @@ jobs:
           python -m pytest -q tests/test_ci_v99_live_nosession_rls.py tests/test_jw_eight_stage_release_gate.py \
             tests/test_ci_v97_supavisor_restricted_auth.py tests/test_ci_v97_independent_boundary.py \
             -ra --junitxml=jw-v99-eight-stage-junit.xml
-      - name: Real two custom-role auth and no-session ten-table RLS (NO WRITES)
+      - name: Real two custom-role auth and no-session ten-table RLS observation (NO WRITES)
         env:
           JW_V97_TRADE_DSN: ${{ secrets.JW_V97_TRADE_DSN }}
           JW_V97_AUTH_DSN: ${{ secrets.JW_V97_AUTH_DSN }}
@@ -45,7 +45,8 @@ jobs:
           print("Real denied-session ten-table RLS:",rls.get("decision"),rls.get("reason"),
                 "rollback",rls.get("rollback"),"tables",rls.get("tested_tables"))
           assert auth["decision"]=="PASS" and auth["authenticated"] is True
-          assert rls["decision"]=="PASS" and rls["rollback"]=="PASS"
+          assert rls["decision"]=="INCONCLUSIVE" and rls["rollback"]=="PASS"
+          assert rls["row_rls_proof"]=="NOT_PROVEN_WITHOUT_POSITIVE_CONTROL"
           assert rls["cross_tenant_abc"]=="NOT_VERIFIED"
           assert auth["production_cutover"] is False and rls["production_cutover"] is False
           PY
