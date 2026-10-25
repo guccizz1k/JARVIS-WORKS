@@ -144,10 +144,18 @@ def register_v90_messenger(app) -> bool:
             with stage._connect() as conn:
                 with conn.transaction():
                     with conn.cursor() as cur:
-                        cur.execute("""SELECT count(*) FROM pg_catalog.pg_trigger
-                            WHERE tgname IN
-                              ('v112_messenger_insert_wakeup','v112_messenger_edit_wakeup')
-                              AND NOT tgisinternal AND tgenabled='O'""")
+                        cur.execute("""SELECT count(*) FROM pg_catalog.pg_trigger t
+                            JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+                            JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                            JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
+                            JOIN pg_catalog.pg_namespace pn ON pn.oid=p.pronamespace
+                            WHERE n.nspname='jw_dev' AND pn.nspname='jw_dev'
+                              AND p.proname='v112_messenger_wakeup'
+                              AND ((c.relname='messenger_messages'
+                                AND t.tgname='v112_messenger_insert_wakeup')
+                               OR (c.relname='messenger_edits'
+                                AND t.tgname='v112_messenger_edit_wakeup'))
+                              AND NOT t.tgisinternal AND t.tgenabled='O'""")
                         if cur.fetchone() != (2,):
                             raise RuntimeError('V11.2 verified message triggers missing')
             daemon = threading.Thread(

@@ -70,7 +70,7 @@ class FakeCursor:
     def __enter__(self):return self
     def __exit__(self,*args):pass
     def execute(self,sql,params):
-        assert '%s' in sql
+        assert ('%s' in sql) == bool(params)
         assert sql.count('%s') == len(params)
         self.calls.append((sql,params))
     def fetchone(self):return next(self.rows)
@@ -160,3 +160,26 @@ def test_ephemeral_sql_denies_persistent_dbs_and_no_worker_grants():
     assert "CREATE TRIGGER v112_messenger_insert_wakeup" in sql
     assert "CREATE TRIGGER v112_messenger_edit_wakeup" in sql
 
+
+
+def test_max_retry_expired_claim_becomes_failed_instead_of_sticking():
+    con=FakeConn([])
+    con.cur.fetchall=lambda:[('taskA',),('taskB',)]
+    changed=PgOcrQueue(lambda:con).expire_exhausted_leases()
+    assert changed==2
+    sql,_=con.cur.calls[-1]
+    assert "state='failed'" in sql
+    assert "state='running' AND lease_until<clock_timestamp()" in sql
+    assert 'attempts>=max_attempts' in sql
+
+
+@pytest.mark.asyncio
+async def test_hub_connection_status_precedes_subscriber():
+    hub=WakeHub()
+    hub.set_connected_from_thread(True)
+    assert hub.connected is True
+    ev=hub.subscribe('a')
+    assert not ev.is_set()
+    hub.set_connected_from_thread(False)
+    assert hub.connected is False
+    hub.unsubscribe('a',ev)

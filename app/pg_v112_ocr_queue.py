@@ -101,6 +101,19 @@ class PgOcrQueue:
                         raise RuntimeError('Invalid atomic work claim')
                     return Claim(*row)
 
+    def expire_exhausted_leases(self) -> int:
+        """Poison expired claims after max retries; never leave them RUNNING."""
+        with self._connect() as conn:
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    cur.execute("""UPDATE jw_dev.ocr_jobs_v112
+                       SET state='failed',lease_token=NULL,lease_until=NULL,
+                           last_error_code='PROCESSOR_FAILED'
+                       WHERE state='running' AND lease_until<clock_timestamp()
+                         AND attempts>=max_attempts
+                       RETURNING id""", ())
+                    return len(cur.fetchall())
+
     def complete(self, claim: Claim, *, result_key: str) -> bool:
         if not isinstance(claim, Claim):
             raise ValueError('Invalid claim')
