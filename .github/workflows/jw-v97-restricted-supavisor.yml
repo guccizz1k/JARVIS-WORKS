@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/v97-restricted-supavisor-login-20261025
+      - review/v98-supavisor-hop-aware-ssl-20261025
   workflow_dispatch:
 permissions:
   contents: read
