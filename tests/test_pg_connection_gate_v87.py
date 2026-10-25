@@ -106,3 +106,22 @@ def test_gate_is_query_only():
     q=LOGIN_PROBE+' '+ROLE_PROBE
     assert 'FROM jw_dev.users u' not in q
     assert 'COPY ' not in q and 'DELETE ' not in q and 'UPDATE ' not in q
+
+def test_supavisor_backend_ssl_exception_does_not_change_default_v87_gate():
+    from app.pg_connection_gate_v87 import _check_one
+    class C:
+        def __init__(self):self.mode=None
+        def __enter__(self):return self
+        def __exit__(self,*a):return False
+        def execute(self,q):
+            if q==LOGIN_PROBE:self.mode="login"
+            elif q==ROLE_PROBE:self.mode="role"
+        def fetchone(self):
+            if self.mode=="login":
+                return ("jw_auth_gateway_v90","jw_auth_gateway_v90",False,True,
+                        False,False,False,17,True)
+            return ("jw_auth_stage_v85",False,False,False,False,True,False)
+    class Conn:
+        def cursor(self):return C()
+    assert "tls_or_postgres_mismatch" in _check_one(Conn(),kind="auth")[1]
+    assert _check_one(Conn(),kind="auth",trusted_pooler_tls=True)[1]==[]

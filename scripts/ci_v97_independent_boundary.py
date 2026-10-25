@@ -69,7 +69,7 @@ TABLES_SQL = """SELECT n.nspname,c.relname,c.relrowsecurity,c.relforcerowsecurit
  ORDER BY n.nspname,c.relname"""
 
 
-def _inspect(connection, kind):
+def _inspect(connection, kind, *, trusted_pooler_tls=False):
     """Return only fixed diagnostic codes and non-customer catalog metadata."""
     other = "trade" if kind == "auth" else "auth"
     with connection.cursor() as cur:
@@ -79,7 +79,9 @@ def _inspect(connection, kind):
         if (not login or len(login) != 14 or login[:3] != (
                 "postgres", LOGINS[kind], LOGINS[kind])
                 or login[3:10] != (True, False, False, False, False, False, False)
-                or login[10:13] != (17, "on", True)
+                or login[10:12] != (17, "on")
+                or (login[12] is not True and
+                    not (trusted_pooler_tls and login[12] is False))
                 or type(login[13]) is not int or login[13] <= 0):
             return ["gateway_attributes_or_transport"], None
 
@@ -129,7 +131,8 @@ def _inspect(connection, kind):
         return sorted(set(issues)), snapshot
 
 
-def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None):
+def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None,
+                                 trusted_pooler_tls=False):
     """Fixed, redacted verdict only; neither imports a driver nor reads secrets.
 
     The caller supplies already validated DSNs and its verified-full connector.
@@ -161,7 +164,7 @@ def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None):
         if len(connections) == 2 and not issues:
             for kind, db in connections:
                 try:
-                    findings, snapshot = _inspect(db, kind)
+                    findings, snapshot = _inspect(db, kind, trusted_pooler_tls=trusted_pooler_tls)
                     issues.extend(kind + ":" + code for code in findings)
                     snapshots.append(snapshot)
                 except Exception:
