@@ -41,6 +41,8 @@ def _metadata(org_id: str, object_key: str, filename: str, digest: str,
     if not (isinstance(filename, str) and 1 <= len(filename) <= 150
             and all(ord(c) >= 32 and ord(c) != 127 for c in filename)):
         raise ValueError('Invalid filename')
+    if not filename.lower().endswith(('.png','.jpg','.jpeg','.webp','.pdf','.xlsx')):
+        raise ValueError('Unapproved document type')
     if not (isinstance(digest, str) and HEX64.fullmatch(digest)):
         raise ValueError('Invalid content hash')
     if not (isinstance(request_id, str) and KEY.fullmatch(request_id)):
@@ -118,7 +120,7 @@ class PgOcrQueue:
         if not isinstance(claim, Claim):
             raise ValueError('Invalid claim')
         if not (isinstance(result_key,str) and
-                result_key==f'tenant/{claim.org_id}/ocr-result/{claim.id}'):
+                result_key==f'tenant/{claim.org_id}/ocr-result/{claim.id}/{claim.lease_token}'):
             raise ValueError('Result key must be tenant-bound and stable')
         with self._connect() as conn:
             with conn.transaction():
@@ -170,7 +172,9 @@ def process_one(queue: PgOcrQueue, store: Any,
         if type(document) is not dict:
             code='MALFORMED_DOCUMENT'
             raise ValueError('Invalid OCR proposal')
-        result_key=f'tenant/{job.org_id}/ocr-result/{job.id}'
+        # A lease-specific output path prevents expired workers from overwriting
+        # proposals created by a replacement worker after crash recovery.
+        result_key=f'tenant/{job.org_id}/ocr-result/{job.id}/{job.lease_token}'
         store.write_proposal(job.org_id,result_key,document)
         return 'NEEDS_REVIEW' if queue.complete(job,result_key=result_key) else 'LEASE_LOST'
     except Exception:

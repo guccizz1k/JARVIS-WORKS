@@ -128,13 +128,13 @@ def test_ocr_result_is_always_human_review_state():
     class Queue:
         def claim(self):return claim
         def complete(self,j,*,result_key):
-            assert result_key=='tenant/acme/ocr-result/'+'a'*32
+            assert result_key=='tenant/acme/ocr-result/'+'a'*32+'/'+'c'*64
             return True
         def fail(self,*args,**kwargs):raise AssertionError('unexpected failure')
     class Store:
         def read(self,org,k):assert org=='acme' and k==key;return b'pdf'
         def write_proposal(self,org,k,doc):
-            assert org=='acme' and k=='tenant/acme/ocr-result/'+'a'*32
+            assert org=='acme' and k=='tenant/acme/ocr-result/'+'a'*32+'/'+'c'*64
             assert doc=={'warnings':['human approval required']}
     assert process_one(Queue(),Store(),lambda name,raw:{'warnings':['human approval required']})=='NEEDS_REVIEW'
 
@@ -183,3 +183,52 @@ async def test_hub_connection_status_precedes_subscriber():
     hub.set_connected_from_thread(False)
     assert hub.connected is False
     hub.unsubscribe('a',ev)
+
+
+
+def test_stale_lease_cannot_overwrite_replacement_worker_result():
+    old=Claim('a'*32,'acme','tenant/acme/'+'d'*32,'f'*64,'doc.pdf',1,'1'*64)
+    expected='tenant/acme/ocr-result/'+'a'*32+'/'+'1'*64
+    replacement='tenant/acme/ocr-result/'+'a'*32+'/'+'2'*64
+    assert expected!=replacement
+    con=FakeConn([None])
+    assert PgOcrQueue(lambda:con).complete(old,result_key=expected) is False
+    sql,params=con.cur.calls[-1]
+    assert 'lease_token=%s' in sql and 'lease_until>clock_timestamp()' in sql
+    assert params[-1]=='1'*64
+    with pytest.raises(ValueError):
+        PgOcrQueue(lambda:FakeConn([])).complete(old,result_key=replacement)
+
+
+def test_document_failure_never_autoapproves_accounting():
+    old=Claim('a'*32,'acme','tenant/acme/'+'d'*32,hashlib.sha256(b'ok').hexdigest(),
+              'doc.pdf',1,'1'*64)
+    class Queue:
+        def claim(self):return old
+        def fail(self,*_,**kwargs):
+            assert kwargs['error_code']=='PROCESSOR_FAILED';return True
+        def complete(self,*_,**kwargs):raise AssertionError('should not commit')
+    class Store:
+        def read(self,*_):return b'ok'
+        def write_proposal(self,*_):raise RuntimeError('object store unavailable')
+    assert process_one(Queue(),Store(),lambda *args:{'review_only':True})=='RETRY_OR_FAILED'
+
+
+def test_unapproved_ocr_file_types_rejected():
+    key='tenant/acme/'+'a'*32
+    for name in ('payload.exe','document.svg','archive.zip','no-extension'):
+        with pytest.raises(ValueError):
+            _metadata('acme',key,name,'a'*64,'request-12345')
+    _metadata('acme',key,'SCAN.PDF','a'*64,'request-12345')
+
+
+def test_sql_has_db_tenant_fence_and_immutable_job_identity():
+    sql=(Path(__file__).resolve().parents[1]/'db/review/v112_ephemeral_only_pg.sql').read_text()
+    assert 'CREATE TRIGGER v112_ocr_tenant_guard' in sql
+    assert 'OCR_JOB_TENANT_MISMATCH' in sql
+    assert 'OCR_JOB_SOURCE_IMMUTABLE' in sql
+    assert "split_part(object_key,'/',2)=org_id" in sql
+    assert "split_part(result_key,'/',4)=id" in sql
+    assert 'SECURITY DEFINER' in sql
+    assert 'REVOKE ALL ON FUNCTION jw_dev.v112_guard_ocr_job_tenant() FROM PUBLIC' in sql
+    assert 'CREATE POLICY' not in sql and 'GRANT ALL' not in sql
