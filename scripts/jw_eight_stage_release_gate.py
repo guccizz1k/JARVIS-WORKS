@@ -24,10 +24,11 @@ GATES = (
 
 def report(rls: dict, login: dict, *, sha: str = "NOT_PROVIDED") -> dict:
     actual_rls = (
-        isinstance(rls,dict) and rls.get("decision")=="PASS"
+        isinstance(rls,dict) and rls.get("decision")=="INCONCLUSIVE"
         and rls.get("scope")=="REAL_DB_UNKNOWN_SESSION_READONLY"
         and rls.get("tested_tables")==10
         and rls.get("rollback")=="PASS"
+        and rls.get("row_rls_proof")=="NOT_PROVEN_WITHOUT_POSITIVE_CONTROL"
         and rls.get("cross_tenant_abc")=="NOT_VERIFIED"
         and rls.get("production_cutover") is False
     )
@@ -41,7 +42,7 @@ def report(rls: dict, login: dict, *, sha: str = "NOT_PROVIDED") -> dict:
     for number,version,name in GATES:
         if number=="1":
             status="PARTIAL" if actual_rls else "BLOCKED"
-            evidence=("Real invalid-session RLS denied across 10 jw_dev tables; "
+            evidence=("Real zero-row observations across ten live tables are INCONCLUSIVE for RLS without a positive-control populated fixture; "
                       "valid A/B/C tenant cross-access NOT TESTED" if actual_rls
                       else "No verified read-only invalid-session RLS receipt")
         elif number=="2":
