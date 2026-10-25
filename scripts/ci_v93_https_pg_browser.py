@@ -113,6 +113,8 @@ def main() -> int:
     os.environ.pop("JW_INSECURE_LOCAL_DEV",None)
     v90.stage._connect=lambda: psycopg.connect(fixture.TRADE_DSN,connect_timeout=5)
     app=FastAPI()
+    # Mount the real review-only PostgreSQL messenger HTTP + WebSocket on the SAME TLS server.
+    assert v90.register_v90_messenger(app)
     assert write.register_v92_quote_api(app)
     assert read.register_v93_quote_reader(app)
 
@@ -200,6 +202,67 @@ def main() -> int:
                   throw Error('Company A quote lost after switch');
                 return 'JW_V93_HTTPS_TENANT_B_DENIAL_AND_RECOVERY_PASS';
             }""","JW_V93_HTTPS_TENANT_B_DENIAL_AND_RECOVERY_PASS")
+            # V10.4 extension: quote + B2B messenger share one verified HTTPS origin.
+            assertion(r"""async () => {
+              if(location.origin!=='https://127.0.0.1:8769')
+                throw Error('Untrusted stage origin');
+              const request=async (url,method='GET',value,csrf)=>{
+                const headers={'Accept':'application/json'};
+                if(value!==undefined) headers['Content-Type']='application/json';
+                if(csrf)headers['X-CSRF-Token']=csrf;
+                const r=await fetch(url,{method,credentials:'same-origin',headers,
+                  body:value===undefined?undefined:JSON.stringify(value)});
+                return {code:r.status,data:await r.json()};
+              };
+              await fetch('/qa/set/A',{credentials:'same-origin'});
+              const csrf=(await(await fetch('/qa/info')).json()).csrf;
+              const noCsrf=await request('/api/pg-stage/v90/chats','POST',{other_org_id:'ci-b'});
+              if(noCsrf.code!==403) throw Error('Missing messenger CSRF was allowed');
+              const opened=await request('/api/pg-stage/v90/chats','POST',{other_org_id:'ci-b'},csrf);
+              if(opened.code!==200||!opened.data.connection_id)
+                throw Error('PG messenger start failed '+opened.code);
+              const id=opened.data.connection_id;
+              const path='/api/pg-stage/v90/chats/'+encodeURIComponent(id)+'/messages';
+              const body={request_id:'v104-https-wss-msg-001',body:'JW_PG_HTTPS_WSS_A_TO_B'};
+              const sent=await request(path,'POST',body,csrf);
+              if(sent.code!==200||!sent.data.message_id) throw Error('PG send failed '+sent.code);
+              const replay=await request(path,'POST',body,csrf);
+              if(replay.code!==200||replay.data.message_id!==sent.data.message_id)
+                throw Error('Replay duplicated messenger message');
+              await fetch('/qa/set/B',{credentials:'same-origin'});
+              const b=await request(path);
+              if(b.code!==200||JSON.stringify(b.data).indexOf('JW_PG_HTTPS_WSS_A_TO_B')<0)
+                throw Error('Authorized B lost PG messenger message');
+              const events=await new Promise((resolve,reject)=>{
+                const socket=new WebSocket('wss://127.0.0.1:8769'+
+                  '/api/pg-stage/v90/chats/'+encodeURIComponent(id)+'/stream?after=0');
+                let checkpoint=false,done=false;
+                const timeout=setTimeout(()=>{
+                  if(!done){done=true;socket.close();reject(Error('WSS replay timeout'));}
+                },8000);
+                socket.onmessage=e=>{
+                  const item=JSON.parse(e.data);
+                  if(item.type==='ready')checkpoint=true;
+                  if(item.type==='message'&&JSON.stringify(item.data).includes('JW_PG_HTTPS_WSS_A_TO_B')){
+                    done=true;clearTimeout(timeout);socket.close();
+                    if(!checkpoint)reject(Error('Missing WSS checkpoint'));else resolve(true);
+                  }
+                };
+                socket.onerror=()=>{if(!done){done=true;clearTimeout(timeout);reject(Error('WSS TLS/handshake failed'));}};
+                socket.onclose=()=>{if(!done){done=true;clearTimeout(timeout);reject(Error('WSS closed without replay'));}};
+              });
+              if(!events)throw Error('WSS events absent');
+              await fetch('/qa/set/C',{credentials:'same-origin'});
+              const forbidden=await request(path);
+              if(forbidden.code!==403)throw Error('Nonmember C read A/B chat '+forbidden.code);
+              await fetch('/qa/set/A',{credentials:'same-origin'});
+              const quotes=await request('/api/pg-stage/v92/quotes');
+              if(quotes.code!==200||!quotes.data.some(q=>q.title==='J1-J6 HTTPS PG 견적'))
+                throw Error('Finance quote changed after websocket session switch');
+              return 'JW_V104_ONE_HTTPS_ORIGIN_PG17_QUOTE_WSS_CHAT_A_B_C_PASS';
+            }""","JW_V104_ONE_HTTPS_ORIGIN_PG17_QUOTE_WSS_CHAT_A_B_C_PASS",timeout=90)
+            cli("screenshot",f"--filename={PROOF/'jw_v104_https_pg_quote_chat.png'}")
+            print("PASS: verified localhost HTTPS PG17 quote + messenger + WSS replay, tenant A/B/C, CSRF and dedupe",flush=True)
             from scripts.ci_v93_finance_restore import restore_proof
             restore_proof()
             print("PASS: real Chromium browser -> HTTPS -> V9.3 API -> PG17 nonprivileged session; quote form/GET/tenant denial",flush=True)
