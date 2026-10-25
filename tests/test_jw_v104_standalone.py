@@ -51,18 +51,20 @@ def test_reject_no_origin_or_wildcard(monkeypatch):
 def test_standalone_excludes_legacy_sqlite_and_document_production_routes(monkeypatch):
     configure(monkeypatch)
     app=stage.create_app()
-    paths={r.path for r in app.routes}
-    for expected in ("/api/pg-stage/v85/login","/api/pg-stage/v85/logout",
-                     "/api/pg-stage/v90/me","/api/pg-stage/v90/chats",
-                     "/api/pg-stage/v92/quotes", "/healthz"):
-        assert expected in paths,expected
-    for forbidden in ("/api/login","/api/register","/api/me",
-                      "/api/quotes","/api/orders/from-quote",
-                      "/api/invoices/from-order","/api/import-previews"):
-        assert forbidden not in paths
+    # Route-tree internals vary with FastAPI versions. Verify the actual HTTP
+    # boundary instead of relying on private _IncludedRouter.path layout.
     client=TestClient(app,base_url="https://review.example.invalid")
     assert client.get("/healthz").json()=={
         "mode":"isolated_pg_api_only","release":"BLOCKED"}
     assert client.get("/docs").status_code==404
     assert client.get("/openapi.json").status_code==404
+    for forbidden in ("/api/login","/api/register","/api/me",
+                      "/api/quotes","/api/orders/from-quote",
+                      "/api/invoices/from-order","/api/import-previews"):
+        assert client.get(forbidden).status_code==404,forbidden
     assert client.get("/api/pg-stage/v90/me").status_code==401
+    assert client.get("/api/pg-stage/v84/me").status_code==401
+    assert client.get("/api/pg-stage/v92/quotes").status_code==401
+    for route in ("/api/pg-stage/v85/login","/api/pg-stage/v90/chats",
+                  "/api/pg-stage/v92/quotes"):
+        assert client.post(route,json={}).status_code==422,route
