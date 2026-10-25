@@ -50,8 +50,11 @@ The existing V8.7 two-session role/TLS gate remains intact. After it succeeds,
 new independent sessions recheck PG17, TLS, exact principals, LOGIN,
 NOINHERIT, NOBYPASSRLS, forbidden cross-role membership and SET permissions,
 fixed `SET LOCAL ROLE`, payment INSERT denial, and catalog ENABLE/FORCE RLS.
-The separate catalog gate names its exact public-35 and discovered `jw_dev`
-scope. Missing, disabled, or unforced required tables block acceptance.
+The business schema is `jw_dev`: its complete table-name set must match the
+canonical 35 tables, with ENABLE RLS and FORCE RLS on all 35. Missing, extra,
+disabled, or unforced tables block acceptance. `public` has no required business
+tables; existing security checks still apply if canonical names appear there.
+Both schema counts are observed from the catalog, not assumed constants.
 It does not claim tenant-row isolation from catalog flags: that remains
 `NOT RUN` for the live database until separately authorized fixture-based E2E.
 

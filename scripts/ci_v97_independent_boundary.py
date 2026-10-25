@@ -14,7 +14,6 @@ from app.pg_full_shadow_v76 import EXPECTED_TABLES
 
 LOGINS = {"auth": "jw_auth_gateway_v90", "trade": "jw_trade_gateway_v90"}
 STAGES = {"auth": "jw_auth_stage_v85", "trade": "jw_app_dev"}
-STAGE_REQUIRED_TABLES = frozenset({"users", "sessions", "customers", "payments"})
 ACK = "READ_ONLY_SUPAVISOR_ACCEPTANCE_V97"
 
 LOGIN_SQL = """SELECT current_database(), session_user, current_user,
@@ -53,8 +52,9 @@ STAGE_MEMBERSHIP_SQL = """SELECT
  pg_catalog.pg_has_role(current_user,%s,'SET')"""
 
 # OIDs avoid private-schema name resolution by NOINHERIT raw gateways.
-# public scope is exactly the canonical 35 application tables, while jw_dev
-# includes every discovered ordinary/partitioned table plus four required ones.
+# All canonical 35 business tables must be in jw_dev; inspect every r/p table
+# there so extras cannot hide behind an allowlist. public has no required
+# business tables; retain security checks on any canonical names found there.
 # No table contents, auth functions or policy expressions are evaluated.
 TABLES_SQL = """SELECT n.nspname,c.relname,c.relrowsecurity,c.relforcerowsecurity,
  (c.relowner=(SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user)
@@ -112,10 +112,8 @@ def _inspect(connection, kind):
         public = {row[1] for row in rows if row[0] == "public"}
         stage = {row[1] for row in rows if row[0] == "jw_dev"}
         issues = []
-        if public != EXPECTED_TABLES:
-            issues.append("public_application_table_set")
-        if not STAGE_REQUIRED_TABLES <= stage:
-            issues.append("stage_required_table_set")
+        if stage != EXPECTED_TABLES:
+            issues.append("jw_dev_application_table_set")
         for schema, _table, enabled, forced, owner, insert in rows:
             if schema not in ("public", "jw_dev"):
                 issues.append("unexpected_catalog_scope")
@@ -127,7 +125,7 @@ def _inspect(connection, kind):
                 issues.append("direct_payment_insert")
         # The snapshot omits grants, which intentionally differ between stages.
         snapshot = (login[13], tuple(sorted((r[0], r[1], r[2], r[3]) for r in rows)),
-                    len(stage))
+                    len(stage), len(public))
         return sorted(set(issues)), snapshot
 
 
@@ -188,6 +186,6 @@ def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None):
         return {**base, "checked": bool(connections),
                 "failed_checks": sorted(set(issues or ["independent_probe_incomplete"]))}
     return {**base, "decision": "PASS", "checked": True,
-            "public_application_tables": len(EXPECTED_TABLES),
+            "public_application_tables": snapshots[0][3],
             "jw_dev_tables": snapshots[0][2], "catalog_boundaries": "PASS",
             "read_only_rollback": "PASS", "backend_tls_active": True}

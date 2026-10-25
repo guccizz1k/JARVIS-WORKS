@@ -52,10 +52,12 @@ class Cursor:
 
     def fetchall(self):
         assert self.query == gate.TABLES_SQL
-        rows = [(schema, table, True, True, False, False)
-                for schema, tables in (("public", gate.EXPECTED_TABLES),
-                                       ("jw_dev", gate.STAGE_REQUIRED_TABLES))
-                for table in sorted(tables)]
+        b = self.db.behavior
+        # Owner-confirmed Supabase layout: public business 0, jw_dev business 35.
+        rows = [("jw_dev", table, True, True, False, False)
+                for table in sorted(gate.EXPECTED_TABLES)]
+        rows += [("public", table, True, True, False, False)
+                 for table in b.get("public_tables", ())]
         transform = self.db.behavior.get("tables")
         return transform(rows) if transform else rows
 
@@ -80,13 +82,14 @@ class Connection:
             raise RuntimeError("secret-password")
 
 
-def run(behavior=None, *, env=ENV):
+def run(behavior=None, *, env=ENV, public_tables=()):
     dbs = []
     opts = []
 
     def connect(dsn, **kwargs):
         kind = "auth" if dsn == "synthetic-auth" else "trade"
-        db = Connection(kind, **((behavior or {}) if kind == "auth" else {}))
+        db = Connection(kind, public_tables=public_tables,
+                        **((behavior or {}) if kind == "auth" else {}))
         dbs.append(db)
         opts.append(kwargs)
         return db
@@ -102,8 +105,8 @@ def test_catalog_pass_has_precise_scope_and_two_independent_readonly_rollbacks()
     assert result["catalog_only"] is True
     assert result["tenant_row_isolation"] == "NOT RUN"
     assert result["production_cutover"] is False
-    assert result["public_application_tables"] == 35
-    assert result["jw_dev_tables"] == 4
+    assert result["public_application_tables"] == 0
+    assert result["jw_dev_tables"] == 35
     assert len(dbs) == 2 and dbs[0] is not dbs[1]
     assert all(db.rolled_back and db.closed for db in dbs)
     for db in dbs:
@@ -175,14 +178,54 @@ def alter_table(schema, table, index, value):
 @pytest.mark.parametrize("schema", ["public", "jw_dev"])
 @pytest.mark.parametrize("index,value", [(2, False), (3, False), (4, True), (5, True)])
 def test_force_rls_owner_membership_and_direct_payment_insert_are_required(schema, index, value):
-    result, _, _ = run({"tables": alter_table(schema, "payments", index, value)})
+    result, _, _ = run({"tables": alter_table(schema, "payments", index, value)},
+                      public_tables=("payments",) if schema == "public" else ())
     assert result["decision"] == "BLOCKED"
 
 
-@pytest.mark.parametrize("schema", ["public", "jw_dev"])
-def test_required_tables_cannot_be_missing(schema):
+@pytest.mark.parametrize("table", sorted(gate.EXPECTED_TABLES))
+def test_required_jw_dev_business_tables_cannot_be_missing(table):
     result, _, _ = run({"tables": lambda rows: [r for r in rows
-                                               if r[:2] != (schema, "payments")]})
+                                               if r[:2] != ("jw_dev", table)]})
+    assert result["decision"] == "BLOCKED"
+
+
+@pytest.mark.parametrize("public_tables", [(), ("payments",)])
+def test_actual_jw_dev_35_layout_accepts_absent_or_hardened_public(public_tables):
+    result, dbs, _ = run(public_tables=public_tables)
+    assert result["decision"] == "PASS", result.get("failed_checks")
+    assert result["jw_dev_tables"] == 35
+    assert result["public_application_tables"] == len(public_tables)
+    assert all(db.rolled_back and db.closed for db in dbs)
+
+
+def test_same_count_wrong_jw_dev_table_names_cannot_pass():
+    def replace(rows):
+        return [r for r in rows if r[:2] != ("jw_dev", "quotes")] + [
+            ("jw_dev", "unexpected_replacement", True, True, False, False)]
+    assert run({"tables": replace})[0]["decision"] == "BLOCKED"
+
+
+def test_extra_jw_dev_table_is_rejected_even_when_force_rls_is_enabled():
+    result, _, _ = run({"tables": lambda rows: rows + [
+        ("jw_dev", "unexpected_extra", True, True, False, False)]})
+    assert result["decision"] == "BLOCKED"
+    assert "auth:jw_dev_application_table_set" in result["failed_checks"]
+
+
+@pytest.mark.parametrize("table", ["messenger_messages", "mfa_credentials",
+                                 "automation_task_times_v60"])
+@pytest.mark.parametrize("flag", [2, 3])
+def test_rls_and_force_rls_cover_business_tables_beyond_legacy_four(table, flag):
+    result, _, _ = run({"tables": alter_table("jw_dev", table, flag, False)})
+    assert result["decision"] == "BLOCKED"
+    assert "auth:rls_not_enabled_and_forced" in result["failed_checks"]
+
+
+def test_public_copies_cannot_replace_missing_jw_dev_business_tables():
+    result, _, _ = run({"tables": lambda rows: [r for r in rows
+                                               if r[0] == "public"]},
+                       public_tables=sorted(gate.EXPECTED_TABLES))
     assert result["decision"] == "BLOCKED"
 
 
@@ -232,5 +275,6 @@ def test_same_backend_pid_is_not_independent():
 
 def test_catalog_drift_between_sessions_is_blocked():
     result, _, _ = run({"tables": lambda rows: rows + [
-        ("jw_dev", "new_stage_table", True, True, False, False)]})
+        ("public", "payments", True, True, False, False)]})
     assert result["decision"] == "BLOCKED"
+    assert result["failed_checks"] == ["catalog_changed_between_sessions"]
