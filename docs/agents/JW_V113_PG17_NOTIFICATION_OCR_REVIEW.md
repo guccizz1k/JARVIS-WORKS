@@ -1,0 +1,13 @@
+# V11.3 — PG17 notifications and OCR crash recovery (manual-only, review)
+
+This patch is a dependency on V11.2 Draft PR #24, not a release. All J1–J6 requirements and the one-primary-account-per-company rule remain unchanged. Main, persistent Render/Supabase databases and diagnostics site remain untouched.
+
+**Fix 1**: A stale OCR processor cannot overwrite a replacement processor's output: proposal object paths contain the 64-character lease token and the DB completion query still requires matching token and nonexpired lease. Unreferenced failed outputs require later expiry-based object-store garbage collection; a durable store is NOT implemented.
+
+**Fix 2**: Isolated test DDL now checks stored object keys and result paths are bound to the same tenant and task; a SECURITY DEFINER trigger verifies source worker actor belongs to org. Source metadata/tenant fields are immutable after admission. Trigger direct EXECUTE privilege is revoked from PUBLIC, and no OCR queue grants or RLS policies are added. Must independently audit definer owner, fixed search_path and future worker grants before production.
+
+**Fix 3**: Input OCR filename extensions restricted to PDF, PNG, JPEG, WebP and XLSX. Existing sandboxed, scanned parser remains required. No financial transaction is posted and human approval remains mandatory.
+
+**Manual test**: scripts/jw_v113_ephemeral_pg_integration.py (manual workflow jw-v113-disposable-pg17-manual.yml) requires a **fresh local PostgreSQL17 cluster** with postgres root on 127.0.0.1 and no other databases/roles. It creates its own jw_v112_ci_<12hex> DB, uses existing V90 synthetic schema, applies disposable V112 DDL and tests: a two-LISTEN commit receives notification, rollback doesn't, edit triggers work, duplicate admission, a wrong-tenant actor is denied, two competing claims don't both win, stale leases cannot finalize, replacement lease moves job to needs_review. It drops its disposable database and role on exit. NEVER run on Render, Supabase or production. Workflow has only workflow_dispatch; no push/PR/schedule automatic triggers. No run is authorized while the user's GitHub Actions budget is exhausted.
+
+**Evidence**: Separate local V11.2 + V11.3 Python tests pass; PostgreSQL17 integration, multiple real Render instances, enterprise MFA/browser and 100k load remain **NOT EXECUTED** until a fresh isolated PG17 runner and budget are available. Not a full 35-table migration and NOT production ready.
