@@ -22,7 +22,66 @@ GATES = (
 )
 
 
-def report(rls: dict, login: dict, *, sha: str = "NOT_PROVIDED") -> dict:
+
+# This key belongs to an independent protected verifier, not review CI.
+# A signature attests reviewed external evidence; never infer tests from a claim.
+_STAGE_CONTROLS = {"1":["abc_cross_tenant_authenticated_rls","select_insert_update_delete_denials","rpc_attachment_denials","clean_fixture_rollback","real_https_session"],"2":["company_unique_postgres_signup","login_logout_revoke","mfa_recovery_replay","csrf_reset_lockout","browser_postgres_only"],"3":["quote_order_delivery_invoice_payment","approved_actor","zero_krw_reconciliation","idempotency_concurrency","wrong_tenant_durable_rollback"],"4":["multicompany_direct_group","search_membership","attachment_validation","edit_30m_no_delete","websocket_reconnect_dedupe"],"5":["pdf_excel_ground_truth_accuracy","approved_preview_and_conversion","linked_documents","malformed_formula_injection","measured_time_savings"],"6":["approved_https_staging","fastapi_ws_worker","desktop_browsers","http_auth_csrf","safe_secrets"],"7":["representative_restore","migration_no_data_loss","measured_rto_rpo_and_p95","concurrency","failure_injection_rollback"],"8":["independent_security_signoff","owner_final_confirmation","ops_runbook","no_deploy_review_boundary"]}
+def _verified_stages(receipts, sha, key):
+    import hashlib, hmac, re
+    from datetime import datetime, timezone
+    if not isinstance(receipts, list) or not isinstance(key, bytes) or len(key) < 32:
+        return {}
+    if not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{40}", sha):
+        return {}
+    verified = {}
+    for record in receipts:
+        if not isinstance(record, dict) or set(record) != {"payload", "signature"}:
+            return {}
+        payload, sig = record["payload"], record["signature"]
+        if not isinstance(payload, dict) or not isinstance(sig, str) or not re.fullmatch(r"[a-f0-9]{64}", sig):
+            return {}
+        required_keys = {"schema", "stage", "sha", "environment", "run_url", "controls", "reviewer", "verified_at", "measurements"}
+        if set(payload) != required_keys:
+            return {}
+        stage = payload["stage"]
+        if type(stage) is not int or str(stage) not in _STAGE_CONTROLS or stage in verified:
+            return {}
+        if payload["schema"] != "jw-reviewed-stage-v1" or payload["sha"] != sha or payload["environment"] != "isolated-https-staging":
+            return {}
+        url = payload["run_url"]
+        prefix = "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/"
+        if not isinstance(url, str) or not url.startswith(prefix) or not re.fullmatch(r"[1-9][0-9]*(?:/attempts/[1-9][0-9]*)?", url[len(prefix):]):
+            return {}
+        controls = payload["controls"]
+        if not isinstance(controls, list) or any(not isinstance(x, str) for x in controls):
+            return {}
+        if len(controls) != len(set(controls)) or set(controls) != set(_STAGE_CONTROLS[str(stage)]):
+            return {}
+        if not isinstance(payload["reviewer"], str) or len(payload["reviewer"].strip()) < 3:
+            return {}
+        measure = payload["measurements"]
+        if not isinstance(measure, dict):
+            return {}
+        if stage == 3 and (type(measure.get("material_arithmetic_errors")) is not int or measure["material_arithmetic_errors"] != 0 or type(measure.get("unreconciled_krw")) is not int or measure["unreconciled_krw"] != 0):
+            return {}
+        if stage == 5 and (type(measure.get("document_samples")) is not int or measure["document_samples"] < 50 or measure.get("ground_truth_accuracy") != 1 or measure.get("material_arithmetic_errors") != 0):
+            return {}
+        if stage == 7 and (any(type(measure.get(k)) not in (int,float) or not 0 <= measure[k] < 1e8 for k in ("rto_seconds","rpo_seconds","p95_ms","rto_target_seconds","rpo_target_seconds","p95_target_ms")) or any(measure.get(v,1e12) > measure.get(t,-1) for v,t in (("rto_seconds","rto_target_seconds"),("rpo_seconds","rpo_target_seconds"),("p95_ms","p95_target_ms")))):
+            return {}
+        try:
+            moment = datetime.fromisoformat(payload["verified_at"].replace("Z", "+00:00"))
+            if moment.tzinfo is None or moment.astimezone(timezone.utc) > datetime.now(timezone.utc):
+                return {}
+            canonical = json.dumps(payload, sort_keys=True, separators=(",",":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+            correct = hmac.new(key, canonical, hashlib.sha256).hexdigest()
+        except (TypeError, ValueError, AttributeError):
+            return {}
+        if not hmac.compare_digest(sig, correct):
+            return {}
+        verified[stage] = url
+    return verified
+
+def report(rls: dict, login: dict, *, sha: str = "NOT_PROVIDED", receipts=None, verification_key: bytes | None = None) -> dict:
     actual_rls = (
         isinstance(rls,dict) and rls.get("decision")=="INCONCLUSIVE"
         and rls.get("scope")=="REAL_DB_UNKNOWN_SESSION_READONLY"
@@ -38,12 +97,13 @@ def report(rls: dict, login: dict, *, sha: str = "NOT_PROVIDED") -> dict:
         and login.get("read_only") is True
         and login.get("production_cutover") is False
     )
+    certified = _verified_stages(receipts, sha, verification_key)
     stages=[]
     for number,version,name in GATES:
         if number=="1":
             status="PARTIAL" if actual_rls else "BLOCKED"
             evidence=("Real zero-row observations across ten live tables are INCONCLUSIVE for RLS without a positive-control populated fixture; "
-                      "valid A/B/C tenant cross-access NOT TESTED" if actual_rls
+                      "valid A/B/C tenant cross-access NOT TESTED on this SHA; separate PR #20 includes manual real DEV DB A/B/C rollback evidence" if actual_rls
                       else "No verified read-only invalid-session RLS receipt")
         elif number=="2":
             status="PARTIAL" if actual_login else "BLOCKED"
@@ -67,16 +127,21 @@ def report(rls: dict, login: dict, *, sha: str = "NOT_PROVIDED") -> dict:
         else:
             status="BLOCKED"
             evidence="Independent release security review and owner sign-off absent; no deployment"
-        stages.append({"stage":int(number),"version":version,"requirement":name,
+        n = int(number)
+        if n in certified and (n != 8 or all(p in certified for p in range(1,8))):
+            status = "PASS"
+            evidence = "Independently signed exact-SHA stage controls and external test run: " + certified[n]
+        stages.append({"stage":n,"version":version,"requirement":name,
                        "evaluation":"ATTEMPTED","status":status,"evidence":evidence,
-                       "complete":False})
+                       "complete":status=="PASS","required_controls":_STAGE_CONTROLS[str(n)]})
     assert len(stages)==8 and set(x["stage"] for x in stages)==set(range(1,9))
     assert all(x["evaluation"]=="ATTEMPTED" and x["status"]!="SKIP" for x in stages)
     return {"schema":"jw-eight-stage-v1","commit":sha,
             "release":"BLOCKED","production_deployed":False,
             "review_integrity":"PASS" if actual_rls and actual_login else "BLOCKED",
+            "attested_stage_count":sum(x["status"]=="PASS" for x in stages),
             "stages":stages,
-            "notes":"CI report success certifies honest evidence only, NOT all 8 stages complete"}
+            "notes":"Only a separate protected verifier can sign external proof; regular review CI cannot self-approve; launch stays BLOCKED"}
 
 
 def main()->int:

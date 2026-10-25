@@ -22,3 +22,10 @@ Infrastructure: connected Vercel account contains only TOOLKIT-related projects 
 ## Release procedure
 No merges/main changes, no DB schema/customer-row writes, no paid host or new secrets, no public deployment without human approval.
 A reviewer must explicitly provide: clean-room staged tenant identities, provider hosting/region/runtime, budget and custom domain, approved migration window and tested rollback, final security approval. Until evidence for these controls is collected, release remains BLOCKED.
+
+
+## 2026-10-25 independent evidence promotion protocol
+
+Existing review status is NOT promoted: the previous PR #20 has manual real development-DB A/B/C positive-control RLS rollback receipts; this PR includes reproducible review SQL and negative contracts but does NOT represent same-SHA full deployed HTTPS identity E2E. Each Stage 1–8 can now become PASS **only** when a separate protected independent validator signs an exact-SHA, complete-control, measured, external GitHub Actions receipt. The current review workflows deliberately lack that private verification key; their stage statuses remain PARTIAL/BLOCKED. The reviewer must separately inspect actual external runs; an HMAC alone is not proof that the underlying test happened. Stage 8 additionally requires 1–7 independently signed; `release` remains BLOCKED even after prelaunch approval, until an entirely separate expressly authorized deployment action.
+
+The original database policies/migrations/customer data and deployment are unchanged. RLS advisor notices and missing FK indexes remain explicit review obligations; do not blanket-grant or bulk-index without separate performance evidence.
