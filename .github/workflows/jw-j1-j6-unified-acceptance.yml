@@ -12,6 +12,7 @@ on:
       - review/v96-supavisor-root-ca-tls-20261025
       - review/v97-restricted-supavisor-login-20261025
       - review/v98-supavisor-hop-aware-ssl-20261025
+      - review/v99-v110-eight-stage-acceptance-20261025
   workflow_dispatch:
 
 permissions:
