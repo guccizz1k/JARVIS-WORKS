@@ -86,7 +86,13 @@ def create_realtime_router(
             await ws.close(code=1008)
             return
 
-        await ws.accept()
+        try:
+            await ws.accept()
+        except BaseException:
+            # Even failed handshakes/cancellation cannot leak hub subscriptions.
+            if subscriber is not None:
+                wake_hub.unsubscribe(connection_id, subscriber)
+            raise
         cursor = after
         edit_dt = edt
         edit_id = edit_after_id
