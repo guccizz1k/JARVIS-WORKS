@@ -78,7 +78,8 @@ def check(*,env=None,connector=None)->dict:
     try:
         verdict=check_two_connections(connector=connector,env={
             "JW_ENV":"dev","JW_PG_V87_CONNECT_GATE":"ISOLATED_DEV_ONLY",
-            "JW_PG_STAGE_DSN":trade,"JW_PG_AUTH_STAGE_DSN":auth})
+            "JW_PG_STAGE_DSN":trade,"JW_PG_AUTH_STAGE_DSN":auth},
+            trusted_pooler_tls=True)
     except Exception:
         return {**base,"reason":"ROLE_GATE_ERROR"}
     if verdict.get("result")!="PASS":
@@ -86,7 +87,8 @@ def check(*,env=None,connector=None)->dict:
                 "failed_checks":verdict.get("failed_checks",[])}
     try:
         independent=check_independent_boundaries(connector=connector,
-            trade_dsn=trade,auth_dsn=auth,env=e)
+            trade_dsn=trade,auth_dsn=auth,env=e,
+            trusted_pooler_tls=True)
     except Exception:
         return {**base,"reason":"INDEPENDENT_BOUNDARY_ERROR"}
     if independent.get("decision")!="PASS":

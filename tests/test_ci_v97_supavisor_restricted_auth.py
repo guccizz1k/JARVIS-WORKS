@@ -55,9 +55,10 @@ def test_production_or_no_approval_denied():
 
 def test_read_only_role_gate_wiring_and_redacted_failure(monkeypatch):
     seen=[]
-    def fake(*,connector,env):
+    def fake(*,connector,env,trusted_pooler_tls=False):
         seen.append(env["JW_ENV"])
         assert env["JW_PG_V87_CONNECT_GATE"]=="ISOLATED_DEV_ONLY"
+        assert trusted_pooler_tls is True
         return {"result":"BLOCKED","failed_checks":["connection_or_tenant_role_failed"]}
     monkeypatch.setattr(r,"check_two_connections",fake)
     v=r.check(env=env(),connector=lambda *a,**kw:None)
@@ -90,7 +91,8 @@ def test_real_connector_forces_read_only_and_bounded_statements(monkeypatch):
     import psycopg
     seen=[]
     monkeypatch.setattr(psycopg,"connect",lambda dsn,**kw:seen.append(kw))
-    def legacy(*,connector,env):
+    def legacy(*,connector,env,trusted_pooler_tls=False):
+        assert trusted_pooler_tls is True
         connector(env["JW_PG_STAGE_DSN"],sslmode="verify-full")
         return {"result":"PASS"}
     monkeypatch.setattr(r,"check_two_connections",legacy)

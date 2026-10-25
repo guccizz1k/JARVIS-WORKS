@@ -82,7 +82,7 @@ class Connection:
             raise RuntimeError("secret-password")
 
 
-def run(behavior=None, *, env=ENV, public_tables=()):
+def run(behavior=None, *, env=ENV, public_tables=(), trusted_pooler_tls=False):
     dbs = []
     opts = []
 
@@ -95,7 +95,8 @@ def run(behavior=None, *, env=ENV, public_tables=()):
         return db
 
     result = gate.check_independent_boundaries(
-        connector=connect, trade_dsn="synthetic-trade", auth_dsn="synthetic-auth", env=env)
+        connector=connect, trade_dsn="synthetic-trade", auth_dsn="synthetic-auth",
+        env=env, trusted_pooler_tls=trusted_pooler_tls)
     return result, dbs, opts
 
 
@@ -278,3 +279,18 @@ def test_catalog_drift_between_sessions_is_blocked():
         ("public", "payments", True, True, False, False)]})
     assert result["decision"] == "BLOCKED"
     assert result["failed_checks"] == ["catalog_changed_between_sessions"]
+
+def test_supavisor_optin_only_accepts_explicit_upstream_false():
+    assert run({"login": {12: False}}, trusted_pooler_tls=False)[0]["decision"]=="BLOCKED"
+    assert run({"login": {12: False}}, trusted_pooler_tls=True)[0]["decision"]=="PASS"
+    assert run({"login": {12: None}}, trusted_pooler_tls=True)[0]["decision"]=="BLOCKED"
+    assert run({"login": {10: 16, 12: False}}, trusted_pooler_tls=True)[0]["decision"]=="BLOCKED"
+    assert run({"login": {11: "off", 12: False}}, trusted_pooler_tls=True)[0]["decision"]=="BLOCKED"
+
+def test_supavisor_attestation_must_not_claim_backend_tls_true():
+    output,_,_=run({"login":{12:False}},trusted_pooler_tls=True)
+    assert output["decision"]=="PASS"
+    assert output["backend_tls_active"]=="NOT_ASSERTED_FOR_SUPAVISOR"
+    direct,_,_=run()
+    assert direct["decision"]=="PASS"
+    assert direct["backend_tls_active"] is True
