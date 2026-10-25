@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, build_opener, HTTPHandler, HTTPRedirectHandler
+from urllib.request import Request, build_opener, HTTPHandler, HTTPRedirectHandler, ProxyHandler
 
 class DenyRedirect(HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
@@ -31,13 +31,13 @@ def validate_target(value: str) -> str:
 
 def probe(url: str, *, requests: int = 100, concurrency: int = 4) -> dict:
     validate_target(url)
-    if (os.getenv('JW_ENV','').lower() in ('production','prod')
+    if (os.getenv('JW_ENV','').lower() not in ('review','test','development')
         or os.getenv('JW_SCALE_ALLOW_LOCAL_PROBE')!='YES_LOOPBACK_ONLY'):
         raise RuntimeError('local-only approval missing')
     if (type(requests) is not int or type(concurrency) is not int
         or not 1<=requests<=500 or not 1<=concurrency<=16 or requests<concurrency):
         raise ValueError('bounded probe limits exceeded')
-    opener=build_opener(HTTPHandler(),DenyRedirect())
+    opener=build_opener(ProxyHandler({}),HTTPHandler(),DenyRedirect())
     def one(_:int) -> tuple[int,float]:
         before=time.monotonic()
         try:
