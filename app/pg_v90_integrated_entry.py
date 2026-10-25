@@ -122,7 +122,50 @@ def register_v90_messenger(app) -> bool:
             response.headers['Cache-Control'] = 'no-store'
             return {'org_id': identity[2], 'csrf_token': identity[4]}
 
+    # V11.2 remains disabled by default. Only a separately approved isolated
+    # PG17 staging fixture with installed triggers may start the listener.
+    wake_hub = None
+    if os.getenv('JW_V112_PG_NOTIFY_ACK') == 'ISOLATED_PG17_REVIEW_ONLY':
+        if os.getenv('JW_ENV') not in ('dev','development','test'):
+            raise RuntimeError('V11.2 notifications prohibited outside review')
+        from .pg_v112_wakeup import WakeHub, listen_forever
+        import threading
+        wake_hub = WakeHub(max_subscribers=3000)
+        stop = threading.Event()
+        active = []
+
+        def _listener_connect():
+            import psycopg
+            return psycopg.connect(
+                os.environ['JW_PG_STAGE_DSN'],connect_timeout=5,
+                sslmode='verify-full',autocommit=True)
+
+        def _start_listener():
+            with stage._connect() as conn:
+                with conn.transaction():
+                    with conn.cursor() as cur:
+                        cur.execute("""SELECT count(*) FROM pg_catalog.pg_trigger
+                            WHERE tgname IN
+                              ('v112_messenger_insert_wakeup','v112_messenger_edit_wakeup')
+                              AND NOT tgisinternal AND tgenabled='O'""")
+                        if cur.fetchone() != (2,):
+                            raise RuntimeError('V11.2 verified message triggers missing')
+            daemon = threading.Thread(
+                target=listen_forever,args=(_listener_connect,wake_hub,stop),
+                name='jw-v112-pg-listener',daemon=True)
+            daemon.start()
+            active.append(daemon)
+
+        def _stop_listener():
+            stop.set()
+            for daemon in active:
+                daemon.join(timeout=3)
+
+        app.add_event_handler('startup', _start_listener)
+        app.add_event_handler('shutdown', _stop_listener)
+
     app.add_api_route('/api/pg-stage/v90/me', current_pg_identity, methods=['GET'])
     app.include_router(create_router(gateway, _authorize))
-    app.include_router(create_realtime_router(gateway, _authorize, allowed_origins=origins))
+    app.include_router(create_realtime_router(
+        gateway, _authorize, allowed_origins=origins, wake_hub=wake_hub))
     return True
