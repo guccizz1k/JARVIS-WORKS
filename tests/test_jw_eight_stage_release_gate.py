@@ -1,8 +1,10 @@
 """J1–J6 gate prevents positive launch verdicts from partial proofs."""
 from scripts import jw_eight_stage_release_gate as gate
 
-RLS={"decision":"PASS","scope":"REAL_DB_UNKNOWN_SESSION_READONLY",
-     "tested_tables":10,"rollback":"PASS","cross_tenant_abc":"NOT_VERIFIED",
+RLS={"decision":"INCONCLUSIVE","scope":"REAL_DB_UNKNOWN_SESSION_READONLY",
+     "tested_tables":10,"rollback":"PASS",
+     "row_rls_proof":"NOT_PROVEN_WITHOUT_POSITIVE_CONTROL",
+     "cross_tenant_abc":"NOT_VERIFIED",
      "production_cutover":False}
 AUTH={"decision":"PASS","authenticated":True,"read_only":True,
       "production_cutover":False}
