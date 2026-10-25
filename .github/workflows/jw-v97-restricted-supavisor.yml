@@ -1,0 +1,57 @@
+name: JW V9.7 restricted Supavisor login readiness (review only)
+on:
+  push:
+    branches:
+      - review/v97-restricted-supavisor-login-20261025
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  restricted-role-readonly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      JW_ENV: review
+      JW_V97_LIVE_ACK: READ_ONLY_SUPAVISOR_ACCEPTANCE_V97
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Secret names and configured status only (no values)
+        id: secret-status
+        env:
+          JW_V97_TRADE_DSN_SET: ${{ secrets.JW_V97_TRADE_DSN != '' }}
+          JW_V97_AUTH_DSN_SET: ${{ secrets.JW_V97_AUTH_DSN != '' }}
+        run: python3 -m scripts.ci_v97_secret_status
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: V9.7 contract and original restricted role regressions
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pytest -q tests/test_ci_v97_supavisor_restricted_auth.py tests/test_ci_v97_independent_boundary.py tests/test_ci_v97_secret_status.py tests/test_pg_connection_gate_v87.py tests/test_ci_v96_supabase_ca.py -ra --junitxml=jw-v97-focused.xml
+      - name: Check actual restricted Supavisor logins only if secrets are provisioned
+        if: steps.secret-status.outputs.ready == 'true'
+        env:
+          JW_V97_TRADE_DSN: ${{ secrets.JW_V97_TRADE_DSN }}
+          JW_V97_AUTH_DSN: ${{ secrets.JW_V97_AUTH_DSN }}
+        run: |
+          python -m scripts.ci_v97_supavisor_restricted_auth --require-authenticated > jw-v97-verdict.json
+          python - <<'PY'
+          import json
+          x=json.load(open("jw-v97-verdict.json"))
+          print("Read-only restricted Supavisor authentication:",x["decision"],
+                "reason:",x.get("reason"),"production_cutover:",x["production_cutover"])
+          if x["decision"]!="PASS":
+              print("BLOCKED: real DB login unverified. Do NOT release.")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v97-readonly-auth-proof
+          path: |
+            jw-v97-verdict.json
+            jw-v97-secret-status.json
+            jw-v97-focused.xml
+          retention-days: 3
+          if-no-files-found: ignore
