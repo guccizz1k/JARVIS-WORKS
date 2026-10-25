@@ -104,6 +104,17 @@ def _prove(psycopg, dsn):
         for listener in (first,second):
             got=_notification(listener)
             assert len(got)==1 and got[0].payload==digest_connection('ci-chat')
+    # The review migration intentionally grants no OCR queue access.
+    # Before privileged fixture tests, prove normal trade role is denied.
+    try:
+        with psycopg.connect(dsn) as restricted:
+            with restricted.cursor() as c:
+                c.execute('SET LOCAL ROLE jw_app_dev')
+                c.execute('SELECT count(*) FROM jw_dev.ocr_jobs_v112')
+    except psycopg.errors.InsufficientPrivilege:
+        pass
+    else:
+        raise AssertionError('UNAPPROVED_TRADE_ROLE_CAN_READ_OCR_QUEUE')
     q=PgOcrQueue(lambda:psycopg.connect(dsn,connect_timeout=5))
     obj='tenant/ci-a/'+'a'*32
     kwargs=dict(org_id='ci-a',actor_id='ci-ua',object_key=obj,
@@ -139,7 +150,7 @@ def _prove(psycopg, dsn):
             assert c.fetchone()==('needs_review',fresh,2)
     return {'commit_two_listeners':'PASS','rollback_no_notify':'PASS',
             'edits_notify':'PASS','ocr_idempotency':'PASS',
-            'actor_org_check':'PASS','concurrent_skip_locked':'PASS',
+            'actor_org_check':'PASS','unprivileged_queue_default_deny':'PASS','concurrent_skip_locked':'PASS',
             'lease_result_fencing':'PASS','full_business_e2e':'NOT_RUN',
             '2_render_instances':'NOT_RUN'}
 

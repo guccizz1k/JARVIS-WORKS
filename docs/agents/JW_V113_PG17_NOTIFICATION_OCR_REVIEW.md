@@ -14,3 +14,7 @@ This patch is a dependency on V11.2 Draft PR #24, not a release. All J1–J6 req
 
 ## Preflight hardening follow-up (2026-10-25)
 Preflight now refuses **existing user-owned relations, functions or non-plpgsql extensions in the local postgres root database**, as well as extra databases/roles. Previously an unrelated user table in the default postgres DB could go unnoticed. This does not replace isolated container identity; only start on a fresh ephemeral PG17 environment you control. New negative mock tests for preflight were added. Tenant actor mismatch assertions in the actual CI runner are executed as a privileged fixture owner and **are not proof of restricted-worker RLS**. Without a reviewed worker DB principal/grants and persistent schema approval, the queue MUST NOT be operated in customer staging.
+
+
+### Least-privilege denial proof (pending actual PG execution)
+The manual PG17 runner explicitly checks that `SET LOCAL ROLE jw_app_dev` cannot read the new OCR queue. A query that succeeds **fails the test**. This confirms no accidental broad trade-role SELECT grant within the ephemeral fixture; it **does not** establish authorized restricted-worker policies or tenant-isolated queue use. All subsequent OCR queue concurrency probes still use the disposable superuser fixture and must not be reported as worker-RLS PASS. No role/queue GRANT or persistent schema change performed.

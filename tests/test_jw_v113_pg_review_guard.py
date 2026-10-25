@@ -94,3 +94,11 @@ def test_known_empty_disposable_pg17_readonly_preflight_passes(monkeypatch):
     assert gate._preflight(pg,lambda _:opts,"synthetic-only") is None
     assert len(pg.conn.c.calls)==6
     assert all(query.lstrip().upper().startswith("SELECT") for query in pg.conn.c.calls)
+
+
+def test_queue_permissions_fail_closed_for_trade_role_in_ephemeral_fixture():
+    import inspect
+    source=inspect.getsource(gate._prove)
+    assert "SET LOCAL ROLE jw_app_dev" in source
+    assert "psycopg.errors.InsufficientPrivilege" in source
+    assert "UNAPPROVED_TRADE_ROLE_CAN_READ_OCR_QUEUE" in source
