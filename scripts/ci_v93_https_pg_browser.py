@@ -115,6 +115,8 @@ def main() -> int:
     app=FastAPI()
     # Mount the real review-only PostgreSQL messenger HTTP + WebSocket on the SAME TLS server.
     assert v90.register_v90_messenger(app)
+    from app import pg_auth_v85 as auth
+    assert auth.register_v85_auth(app)
     assert write.register_v92_quote_api(app)
     assert read.register_v93_quote_reader(app)
 
@@ -266,6 +268,93 @@ def main() -> int:
             print("PASS: verified localhost HTTPS PG17 quote + messenger + WSS replay, tenant A/B/C, CSRF and dedupe",flush=True)
             from scripts.ci_v93_finance_restore import restore_proof
             restore_proof()
+            # V10.6: do this AFTER the unchanged 13-table restore, so its
+            # fingerprint remains meaningful and the auth fixture adds no
+            # tables to the independently verified restore baseline.
+            from scripts.ci_v106_real_pg_auth import prepare_real_auth, PASSWORD
+            prepare_real_auth(fixture)
+            assertion(r"""async () => {
+              const req=async(path,method='GET',body,csrf)=>{
+                const h={'Accept':'application/json'};
+                if(body!==undefined)h['Content-Type']='application/json';
+                if(csrf)h['X-CSRF-Token']=csrf;
+                const r=await fetch(path,{method,headers:h,credentials:'same-origin',
+                  body:body===undefined?undefined:JSON.stringify(body)});
+                return {code:r.status,data:await r.json()};
+              };
+              const auth='/api/pg-stage/v85/';
+              const root='/api/pg-stage/v92/quotes';
+              const bad=await req(auth+'login','POST',
+                {email:'a@invalid.test',password:'wrong-ci-password'});
+              if(bad.code!==401)throw Error('Real PG failed-password login not denied: '+bad.code);
+              const a=await req(auth+'login','POST',
+                {email:'a@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(a.code!==200||!a.data.csrf_token||a.data.backend!=='postgresql_auth_stage')
+                throw Error('Real PG A credential login failed '+a.code);
+              const csrfA=a.data.csrf_token;
+              const me=await req('/api/pg-stage/v90/me');
+              if(me.code!==200||me.data.org_id!=='ci-a'||me.data.csrf_token!==csrfA)
+                throw Error('Newly issued PG session not accepted by business role');
+              const quote={request_id:'v106-real-auth-quote-0001',customer_id:'ci-customer-a',
+                title:'REAL PG AUTH QUOTE',vat_mode:'taxable',
+                items:[{name:'A',quantity:3,unit_price:101},{name:'B',quantity:2,unit_price:503}]};
+              const created=await req(root,'POST',quote,csrfA);
+              if(created.code!==201||created.data.money.total!==1440)
+                throw Error('PG auth-to-finance write failed '+created.code);
+              const replay=await req(root,'POST',quote,csrfA);
+              if(replay.code!==200||replay.data.quote_id!==created.data.quote_id)
+                throw Error('Authorized PG quote retry not idempotent');
+              const chat=await req('/api/pg-stage/v90/chats','POST',
+                  {other_org_id:'ci-b'},csrfA);
+              if(chat.code!==200||!chat.data.connection_id)
+                throw Error('PG auth-to-messenger start failed');
+              const msgs='/api/pg-stage/v90/chats/'+chat.data.connection_id+'/messages';
+              const sent=await req(msgs,'POST',
+                {request_id:'v106-real-auth-message-0001',body:'V106_REAL_AUTH_PG_A_TO_B'},csrfA);
+              if(sent.code!==200||!sent.data.message_id)
+                throw Error('PG auth-to-messenger send failed');
+              const noCSRF=await req(msgs,'POST',
+                {request_id:'v106-no-csrf-attempt',body:'DENIED'});
+              if(noCSRF.code!==403)throw Error('New PG auth bypassed business CSRF');
+              const badLogout=await req(auth+'logout','POST',undefined,'wrong');
+              if(badLogout.code!==403)throw Error('Bad PG logout CSRF accepted');
+              const validLogout=await req(auth+'logout','POST',undefined,csrfA);
+              if(validLogout.code!==200||validLogout.data.ok!==true)
+                throw Error('PG A logout failed');
+              const revoked=await req('/api/pg-stage/v90/me');
+              if(revoked.code!==401)throw Error('Logged-out A retained business access');
+              const b=await req(auth+'login','POST',
+                {email:'b@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(b.code!==200||!b.data.csrf_token)throw Error('Real PG B login failed');
+              const foreign=await req(root+'/'+created.data.quote_id);
+              if(foreign.code!==404)throw Error('PG B accessed PG A financial document');
+              const recv=await req(msgs);
+              if(recv.code!==200||!JSON.stringify(recv.data).includes('V106_REAL_AUTH_PG_A_TO_B'))
+                throw Error('PG B cannot receive authorized A message');
+              const blogout=await req(auth+'logout','POST',undefined,b.data.csrf_token);
+              if(blogout.code!==200)throw Error('B logout failed');
+              const bRevoked=await req(msgs);
+              if(bRevoked.code!==401)throw Error('Logged-out B retained chat');
+              const again=await req(auth+'login','POST',
+                {email:'a@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(again.code!==200)throw Error('Real PG A relogin failed');
+              const aQuote=await req(root+'/'+created.data.quote_id);
+              if(aQuote.code!==200||aQuote.data.money.total!==1440)
+                throw Error('PG A finance recovery after logout failed');
+              return 'JW_V106_REAL_PG_AUTH_LOGIN_QUOTE_CHAT_LOGOUT_RLS_PASS';
+            }""","JW_V106_REAL_PG_AUTH_LOGIN_QUOTE_CHAT_LOGOUT_RLS_PASS",timeout=110)
+            with psycopg.connect(fixture.root_dsn) as root:
+                events=root.execute("""
+                    SELECT event_type,count(*) FROM jw_dev.security_events
+                    GROUP BY event_type ORDER BY event_type
+                """).fetchall()
+                if dict(events)!={"login_success":3,"logout":2}:
+                    raise AssertionError("Actual PostgreSQL auth events inconsistent")
+            print("PASS: real PG17 independent credential login, hashed DB sessions, "
+                  "login failure, CSRF, A->quote+chat->B, logout revocation, "
+                  "tenant denial, and relogin recovery",flush=True)
+            print("LIMIT: synthetic A/B fixture on disposable PG17; MFA not enabled; "
+                  "Render isolated Postgres not yet provisioned/connected",flush=True)
             print("PASS: real Chromium browser -> HTTPS -> V9.3 API -> PG17 nonprivileged session; quote form/GET/tenant denial",flush=True)
             print("LIMIT: localhost self-signed synthetic CA; QA-only cookie issuer; not hosted production HTTPS or real Supabase auth",flush=True)
             return 0
