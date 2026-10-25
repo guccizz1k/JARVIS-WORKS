@@ -4,6 +4,7 @@ import hashlib, json, os, ssl, sys
 from pathlib import Path
 from app.pg_connection_gate_v87 import check_two_connections
 from scripts.ci_v95_supavisor_session_tls import POOLER_HOST, POOLER_PORT, PROJECT_REF
+from scripts.ci_v97_independent_boundary import check_independent_boundaries
 
 CA = Path(__file__).resolve().parents[1]/"tests"/"certs"/"prod-ca-2021.crt"
 CA_DER_SHA256 = "807025ad50d4ed219d2c9c7d299c004f824eb00cf7f65afef607d07b72e6cafa"
@@ -56,9 +57,14 @@ def check(*,env=None,connector=None)->dict:
     auth=e.get("JW_V97_AUTH_DSN","")
     if not trade or not auth:
         return {**base,"reason":"TWO_INDEPENDENT_SECRETS_MISSING"}
+    # Reject ambient libpq service/password/options overrides; never inspect values.
+    if any(key.startswith("PG") for key in e):
+        return {**base,"reason":"AMBIENT_LIBPQ_SETTINGS"}
     if not valid_dsn(trade,"trade") or not valid_dsn(auth,"auth") or trade==auth:
         return {**base,"reason":"PRIVILEGED_OR_WRONG_POOLER_DSN"}
     if connector is None:
+        if any(key.startswith("PG") for key in os.environ):
+            return {**base,"reason":"AMBIENT_LIBPQ_SETTINGS"}
         try:
             import psycopg
         except ImportError:
@@ -66,7 +72,9 @@ def check(*,env=None,connector=None)->dict:
         def connector(dsn,**kwargs):
             return psycopg.connect(dsn,sslmode="verify-full",
                 sslrootcert=str(CA),connect_timeout=5,
-                application_name="jw_v97_readonly",gssencmode="disable")
+                application_name="jw_v97_readonly",gssencmode="disable",
+                options="-c default_transaction_read_only=on -c statement_timeout=5000 "
+                        "-c lock_timeout=1000 -c idle_in_transaction_session_timeout=10000")
     try:
         verdict=check_two_connections(connector=connector,env={
             "JW_ENV":"dev","JW_PG_V87_CONNECT_GATE":"ISOLATED_DEV_ONLY",
@@ -76,8 +84,18 @@ def check(*,env=None,connector=None)->dict:
     if verdict.get("result")!="PASS":
         return {**base,"reason":"ROLE_GATE_REJECTED",
                 "failed_checks":verdict.get("failed_checks",[])}
+    try:
+        independent=check_independent_boundaries(connector=connector,
+            trade_dsn=trade,auth_dsn=auth,env=e)
+    except Exception:
+        return {**base,"reason":"INDEPENDENT_BOUNDARY_ERROR"}
+    if independent.get("decision")!="PASS":
+        return {**base,"reason":"INDEPENDENT_BOUNDARY_REJECTED",
+                "failed_checks":independent.get("failed_checks",[])}
     return {**base,"decision":"PASS","authenticated":True,
-            "role_boundaries":"PASS","reason":"RESTRICTED_READ_ONLY_GATE_VERIFIED"}
+            "role_boundaries":"PASS","independent_boundary":independent,
+            "tenant_row_isolation":"NOT RUN",
+            "reason":"RESTRICTED_READ_ONLY_GATE_VERIFIED"}
 
 def main()->int:
     result=check()

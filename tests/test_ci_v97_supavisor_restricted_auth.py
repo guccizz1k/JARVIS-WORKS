@@ -66,6 +66,37 @@ def test_read_only_role_gate_wiring_and_redacted_failure(monkeypatch):
 
 def test_mock_good_gate_is_not_production_authorization(monkeypatch):
     monkeypatch.setattr(r,"check_two_connections",lambda **_:{"result":"PASS"})
+    monkeypatch.setattr(r,"check_independent_boundaries",lambda **_:{
+        "decision":"PASS","catalog_only":True,"tenant_row_isolation":"NOT RUN"},raising=False)
     v=r.check(env=env(),connector=lambda *_a,**_k:None)
     assert v["authenticated"] is True and v["production_cutover"] is False
     assert v["production_deployed"] is False
+
+def test_legacy_pass_cannot_override_independent_boundary_failure(monkeypatch):
+    monkeypatch.setattr(r,"check_two_connections",lambda **_:{"result":"PASS"})
+    monkeypatch.setattr(r,"check_independent_boundaries",lambda **_:{
+        "decision":"BLOCKED","failed_checks":["login_inherits"]},raising=False)
+    v=r.check(env=env(),connector=lambda *_a,**_k:None)
+    assert v["decision"]=="BLOCKED" and v["authenticated"] is False
+    assert v["reason"]=="INDEPENDENT_BOUNDARY_REJECTED"
+
+def test_inherited_libpq_configuration_blocks_before_network(monkeypatch):
+    def forbidden(**_):raise AssertionError("connection attempted")
+    monkeypatch.setattr(r,"check_two_connections",forbidden)
+    v=r.check(env=env(PGOPTIONS="-c default_transaction_read_only=off"))
+    assert v["reason"]=="AMBIENT_LIBPQ_SETTINGS"
+
+def test_real_connector_forces_read_only_and_bounded_statements(monkeypatch):
+    import psycopg
+    seen=[]
+    monkeypatch.setattr(psycopg,"connect",lambda dsn,**kw:seen.append(kw))
+    def legacy(*,connector,env):
+        connector(env["JW_PG_STAGE_DSN"],sslmode="verify-full")
+        return {"result":"PASS"}
+    monkeypatch.setattr(r,"check_two_connections",legacy)
+    monkeypatch.setattr(r,"check_independent_boundaries",lambda **_:{"decision":"PASS"},raising=False)
+    r.check(env=env())
+    assert seen[0]["sslmode"]=="verify-full"
+    assert seen[0]["sslrootcert"]==str(r.CA)
+    assert "default_transaction_read_only=on" in seen[0]["options"]
+    assert "statement_timeout=5000" in seen[0]["options"]
