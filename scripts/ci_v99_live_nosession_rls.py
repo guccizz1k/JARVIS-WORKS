@@ -1,4 +1,4 @@
-"""Actual Supabase no-session RLS denial, read-only and rollback-verified.
+"""Actual Supabase no-session observation, read-only and rollback-verified.
 
 A missing session is NOT a substitute for adversarial valid A/B/C users.
 No customer identifiers, rows, sensitive query results or credentials in logs.
@@ -25,6 +25,7 @@ def validate_result(*, environ=None, connector=None) -> dict:
     base = {"decision":"BLOCKED","scope":"REAL_DB_UNKNOWN_SESSION_READONLY",
             "authenticated":False, "cross_tenant_abc":"NOT_VERIFIED",
             "writes":False,"rollback":"NOT_VERIFIED","tested_tables":0,
+            "row_rls_proof":"NOT_PROVEN_WITHOUT_POSITIVE_CONTROL",
             "production_cutover":False}
     if env.get("JW_ENV") != "review" or env.get("JW_V99_RLS_ACK") != ACK:
         return {**base, "reason":"REVIEW_READONLY_OPT_IN_REQUIRED"}
@@ -85,7 +86,9 @@ def validate_result(*, environ=None, connector=None) -> dict:
     if not completed or not rolled_back or reason:
         return {**base,"reason":reason or "PROBE_INCOMPLETE",
                 "rollback":"PASS" if rolled_back else "NOT_VERIFIED"}
-    return {**base, "decision":"PASS","reason":"MISSING_SESSION_CANNOT_SEE_ROWS",
+    # Zero results on an empty table do NOT prove RLS denial. Only an
+    # approved populated positive-control fixture can establish row isolation.
+    return {**base, "decision":"INCONCLUSIVE","reason":"NULL_TENANT_ZERO_ROWS_OBSERVED",
             "authenticated":True, "tested_tables":len(TABLES),
             "rollback":"PASS"}
 
