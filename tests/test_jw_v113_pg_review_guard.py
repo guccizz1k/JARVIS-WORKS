@@ -35,3 +35,62 @@ def test_manual_pg_contract_marks_unrun_live_work():
     assert 'concurrent_skip_locked' in source
     assert 'rollback_no_notify' in source
     assert 'actor_org_check' in source
+
+
+@pytest.mark.parametrize("bad_index,error_code",[
+ (3,"ROOT_DB_HAS_USER_RELATIONS"),
+ (4,"ROOT_DB_HAS_USER_FUNCTIONS"),
+ (5,"ROOT_DB_HAS_EXTRA_EXTENSIONS"),
+])
+def test_root_postgres_database_must_have_no_user_objects(monkeypatch,bad_index,error_code):
+    monkeypatch.setenv("JW_PG_CI_ALLOW","ONLY_EPHEMERAL_LOCAL_DATABASE")
+    class Cursor:
+        def __init__(self):self.calls=[];self.index=0
+        def __enter__(self):return self
+        def __exit__(self,*_):return False
+        def execute(self,query):self.calls.append(query)
+        def fetchone(self):
+            values=[17,0,0,0,0,0]
+            values[bad_index]=1
+            index=self.index;self.index+=1
+            return (values[index],)
+    class Connection:
+        def __init__(self):self.c=Cursor()
+        def __enter__(self):return self
+        def __exit__(self,*_):return False
+        def cursor(self):return self.c
+    class MockPg:
+        def __init__(self):self.conn=Connection()
+        def connect(self,*args,**kwargs):return self.conn
+    pg=MockPg()
+    options={"host":"127.0.0.1","port":"5432","dbname":"postgres",
+             "user":"postgres","connect_timeout":"5"}
+    with pytest.raises(RuntimeError,match=error_code):
+        gate._preflight(pg,lambda _:options,"synthetic-only")
+    assert not any("CREATE ROLE" in q or "DROP DATABASE" in q for q in pg.conn.c.calls)
+
+
+def test_known_empty_disposable_pg17_readonly_preflight_passes(monkeypatch):
+    monkeypatch.setenv("JW_PG_CI_ALLOW","ONLY_EPHEMERAL_LOCAL_DATABASE")
+    class Cursor:
+        def __init__(self):self.calls=[];self.index=0
+        def __enter__(self):return self
+        def __exit__(self,*_):return False
+        def execute(self,sql):self.calls.append(sql)
+        def fetchone(self):
+            item=(17,) if self.index==0 else (0,)
+            self.index+=1;return item
+    class Connection:
+        def __init__(self):self.c=Cursor()
+        def __enter__(self):return self
+        def __exit__(self,*_):return False
+        def cursor(self):return self.c
+    class MockPg:
+        def __init__(self):self.conn=Connection()
+        def connect(self,*args,**kwargs):return self.conn
+    pg=MockPg()
+    opts={"host":"127.0.0.1","port":"5432","dbname":"postgres",
+          "user":"postgres","connect_timeout":"5"}
+    assert gate._preflight(pg,lambda _:opts,"synthetic-only") is None
+    assert len(pg.conn.c.calls)==6
+    assert all(query.lstrip().upper().startswith("SELECT") for query in pg.conn.c.calls)

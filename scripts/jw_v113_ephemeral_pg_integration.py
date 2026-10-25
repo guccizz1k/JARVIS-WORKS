@@ -40,6 +40,23 @@ def _preflight(psycopg, parse, dsn):
             c.execute("""SELECT count(*) FROM pg_catalog.pg_roles
                          WHERE rolname<>'postgres' AND rolname !~ '^pg_'""")
             if c.fetchone() != (0,): raise RuntimeError('FOREIGN_ROLE_DENIED')
+            # A cluster with just one database/role can still contain real
+            # user tables, custom functions or extensions in database postgres.
+            c.execute("""SELECT count(*) FROM pg_catalog.pg_class r
+                JOIN pg_catalog.pg_namespace n ON n.oid=r.relnamespace
+                WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
+                  AND n.nspname NOT LIKE 'pg_toast_temp_%'
+                  AND n.nspname NOT LIKE 'pg_temp_%'
+                  AND r.relkind IN ('r','p','v','m','f','S')""")
+            if c.fetchone() != (0,): raise RuntimeError('ROOT_DB_HAS_USER_RELATIONS')
+            c.execute("""SELECT count(*) FROM pg_catalog.pg_proc p
+                JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+                WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+                  AND n.nspname NOT LIKE 'pg_temp_%'
+                  AND n.nspname NOT LIKE 'pg_toast_%'""")
+            if c.fetchone() != (0,): raise RuntimeError('ROOT_DB_HAS_USER_FUNCTIONS')
+            c.execute("SELECT count(*) FROM pg_catalog.pg_extension WHERE extname<>'plpgsql'")
+            if c.fetchone() != (0,): raise RuntimeError('ROOT_DB_HAS_EXTRA_EXTENSIONS')
 
 
 def _notification(conn, seconds=1.0):
