@@ -49,10 +49,19 @@ def diagnose(*, env=None, connector=None) -> dict:
                         major,backend_ssl,same_identity,expected_role=cur.fetchone()
                     # These flags are intentionally booleans only, never
                     # actual usernames, backend PID, SQL messages or secrets.
+                    # Boolean-only transport diagnostics. Never print libpq
+                    # parameters, URLs, usernames, secrets or certificate paths.
+                    params=getattr(getattr(db,"info",None),"dsn_parameters",{}) or {}
                     evidence[kind]={"pg_major_17":major==17,
                                     "backend_pg_stat_ssl":bool(backend_ssl),
                                     "session_identity_consistent":same_identity is True,
-                                    "login_role_expected":expected_role is True}
+                                    "login_role_expected":expected_role is True,
+                                    "client_tls_attested":v97.verified_pooler_client_tls(db),
+                                    "cfg_host_match":params.get("host")==v97.POOLER_HOST,
+                                    "cfg_port_match":str(params.get("port"))==str(v97.POOLER_PORT),
+                                    "cfg_verify_full":params.get("sslmode")=="verify-full",
+                                    "cfg_ca_match":params.get("sslrootcert")==str(v97.CA),
+                                    "cfg_gss_disable":params.get("gssencmode")=="disable"}
                 finally:
                     db.rollback()
         except Exception:
