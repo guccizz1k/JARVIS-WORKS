@@ -49,8 +49,118 @@ CREATE TABLE jw_dev.ocr_jobs_v112 (
  id text PRIMARY KEY CHECK (id ~ '^[a-f0-9]{32}$'),
  org_id text NOT NULL REFERENCES jw_dev.organizations(id),
  actor_id text NOT NULL REFERENCES jw_dev.users(id),
- object_key text NOT NULL,
- filename text NOT NULL,
+ object_key text NOT NULL
+   CHECK(object_key ~ '^tenant/[A-Za-z0-9_-]{1,128}/[a-f0-9]{32}
+ file_sha256 text NOT NULL CHECK(file_sha256 ~ '^[a-f0-9]{64}$'),
+ request_id text NOT NULL,
+ state text NOT NULL DEFAULT 'queued'
+   CHECK(state IN ('queued','running','needs_review','failed')),
+ attempts integer NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 3),
+ max_attempts integer NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 3),
+ available_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ lease_token text CHECK(lease_token IS NULL OR lease_token ~ '^[a-f0-9]{64}$'),
+ lease_until timestamptz,
+ result_key text
+   CHECK(result_key IS NULL OR
+     (result_key ~ '^tenant/[A-Za-z0-9_-]{1,128}/ocr-result/[a-f0-9]{32}/[a-f0-9]{64}
+ completed_at timestamptz,
+ last_error_code text,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ UNIQUE(org_id,request_id),
+ CHECK ((state='running')=(lease_token IS NOT NULL AND lease_until IS NOT NULL)),
+ CHECK ((state='needs_review')=(result_key IS NOT NULL))
+);
+-- Fail closed on actor/tenant mismatch even if future API trusts a client org.
+-- SECURITY DEFINER uses only a fully qualified trusted table; direct function
+-- EXECUTE is revoked from PUBLIC; no worker policies/grants are enabled here.
+CREATE FUNCTION jw_dev.v112_guard_ocr_job_tenant()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog,jw_dev,pg_temp
+AS $body$
+DECLARE v_actor_org text;
+BEGIN
+ IF TG_OP='UPDATE' AND
+    (NEW.org_id,NEW.actor_id,NEW.object_key,NEW.file_sha256,
+      NEW.request_id,NEW.filename) IS DISTINCT FROM
+    (OLD.org_id,OLD.actor_id,OLD.object_key,OLD.file_sha256,
+      OLD.request_id,OLD.filename) THEN
+   RAISE EXCEPTION 'OCR_JOB_SOURCE_IMMUTABLE' USING ERRCODE='23514';
+ END IF;
+ SELECT org_id INTO v_actor_org FROM jw_dev.users WHERE id=NEW.actor_id;
+ IF v_actor_org IS NULL OR v_actor_org IS DISTINCT FROM NEW.org_id THEN
+   RAISE EXCEPTION 'OCR_JOB_TENANT_MISMATCH' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END
+$body$;
+REVOKE ALL ON FUNCTION jw_dev.v112_guard_ocr_job_tenant() FROM PUBLIC;
+CREATE TRIGGER v112_ocr_tenant_guard
+  BEFORE INSERT OR UPDATE ON jw_dev.ocr_jobs_v112
+  FOR EACH ROW EXECUTE FUNCTION jw_dev.v112_guard_ocr_job_tenant();
+
+CREATE INDEX v112_ocr_queue_claim_idx ON jw_dev.ocr_jobs_v112
+ (available_at,id) WHERE state IN ('queued','running');
+ALTER TABLE jw_dev.ocr_jobs_v112 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE jw_dev.ocr_jobs_v112 FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON jw_dev.ocr_jobs_v112 FROM PUBLIC;
+-- No policies or grants here. Worker/trade grants require independently
+-- reviewed actor/tenant binding and are NOT activated by this CI-only file.
+-- Consequently the proposed Python queue must remain disabled outside mocks.
+COMMIT;
+
+
+     AND split_part(object_key,'/',2)=org_id),
+ filename text NOT NULL CHECK(length(filename) BETWEEN 1 AND 150),
+ file_sha256 text NOT NULL CHECK(file_sha256 ~ '^[a-f0-9]{64}$'),
+ request_id text NOT NULL,
+ state text NOT NULL DEFAULT 'queued'
+   CHECK(state IN ('queued','running','needs_review','failed')),
+ attempts integer NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 3),
+ max_attempts integer NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 3),
+ available_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ lease_token text CHECK(lease_token IS NULL OR lease_token ~ '^[a-f0-9]{64}$'),
+ lease_until timestamptz,
+ result_key text,
+ completed_at timestamptz,
+ last_error_code text,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ UNIQUE(org_id,request_id),
+ CHECK ((state='running')=(lease_token IS NOT NULL AND lease_until IS NOT NULL)),
+ CHECK ((state='needs_review')=(result_key IS NOT NULL))
+);
+CREATE INDEX v112_ocr_queue_claim_idx ON jw_dev.ocr_jobs_v112
+ (available_at,id) WHERE state IN ('queued','running');
+ALTER TABLE jw_dev.ocr_jobs_v112 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE jw_dev.ocr_jobs_v112 FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON jw_dev.ocr_jobs_v112 FROM PUBLIC;
+-- No policies or grants here. Worker/trade grants require independently
+-- reviewed actor/tenant binding and are NOT activated by this CI-only file.
+-- Consequently the proposed Python queue must remain disabled outside mocks.
+COMMIT;
+
+
+       AND split_part(result_key,'/',2)=org_id
+       AND split_part(result_key,'/',4)=id)),
+ completed_at timestamptz,
+ last_error_code text,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ UNIQUE(org_id,request_id),
+ CHECK ((state='running')=(lease_token IS NOT NULL AND lease_until IS NOT NULL)),
+ CHECK ((state='needs_review')=(result_key IS NOT NULL))
+);
+CREATE INDEX v112_ocr_queue_claim_idx ON jw_dev.ocr_jobs_v112
+ (available_at,id) WHERE state IN ('queued','running');
+ALTER TABLE jw_dev.ocr_jobs_v112 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE jw_dev.ocr_jobs_v112 FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON jw_dev.ocr_jobs_v112 FROM PUBLIC;
+-- No policies or grants here. Worker/trade grants require independently
+-- reviewed actor/tenant binding and are NOT activated by this CI-only file.
+-- Consequently the proposed Python queue must remain disabled outside mocks.
+COMMIT;
+
+
+     AND split_part(object_key,'/',2)=org_id),
+ filename text NOT NULL CHECK(length(filename) BETWEEN 1 AND 150),
  file_sha256 text NOT NULL CHECK(file_sha256 ~ '^[a-f0-9]{64}$'),
  request_id text NOT NULL,
  state text NOT NULL DEFAULT 'queued'
