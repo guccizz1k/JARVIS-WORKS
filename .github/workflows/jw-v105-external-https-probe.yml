@@ -1,0 +1,96 @@
+name: JW V10.5 external HTTPS transport contract (review only)
+
+on:
+  push:
+    branches:
+      - review/v99-v110-eight-stage-acceptance-20261025
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v105-external-https-review
+  cancel-in-progress: true
+
+jobs:
+  real-external-tls-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      JW_EXPECTED_DEPLOYED_SHA: ca4537763850ffde4b95c320fc9ba38040dcf6fd
+    steps:
+      - name: Independently verify public Render HTTPS with strict TLS + no business routes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import ssl
+          import time
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+
+          BASE = "https://jw-isolated-https-review-20261025.onrender.com"
+          ctx = ssl.create_default_context()
+          assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+          print("RENDER_DEPLOYMENT_SHA=" + os.environ["JW_EXPECTED_DEPLOYED_SHA"])
+          print("GITHUB_WORKFLOW_SHA=" + os.environ["GITHUB_SHA"])
+          print("ASSERT: checked-out workflow SHA differs from Render-pinned deployment SHA")
+
+          def probe(path, method="GET"):
+              assert path.startswith("/") and not path.startswith("//")
+              request = Request(BASE + path, method=method, headers={"Accept": "application/json"})
+              for attempt in range(3):
+                  try:
+                      with urlopen(request, timeout=25, context=ctx) as response:
+                          return response.status, response.headers, response.read(16384), response.geturl()
+                  except HTTPError as response:
+                      return response.code, response.headers, response.read(16384), response.geturl()
+                  except (TimeoutError, URLError):
+                      if attempt == 2:
+                          raise
+                      time.sleep(3 + attempt * 4)
+              raise AssertionError("Unreachable after retries")
+
+          for path in ("/", "/healthz"):
+              status, headers, content, location = probe(path)
+              assert status == 200, (path, status, content[:200])
+              assert location == BASE + path, ("Unexpected redirect", location)
+              assert "Set-Cookie" not in headers, ("Unexpected session cookie", path)
+              response = json.loads(content)
+              if path == "/":
+                  assert response == {
+                      "service": "JARVIS-WORKS isolated staging infrastructure",
+                      "transport": "HTTPS via hosting TLS termination",
+                      "database": "NOT_CONNECTED",
+                      "business_api": "DISABLED",
+                      "release": "BLOCKED",
+                  }, response
+                  assert headers.get("X-Robots-Tag") == "noindex, nofollow, noarchive"
+                  assert headers.get("Cache-Control") == "no-store"
+                  assert headers.get("Content-Security-Policy") == "default-src 'none'"
+                  assert headers.get("X-Content-Type-Options") == "nosniff"
+              else:
+                  assert response == {"status": "ok", "scope": "transport_only"}, response
+              print("PASS: strict TLS GET " + path + " -> 200, safe response")
+
+          forbidden = (
+              "/docs", "/openapi.json", "/api/me", "/api/login",
+              "/api/quotes", "/api/pg-stage/v84/me",
+              "/api/pg-stage/v85/login", "/api/pg-stage/v90/chats",
+              "/api/pg-stage/v92/quotes"
+          )
+          for path in forbidden:
+              status, headers, content, location = probe(path)
+              assert status == 404, (path, status, content[:150])
+              assert location == BASE + path
+              assert "Set-Cookie" not in headers
+              print("PASS: absent route " + path)
+
+          status, headers, _, location = probe("/api/pg-stage/v92/quotes", "POST")
+          assert status == 404, ("POST unexpected", status)
+          assert location == BASE + "/api/pg-stage/v92/quotes"
+          print("PASS: business write routes disabled and no credentials sent")
+          print("JW_V105_EXTERNAL_HTTPS_TLS_PUBLIC_TRANSPORT_PASS")
+          PY
