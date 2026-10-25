@@ -191,4 +191,8 @@ def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None,
     return {**base, "decision": "PASS", "checked": True,
             "public_application_tables": snapshots[0][3],
             "jw_dev_tables": snapshots[0][2], "catalog_boundaries": "PASS",
-            "read_only_rollback": "PASS", "backend_tls_active": True}
+            "read_only_rollback": "PASS",
+            # Supavisor terminates client TLS; the backend observation is not
+            # an attestation of the external client leg. Do not fabricate TRUE.
+            "backend_tls_active": (
+                "NOT_ASSERTED_FOR_SUPAVISOR" if trusted_pooler_tls else True)}

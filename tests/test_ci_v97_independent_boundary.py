@@ -286,3 +286,11 @@ def test_supavisor_optin_only_accepts_explicit_upstream_false():
     assert run({"login": {12: None}}, trusted_pooler_tls=True)[0]["decision"]=="BLOCKED"
     assert run({"login": {10: 16, 12: False}}, trusted_pooler_tls=True)[0]["decision"]=="BLOCKED"
     assert run({"login": {11: "off", 12: False}}, trusted_pooler_tls=True)[0]["decision"]=="BLOCKED"
+
+def test_supavisor_attestation_must_not_claim_backend_tls_true():
+    output,_,_=run({"login":{12:False}},trusted_pooler_tls=True)
+    assert output["decision"]=="PASS"
+    assert output["backend_tls_active"]=="NOT_ASSERTED_FOR_SUPAVISOR"
+    direct,_,_=run()
+    assert direct["decision"]=="PASS"
+    assert direct["backend_tls_active"] is True
