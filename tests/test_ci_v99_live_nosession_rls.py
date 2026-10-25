@@ -54,7 +54,8 @@ def provisioned_env():
 def test_ten_zero_counts_real_transaction_rolls_back():
     db=MockConnection()
     result=p.validate_result(environ=provisioned_env(),connector=lambda _:db)
-    assert result["decision"]=="PASS",result
+    assert result["decision"]=="INCONCLUSIVE",result
+    assert result["row_rls_proof"]=="NOT_PROVEN_WITHOUT_POSITIVE_CONTROL"
     assert result["tested_tables"]==10
     assert db.rolled and db.closed
     assert result["cross_tenant_abc"]=="NOT_VERIFIED"
