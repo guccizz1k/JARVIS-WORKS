@@ -53,7 +53,7 @@ def verified_pooler_client_tls(connection)->bool:
     Only the special V9.7 Supavisor review gate uses this transport attestor.
     """
     try:
-        cfg=connection.info.dsn_parameters
+        cfg=connection.info.get_parameters()  # psycopg3, not psycopg2 .dsn_parameters
         return (cfg.get("host")==POOLER_HOST
                 and str(cfg.get("port"))==str(POOLER_PORT)
                 and cfg.get("sslmode")=="verify-full"
