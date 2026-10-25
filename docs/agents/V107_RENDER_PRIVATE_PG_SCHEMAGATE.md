@@ -1,0 +1,15 @@
+# JARVIS-WORKS V10.7 Render private PostgreSQL readiness contract
+
+The free HTTPS transport probe is **live** at `https://jw-isolated-https-review-20261025.onrender.com` and still intentionally has zero DB connectivity or business routes. The **existing Render Free PostgreSQL17** `jw-isolated-stage-pg17-20261025` is private (external allowlist empty), Singapore. Neither environment is production.
+
+**Blocking fact:** the connected Render API query tool is read-only and fails to connect to this DB from outside due to external IP deny-all; Render Free web service does not provide Shell/SSH or one-off jobs. Cannot install the 35-table schema / create isolated trade and auth roles via that route. Do NOT open the Postgres external IP allowlist, paste internal credentials into a chat, or attach the default DB owner's password to the public web process.
+
+This change adds standalone CLI `python -m scripts.jw_v107_render_pg_schema_gate`, **not an HTTP route or migration**. To run on Render's private network, a protected execution context must have two independently provisioned limited login roles (exact `jw_trade_gateway_v90` / `jw_auth_gateway_v90`) with `NOINHERIT`, SET-only membership in distinct `jw_app_dev` / `jw_auth_stage_v85`. It accepts *only* internal host `dpg-dbeorinavr4c73bke6j0-a`, this DB name, SSL `require` (or `verify-full` where supported), short timeout, and validated env ACK. Credentials are injected as secrets `JW_RENDER_PG_TRADE_DSN` and `JW_RENDER_PG_AUTH_DSN`. Default owner credentials are rejected.
+
+All sessions default READ ONLY, enforce query timeouts, inspect PG17/no elevated privileges/no cross-role membership/no raw table grants, exact **35 table names** with FORCE RLS, no stage ownership or direct payment insert. Each transaction is rolled back and closed; response has no credential fields and includes explicit **TLS hostname verification NOT_ATTESTED** when only private SSL encryption is used. Missing roles, credentials, schema, or DB connectivity => **BLOCKED**. Expected current result: **BLOCKED** (not run against Render DB).
+
+**Dependency:** create and review genuine PostgreSQL17 schema-only deployment migration for all 35 tables, policies and security-definer functions and provision roles in a bounded authenticated private execution environment before running the gate. The existing `migrations/v85_auth_stage.sql` alone is insufficient; CI fixture migrations are explicitly synthetic and **must not be deployed to persistent Render DB**. Only independently validated schema and explicit owner approval may progress to persistent environment writes. No scheduled automatic migration.
+
+This progress is coding/test hardening, not actual user account signup/MFA or a public database-connected application. J1–J6 and release-gate evidence remain separate. `main` not changed, production release **BLOCKED**, Render probe auto deploy **OFF**.
+
+Useful docs: https://render.com/docs/ssh ; https://render.com/docs/free ; https://render.com/docs/postgresql-creating-connecting .
