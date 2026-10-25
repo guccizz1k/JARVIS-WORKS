@@ -1,0 +1,22 @@
+name: JW V9.9 Supabase row isolation proof contracts
+on:
+  push:
+    branches:
+      - review/v99-real-supabase-tenant-rls-rollback-20261025
+permissions:
+  contents: read
+jobs:
+  read-only-rls-evidence-shape:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate transaction rollback, no DDL, and tenant denial proof
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pytest -q tests/test_ci_v99_live_rls_rollback.py -ra

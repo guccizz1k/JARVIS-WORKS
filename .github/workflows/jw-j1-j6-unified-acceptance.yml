@@ -12,6 +12,7 @@ on:
       - review/v96-supavisor-root-ca-tls-20261025
       - review/v97-restricted-supavisor-login-20261025
       - review/v98-supavisor-hop-aware-ssl-20261025
+      - review/v99-real-supabase-tenant-rls-rollback-20261025
   workflow_dispatch:
 
 permissions:
@@ -40,7 +41,7 @@ jobs:
           git merge-base --is-ancestor efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD
           test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
           git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt requirements-dev.txt
-          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql'
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql' ':!db/review/v99_live_tenant_row_read_rollback.sql' ':!db/review/v99_live_customer_withcheck_rollback.sql'
           python - <<'PY'
           import subprocess
           changed=set(subprocess.check_output(
