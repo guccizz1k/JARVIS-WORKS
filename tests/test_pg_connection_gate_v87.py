@@ -106,3 +106,20 @@ def test_gate_is_query_only():
     q=LOGIN_PROBE+' '+ROLE_PROBE
     assert 'FROM jw_dev.users u' not in q
     assert 'COPY ' not in q and 'DELETE ' not in q and 'UPDATE ' not in q
+
+def test_pooler_termination_requires_real_independent_tls_attestation():
+    def connector(dsn,**kw):
+        return Connection("auth" if dsn=="auth_secret" else "trade", {"ssl":False})
+    assert check_two_connections(connector=connector,env=env())["result"]=="BLOCKED"
+    assert check_two_connections(connector=connector,env=env(),
+               client_tls_guard=lambda conn:False)["result"]=="BLOCKED"
+    assert check_two_connections(connector=connector,env=env(),
+               client_tls_guard=lambda conn:True)["result"]=="PASS"
+
+
+def test_proxy_tls_never_waives_postgresql_17():
+    def connector(dsn,**kw):
+        return Connection("auth" if dsn=="auth_secret" else "trade",
+                          {"ssl":False,"major":16})
+    assert check_two_connections(connector=connector,env=env(),
+                client_tls_guard=lambda conn:True)["result"]=="BLOCKED"

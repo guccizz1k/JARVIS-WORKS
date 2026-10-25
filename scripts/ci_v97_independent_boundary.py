@@ -69,17 +69,20 @@ TABLES_SQL = """SELECT n.nspname,c.relname,c.relrowsecurity,c.relforcerowsecurit
  ORDER BY n.nspname,c.relname"""
 
 
-def _inspect(connection, kind):
+def _inspect(connection, kind, client_tls_guard=None):
     """Return only fixed diagnostic codes and non-customer catalog metadata."""
     other = "trade" if kind == "auth" else "auth"
     with connection.cursor() as cur:
         cur.execute("SET TRANSACTION READ ONLY")
         cur.execute(LOGIN_SQL)
         login = cur.fetchone()
+        client_tls_ok = (login and len(login) == 14 and
+            (login[12] is True if client_tls_guard is None
+             else client_tls_guard(connection) is True))
         if (not login or len(login) != 14 or login[:3] != (
                 "postgres", LOGINS[kind], LOGINS[kind])
                 or login[3:10] != (True, False, False, False, False, False, False)
-                or login[10:13] != (17, "on", True)
+                or login[10:12] != (17, "on") or not client_tls_ok
                 or type(login[13]) is not int or login[13] <= 0):
             return ["gateway_attributes_or_transport"], None
 
@@ -125,11 +128,11 @@ def _inspect(connection, kind):
                 issues.append("direct_payment_insert")
         # The snapshot omits grants, which intentionally differ between stages.
         snapshot = (login[13], tuple(sorted((r[0], r[1], r[2], r[3]) for r in rows)),
-                    len(stage), len(public))
+                    len(stage), len(public), login[12] is True)
         return sorted(set(issues)), snapshot
 
 
-def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None):
+def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None, client_tls_guard=None):
     """Fixed, redacted verdict only; neither imports a driver nor reads secrets.
 
     The caller supplies already validated DSNs and its verified-full connector.
@@ -161,7 +164,7 @@ def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None):
         if len(connections) == 2 and not issues:
             for kind, db in connections:
                 try:
-                    findings, snapshot = _inspect(db, kind)
+                    findings, snapshot = _inspect(db, kind, client_tls_guard=client_tls_guard)
                     issues.extend(kind + ":" + code for code in findings)
                     snapshots.append(snapshot)
                 except Exception:
@@ -188,4 +191,5 @@ def check_independent_boundaries(*, connector, trade_dsn, auth_dsn, env=None):
     return {**base, "decision": "PASS", "checked": True,
             "public_application_tables": snapshots[0][3],
             "jw_dev_tables": snapshots[0][2], "catalog_boundaries": "PASS",
-            "read_only_rollback": "PASS", "backend_tls_active": True}
+            "read_only_rollback": "PASS", "backend_tls_active": all(snapshot[4] for snapshot in snapshots),
+            "verified_client_tls": client_tls_guard is not None}

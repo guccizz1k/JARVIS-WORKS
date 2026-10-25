@@ -45,6 +45,23 @@ def valid_dsn(value:str,kind:str)->bool:
     except Exception:
         return False
 
+def verified_pooler_client_tls(connection)->bool:
+    """Require libpq's *actual* negotiated verify-full settings, not pg_stat_ssl.
+
+    The supplied connector uses psycopg.connect with fixed public Supabase CA
+    and verify-full hostname. Any missing or overridden setting fails closed.
+    Only the special V9.7 Supavisor review gate uses this transport attestor.
+    """
+    try:
+        cfg=connection.info.get_parameters()  # psycopg3, not psycopg2 .dsn_parameters
+        return (cfg.get("host")==POOLER_HOST
+                and str(connection.info.port)==str(POOLER_PORT)
+                and cfg.get("sslmode")=="verify-full"
+                and cfg.get("sslrootcert")==str(CA)
+                and connection.pgconn.used_gssapi is False)
+    except (AttributeError,TypeError,ValueError):
+        return False
+
 def check(*,env=None,connector=None)->dict:
     e=os.environ if env is None else env
     base={"decision":"BLOCKED","authenticated":False,"read_only":True,
@@ -78,7 +95,8 @@ def check(*,env=None,connector=None)->dict:
     try:
         verdict=check_two_connections(connector=connector,env={
             "JW_ENV":"dev","JW_PG_V87_CONNECT_GATE":"ISOLATED_DEV_ONLY",
-            "JW_PG_STAGE_DSN":trade,"JW_PG_AUTH_STAGE_DSN":auth})
+            "JW_PG_STAGE_DSN":trade,"JW_PG_AUTH_STAGE_DSN":auth},
+            client_tls_guard=verified_pooler_client_tls)
     except Exception:
         return {**base,"reason":"ROLE_GATE_ERROR"}
     if verdict.get("result")!="PASS":
@@ -86,7 +104,8 @@ def check(*,env=None,connector=None)->dict:
                 "failed_checks":verdict.get("failed_checks",[])}
     try:
         independent=check_independent_boundaries(connector=connector,
-            trade_dsn=trade,auth_dsn=auth,env=e)
+            trade_dsn=trade,auth_dsn=auth,env=e,
+            client_tls_guard=verified_pooler_client_tls)
     except Exception:
         return {**base,"reason":"INDEPENDENT_BOUNDARY_ERROR"}
     if independent.get("decision")!="PASS":

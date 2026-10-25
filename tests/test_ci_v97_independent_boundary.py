@@ -278,3 +278,22 @@ def test_catalog_drift_between_sessions_is_blocked():
         ("public", "payments", True, True, False, False)]})
     assert result["decision"] == "BLOCKED"
     assert result["failed_checks"] == ["catalog_changed_between_sessions"]
+
+def test_pooler_backend_plaintext_is_not_improperly_accepted():
+    env=ENV
+    def connector(dsn,**kwargs):
+        return Connection("auth" if dsn=="synthetic-auth" else "trade",
+                          login={12:False})
+    direct=gate.check_independent_boundaries(
+        connector=connector,trade_dsn="synthetic-trade",
+        auth_dsn="synthetic-auth",env=env)
+    assert direct["decision"]=="BLOCKED"
+    rejected=gate.check_independent_boundaries(
+        connector=connector,trade_dsn="synthetic-trade",
+        auth_dsn="synthetic-auth",env=env,client_tls_guard=lambda db:False)
+    assert rejected["decision"]=="BLOCKED"
+    trusted=gate.check_independent_boundaries(
+        connector=connector,trade_dsn="synthetic-trade",
+        auth_dsn="synthetic-auth",env=env,client_tls_guard=lambda db:True)
+    assert trusted["decision"]=="PASS",trusted.get("failed_checks")
+    assert trusted["backend_tls_active"] is False and trusted["verified_client_tls"] is True
