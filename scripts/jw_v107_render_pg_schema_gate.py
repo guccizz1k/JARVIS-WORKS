@@ -12,6 +12,7 @@ import os
 import sys
 from typing import Any
 
+from psycopg import ProgrammingError
 from psycopg.conninfo import conninfo_to_dict
 
 from app.pg_full_shadow_v76 import EXPECTED_TABLES
@@ -54,7 +55,7 @@ def valid_dsn(value: str, kind: str) -> bool:
                 and p.get("port", "5432") == "5432"
                 and p.get("sslmode") in ("require", "verify-full")
                 and 1 <= int(p.get("connect_timeout", "5")) <= 5)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, ProgrammingError):
         return False
 
 
