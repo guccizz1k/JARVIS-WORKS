@@ -46,7 +46,7 @@ def test_no_decrypted_credentials_or_customer_tables_in_diagnostic():
     import inspect
     code=inspect.getsource(r)
     assert "SELECT * FROM" not in code
-    assert "sslmode=\\"verify-full\\"" in code
+    assert 'sslmode="verify-full"' in code
     assert "sslrootcert=str(v97.CA)" in code
     assert "db.rollback()" in code
     assert "production_cutover" in code
