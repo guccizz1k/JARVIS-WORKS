@@ -11,7 +11,9 @@ def test_production_fails_closed():
 
 def test_separate_tls_hops_with_mock_readonly():
     class Conn:
-        def __init__(self,u):self.user=u;self.info=self
+        def __init__(self,u):
+            self.user=u;self.info=self
+            self.host=gate.POOLER_HOST;self.port=5432
         def get_parameters(self):return {"sslmode":"verify-full",
             "sslrootcert":str(gate.CA),"host":gate.POOLER_HOST,"port":"5432"}
         def cursor(self):return self

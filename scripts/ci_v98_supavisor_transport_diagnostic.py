@@ -27,11 +27,14 @@ def diagnose(env=None,connector=None):
         try:
             with closing(connector(dsn)) as conn:
                 params=conn.info.get_parameters()
-                if not (params.get("sslmode")=="verify-full"
-                        and params.get("sslrootcert")==str(gate.CA)
-                        and params.get("host")==gate.POOLER_HOST
-                        and str(params.get("port"))=="5432"):
-                    return {**base,"reason":"UNTRUSTED_CONNECTION_PARAMETERS"}
+                if params.get("sslmode") != "verify-full":
+                    return {**base,"reason":"LIBPQ_SSLMODE_UNTRUSTED"}
+                if params.get("sslrootcert") != str(gate.CA):
+                    return {**base,"reason":"LIBPQ_ROOT_CA_UNTRUSTED"}
+                # libpq get_parameters() omits parameters equal to defaults;
+                # ConnectionInfo.host/port report the actual connected target.
+                if db.info.host != gate.POOLER_HOST or str(db.info.port) != "5432":
+                    return {**base,"reason":"LIBPQ_PEER_ENDPOINT_MISMATCH"}
                 with conn.cursor() as cur:
                     cur.execute("SET TRANSACTION READ ONLY")
                     cur.execute("""SELECT session_user,current_user,
