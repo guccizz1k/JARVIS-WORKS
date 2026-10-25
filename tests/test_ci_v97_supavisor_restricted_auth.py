@@ -107,7 +107,7 @@ def test_pooler_tls_attestation_requires_exact_libpq_config():
     from types import SimpleNamespace
     good={"host":r.POOLER_HOST,"port":"5432","sslmode":"verify-full",
           "sslrootcert":str(r.CA),"gssencmode":"disable"}
-    conn=lambda fields:SimpleNamespace(info=SimpleNamespace(dsn_parameters=fields))
+    conn=lambda fields:SimpleNamespace(info=SimpleNamespace(get_parameters=lambda:fields))
     assert r.verified_pooler_client_tls(conn(good))
     for key,bad in [("sslmode","require"),("sslmode","disable"),
                     ("sslrootcert","/tmp/unapproved.crt"),
