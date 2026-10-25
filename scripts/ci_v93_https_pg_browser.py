@@ -140,6 +140,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="jw-v93-https-") as tmp:
         key,crt=_ssl_files(Path(tmp))
         config=uvicorn.Config(app,host="127.0.0.1",port=8769,log_level="error",
+                              ws="websockets-sansio",
                               ssl_keyfile=str(key),ssl_certfile=str(crt),access_log=False)
         server=uvicorn.Server(config)
         thread=threading.Thread(target=server.run,daemon=True)
