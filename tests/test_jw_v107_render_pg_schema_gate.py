@@ -115,3 +115,18 @@ def test_public_transport_probe_rejects_database_credentials(monkeypatch):
     from scripts import jw_v105_render_https_probe as probe
     assert "JW_RENDER_PG_TRADE_DSN" in probe.BANNED
     assert "JW_RENDER_PG_AUTH_DSN" in probe.BANNED
+
+
+def test_v107_cleanup_errors_cannot_escape_or_become_pass():
+    class BrokenCleanup(Connection):
+        def rollback(self):
+            raise RuntimeError("fake-password-must-never-print")
+        def close(self):
+            self.closed=True
+            raise RuntimeError("fake-password-must-never-print")
+    conn=BrokenCleanup()
+    actual=gate.check(env=env(),connector=lambda dsn,kind:conn)
+    assert actual["decision"]=="BLOCKED"
+    assert actual["reason"]=="CONNECTION_CLEANUP_FAILED"
+    assert conn.closed
+    assert "fake-password-must-never-print" not in str(actual)

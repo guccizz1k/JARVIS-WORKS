@@ -104,10 +104,17 @@ def _inspection(connection: Any, kind: str) -> tuple[bool, str]:
     except Exception:
         return False, "CATALOG_QUERY_FAILED"
     finally:
+        cleanup_failed = False
         try:
             connection.rollback()
-        finally:
+        except Exception:
+            cleanup_failed = True
+        try:
             connection.close()
+        except Exception:
+            cleanup_failed = True
+        if cleanup_failed:
+            raise RuntimeError("DB_CONNECTION_CLEANUP_FAILED")
 
 
 def check(*, env: Any = None, connector: Any = None) -> dict:
@@ -153,7 +160,11 @@ def check(*, env: Any = None, connector: Any = None) -> dict:
             conn = connector(dsn, kind=kind)
         except Exception:
             return {**verdict, "reason": "PRIVATE_DB_CONNECTION_FAILED", "checked": result}
-        success, reason = _inspection(conn, kind)
+        try:
+            success, reason = _inspection(conn, kind)
+        except Exception:
+            return {**verdict, "reason": "CONNECTION_CLEANUP_FAILED",
+                    "checked": result}
         result[kind] = reason
         if not success:
             return {**verdict, "reason": reason, "checked": result}

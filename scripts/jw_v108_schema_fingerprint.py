@@ -9,12 +9,28 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 from . import jw_v107_render_pg_schema_gate as role_gate
 
 MANIFEST = Path(__file__).resolve().parents[1] / "db/review/v108_source_schema_fingerprints.json"
+
+EXPECTED_COUNTS = {
+    "tables": 35,
+    "columns": 282,
+    "constraints": 183,
+    "indexes": 87,
+    "policies": 40,
+    "triggers": 45,
+    "functions": 28,
+    "sequences": 1,
+    "table_acl": 40,
+    "function_acl": 18,
+}
+HEX_MD5 = re.compile(r"^[a-f0-9]{32}$")
+
 
 # Each digest excludes catalog object OIDs and real data rows. The queries are
 # anchored to schema jw_dev (PostgreSQL17). Source query texts are versioned to
@@ -47,27 +63,49 @@ QUERIES: dict[str, str] = {
 
 
 def source_baseline() -> dict:
+    """Validate pinned shape and types, not just digest lengths.
+
+    This is a REVIEW FINGERPRINT, not independent authorization to migrate.
+    """
     source = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    counts = source["counts_and_md5"]
-    if (source["schema"] != "jw_dev"
-        or source["source_pg_major"] != 17
-        or source["data_rows_extracted"] is not False
-        or source["function_source_extracted_to_repository"] is not False
-        or source["migration_authorized"] is not False
-        or set(counts) != set(QUERIES)
-        or counts["tables"]["n"] != 35
-        or counts["forced_rls"] != {"n": 35, "force_rls": 35}
-        or any(v["n"] < 1 or
-               ("digest" in v and
-                (not isinstance(v["digest"], str) or len(v["digest"]) != 32))
-               for v in counts.values())):
-        raise RuntimeError("Source fingerprint baseline corrupted or incomplete")
+    if (type(source) is not dict
+        or source.get("schema") != "jw_dev"
+        or source.get("source_kind") != "development_postgresql_catalog_metadata_only"
+        or source.get("source_pg_major") != 17
+        or source.get("source_checked_date") != "2026-10-25"
+        or source.get("data_rows_extracted") is not False
+        or source.get("function_source_extracted_to_repository") is not False
+        or source.get("migration_authorized") is not False):
+        raise RuntimeError("Source fingerprint manifest has an invalid scope")
+    counts = source.get("counts_and_md5")
+    if type(counts) is not dict or set(counts) != set(QUERIES):
+        raise RuntimeError("Source fingerprint sections are missing or unexpected")
+    for key, row in counts.items():
+        if type(row) is not dict:
+            raise RuntimeError("Invalid fingerprint section type: " + key)
+        if key == "forced_rls":
+            if (set(row) != {"n", "force_rls"}
+                or type(row["n"]) is not int
+                or type(row["force_rls"]) is not int
+                or row != {"n": 35, "force_rls": 35}):
+                raise RuntimeError("Malformed FORCE RLS source fingerprint")
+        else:
+            if (set(row) != {"n", "digest"}
+                or type(row["n"]) is not int
+                or row["n"] != EXPECTED_COUNTS[key]
+                or type(row["digest"]) is not str
+                or HEX_MD5.fullmatch(row["digest"]) is None):
+                raise RuntimeError("Malformed source fingerprint: " + key)
     return counts
 
 
 def verify(*, env: dict | None = None, connector: Any = None,
            role_boundary: Any = None) -> dict:
-    """Return a redacted verdict; never SQL writes or product-data queries."""
+    """Read-only, redacted and cleanup-fail-closed metadata comparison.
+
+    A PASS is only scoped to catalogue fingerprints. It is NEVER an RLS
+    penetration-test PASS, signed approval, or deploy authorization.
+    """
     settings = os.environ if env is None else env
     result = {
         "decision": "BLOCKED",
@@ -82,12 +120,19 @@ def verify(*, env: dict | None = None, connector: Any = None,
         expected = source_baseline()
     except Exception:
         return {**result, "reason": "SOURCE_BASELINE_INVALID"}
-    gate = role_gate.check if role_boundary is None else role_boundary
-    boundary = gate(env=settings, connector=connector)
-    if boundary.get("decision") != "PASS":
-        return {**result, "reason": "TWO_ROLE_BOUNDARY_NOT_VERIFIED"}
-    dsn = settings.get("JW_RENDER_PG_TRADE_DSN", "")
-    if not role_gate.valid_dsn(dsn, "trade"):
+    try:
+        boundary_checker = role_gate.check if role_boundary is None else role_boundary
+        boundary = boundary_checker(env=settings, connector=connector)
+        if type(boundary) is not dict or boundary.get("decision") != "PASS":
+            return {**result, "reason": "TWO_ROLE_BOUNDARY_NOT_VERIFIED"}
+    except Exception:
+        return {**result, "reason": "TWO_ROLE_BOUNDARY_CHECK_FAILED"}
+    try:
+        dsn = settings.get("JW_RENDER_PG_TRADE_DSN", "")
+        valid = role_gate.valid_dsn(dsn, "trade")
+    except Exception:
+        valid = False
+    if not valid:
         return {**result, "reason": "TRADE_DSN_INVALID"}
     if connector is None:
         import psycopg
@@ -96,33 +141,47 @@ def verify(*, env: dict | None = None, connector: Any = None,
                 dsn, connect_timeout=5,
                 options="-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=1000",
                 application_name="jw_v108_schema_metadata_only", gssencmode="disable")
-
     try:
         conn = connector(dsn, kind="trade")
     except Exception:
         return {**result, "reason": "RESTRICTED_DB_UNREACHABLE"}
     mismatches = []
-    failure = None
+    query_failed = False
+    cleanup_failed = False
     try:
         with conn.cursor() as cursor:
             cursor.execute("SET TRANSACTION READ ONLY")
             for key, query in QUERIES.items():
                 cursor.execute(query)
                 values = cursor.fetchone()
-                wanted = expected[key]
-                actual = {"n": values[0], "force_rls": values[1]} if key == "forced_rls" \
-                    else {"n": values[0], "digest": values[1]}
-                if actual != wanted:
+                if (not isinstance(values, (tuple, list)) or len(values) != 2
+                    or type(values[0]) is not int):
+                    raise ValueError("Invalid catalog response shape")
+                if key == "forced_rls":
+                    if type(values[1]) is not int:
+                        raise ValueError("Invalid FORCE RLS count")
+                    actual = {"n": values[0], "force_rls": values[1]}
+                else:
+                    if type(values[1]) is not str or HEX_MD5.fullmatch(values[1]) is None:
+                        raise ValueError("Invalid catalog hash")
+                    actual = {"n": values[0], "digest": values[1]}
+                if actual != expected[key]:
                     mismatches.append(key)
     except Exception:
-        failure = "CATALOG_QUERY_FAILED"
+        query_failed = True
     finally:
         try:
             conn.rollback()
-        finally:
+        except Exception:
+            cleanup_failed = True
+        try:
             conn.close()
-    if failure:
-        return {**result, "reason": failure}
+        except Exception:
+            cleanup_failed = True
+    if cleanup_failed:
+        return {**result, "reason": "CONNECTION_CLEANUP_FAILED"}
+    if query_failed:
+        return {**result, "reason": "CATALOG_QUERY_FAILED"}
     if mismatches:
         return {**result, "reason": "SCHEMA_FINGERPRINT_MISMATCH",
                 "mismatched_sections": sorted(mismatches)}
