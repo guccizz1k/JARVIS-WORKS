@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import sys
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 from datetime import datetime
@@ -36,9 +37,10 @@ def validated_db_path(db_path: Path) -> Path:
     candidate = Path(db_path).expanduser().absolute()
     if candidate.suffix != ".sqlite3":
         raise ValueError("PRIVATE_DATABASE_EXTENSION_REQUIRED")
-    if candidate.is_symlink() or candidate.parent.is_symlink():
+    if candidate.is_symlink() or any(parent.is_symlink() for parent in candidate.parents):
         raise PermissionError("SYMLINK_DATABASE_FORBIDDEN")
-    if candidate == PROJECT or PROJECT in candidate.parents:
+    destination = candidate.resolve(strict=False)
+    if destination == PROJECT or PROJECT in destination.parents:
         raise PermissionError("DATABASE_INSIDE_GITHUB_WORKTREE_FORBIDDEN")
     if candidate.exists() and not candidate.is_file():
         raise PermissionError("DATABASE_MUST_BE_REGULAR_FILE")
@@ -156,7 +158,7 @@ def main(argv=None, env=None) -> int:
             reserve_per_role_krw=args.reserve_per_role_krw,
             max_output_tokens=args.max_output_tokens,
         )
-    except (ValueError, PermissionError, sqlite3.Error, OSError, TimeoutError) as exc:
+    except (ValueError, PermissionError, sqlite3.Error, OSError, TimeoutError, urllib.error.URLError) as exc:
         # Deliberately avoid printing exception contents, to prevent secret leaks.
         output = {
             "status": "BLOCKED", "reason": type(exc).__name__,
