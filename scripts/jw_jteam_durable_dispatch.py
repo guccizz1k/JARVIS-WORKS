@@ -35,7 +35,7 @@ def dispatch(db,job_id,task,worker=None,fail_after=None):
         if row and row[0]!=digest:
             raise ValueError("JOB_ID_TASK_MISMATCH")
         if row and row[1]=="BLOCKED":
-            raise PermissionError("BLOCKED_JOB_REQUIRES_RECONCILIATION")
+            raise PermissionError("BLOCKED_JOB_RECONCILIATION_REQUIRED")
         if not row:
             db.execute("INSERT INTO jobs VALUES(?,?,?,?)",(job_id,digest,"RUNNING",now))
     for index,role in enumerate(ROLES):
