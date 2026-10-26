@@ -48,3 +48,7 @@ Read `docs/agents/JW_V120_JTEAM_ACTIVATION.md` and execute the fail-closed readi
 ## J team OpenAI API prototype V12.1
 
 See `docs/agents/JW_V121_OPENAI_API_RUNNER.md`. API runner is dry-run by default; no paid model call without separate explicit approval and actual enforceable provider budget guard. It is not a deployed autonomous agent server. No main merge or production.
+
+## J team V12.2 durable simulation
+
+Use `scripts/jw_jteam_durable_simulator.py` only for offline idempotency/checkpoint testing. SIMULATED_ONLY is never independent model proof or release approval.
