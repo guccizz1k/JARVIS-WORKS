@@ -142,8 +142,9 @@ def test_manifest_rejects_digest_bad_type_extra_or_missing(monkeypatch):
     x=copy.deepcopy(baseline);x.pop("triggers");variants.append(x)
     x=copy.deepcopy(baseline);x["unexpected"]={"n":1,"digest":"0"*32};variants.append(x)
     x=copy.deepcopy(baseline);x["table_acl"]["extra"]="unsafe";variants.append(x)
+    source_manifest=json.loads(a.MANIFEST.read_text(encoding="utf-8"))
     for altered in variants:
-        manifest=json.loads(a.MANIFEST.read_text())
+        manifest=copy.deepcopy(source_manifest)
         manifest["counts_and_md5"]=altered
         class FakeManifest:
             def read_text(self, *, encoding): return json.dumps(manifest)
