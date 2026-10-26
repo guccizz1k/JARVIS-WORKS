@@ -14,3 +14,7 @@ Run python scripts/jw_jteam_optional_capabilities.py --check and python -m pytes
 5-Gate evidence: G1 metadata/AST/import; G2 positive and adversarial scenarios; G3 existing regression/guard; G4 design token only, full browser/Penpot NOT RUN; G5 permission, localhost/no-secret/no-cost fail-closed, external runtime BLOCKED. Keep owner API spend <=50,000 KRW/month and Actions extra <=$5/month. No production deploy, no main merge, no customer data movement, no OpenAI API calls.
 
 Exit criteria: exact-SHA CI PASS on reviewed branch, recorded failure/skip counts, separate opt-in connected app tests and actual comparative benchmarks. Structural PASS is not integration acceptance.
+
+## Team manifest integration
+
+The original five-role `agents/team/jarvis_v1/team.json` now names the new optional project-local skills under their corresponding existing owners. The role order, authority, runtime-disabled default, J1–J6 and monthly caps are unchanged. `jw_agent_team_gate.py` checks that every role's declared SKILL.md exists; the new regression test proves no role gained paid-tool authority. This is role registration, not independent execution or active external integration.
