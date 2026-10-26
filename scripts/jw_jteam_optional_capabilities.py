@@ -17,7 +17,7 @@ SKILLS = ("jt-design-system-bridge", "jt-audio-research",
 OWNERS = ("deputy_manager", "deputy", "manager", "jarvis_lead")
 RUNTIMES = ("EXPORTED_TOKENS_ONLY", "TRANSCRIPT_VALIDATION_ONLY",
             "OPT_IN_LOOPBACK_SYNTHETIC_ONLY", "OPT_IN_LOOPBACK_EVENT_ONLY")
-SAFE_KEY = re.compile(r"^[a-z][a-z0-9_.-]{1,79}$")
+SAFE_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,79}$")
 SAFE_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,79}$")
 SECRET = re.compile(
     r"(?i)(?:OPENAI_API_KEY|GITHUB_TOKEN|DATABASE_URL|github_pat_|ghp_|"
