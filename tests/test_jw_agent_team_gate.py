@@ -59,6 +59,14 @@ class AgentTeamGate(unittest.TestCase):
     def test_budget_raise(self):
         self.mutate(lambda x:x["monthly_caps"].update(openai_api_krw=50001))
         self.contains("spending policy")
+    def test_malformed_protected_lists_fail_closed(self):
+        self.mutate(lambda x:x.update(must_not=[{"evil":1}]))
+        self.contains("main/production protection")
+
+    def test_malformed_dep_list_fails_closed(self):
+        self.mutate(lambda x:x["roles"][2].update(depends_on=[{"bad":True}]))
+        self.contains("dependency DAG")
+
     def test_paid_tool(self):
         self.mutate(lambda x:x["roles"][3].update(may_execute_paid_tools=True))
         self.contains("paid tool")

@@ -43,7 +43,8 @@ def audit(root: Path) -> list[str]:
         caps.get("render_plan_approved") is not False):
         errors.append("unauthorized spending policy")
     protected=obj.get("must_not")
-    if type(protected) is not list or not {"main","production","live_db_migrations","unapproved_paid_api"}.issubset(set(protected)):
+    if (type(protected) is not list or any(type(x) is not str for x in protected)
+        or not {"main","production","live_db_migrations","unapproved_paid_api"}.issubset(set(protected))):
         errors.append("main/production protection missing")
     roles=obj.get("roles")
     if type(roles) is not list or len(roles)!=5:
@@ -63,7 +64,8 @@ def audit(root: Path) -> list[str]:
         if role.get("may_execute_paid_tools") is not False:
             errors.append("paid tool authority granted: "+name)
         deps=role.get("depends_on")
-        if type(deps) is not list or len(deps)!=len(set(deps)) or any(x not in ORDER[:idx] for x in deps):
+        if (type(deps) is not list or any(type(x) is not str for x in deps)
+            or len(deps)!=len(set(deps)) or any(x not in ORDER[:idx] for x in deps)):
             errors.append("dependency DAG invalid: "+name)
         skills=role.get("skills")
         if type(skills) is not list or not skills:
