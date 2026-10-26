@@ -115,10 +115,6 @@ def local_public_digest(root: Path, *, ingest_fn=None) -> dict:
         files.append((relative, body))
     if not files:
         raise ValueError("EMPTY_PUBLIC_FIXTURE")
-    baseline = "\n".join(f"{rel}:\n{body}" for rel, body in files)
-    baseline_start = time.perf_counter_ns()
-    baseline_sha = hashlib.sha256(baseline.encode("utf-8")).hexdigest()
-    baseline_ns = time.perf_counter_ns() - baseline_start
     if ingest_fn is None:
         from gitingest import ingest as ingest_fn  # optional, pinned in isolated CI only
     with tempfile.TemporaryDirectory(prefix="jteam-public-pilot-") as stage:
@@ -127,6 +123,12 @@ def local_public_digest(root: Path, *, ingest_fn=None) -> dict:
             target = stage_path / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(body, encoding="utf-8")
+        baseline_start = time.perf_counter_ns()
+        baseline = "\n".join(
+            f"{p.relative_to(stage_path)}:\n{p.read_text(encoding='utf-8')}"
+            for p in sorted(stage_path.rglob("*")) if p.is_file())
+        baseline_ns = time.perf_counter_ns() - baseline_start
+        baseline_sha = hashlib.sha256(baseline.encode("utf-8")).hexdigest()
         start = time.perf_counter_ns()
         result = ingest_fn(str(stage_path))
         candidate_ns = time.perf_counter_ns() - start
@@ -134,6 +136,8 @@ def local_public_digest(root: Path, *, ingest_fn=None) -> dict:
         or not all(isinstance(v, str) for v in result)
         or not result[2] or DANGEROUS.search(result[2])):
         raise ValueError("INVALID_OR_UNSAFE_DIGEST")
+    if any(body.strip() not in result[2] for _rel, body in files):
+        raise ValueError("GITINGEST_MISSING_SOURCE_CONTENT")
     return {
         "status": "LOCAL_PUBLIC_PILOT_MEASURED",
         "file_count": len(files),
@@ -141,6 +145,7 @@ def local_public_digest(root: Path, *, ingest_fn=None) -> dict:
         "baseline_sha256": baseline_sha,
         "candidate_sha256": hashlib.sha256(result[2].encode()).hexdigest(),
         "baseline_elapsed_ns": baseline_ns,
+        "comparison_scope": "SAME_FIXTURE_DIFFERENT_OUTPUT_FORMATS_NO_QUALITY_CLAIM",
         "candidate_elapsed_ns": candidate_ns,
         "candidate_characters": len(result[2]),
         "remote_upload": False, "api_calls": 0, "release": "BLOCKED",
