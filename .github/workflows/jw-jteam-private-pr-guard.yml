@@ -1,0 +1,87 @@
+name: J team private PR guard (no paid models)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "agents/team/jarvis_v1/**"
+      - ".agents/skills/jw-*/SKILL.md"
+      - "scripts/jw_jteam_*.py"
+      - "scripts/jw_agent_team_gate.py"
+      - "scripts/jw_skill_contract.py"
+      - "scripts/jw_evidence_gate.py"
+      - "tests/test_jw_jteam*.py"
+      - "tests/test_jw_agent_team_gate.py"
+      - "tests/test_jw_skill_contract.py"
+      - "tests/test_jw_evidence_gate.py"
+      - "requirements-dev.txt"
+      - "requirements-jteam-external-pilot.txt"
+      - "AGENTS.md"
+      - ".github/workflows/jw-jteam-private-pr-guard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-jteam-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  private-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      JW_ENV: review
+      JTEAM_PAID_API_APPROVED: "NO"
+      JTEAM_PROVIDER_BUDGET_ENFORCED: "NO"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Guard private repo and no injected provider key
+        run: |
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
+              payload = json.load(f)
+          assert payload.get("repository", {}).get("private") is True, "JTEAM_PUBLIC_REPOSITORY_FORBIDDEN"
+          assert not os.environ.get("OPENAI_API_KEY"), "PAID_MODEL_SECRET_FORBIDDEN_IN_CI"
+          assert os.environ["JTEAM_PAID_API_APPROVED"] == "NO"
+          print("PASS: private-only/no paid model secrets")
+          PY
+      - name: Install project-declared test-only dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-jteam-external-pilot.txt
+      - name: J team guardrail navigation and safe dry run
+        run: |
+          python -m scripts.jw_agent_team_gate --root .
+          python -m scripts.jw_skill_contract --root .
+          python -m scripts.jw_evidence_gate --check-project .
+          python scripts/jw_jteam_external_sources.py --check
+          python -m scripts.jw_jteam_private_cli
+      - name: Run targeted and expanded no-network regression
+        run: |
+          python -m pytest -q tests/test_jw_jteam*.py tests/test_jw_agent_team_gate.py tests/test_jw_skill_contract.py --junitxml=jteam-pr-focused.xml
+          python -m pytest -q tests/test_jw_*.py --junitxml=jteam-pr-expanded.xml
+          python - <<'PY'
+          from xml.etree import ElementTree as ET
+          for filename in ("jteam-pr-focused.xml", "jteam-pr-expanded.xml"):
+              cases=list(ET.parse(filename).getroot().iter("testcase"))
+              assert cases and not any(c.find(t) is not None for c in cases for t in ("failure","error","skipped"))
+              print("PASS:",filename,len(cases),"tests with no failures/errors/skips")
+          PY
+      - name: Upload synthetic-only JUnit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jteam-pr-offline-proof
+          path: |
+            jteam-pr-focused.xml
+            jteam-pr-expanded.xml
+          retention-days: 2
+          if-no-files-found: ignore
