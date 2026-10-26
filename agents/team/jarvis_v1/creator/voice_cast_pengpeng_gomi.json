@@ -1,0 +1,32 @@
+{
+  "schema": "jw-creator-dual-korean-voices-v1",
+  "locale": "ko-KR",
+  "single_voice_for_both": false,
+  "cast": {
+    "pengpeng": {
+      "name": "펭펭",
+      "voice_gender": "female",
+      "vocal_direction": "밝고 자연스러운 젊은 여성, 친근하고 약간 허둥대는 억양",
+      "voice_selection": "NOT_SELECTED",
+      "korean_voice_verified": false
+    },
+    "gomi": {
+      "name": "고미",
+      "voice_gender": "male",
+      "vocal_direction": "따뜻하고 차분한 남성, 다정하게 설명하는 안정적인 저음",
+      "voice_selection": "NOT_SELECTED",
+      "korean_voice_verified": false
+    }
+  },
+  "dialogue": [
+    {"speaker": "pengpeng", "text": "고미야! 거래처에 메일 보내야 하는데, 납기가 하루 늦어졌어. 뭐라고 쓰지?"},
+    {"speaker": "gomi", "text": "그럴 땐 챗지피티에 딱 세 가지만 알려 줘. 상황, 말투, 문장 수!"},
+    {"speaker": "pengpeng", "text": "납기일이 하루 늦어져. 공손하게 세 문장으로 써 줘!"},
+    {"speaker": "gomi", "text": "이제 답변이 나왔네. 내용을 확인해 보자."},
+    {"speaker": "pengpeng", "text": "우와! 이렇게 물어보면 되는구나!"},
+    {"speaker": "gomi", "text": "그치! 날짜랑 실제 상황도 꼭 확인한 다음 보내!"}
+  ],
+  "publish_status": "BLOCKED_UNTIL_TWO_VOICES_VERIFIED",
+  "voice_provider": "NONE_SELECTED_NO_NEW_CREDIT_SPEND",
+  "notes": "Existing single-voice 36-second TTS audio is not an acceptable final cast. Two independently verified Korean female and male voice tracks are mandatory. Pitch-shifting the same voice alone is not accepted as distinct casting. Do not claim real voice generation or quality verification on this contract alone."
+}
