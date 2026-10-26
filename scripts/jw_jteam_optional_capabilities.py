@@ -118,6 +118,26 @@ def whisper_transcript_gate(segments: list) -> dict:
             "whisper_runtime": "NOT_CONNECTED", "release": "BLOCKED"}
 
 
+class _DenyRedirect(urllib.request.HTTPRedirectHandler):
+    """HTTP redirects must never turn a localhost-only probe into an external call."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _local_open(request, *, timeout: int):
+    """Use a fresh no-proxy, no-redirect opener for approved loopback calls only."""
+    if request.full_url not in (
+        "http://127.0.0.1:11434/api/chat",
+        "http://127.0.0.1:5678/webhook/jteam-review-only",
+    ):
+        raise PermissionError("REMOTE_URL_FORBIDDEN")
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), _DenyRedirect()
+    )
+    return opener.open(request, timeout=timeout)
+
+
 def ollama_loopback_probe(model: str, instruction: str, *,
                           approved: bool = False, synthetic: bool = False,
                           transport=None) -> dict:
@@ -133,7 +153,7 @@ def ollama_loopback_probe(model: str, instruction: str, *,
     request = urllib.request.Request(
         "http://127.0.0.1:11434/api/chat", data=payload,
         headers={"Content-Type": "application/json"}, method="POST")
-    opener = urllib.request.urlopen if transport is None else transport
+    opener = _local_open if transport is None else transport
     with opener(request, timeout=4) as response:
         raw = response.read(16385)
     if len(raw) > 16384:
@@ -171,7 +191,7 @@ def n8n_review_event(event: str, fields: dict, *,
     request = urllib.request.Request(
         "http://127.0.0.1:5678/webhook/jteam-review-only",
         data=body, headers={"Content-Type": "application/json"}, method="POST")
-    opener = urllib.request.urlopen if transport is None else transport
+    opener = _local_open if transport is None else transport
     with opener(request, timeout=4) as response:
         status = response.getcode()
         if response.read(4097) and status not in (200, 201, 202, 204):
