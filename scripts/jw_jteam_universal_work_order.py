@@ -116,6 +116,12 @@ def domain_for(instruction: str, *, domain: str | None = None, config: dict | No
     return next(name for name in ranked if counts[name] == maximum)
 
 
+if __package__:
+    from .jw_jteam_social_format import baseline_for, role_instructions
+else:
+    from jw_jteam_social_format import baseline_for, role_instructions
+
+
 def role_guidance(role: str, instruction: str, *, domain: str | None = None,
                   config: dict | None = None) -> str:
     obj = read_contract() if config is None else config
@@ -123,13 +129,14 @@ def role_guidance(role: str, instruction: str, *, domain: str | None = None,
         raise ValueError("UNKNOWN_JTEAM_ROLE")
     chosen = domain_for(instruction, domain=domain, config=obj)
     focus = obj["allowed_domains"][chosen]["role_focus"][role]
+    social_default = (" " + role_instructions(role)) if chosen == "social_media" else ""
     return (
         f"JTEAM_DOMAIN={chosen}; J1-J6 role={role}. {focus} "
         "This is advisory text, never authorization to publish, buy, merge, deploy "
         "or call paid models. Show actual evidence vs NOT RUN; no fake followers, "
         "copied or repetitive mass-produced media, unapproved account transfer "
         "or external upload of private source. Independent role-play is not "
-        "independent model execution."
+        "independent model execution." + social_default
     )
 
 
@@ -149,8 +156,10 @@ def plan(instruction: str, *, domain: str | None = None,
     if chosen == "business":
         issues.append("BUSINESS_REVENUE_NOT_MEASURED")
     stages = [{"stage": x, "status": "NOT_RUN"} for x in STAGES]
+    social_baseline = baseline_for(clean) if chosen == "social_media" else None
     return {
         "status": "PLAN_ONLY", "domain": chosen,
+        **({"social_content_format": social_baseline} if social_baseline is not None else {}),
         "task_sha256": hashlib.sha256(clean.encode("utf-8")).hexdigest(),
         "privacy": "PRIVATE_OWNER_ONLY",
         "roles": [{"role": name,
