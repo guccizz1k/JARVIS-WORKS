@@ -56,3 +56,9 @@ Use `scripts/jw_jteam_durable_simulator.py` only for offline idempotency/checkpo
 ## J team V12.3 durable dispatch
 
 See `docs/agents/JW_V123_DURABLE_DISPATCH.md`. Injected worker is offline-only; no actual paid OpenAI call or release approval.
+
+## V12.7 — Fabric + Gitingest for J1–J6 and the Jarvis lead
+
+All five J team roles and the Jarvis lead must consult `agents/team/jarvis_v1/external_intelligence.json` and `docs/agents/JW_V127_FABRIC_GITINGEST.md` when conducting research, debugging, UX review, acceptance, incident recovery or external technology trials. Use the **project-authored** Fabric-style pattern files under `agents/team/jarvis_v1/fabric_patterns/`, routed by J1–J6 phase and role. These supplement—not replace—existing J1–J6 harness acceptance, human approvals, exact-SHA evidence or protected data boundaries. `scripts/jw_jteam_openai_runner.py` loads relevant pattern text when running only after its existing paid-dispatch approvals.
+
+Gitingest is an **optional local synthetic/public code fixture pilot only**, pinned in `requirements-jteam-external-pilot.txt`; never transmit private JARVIS-WORKS code, private GitHub credentials, customer information or database records to gitingest.com or other third-party servers. See `scripts/jw_jteam_external_sources.py --check` and `--demo-local` for non-paid/no-secret assessment. Mark any unexecuted external tests NOT RUN. These repository-local instructions can guide Jarvis project assistance and checked-out coding agents, but do **not** globally install software into ChatGPT, alter model weights or prove a real J team multi-agent execution. Do not merge main, deploy production or invoke paid APIs automatically.
