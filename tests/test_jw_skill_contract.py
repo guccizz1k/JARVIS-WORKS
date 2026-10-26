@@ -31,7 +31,7 @@ class TestRegistry(unittest.TestCase):
         self.assertIn(needle, ' '.join(audit(self.root)))
 
     def test_valid_fixture(self):self.assertEqual(audit(self.root), [])
-    def test_exactly_ten(self):self.assertEqual((len(APPROVED),len(NEW)),(10,8))
+    def test_exactly_fourteen(self):self.assertEqual((len(APPROVED),len(NEW)),(14,12))
     def test_unknown_skill(self):
         (self.root/'.agents/skills/random-upstream').mkdir();self.fail_contains('unreviewed skill')
     def test_missing_skill(self):

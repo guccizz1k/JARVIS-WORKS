@@ -29,7 +29,8 @@
       "depends_on": [],
       "skills": [
         "jw-solution-innovation",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-audio-research"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -47,7 +48,8 @@
       "depends_on": [],
       "skills": [
         "jw-ui-ux-accessibility",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-design-system-bridge"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -70,7 +72,8 @@
         "jw-verified-delivery",
         "jw-root-cause-debugging",
         "jw-trade-document-integrity",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-local-model-evaluation"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -113,7 +116,8 @@
       "skills": [
         "jw-verified-delivery",
         "jw-evidence-retro",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-workflow-adapter"
       ],
       "can_commit": true,
       "may_execute_paid_tools": false,
@@ -137,5 +141,7 @@
     "research",
     "everyday"
   ],
-  "universal_runtime_status": "PLAN_ONLY_UNTIL_ACTUAL_CONNECTORS_AND_MODELS"
+  "universal_runtime_status": "PLAN_ONLY_UNTIL_ACTUAL_CONNECTORS_AND_MODELS",
+  "optional_capabilities_contract": "agents/team/jarvis_v1/capability_routing.json",
+  "optional_capabilities_mode": "DISABLED_BY_DEFAULT"
 }
