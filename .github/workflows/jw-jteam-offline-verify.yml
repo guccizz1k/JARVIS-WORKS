@@ -1,0 +1,39 @@
+name: JW J team V12.6 offline verification
+
+on:
+  push:
+    branches:
+      - review/v126-jteam-offline-ci-20261026
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-jteam-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      JW_ENV: review
+      JTEAM_PAID_API_APPROVED: "NO"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Checkout review SHA without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install declared development dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run J team core contract tests
+        run: python -m unittest discover -s tests -p 'test_jw_jteam*.py' -v
+      - name: Run broader JW offline regression suite
+        run: python -m pytest -q tests/test_jw_*.py -ra --disable-warnings
