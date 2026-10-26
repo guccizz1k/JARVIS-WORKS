@@ -59,7 +59,7 @@ jobs:
           python -m compileall -q scripts/jw_jteam_private_cli.py scripts/jw_jteam_durable_dispatch.py scripts/jw_jteam_openai_runner.py
           python scripts/jw_agent_team_gate.py --root .
           python scripts/jw_skill_contract.py --root .
-          python scripts/jw_evidence_gate.py --check-project .
+          python -m scripts.jw_evidence_gate --check-project .
           python -m scripts.jw_jteam_private_cli
       - name: Verify private runtime and no-spend negative contracts
         run: python -m pytest -q tests/test_jw_jteam_private_cli.py tests/test_jw_jteam_durable_dispatch.py tests/test_jw_jteam_retry_safety.py tests/test_jw_jteam_openai_runner.py tests/test_jw_jteam_external_sources.py --junitxml=jteam-private.xml
