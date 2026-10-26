@@ -6,6 +6,7 @@ on:
     paths:
       - "agents/team/jarvis_v1/**"
       - ".agents/skills/jw-*/SKILL.md"
+      - ".agents/skills/jt-*/SKILL.md"
       - "scripts/jw_jteam_*.py"
       - "scripts/jw_agent_team_gate.py"
       - "scripts/jw_skill_contract.py"
