@@ -35,6 +35,26 @@ PROHIBITED_POLICY = {
 }
 
 
+FACELESS_POLICY = {
+    "user_filming_required": False,
+    "user_voice_recording_required": False,
+    "user_script_writing_required": False,
+    "user_editing_required": False,
+    "user_media_assets_required": False,
+    "editorial_source": "ORIGINAL_VERIFIABLE_ASSISTANT_CONTENT",
+    "media_sources": "OWN_GENERATED_OR_LICENSE_VERIFIED_ONLY",
+    "rendering": "FREE_LOCAL_TOOLS_FIRST",
+    "user_actions_only": ["ONE_TIME_ACCOUNT_CREATION_OR_OAUTH",
+                          "PLATFORM_REQUIRED_PUBLISHING_APPROVAL"],
+    "publish_without_authenticated_connection": "FORBIDDEN",
+    "publisher_upload_without_owner_authority": "FORBIDDEN",
+    "synthetic_realism_disclosure": "WHEN_PLATFORM_REQUIRES",
+    "repetitive_low_value_bulk_publishing": "FORBIDDEN",
+    "promised_subscribers_or_revenue": "FORBIDDEN",
+    "status": "CAPABILITY_SPEC_NOT_END_TO_END_DEPLOYMENT",
+}
+
+
 def read_contract(path: Path = CONTRACT) -> dict:
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 32768:
         raise ValueError("UNSAFE_WORK_ORDER_CONTRACT")
@@ -48,7 +68,8 @@ def read_contract(path: Path = CONTRACT) -> dict:
         or obj.get("default_domain") != "research"
         or type(obj.get("monthly_extra_cost_preference_krw")) is not int
         or obj["monthly_extra_cost_preference_krw"] != 0
-        or obj.get("action_policy") != PROHIBITED_POLICY):
+        or obj.get("action_policy") != PROHIBITED_POLICY
+        or obj.get("faceless_content_policy") != FACELESS_POLICY):
         raise ValueError("WORK_ORDER_POLICY_MISMATCH")
     domains = obj.get("allowed_domains")
     if not isinstance(domains, dict) or set(domains) != set(DOMAINS):
@@ -137,6 +158,10 @@ def plan(instruction: str, *, domain: str | None = None,
                    "execution_status": "NOT_RUN"} for name in ROLES],
         "stages": stages, "issues": issues,
         "approval": "REQUIRED_BEFORE_EXTERNAL_ACTION",
+        "user_filming_required": False,
+        "user_recording_required": False,
+        "user_supplied_media_required": False,
+        "media_rendered": False,
         "publication_performed": False, "paid_calls": 0,
         "independent_models_run": 0,
         "release": "BLOCKED",
