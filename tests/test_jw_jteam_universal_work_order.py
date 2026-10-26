@@ -114,5 +114,17 @@ class UniversalJTeamOrderTests(unittest.TestCase):
         self.assertIs(seen[0]["store"], False)
 
 
+    def test_social_request_includes_compulsory_proven_format_research(self):
+        for task in ("유튜브 쇼츠 스크립트 작성", "인스타그램 게시글 작성"):
+            order = plan(task)
+            self.assertIn("social_content_format", order)
+            self.assertEqual(order["social_content_format"]["source_market_evidence"], "NOT_VERIFIED")
+            self.assertEqual(len(order["social_content_format"]["pilot"]), 3)
+            self.assertEqual(len(order["social_content_format"]["first_seven"]), 7)
+            self.assertEqual(order["paid_calls"], 0)
+            self.assertEqual(order["publication_performed"], False)
+        text = role_guidance("manager", "인스타그램 캡션 작성")
+        self.assertIn("3 original pilot posts", text)
+
 if __name__ == "__main__":
     unittest.main()

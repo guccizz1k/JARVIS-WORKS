@@ -1,0 +1,46 @@
+{
+  "schema": "jw-social-market-format-v1",
+  "default_for": [
+    "instagram",
+    "youtube"
+  ],
+  "formats": [
+    "POV",
+    "TIER_LIST"
+  ],
+  "example_claim_status": "ILLUSTRATIVE_UNVERIFIED",
+  "source_policy": "PRIMARY_METRIC_EVIDENCE_REQUIRED",
+  "market_gap_policy": "SEARCH_ABSENCE_IS_NOT_MARKET_PROOF",
+  "user_assets_policy": "ORIGINAL_OR_RIGHTS_CLEARED_ONLY",
+  "pilot_posts": 3,
+  "starter_episodes": 7,
+  "change_dimensions": [
+    "audience_and_problem",
+    "original_examples_and_claims",
+    "narrative_visuals_audio"
+  ],
+  "content_parts": [
+    "hook",
+    "audience_context",
+    "original_demonstration",
+    "distinct_payoff",
+    "caption_and_cta",
+    "rights_and_disclosure"
+  ],
+  "measurements": [
+    "reach",
+    "views",
+    "average_watch_seconds",
+    "completion_rate",
+    "saves",
+    "shares",
+    "follows",
+    "profile_clicks"
+  ],
+  "release": "REVIEW_ONLY",
+  "paid_budget": "NO_NEW_CHARGES",
+  "source_policy_refs": [
+    "https://support.google.com/youtube/answer/1311392",
+    "https://support.google.com/youtube/answer/2490020"
+  ]
+}
