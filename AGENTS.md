@@ -32,3 +32,7 @@ One role-structured review team is defined by `agents/team/jarvis_v1/team.json`:
 - Open-source review, alternatives, problem-solving and creativity: `jw-solution-innovation`.
 
 The existing six skills remain governed by J1–J6 and J6 5-Gate. Skills are not ChatGPT account installations. Use `python scripts/jw_skill_contract.py --root .` and `python scripts/jw_agent_team_gate.py --root .` for offline structural checks only. No automatic external tools, real-company data, paid API calls, database mutation, production release, or main branch merges. Release BLOCKED until separate proof.
+
+## V11.8 eight-stage UI/UX pipeline
+
+For JARVIS-WORKS product UI/UX tasks, read `docs/agents/JW_V118_DESIGN_PIPELINE.md` and `agents/team/jarvis_v1/design_pipeline.json` before changes. Route eight stages to the existing five-role team; do not create new agents or bypass J1–J6. Run `python -m unittest tests.test_jw_design_eight_stage_gate -v`. Structural checks alone are not independent browser or runtime proof.

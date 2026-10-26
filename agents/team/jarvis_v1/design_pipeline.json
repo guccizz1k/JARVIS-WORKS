@@ -1,0 +1,105 @@
+{
+  "schema": "jw-design-eight-stage-v1",
+  "harness": "J1-J6",
+  "team": "jarvis-works-one-team",
+  "mode": "REVIEW_ONLY",
+  "stages": [
+    {
+      "id": "site_strategist",
+      "owner": "deputy",
+      "output": "user_goal_and_primary_action",
+      "requires": [
+        "primary_action",
+        "target_user",
+        "success_metric"
+      ]
+    },
+    {
+      "id": "reference_hunter",
+      "owner": "deputy",
+      "output": "reference_analysis",
+      "requires": [
+        "reference_urls",
+        "adopt",
+        "reject",
+        "rationale"
+      ]
+    },
+    {
+      "id": "design_system",
+      "owner": "deputy_manager",
+      "output": "design_tokens",
+      "requires": [
+        "colors",
+        "type_scale",
+        "spacing_scale",
+        "contrast_review"
+      ]
+    },
+    {
+      "id": "hero_builder",
+      "owner": "deputy_manager",
+      "output": "first_screen",
+      "requires": [
+        "headlines",
+        "subheadlines",
+        "cta",
+        "desktop_1440",
+        "mobile_390"
+      ]
+    },
+    {
+      "id": "section_writer",
+      "owner": "deputy_manager",
+      "output": "product_copy",
+      "requires": [
+        "features",
+        "evidence_based_claims",
+        "faq"
+      ]
+    },
+    {
+      "id": "motion_detailer",
+      "owner": "manager",
+      "output": "motion_and_code",
+      "requires": [
+        "animations",
+        "max_duration_ms",
+        "reduced_motion",
+        "patch_sha"
+      ]
+    },
+    {
+      "id": "performance_checker",
+      "owner": "director",
+      "output": "independent_browser_evidence",
+      "requires": [
+        "source_sha",
+        "browser_1440",
+        "browser_390",
+        "lighthouse_report",
+        "regression_report",
+        "accessibility_report"
+      ]
+    },
+    {
+      "id": "launch_manager",
+      "owner": "jarvis_lead",
+      "output": "prelaunch_review_only",
+      "requires": [
+        "source_sha",
+        "release_checklist",
+        "rollback_plan",
+        "human_approval_required"
+      ]
+    }
+  ],
+  "constraints": {
+    "max_animations": 5,
+    "max_motion_ms": 600,
+    "minimum_contrast_ratio": 4.5,
+    "allow_main_merge": false,
+    "allow_production_deploy": false,
+    "allow_paid_api": false
+  }
+}
