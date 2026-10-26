@@ -22,3 +22,11 @@ Keep the existing `jw-verified-delivery` for code changes and `jw-evidence-retro
 - Render server capacity, 100k accounts, PostgreSQL pool sizing and budgets → `jw-render-capacity-cost`.
 
 All selected skills remain subordinate to user authorization and J1–J6 5-Gate rules. Never auto-install third-party packages/hooks or change `main`, production DB, Render services or spending on skill advice. Validate metadata and routing offline with `python scripts/jw_skill_contract.py --root .`; a structural PASS is not runtime evidence or release approval. Actual releases remain BLOCKED.
+
+## GitHub-informed domain skill routing (J6 review, no tool auto-installs)
+
+- Desktop PC website/HTML-CSS-vanilla JS design, accessibility, keyboard flows, visual browser tests and motion → `jw-ui-ux-accessibility`.
+- Reproducible Python/FastAPI/PostgreSQL/JS/GitHub Actions errors, root cause and minimal safe regressions → `jw-debug-root-cause`.
+- OpenAPI/HTTP boundary exploration, invoice KRW invariants, A/B/C denial and safe property-based testing → `jw-api-property-testing`.
+
+These complement the existing `jw-verified-delivery` umbrella and failure-triggered `jw-evidence-retro`. No unreviewed third-party skill body, external scripts, package installers, release authority, CI dispatch, cloud spend or user data access is granted. Codex can discover these task-scoped `.agents/skills/` files in a checked-out repository; existence is NOT evidence that Codex loaded them. Preserve all J1–J6 5-Gate and `main`/production BLOCKED boundaries.
