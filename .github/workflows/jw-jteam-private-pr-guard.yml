@@ -2,7 +2,7 @@ name: J team private PR guard (no paid models)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, review/v131-jteam-four-skills-20261027]
     paths:
       - "agents/team/jarvis_v1/**"
       - ".agents/skills/jw-*/SKILL.md"
@@ -67,6 +67,7 @@ jobs:
           python -m scripts.jw_agent_team_gate --root .
           python -m scripts.jw_skill_contract --root .
           python scripts/jw_jteam_optional_capabilities.py --check
+          python scripts/jw_jteam_social_format.py --check
           python -m scripts.jw_evidence_gate --check-project .
           python scripts/jw_jteam_external_sources.py --check
           python -m scripts.jw_jteam_private_cli
