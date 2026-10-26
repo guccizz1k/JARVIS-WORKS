@@ -40,3 +40,7 @@ For JARVIS-WORKS product UI/UX tasks, read `docs/agents/JW_V118_DESIGN_PIPELINE.
 ## J team quality tools
 
 Read `agents/team/jarvis_v1/tool_routing.json` and `docs/agents/JW_V119_J_TEAM_TOOL_ROUTING.md` for Playwright, axe-core, Ruff, Hypothesis and Schemathesis role ownership. Pilot tools are not installed. No upstream execution, main merge or production probes without verified gates and user approval.
+
+## J team staged activation V12.0
+
+Read `docs/agents/JW_V120_JTEAM_ACTIVATION.md` and execute the fail-closed readiness checker before claiming independent AI sessions. No actual runtime, provider receipt or A/B benchmark has been verified. Existing J1–J6 security and human approval gates remain authoritative.
