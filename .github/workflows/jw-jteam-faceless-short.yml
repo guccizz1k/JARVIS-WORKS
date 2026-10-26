@@ -1,0 +1,66 @@
+name: J team V13 zero-filming short build
+
+on:
+  push:
+    branches:
+      - review/v130-jteam-universal-work-orders-20261026
+    paths:
+      - "scripts/jw_jteam_faceless_render.py"
+      - "agents/team/jarvis_v1/creator/episodes/**"
+      - "tests/test_jw_jteam_faceless_render.py"
+      - ".github/workflows/jw-jteam-faceless-short.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-faceless-13-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-video:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      OPENAI_API_KEY: ""
+      JTEAM_PAID_API_APPROVED: "NO"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Private source only and no paid API credentials
+        run: |
+          test "${{ github.event.repository.private }}" = "true"
+          test -z "$OPENAI_API_KEY"
+          test "$JTEAM_PAID_API_APPROVED" = "NO"
+      - name: Check out private review branch without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install open-source local rendering dependencies
+        run: |
+          python -m pip install Pillow==11.3.0
+          command -v ffmpeg
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum
+      - name: Check offline content policy and negative inputs
+        run: python -m unittest tests.test_jw_jteam_faceless_render -v
+      - name: Build one original faceless Korean short offline
+        run: python -m scripts.jw_jteam_faceless_render --output jteam-original-vertical.mp4 | tee jteam-render-report.json
+      - name: Verify duration and vertical resolution
+        run: |
+          ffprobe -v error -show_entries stream=width,height -of csv=p=0 jteam-original-vertical.mp4 | grep -Fx '720,1280'
+          ffprobe -v error -show_entries format=duration -of csv=p=0 jteam-original-vertical.mp4
+      - name: Preserve owner-only preview (never publish)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jteam-original-faceless-preview
+          path: |
+            jteam-original-vertical.mp4
+            jteam-render-report.json
+          if-no-files-found: error
+          retention-days: 3
