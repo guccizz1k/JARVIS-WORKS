@@ -11,7 +11,9 @@ from pathlib import Path
 
 OLD = frozenset({'jw-verified-delivery', 'jw-evidence-retro'})
 NEW = frozenset({'jw-tenant-security-review', 'jw-trade-document-integrity',
-                 'jw-messenger-ocr-recovery', 'jw-render-capacity-cost'})
+                 'jw-messenger-ocr-recovery', 'jw-render-capacity-cost',
+                 'jw-ui-ux-accessibility', 'jw-root-cause-debugging',
+                 'jw-solution-innovation'})
 APPROVED = OLD | NEW
 META = re.compile(r'\A---\nname: ([a-z][a-z0-9-]*)\ndescription: ([^\n]{35,500})\n---\n\n')
 DANGEROUS = (

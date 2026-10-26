@@ -22,3 +22,13 @@ Keep the existing `jw-verified-delivery` for code changes and `jw-evidence-retro
 - Render server capacity, 100k accounts, PostgreSQL pool sizing and budgets → `jw-render-capacity-cost`.
 
 All selected skills remain subordinate to user authorization and J1–J6 5-Gate rules. Never auto-install third-party packages/hooks or change `main`, production DB, Render services or spending on skill advice. Validate metadata and routing offline with `python scripts/jw_skill_contract.py --root .`; a structural PASS is not runtime evidence or release approval. Actual releases remain BLOCKED.
+
+## V11.5 one agent team and task-scoped new skills
+
+One role-structured review team is defined by `agents/team/jarvis_v1/team.json`: 대리(deputy) → 차장(deputy_manager) → 과장(manager) → 부장(director) → 총괄(jarvis_lead). Only jarvis_lead owns review-branch commit proposals and synthesis; independent validation requires a separate actual agent/runtime, not role-play. This repository file alone does NOT spawn or schedule models.
+
+- Browser UI/UX, Korean labels, accessibility, visual regression: `jw-ui-ux-accessibility`.
+- Causal debugging, reproducible crashes, Python/SQL failures: `jw-root-cause-debugging`.
+- Open-source review, alternatives, problem-solving and creativity: `jw-solution-innovation`.
+
+The existing six skills remain governed by J1–J6 and J6 5-Gate. Skills are not ChatGPT account installations. Use `python scripts/jw_skill_contract.py --root .` and `python scripts/jw_agent_team_gate.py --root .` for offline structural checks only. No automatic external tools, real-company data, paid API calls, database mutation, production release, or main branch merges. Release BLOCKED until separate proof.
