@@ -126,3 +126,12 @@ def test_j6_did_not_auto_approve_product_release():
     root = Path(__file__).resolve().parents[1]
     spec = (root / "docs/agents/J6_EVIDENCE_GATED_ENGINEERING.md").read_text(encoding="utf-8")
     assert "BLOCKED" in spec and "production" in spec.lower()
+
+
+
+def test_j6_navigation_invokes_local_skill_safety_gate(monkeypatch):
+    from scripts import jw_skill_contract
+    root = Path(__file__).resolve().parents[1]
+    monkeypatch.setattr(jw_skill_contract, 'audit', lambda _: ['synthetic-denied-skill'])
+    assert 'synthetic-denied-skill' in verify_project(root)
+

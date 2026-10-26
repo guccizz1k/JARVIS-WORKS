@@ -104,6 +104,11 @@ def verify_project(root: Path) -> list[str]:
         for token in ("J6", "J1", "J5", "RED", "GREEN", "BLOCKED", "Retro"):
             if token not in spec:
                 issues.append(f"J6 spec missing invariant: {token}")
+    # J6 local Codex Skills are governed at the same project navigation gate.
+    # This checks static safety only; it never runs skills or approves release.
+    if not issues:
+        from scripts.jw_skill_contract import audit
+        issues.extend(audit(root))
     return issues
 
 
