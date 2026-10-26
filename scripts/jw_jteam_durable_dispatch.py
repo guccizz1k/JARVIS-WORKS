@@ -27,6 +27,10 @@ def dispatch(db,job_id,task,worker=None,fail_after=None):
     for index,role in enumerate(ROLES):
         existing=db.execute("SELECT status FROM steps WHERE job_id=? AND role=?",(job_id,role)).fetchone()
         if existing and existing[0]=="COMPLETE":continue
+        # A RUNNING/BLOCKED step might have completed a paid remote request.
+        # Never silently retry: require explicit provider reconciliation first.
+        if existing and existing[0] in ("RUNNING","BLOCKED"):
+            raise PermissionError("UNCERTAIN_PROVIDER_OUTCOME_RECONCILIATION_REQUIRED")
         # An unfinished role is retried only with an idempotent, explicitly supplied worker.
         with db:
             db.execute("INSERT INTO steps VALUES(?,?,?,?,?) ON CONFLICT(job_id,role) DO UPDATE SET status='RUNNING',receipt=NULL",(job_id,role,index,"RUNNING",None))
