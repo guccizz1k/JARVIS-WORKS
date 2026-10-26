@@ -61,8 +61,9 @@ jobs:
           python scripts/jw_skill_contract.py --root .
           python -m scripts.jw_evidence_gate --check-project .
           python -m scripts.jw_jteam_private_cli
+          python -m scripts.jw_jteam_render_private_smoke
       - name: Verify private runtime and no-spend negative contracts
-        run: python -m pytest -q tests/test_jw_jteam_private_cli.py tests/test_jw_jteam_durable_dispatch.py tests/test_jw_jteam_retry_safety.py tests/test_jw_jteam_openai_runner.py tests/test_jw_jteam_external_sources.py --junitxml=jteam-private.xml
+        run: python -m pytest -q tests/test_jw_jteam_private_cli.py tests/test_jw_jteam_render_private_smoke.py tests/test_jw_jteam_durable_dispatch.py tests/test_jw_jteam_retry_safety.py tests/test_jw_jteam_openai_runner.py tests/test_jw_jteam_external_sources.py --junitxml=jteam-private.xml
       - name: Restore pinned legacy fixture and run full Python regression
         run: |
           python scripts/ci_rebuild_v79_overlay.py
