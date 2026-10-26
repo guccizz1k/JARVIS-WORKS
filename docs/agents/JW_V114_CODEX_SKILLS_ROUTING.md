@@ -34,3 +34,13 @@ Release remains BLOCKED, no `main` merge, production data or paid services chang
 **Tech fit:** JARVIS-WORKS currently serves `app/static/index.html`, `style.css`, `app.js` and additional vanilla JS modules through FastAPI; React-only and Next/Vercel deployment practices are not current priorities. Existing Semgrep, Playwright, pytest and J1–J6 checks are reused rather than cloned. Suggested later additions are dependency/compatibility/license review candidates, not deployed libraries.
 
 **Skills total:** 2 pre-existing + 4 enterprise controls + 3 new UI, root-cause and API-test specialties = **9 project-local Codex SKILL.md entries**. The validator `scripts/jw_skill_contract.py` enforces exact filenames, frontmatter, J1–J6 release guards and prohibited executable install/push instructions; these are STRUCTURAL checks only. Main/Render/Supabase/customer records unchanged, release BLOCKED and Actions monthly USD 5 extra cap unchanged.
+
+## Grounded source inspection — current UI baseline (no product changes)
+
+Read-only review of the exact dependency branch on 2026-10-26:
+- `app/static/index.html`: Korean `lang=ko` present; native labels, buttons and one ARIA live region present. Actual keyboard/screen-reader UX: **NOT RUN**.
+- `app/static/style.css`: responsive `@media` and `:focus-visible` present; no `prefers-reduced-motion` block observed. **Improvement candidate**, requires animation inventory and visual/keyboard regression before editing.
+- `app/static/app.js`: contains uses of `innerHTML`. This is an **inspection target, not a proven XSS**; trace all untrusted paths to output sinks and reuse existing injection/security tests.
+- `requirements.txt`: FastAPI, Uvicorn, Pydantic, openpyxl, pdfplumber etc.; **no React/Next or Ruff/Hypothesis/Schemathesis dependency added**.
+- Existing `.github/workflows/jw-v90-quality-gates.yml` includes Semgrep and existing Playwright-based browser checks; do not create duplicated expensive CI.
+These are source inspections, not runtime accessibility ratings or same-SHA end-to-end results.
