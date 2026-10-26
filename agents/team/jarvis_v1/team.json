@@ -28,7 +28,8 @@
       "mission": "Investigate GitHub projects, source licenses, risk and creative alternatives",
       "depends_on": [],
       "skills": [
-        "jw-solution-innovation"
+        "jw-solution-innovation",
+        "jw-external-intelligence"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -45,7 +46,8 @@
       "mission": "Audit accessible enterprise UI/UX, flows, static web and real browser tests",
       "depends_on": [],
       "skills": [
-        "jw-ui-ux-accessibility"
+        "jw-ui-ux-accessibility",
+        "jw-external-intelligence"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -67,7 +69,8 @@
       "skills": [
         "jw-verified-delivery",
         "jw-root-cause-debugging",
-        "jw-trade-document-integrity"
+        "jw-trade-document-integrity",
+        "jw-external-intelligence"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -88,7 +91,8 @@
       "skills": [
         "jw-tenant-security-review",
         "jw-messenger-ocr-recovery",
-        "jw-render-capacity-cost"
+        "jw-render-capacity-cost",
+        "jw-external-intelligence"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -108,7 +112,8 @@
       ],
       "skills": [
         "jw-verified-delivery",
-        "jw-evidence-retro"
+        "jw-evidence-retro",
+        "jw-external-intelligence"
       ],
       "can_commit": true,
       "may_execute_paid_tools": false,
@@ -121,5 +126,7 @@
     }
   ],
   "display_name": "J team",
-  "quality_standard": "SPECIALIST_EVIDENCE_BASED"
+  "quality_standard": "SPECIALIST_EVIDENCE_BASED",
+  "external_intelligence_contract": "agents/team/jarvis_v1/external_intelligence.json",
+  "external_intelligence_mode": "LOCAL_FIRST_REVIEW_ONLY"
 }
