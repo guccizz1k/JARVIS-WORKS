@@ -1,0 +1,95 @@
+name: JW V9 independent Playwright CLI + Semgrep (J1-J5 preserved)
+
+on:
+  push:
+    branches:
+      - review/v90-playwright-semgrep-j1j5-20261024
+      - review/v90-http-document-e2e-j1j5-20261024
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v90-review-quality-gates
+  cancel-in-progress: true
+
+jobs:
+  semgrep-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout reviewed V8.9 ancestry
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm original V8.9 and unchanged production entrypoint
+        run: |
+          git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
+          git diff --exit-code a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD -- app/main.py
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned local Semgrep
+        run: python -m pip install semgrep==1.182.1
+      - name: Verify injected vulnerabilities and scan real source
+        env:
+          SEMGREP_SEND_METRICS: 'off'
+        run: python scripts/ci_semgrep_security.py
+      - name: Retain security scan evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v90-semgrep-report
+          path: artifacts/semgrep/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  playwright-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - name: Checkout reviewed V9.0 browser
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing FastAPI app dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Install pinned Microsoft Playwright CLI and isolated Chromium
+        run: |
+          npm install -g @playwright/cli@0.1.22
+          playwright-cli --help
+          playwright-cli install
+      - name: Run actual browser over real loopback HTTP against isolated demo
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JW_ENV=review
+          export JW_INSECURE_LOCAL_DEV=1
+          export DEMO_SEED=1
+          export JW_BROWSER_CI_ONLY=ISOLATED_LOOPBACK_DEMO
+          export JARVIS_DB_PATH="$RUNNER_TEMP/jw-playwright-demo.sqlite"
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8765 > "$RUNNER_TEMP/jw-playwright-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          python scripts/ci_playwright_cli_smoke.py
+          python -m py_compile scripts/ci_playwright_cli_document_e2e.py
+          python -m scripts.ci_playwright_cli_document_e2e
+      - name: Retain synthetic browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v90-playwright-smoke
+          path: artifacts/playwright-cli/
+          if-no-files-found: ignore
+          retention-days: 3

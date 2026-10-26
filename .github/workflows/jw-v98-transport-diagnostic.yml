@@ -1,0 +1,45 @@
+name: JW V9.8 real Supavisor client vs backend SSL diagnostic
+on:
+  push:
+    branches:
+      - review/v98-supavisor-hop-aware-ssl-20261025
+permissions:
+  contents: read
+jobs:
+  restricted-readonly-hops:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      JW_ENV: review
+      JW_V97_LIVE_ACK: READ_ONLY_SUPAVISOR_ACCEPTANCE_V97
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install unchanged PG deps and run fail-closed contracts
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pytest -q tests/test_ci_v98_supavisor_transport_diagnostic.py tests/test_ci_v97_supavisor_restricted_auth.py
+      - name: Read-only real Supavisor client TLS vs upstream metadata
+        env:
+          JW_V97_AUTH_DSN: ${{ secrets.JW_V97_AUTH_DSN }}
+          JW_V97_TRADE_DSN: ${{ secrets.JW_V97_TRADE_DSN }}
+        run: |
+          python -m scripts.ci_v98_supavisor_transport_diagnostic > jw-v98-transport.json
+          python - <<'PY'
+          import json
+          x=json.load(open("jw-v98-transport.json"))
+          print("Diagnostic:",x["status"],"reason:",x["reason"])
+          for kind,item in x.get("roles",{}).items():
+              print(kind,"PG17",item["postgres_17"],"PG backend SSL",item["upstream_ssl"],
+                    "client verified-full",item["client_verify_full_connection"])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v98-transport-metadata
+          path: jw-v98-transport.json
+          retention-days: 3

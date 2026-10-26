@@ -1,0 +1,90 @@
+name: JW V12.8 private J team complete offline acceptance
+
+on:
+  push:
+    branches:
+      - review/v128-jteam-private-execution-hardening-20261026
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v128-private-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  private-and-full-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      JW_ENV: review
+      JTEAM_PAID_API_APPROVED: "NO"
+      JTEAM_PROVIDER_BUDGET_ENFORCED: "NO"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - name: Checkout exact private review SHA with no stored credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require private repository and original ancestry
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os
+          with open(os.environ["GITHUB_EVENT_PATH"],encoding="utf-8") as f:
+              event=json.load(f)
+          assert event.get("repository",{}).get("private") is True, "REPOSITORY_NOT_PRIVATE"
+          assert os.environ.get("OPENAI_API_KEY","")=="" ,"UNEXPECTED_API_SECRET"
+          assert os.environ.get("JTEAM_PAID_API_APPROVED") == "NO"
+          print("PASS: private source, no model secret and paid dispatch disabled")
+          PY
+          git merge-base --is-ancestor 4fe542b9c5676ae3ee5237504426a938e422cd42 HEAD
+          test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned review/test dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt -r requirements-jteam-external-pilot.txt
+          python -m pip install 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor
+      - name: Check source compilation and J1-J6 navigation
+        run: |
+          python -m compileall -q scripts/jw_jteam_private_cli.py scripts/jw_jteam_durable_dispatch.py scripts/jw_jteam_openai_runner.py
+          python scripts/jw_agent_team_gate.py --root .
+          python scripts/jw_skill_contract.py --root .
+          python -m scripts.jw_evidence_gate --check-project .
+          python -m scripts.jw_jteam_private_cli
+      - name: Verify private runtime and no-spend negative contracts
+        run: python -m pytest -q tests/test_jw_jteam_private_cli.py tests/test_jw_jteam_durable_dispatch.py tests/test_jw_jteam_retry_safety.py tests/test_jw_jteam_openai_runner.py tests/test_jw_jteam_external_sources.py --junitxml=jteam-private.xml
+      - name: Restore pinned legacy fixture and run full Python regression
+        run: |
+          python scripts/ci_rebuild_v79_overlay.py
+          python -m pytest -q tests -ra --junitxml=jteam-full.xml
+          python -m scripts.jw_integrated_acceptance --junit jteam-full.xml
+      - name: Check no failed/errored/skipped tests
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree as ET
+          root=ET.parse("jteam-full.xml").getroot()
+          cases=list(root.iter("testcase"))
+          assert len(cases) >= 589, len(cases)
+          assert not any(c.find(tag) is not None for c in cases for tag in ("failure","error","skipped"))
+          print("PASS:",len(cases),"full suite tests, 0 failed, 0 errored, 0 skipped; actual model calls 0")
+          PY
+      - name: Upload offline test evidence (no source dumps)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jteam-private-v128-junit
+          path: |
+            jteam-private.xml
+            jteam-full.xml
+          if-no-files-found: ignore
+          retention-days: 3

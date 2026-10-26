@@ -1,0 +1,101 @@
+{
+  "schema": "jteam-quality-tools-v1",
+  "team": "J team",
+  "harness": "J1-J6",
+  "execution": "OPT_IN_ISOLATED_TEST_ONLY",
+  "tools": [
+    {
+      "name": "Playwright",
+      "repository": "https://github.com/microsoft/playwright",
+      "owners": [
+        "deputy_manager",
+        "manager",
+        "director"
+      ],
+      "purpose": "Browser UX, keyboard flows, screenshots and regression",
+      "status": "EXISTING_PROJECT_SCRIPTS",
+      "approval": "reuse existing browser scripts"
+    },
+    {
+      "name": "axe-core",
+      "repository": "https://github.com/dequelabs/axe-core",
+      "owners": [
+        "deputy_manager",
+        "director"
+      ],
+      "purpose": "WCAG automated accessibility checks",
+      "status": "PILOT_NOT_INSTALLED",
+      "approval": "license/runtime check and isolated browser pilot"
+    },
+    {
+      "name": "Ruff",
+      "repository": "https://github.com/astral-sh/ruff",
+      "owners": [
+        "manager",
+        "director"
+      ],
+      "purpose": "Python lint and risky pattern discovery",
+      "status": "PILOT_NOT_INSTALLED",
+      "approval": "baseline-only lint with no mass formatting"
+    },
+    {
+      "name": "Hypothesis",
+      "repository": "https://github.com/HypothesisWorks/hypothesis",
+      "owners": [
+        "manager",
+        "director"
+      ],
+      "purpose": "Property tests for finance, parsing, idempotency",
+      "status": "PILOT_NOT_INSTALLED",
+      "approval": "synthetic fixtures and reproducible seed"
+    },
+    {
+      "name": "Schemathesis",
+      "repository": "https://github.com/schemathesis/schemathesis",
+      "owners": [
+        "manager",
+        "director"
+      ],
+      "purpose": "OpenAPI fuzzing and authentication error contracts",
+      "status": "PILOT_NOT_INSTALLED",
+      "approval": "disposable local API only"
+    },
+    {
+      "name": "Fabric",
+      "repository": "https://github.com/danielmiessler/Fabric",
+      "owners": [
+        "deputy",
+        "deputy_manager",
+        "manager",
+        "director",
+        "jarvis_lead"
+      ],
+      "purpose": "Project-owned Fabric-style J1-J6 prompts supplement role instructions",
+      "status": "PROJECT_LOCAL_PATTERN_ADAPTER",
+      "approval": "no CLI/model calls; same J1-J6 controls and human release gates"
+    },
+    {
+      "name": "Gitingest",
+      "repository": "https://github.com/coderamp-labs/gitingest",
+      "owners": [
+        "deputy",
+        "manager",
+        "director",
+        "jarvis_lead"
+      ],
+      "purpose": "Isolated local synthetic/public reference code context",
+      "status": "PINNED_ISOLATED_PILOT",
+      "approval": "gitingest==0.3.1; no customer data, credentials, private repo upload, remote website or production install"
+    }
+  ],
+  "research_owner": "deputy",
+  "integration_owner": "jarvis_lead",
+  "must_not": [
+    "unreviewed_install",
+    "unapproved_spend",
+    "main_merge",
+    "production_testing",
+    "customer_data_upload"
+  ],
+  "external_intelligence_contract": "agents/team/jarvis_v1/external_intelligence.json"
+}

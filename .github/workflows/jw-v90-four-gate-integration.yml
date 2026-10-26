@@ -1,0 +1,127 @@
+name: JW V9.0 four-gate ancestry-safe integration CI
+
+on:
+  push:
+    branches:
+      - review/v90-four-gates-safe-integration-20261024
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v90-four-gate-integration
+  cancel-in-progress: true
+
+jobs:
+  full-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify old main and recovered V8.9 are both ancestors
+        run: |
+          git merge-base --is-ancestor 4fe542b9c5676ae3ee5237504426a938e422cd42 HEAD
+          git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
+          test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
+          git diff --exit-code a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD -- app/main.py
+      - name: Regression dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pip install 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor
+      - name: Rebuild pinned installer overlay and enforce zero regression SKIPs
+        run: |
+          python scripts/ci_rebuild_v79_overlay.py
+          python -m pytest -q tests -ra --junitxml=jw-full-results.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse("jw-full-results.xml").getroot()
+          suite=root.find("testsuite") if root.tag=="testsuites" else root
+          actual=tuple(int(suite.attrib.get(k,0)) for k in ("tests","errors","failures","skipped"))
+          assert actual==(589,0,0,0),actual
+          print("PASS: 589 regression, zero ERROR/FAIL/SKIP")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v90-four-gate-regression
+          path: jw-full-results.xml
+          retention-days: 3
+
+  isolated-pg-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned app and DB dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-postgres-check.txt
+          npm install -g @playwright/cli@0.1.22
+          playwright-cli install
+      - name: Real Chromium HTTP over real PG17 RPC, isolated logins and recovery
+        run: |
+          python -m py_compile scripts/ci_v90_postgres_browser.py
+          python -m scripts.ci_v90_postgres_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v90-pg-browser
+          path: artifacts/playwright-cli/
+          retention-days: 3
+          if-no-files-found: ignore
+
+  semgrep-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Static security patterns and injected fixtures
+        run: |
+          python -m pip install semgrep==1.182.1
+          SEMGREP_SEND_METRICS=off python scripts/ci_semgrep_security.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v90-four-gate-semgrep
+          path: artifacts/semgrep/
+          retention-days: 3
+          if-no-files-found: ignore

@@ -60,6 +60,8 @@ with TemporaryDirectory() as temp:
         page.locator('#login-form [type=submit]').click()
 
 
+        page.get_by_role('heading',name='문서 업로드 · 자동 처리').wait_for(timeout=10000)
+        go('dashboard')
         page.get_by_role('heading',name='업무 대시보드').wait_for(timeout=10000)
         assert page.locator('.cards .card').count()==4
         page.screenshot(path=str(screenshot_dir/f'{device}_jw_dashboard.png'),full_page=True)
@@ -67,7 +69,8 @@ with TemporaryDirectory() as temp:
         go('security')
         page.get_by_role('heading',name='보안 관제 센터').wait_for()
         assert page.get_by_text('현재 회사 소속').count()>=1
-        assert page.locator('.security-check-list .state-pending').count()==3
+        assert page.locator('.security-check-list .state-pending').count()==2
+        assert page.locator('.security-check-list .state-ok').count()>=2
         page.screenshot(path=str(screenshot_dir/f'{device}_jw_security.png'),full_page=True)
         go('dashboard')
 

@@ -1,0 +1,7 @@
+# V10.4 minimal external HTTPS staging — safe API entrypoint
+
+`scripts.jw_v104_standalone:create_app --factory` composes only existing PostgreSQL shadow read, authentication, enterprise messenger (HTTP/WSS), quote creation and quote read routes. It **does not import app.main** and does not expose legacy SQLite customer business operations or the current production UI.
+
+Security: opt-in JW_STAGE_API_ACK=PRIVATE_HTTPS_PG_ONLY, JW_ENV=dev, existing PG staging feature flags, one exact HTTPS Origin, separate restricted gateway usernames, non-empty distinct DSNs with verify-full TLS. Fails closed before opening a listener if any is missing. The marker is NOT a security credential. Actual per-request DB role, session, RLS and CSRF checks remain in the existing modules. External preview requires protected access control, separate disposable PG17 data, approved runtime hostname, provider account connection and spend limit. **No public endpoint is deployed by this patch.**
+
+Verification: unit tests assert default-off, production refusal, admin/weak TLS rejection, invalid Origin and no legacy SQLite routes. The separate local CA-verified HTTPS PG17+WSS Chromium suite checks real protocol/data handling. Neither can substitute for actual external HTTP login/MFA, full finance workflow, OCR approval, representative load or independent security sign-off. Stage 1–8 PASS promotion still requires independent evidence.

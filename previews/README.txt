@@ -1,0 +1,1 @@
+Screenshots captured in Chromium by browser_smoke.py using synthetic demo company data. UI/logic tested in browser with an in-process FastAPI bridge due network navigation restrictions. Not screenshots of iPhone Safari or a deployed service.

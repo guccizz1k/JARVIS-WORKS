@@ -1,0 +1,3 @@
+# Optional PostgreSQL stage driver. Not required for legacy SQLite app.
+# Pin the exact driver version; this is NOT a database credential or DSN.
+psycopg[binary]==3.3.6

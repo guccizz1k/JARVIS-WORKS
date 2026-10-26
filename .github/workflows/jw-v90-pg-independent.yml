@@ -1,0 +1,51 @@
+name: V9.0 isolated PostgreSQL 17 role and contention verification
+
+on:
+  push:
+    branches:
+      - review/v90-on-v89-20261024
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v90-isolated-pg-proof
+  cancel-in-progress: true
+
+jobs:
+  pg-independent-connections:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - name: Checkout exact V9.0 review source
+        uses: actions/checkout@v4
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated PostgreSQL driver
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Compile live database probe
+        run: python -m py_compile scripts/verify_v90_pg_independent_ci.py
+      - name: Real PostgreSQL tenant RLS adversarial baseline
+        run: PYTHONPATH=. python -m scripts.run_postgres_isolation_ci
+      - name: Two independent nonprivileged logins and real transaction contention
+        run: python scripts/verify_v90_pg_independent_ci.py

@@ -1,0 +1,13 @@
+{
+  "app/deployment_safety_v78.py": "fd80b7c5289f0a903423b75b0ab4996ec11ee569480f5a5fb9c7d2fa76735570",
+  "app/main.py": "e4584787c8ee97a417656e62297507caa7d618f4146398342dabc23c8a6ab25f",
+  "app/pg_rls_full_review_v78.py": "7b58e3b3cfce6eb57138e7a979668d11a4237ea6e53303ac69a4f432c535fdc7",
+  "pytest.ini": "3e96466ab8e521eaceb9521fec97b47d456b002fc8000aabf13c4f44fccbd1e6",
+  "scripts/generate_pg_rls_review_v78.py": "36382e869d87adea80be1f676409795369bf99af70a49c3ffb21f16c29557c8e",
+  "scripts/install_v78.py": "ac6907180b045f3709ddafa25507554170aed7100258a8ef6a4de0a7edc71e6c",
+  "scripts/release_audit_v78.py": "2c76ec5fd2b3aa66acdcf15279f6232c1be4b5de5f09e7c0a566bded95ca6082",
+  "tests/test_installer_v75.py": "2d3c4f647e8382c7e3c5f55a4257961feed50646c5e013bb13330c1dc963e7df",
+  "tests/test_installer_v78.py": "67ffc04535004f571e5285ed98f1d8ada7f84be5130961a5f38ce0d19b816514",
+  "tests/test_pg_rls_full_review_v78.py": "0fae160b17ec0967fcc40c2a6c3d9271887b2a8b902e4fb13679b3d2f2ff5f6a",
+  "tests/test_release_audit_v78.py": "2b9fcc452586351422d5041390f5f59f731d030fb0506fc4789cea8053bf365a"
+}
