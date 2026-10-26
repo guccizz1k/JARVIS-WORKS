@@ -191,3 +191,31 @@
 .jw-v62-result{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #e6edf4;flex-wrap:wrap;}
 .jw-v62-result span{overflow-wrap:anywhere;}
 @media(max-width:600px){.jw-v62-panel .panel-body{padding:16px}.jw-v62-result .btn{width:auto}}
+
+
+/* V11.7 desktop-first visual hierarchy and accessibility, no behavior changes */
+:root{--jw-accent:#137d76;--jw-ink:#192b3b;--jw-border:#dce6eb}
+body{background:#f4f7f9;color:var(--jw-ink)}
+:focus-visible{outline:3px solid #19a79a!important;outline-offset:3px}
+.nav-item{min-height:46px;transition:background-color .16s ease,color .16s ease}
+.nav-item.active{background:#176b69;color:#fff;box-shadow:inset 3px 0 #66e3cf}
+.nav-item:hover:not(.active){background:#24485a;color:#fff}
+.sidebar nav{overflow-y:auto;min-height:0;align-content:start;padding-bottom:18px}
+.side-group-label{margin-top:10px}
+.topbar{min-height:72px;height:auto;padding-top:12px;padding-bottom:12px}
+.main-content{max-width:1480px}
+.page-head h1{font-size:clamp(24px,2.2vw,32px);line-height:1.25}
+.card,.panel{border-color:var(--jw-border);box-shadow:0 8px 28px #18384909}
+.card{transition:border-color .18s ease,box-shadow .18s ease}
+.card:hover{border-color:#bad7d2;box-shadow:0 12px 30px #173c4610}
+.btn{min-height:40px}
+.btn.primary{background:#126c67;border-color:#126c67}
+.btn.primary:hover:not(:disabled){background:#0c5853}
+.table th{color:#536b7e;background:#f4f8fa;font-size:12px}
+.table tr:focus-within td{background:#eaf8f5}
+.login-card input:focus-visible,.form-field input:focus-visible,.form-field select:focus-visible,.form-field textarea:focus-visible{outline:2px solid #137d76;outline-offset:2px}
+#toast{max-width:min(480px,calc(100vw - 32px))}
+@media(min-width:1024px){.sidebar{width:266px}.main-content{padding:34px clamp(28px,3vw,56px) 60px}.topbar{padding-left:clamp(28px,3vw,56px);padding-right:clamp(28px,3vw,56px)}}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.dash-cols{grid-template-columns:1fr}}
+@media(max-width:600px){.cards{grid-template-columns:1fr}.page-head{align-items:flex-start;flex-direction:column}.page-actions{flex-wrap:wrap}.main-content{padding:20px 16px 36px}.topbar{padding:12px 16px}.topdate{display:none}.login-card h1{font-size:30px}.login-card{padding:32px 0}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
