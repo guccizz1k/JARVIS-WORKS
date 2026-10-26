@@ -1,0 +1,187 @@
+{
+  "schema": "jw-universal-work-order-v1",
+  "project": "J team",
+  "privacy": "PRIVATE_OWNER_ONLY",
+  "harness": [
+    "J1",
+    "J2",
+    "J3",
+    "J4",
+    "J5",
+    "J6"
+  ],
+  "role_order": [
+    "deputy",
+    "deputy_manager",
+    "manager",
+    "director",
+    "jarvis_lead"
+  ],
+  "default_domain": "research",
+  "allowed_domains": {
+    "software": {
+      "label_ko": "프로그램 개발·자동화",
+      "keywords": [
+        "코드",
+        "개발",
+        "버그",
+        "프로그램",
+        "앱",
+        "웹사이트",
+        "github",
+        "python",
+        "api",
+        "배포",
+        "버전",
+        "테스트",
+        "debug",
+        "script"
+      ],
+      "outcome": "Deliver a tested, reviewable artifact with rollback and exact execution evidence.",
+      "role_focus": {
+        "deputy": "Review software research, libraries, code ownership, and alternatives.",
+        "deputy_manager": "Audit user journeys, product UX, and accessibility.",
+        "manager": "Implement minimally and reproduce errors with executable regression tests.",
+        "director": "Independently verify security, privacy, tests, backward compatibility, and costs.",
+        "jarvis_lead": "Synthesize evidence, plan approvals and review-branch integration only."
+      }
+    },
+    "social_media": {
+      "label_ko": "인스타그램·유튜브·SNS 운영",
+      "keywords": [
+        "인스타",
+        "instagram",
+        "유튜브",
+        "youtube",
+        "reels",
+        "릴스",
+        "쇼츠",
+        "shorts",
+        "SNS",
+        "구독자",
+        "팔로워",
+        "게시물",
+        "콘텐츠",
+        "업로드",
+        "채널",
+        "해시태그",
+        "썸네일",
+        "인플루언서"
+      ],
+      "outcome": "Research a differentiated audience, prepare original rights-cleared assets, review publication, use authorized platform posting, measure genuine engagement.",
+      "role_focus": {
+        "deputy": "Research audience, platform policies, competing themes and credible sources.",
+        "deputy_manager": "Develop channel identity, editorial calendar, clear hooks, mobile-friendly storyboards and accessibility.",
+        "manager": "Prepare original scripts, caption drafts, shot lists and asset production plans; do not claim that a video was rendered.",
+        "director": "Independently check originality, copyright, sponsorship disclosures, manipulated media labels, platform rules, genuine engagement and performance evidence.",
+        "jarvis_lead": "Integrate the approved calendar, prepare publication approval per connected account and report real metrics and revenue honestly."
+      }
+    },
+    "business": {
+      "label_ko": "수익 모델·사업 운영",
+      "keywords": [
+        "사업",
+        "수익",
+        "매출",
+        "제휴",
+        "상품",
+        "고객",
+        "판매",
+        "비즈니스",
+        "비용",
+        "수익화",
+        "자본금",
+        "사업계획",
+        "원가",
+        "순이익",
+        "제안서",
+        "이익",
+        "시장성",
+        "exit"
+      ],
+      "outcome": "Produce validated customer demand, low-capex unit economics, lawful commercialization and a measurable revenue experiment.",
+      "role_focus": {
+        "deputy": "Identify genuine customer pain, competitors, market signals and credible source provenance.",
+        "deputy_manager": "Design an understandable offer, user/customer journey, positioning and messages.",
+        "manager": "Build deliverables, forecasts, landing copy or tools using conservative assumptions.",
+        "director": "Challenge unit economics, cash risk, legal constraints, IP ownership and factual claims.",
+        "jarvis_lead": "Prioritize experiments by expected learning and actual contribution margin, then obtain approvals for commitments."
+      }
+    },
+    "research": {
+      "label_ko": "시장·정보·전문 조사",
+      "keywords": [
+        "조사",
+        "리서치",
+        "보고서",
+        "분석",
+        "비교",
+        "근거",
+        "시장",
+        "사례",
+        "자료",
+        "research",
+        "study",
+        "트렌드",
+        "경쟁사"
+      ],
+      "outcome": "Deliver a dated source-backed answer with alternatives, uncertainty, and evidence checks.",
+      "role_focus": {
+        "deputy": "Collect primary references and capture dates and provenance.",
+        "deputy_manager": "Structure decision options and communicate clearly.",
+        "manager": "Analyze evidence and compute validated comparisons.",
+        "director": "Independently spot errors, selection bias and unsupported assumptions.",
+        "jarvis_lead": "Present a decision-ready conclusion with limitations."
+      }
+    },
+    "everyday": {
+      "label_ko": "일상·개인 업무",
+      "keywords": [
+        "일정",
+        "메일",
+        "메시지",
+        "예약",
+        "할일",
+        "정리",
+        "여행",
+        "생활",
+        "계획",
+        "장보기",
+        "리마인더",
+        "routine",
+        "calendar"
+      ],
+      "outcome": "Help with planning, drafting and authorized actions without inventing personal facts or connections.",
+      "role_focus": {
+        "deputy": "Collect only necessary relevant context.",
+        "deputy_manager": "Organize a clear, low-friction interaction.",
+        "manager": "Prepare requested drafts, calculations or task outputs.",
+        "director": "Check sensitive data, errors, social/financial consequences and execution requirements.",
+        "jarvis_lead": "Deliver succinct result and request confirmation before external writes."
+      }
+    }
+  },
+  "default_workflow": [
+    "intake",
+    "research",
+    "design",
+    "produce",
+    "independent_review",
+    "approval",
+    "authorized_action",
+    "measurement"
+  ],
+  "action_policy": {
+    "provider_model_calls": "BLOCKED_BY_DEFAULT",
+    "external_posting": "REQUIRES_CONNECTED_ACCOUNT_AND_ACTION_APPROVAL",
+    "posting_schedule": "REQUIRES_CONNECTED_SCHEDULER_AND_AUTHORIZATION",
+    "purchases": "REQUIRES_OWNER_APPROVAL",
+    "source_modification": "REQUIRES_ISOLATED_REVIEW_AND_TESTS",
+    "private_code_external_upload": "FORBIDDEN",
+    "fake_follower_bot_engagement": "FORBIDDEN",
+    "platform_account_sale": "POLICY_REVIEW_REQUIRED",
+    "owner_only": "NO_PUBLIC_RUNTIME_BY_DEFAULT"
+  },
+  "monthly_extra_cost_preference_krw": 0,
+  "notes": "A structured planning/routing configuration is not a running autonomous team or authorization to act."
+}
