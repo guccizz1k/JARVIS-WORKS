@@ -71,7 +71,7 @@ def slide_image(slide: dict, index: int, output: Path, font_file: str) -> None:
     for y in range(0, H, 75):
         d.line((0, y, W, y), fill=(17, 29, 44))
     d.rounded_rectangle((45, 75, 257, 130), radius=23, fill=(25, 65, 70))
-    d.text((63, 89), "J TEAM / AUTO", font=font(25), fill=COLORS["aqua"])
+    d.text((63, 89), "AI 실전노트", font=font(25), fill=COLORS["aqua"])
     d.text((645, 91), f"{index+1:02d}/05", font=font(27),
            fill=COLORS["muted"], anchor="ra")
     d.text((51, 191), slide["title"], font=font(48), fill=COLORS["white"])
@@ -83,13 +83,13 @@ def slide_image(slide: dict, index: int, output: Path, font_file: str) -> None:
         d.rounded_rectangle((119, y+42, 151, y+74), radius=8,
                             fill=COLORS["blue"] if k != 1 else COLORS["aqua"])
         d.text((180, y+43), point, font=font(30), fill=COLORS["white"])
-    d.text((W//2, 1041), "촬영 없이 만든 오리지널 콘텐츠",
+    d.text((W//2, 1041), "AI로 줄이는 반복 업무",
            font=font(29), fill=COLORS["aqua"], anchor="mm")
     for k in range(5):
         x = 50 + k*124
         d.rounded_rectangle((x, 1186, x+101, 1199), radius=6,
                             fill=COLORS["aqua"] if k<=index else (44, 61, 80))
-    d.text((54, 1235), "J team / 설명 영상 / 광고 아님",
+    d.text((54, 1235), "AI 실전노트 | 무료 자동화 팁",
            font=font(22), fill=COLORS["muted"])
     image.save(output)
 
