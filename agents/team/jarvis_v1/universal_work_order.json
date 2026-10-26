@@ -183,5 +183,25 @@
     "owner_only": "NO_PUBLIC_RUNTIME_BY_DEFAULT"
   },
   "monthly_extra_cost_preference_krw": 0,
-  "notes": "A structured planning/routing configuration is not a running autonomous team or authorization to act."
+  "notes": "A structured planning/routing configuration is not a running autonomous team or authorization to act.",
+  "faceless_content_policy": {
+    "user_filming_required": false,
+    "user_voice_recording_required": false,
+    "user_script_writing_required": false,
+    "user_editing_required": false,
+    "user_media_assets_required": false,
+    "editorial_source": "ORIGINAL_VERIFIABLE_ASSISTANT_CONTENT",
+    "media_sources": "OWN_GENERATED_OR_LICENSE_VERIFIED_ONLY",
+    "rendering": "FREE_LOCAL_TOOLS_FIRST",
+    "user_actions_only": [
+      "ONE_TIME_ACCOUNT_CREATION_OR_OAUTH",
+      "PLATFORM_REQUIRED_PUBLISHING_APPROVAL"
+    ],
+    "publish_without_authenticated_connection": "FORBIDDEN",
+    "publisher_upload_without_owner_authority": "FORBIDDEN",
+    "synthetic_realism_disclosure": "WHEN_PLATFORM_REQUIRES",
+    "repetitive_low_value_bulk_publishing": "FORBIDDEN",
+    "promised_subscribers_or_revenue": "FORBIDDEN",
+    "status": "CAPABILITY_SPEC_NOT_END_TO_END_DEPLOYMENT"
+  }
 }
