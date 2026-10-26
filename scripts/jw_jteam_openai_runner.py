@@ -13,8 +13,10 @@ from pathlib import Path
 
 if __package__:
     from .jw_jteam_external_sources import fabric_instructions
+    from .jw_jteam_universal_work_order import role_guidance
 else:
     from jw_jteam_external_sources import fabric_instructions
+    from jw_jteam_universal_work_order import role_guidance
 
 ROLES=("deputy","deputy_manager","manager","director","jarvis_lead")
 ROLE_TASKS={
@@ -44,7 +46,7 @@ def require_permission(args,env):
         raise PermissionError("PROVIDER_BUDGET_GUARD_NOT_ATTESTED")
 def request_one(role,task,context,model,key,max_output_tokens):
     payload={"model":model,"instructions":ROLE_TASKS[role]+
-        " J1-J6. Read-only. No claims of independent browser execution without proof. Never reveal credentials.\n" + fabric_instructions(role),
+        " J1-J6. Read-only. No claims of independent browser execution without proof. Never reveal credentials.\n" + fabric_instructions(role) + "\n" + role_guidance(role, task),
         "input":json.dumps({"task":task,"prior_artifacts":context},ensure_ascii=False),
         "max_output_tokens":max_output_tokens,"store":False}
     request=urllib.request.Request(API_URL,data=json.dumps(payload).encode("utf-8"),
