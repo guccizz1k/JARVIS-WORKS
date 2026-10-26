@@ -30,7 +30,7 @@ concurrency:
 jobs:
   private-contract:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 18
     env:
       JW_ENV: review
       JTEAM_PAID_API_APPROVED: "NO"
@@ -56,7 +56,11 @@ jobs:
           print("PASS: private-only/no paid model secrets")
           PY
       - name: Install project-declared test-only dependencies
-        run: python -m pip install -r requirements-dev.txt -r requirements-jteam-external-pilot.txt
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt -r requirements-jteam-external-pilot.txt
+          python -m pip install 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor
       - name: J team guardrail navigation and safe dry run
         run: |
           python -m scripts.jw_agent_team_gate --root .
@@ -69,6 +73,7 @@ jobs:
         run: |
           python -m pytest -q tests/test_jw_jteam*.py tests/test_jw_agent_team_gate.py tests/test_jw_skill_contract.py --junitxml=jteam-pr-focused.xml
           python -m pytest -q tests/test_jw_*.py --junitxml=jteam-pr-expanded.xml
+          python scripts/ci_rebuild_v79_overlay.py
           python -m pytest -q tests --disable-warnings --junitxml=jteam-pr-full.xml
           python - <<'PY'
           from xml.etree import ElementTree as ET
