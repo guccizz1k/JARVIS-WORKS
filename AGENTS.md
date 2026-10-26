@@ -36,3 +36,7 @@ The existing six skills remain governed by J1–J6 and J6 5-Gate. Skills are not
 ## V11.8 eight-stage UI/UX pipeline
 
 For JARVIS-WORKS product UI/UX tasks, read `docs/agents/JW_V118_DESIGN_PIPELINE.md` and `agents/team/jarvis_v1/design_pipeline.json` before changes. Route eight stages to the existing five-role team; do not create new agents or bypass J1–J6. Run `python -m unittest tests.test_jw_design_eight_stage_gate -v`. Structural checks alone are not independent browser or runtime proof.
+
+## J team quality tools
+
+Read `agents/team/jarvis_v1/tool_routing.json` and `docs/agents/JW_V119_J_TEAM_TOOL_ROUTING.md` for Playwright, axe-core, Ruff, Hypothesis and Schemathesis role ownership. Pilot tools are not installed. No upstream execution, main merge or production probes without verified gates and user approval.
