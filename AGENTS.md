@@ -52,3 +52,7 @@ See `docs/agents/JW_V121_OPENAI_API_RUNNER.md`. API runner is dry-run by default
 ## J team V12.2 durable simulation
 
 Use `scripts/jw_jteam_durable_simulator.py` only for offline idempotency/checkpoint testing. SIMULATED_ONLY is never independent model proof or release approval.
+
+## J team V12.3 durable dispatch
+
+See `docs/agents/JW_V123_DURABLE_DISPATCH.md`. Injected worker is offline-only; no actual paid OpenAI call or release approval.
