@@ -16,41 +16,89 @@ def setup(db):
     db.execute("CREATE TABLE IF NOT EXISTS usage_events(id INTEGER PRIMARY KEY AUTOINCREMENT,job_id TEXT NOT NULL,role TEXT NOT NULL,input_tokens INTEGER NOT NULL,output_tokens INTEGER NOT NULL,estimated_krw INTEGER,provider_receipt TEXT,FOREIGN KEY(job_id) REFERENCES jobs(id))")
     db.commit()
 def dispatch(db,job_id,task,worker=None,fail_after=None):
-    """Worker returns receipt dict; no worker => fail closed before any role runs."""
-    if worker is None:raise PermissionError("NO_AUTHORIZED_MODEL_WORKER")
+    """Fail-closed role claims and receipts; injected worker is never implicitly authorized.
+
+    BEGIN IMMEDIATE prevents two local writers from claiming the same role
+    concurrently. A crash after a provider request leaves RUNNING and requires
+    manual reconciliation, never an automatic retry.
+    """
+    if worker is None:
+        raise PermissionError("NO_AUTHORIZED_MODEL_WORKER")
+    if type(job_id) is not str or not 1 <= len(job_id) <= 128:
+        raise ValueError("INVALID_JOB_ID")
+    if type(task) is not str or not 1 <= len(task) <= 8000:
+        raise ValueError("INVALID_TASK")
     digest=hashlib.sha256(task.encode("utf-8")).hexdigest()
     now=int(time.time())
     with db:
-        row=db.execute("SELECT task_hash FROM jobs WHERE id=?",(job_id,)).fetchone()
-        if row and row[0]!=digest:raise ValueError("JOB_ID_TASK_MISMATCH")
-        if not row:db.execute("INSERT INTO jobs VALUES(?,?,?,?)",(job_id,digest,"RUNNING",now))
+        row=db.execute("SELECT task_hash,state FROM jobs WHERE id=?",(job_id,)).fetchone()
+        if row and row[0]!=digest:
+            raise ValueError("JOB_ID_TASK_MISMATCH")
+        if row and row[1]=="BLOCKED":
+            raise PermissionError("BLOCKED_JOB_REQUIRES_RECONCILIATION")
+        if not row:
+            db.execute("INSERT INTO jobs VALUES(?,?,?,?)",(job_id,digest,"RUNNING",now))
     for index,role in enumerate(ROLES):
-        existing=db.execute("SELECT status FROM steps WHERE job_id=? AND role=?",(job_id,role)).fetchone()
-        if existing and existing[0]=="COMPLETE":continue
-        # A RUNNING/BLOCKED step might have completed a paid remote request.
-        # Never silently retry: require explicit provider reconciliation first.
-        if existing and existing[0] in ("RUNNING","BLOCKED"):
-            raise PermissionError("UNCERTAIN_PROVIDER_OUTCOME_RECONCILIATION_REQUIRED")
-        # An unfinished role is retried only with an idempotent, explicitly supplied worker.
-        with db:
-            db.execute("INSERT INTO steps VALUES(?,?,?,?,?) ON CONFLICT(job_id,role) DO UPDATE SET status='RUNNING',receipt=NULL",(job_id,role,index,"RUNNING",None))
+        # Claim and read must be a single SQLite write-serialized transaction.
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            existing=db.execute(
+                "SELECT status FROM steps WHERE job_id=? AND role=?",(job_id,role)
+            ).fetchone()
+            if existing and existing[0]=="COMPLETE":
+                db.commit()
+                continue
+            if existing and existing[0] in ("RUNNING","BLOCKED"):
+                raise PermissionError("UNCERTAIN_PROVIDER_OUTCOME_RECONCILIATION_REQUIRED")
+            db.execute(
+                "INSERT INTO steps VALUES(?,?,?,?,?) "
+                "ON CONFLICT(job_id,role) DO UPDATE SET status='RUNNING',receipt=NULL",
+                (job_id,role,index,"RUNNING",None))
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
         try:
             receipt=worker(role,task)
-            if not isinstance(receipt,dict) or not receipt.get("receipt_id"):raise ValueError("MISSING_WORKER_RECEIPT")
+            if type(receipt) is not dict or not isinstance(receipt.get("receipt_id"),str):
+                raise ValueError("MISSING_WORKER_RECEIPT")
+            receipt_id=receipt["receipt_id"]
+            if not 1 <= len(receipt_id) <= 256 or not receipt_id.isprintable():
+                raise ValueError("INVALID_RECEIPT_ID")
+            if set(receipt) - {"receipt_id","input_tokens","output_tokens","model","response_sha256"}:
+                raise ValueError("SENSITIVE_OR_UNKNOWN_RECEIPT_FIELDS")
             input_tokens=receipt.get("input_tokens",0)
             output_tokens=receipt.get("output_tokens",0)
-            if any(type(n) is not int or n<0 for n in (input_tokens,output_tokens)):raise ValueError("INVALID_USAGE")
+            if any(type(n) is not int or n<0 for n in (input_tokens,output_tokens)):
+                raise ValueError("INVALID_USAGE")
+            if db.execute(
+                "SELECT COUNT(*) FROM usage_events WHERE job_id=? AND provider_receipt=?",
+                (job_id,receipt_id)
+            ).fetchone()[0]:
+                raise ValueError("DUPLICATE_PROVIDER_RECEIPT")
+            # Receipt + usage are committed atomically; never persist prompts or model output.
             with db:
-                db.execute("UPDATE steps SET status='COMPLETE',receipt=? WHERE job_id=? AND role=?",(json.dumps(receipt,sort_keys=True),job_id,role))
-                db.execute("INSERT INTO usage_events(job_id,role,input_tokens,output_tokens,estimated_krw,provider_receipt) VALUES(?,?,?,?,?,?)",(job_id,role,input_tokens,output_tokens,None,receipt["receipt_id"]))
-        except Exception:
+                db.execute("UPDATE steps SET status='COMPLETE',receipt=? WHERE job_id=? AND role=?",
+                           (json.dumps(receipt,sort_keys=True),job_id,role))
+                db.execute(
+                    "INSERT INTO usage_events(job_id,role,input_tokens,output_tokens,"
+                    "estimated_krw,provider_receipt) VALUES(?,?,?,?,?,?)",
+                    (job_id,role,input_tokens,output_tokens,None,receipt_id))
+        except BaseException:
             with db:
-                db.execute("UPDATE steps SET status='BLOCKED' WHERE job_id=? AND role=?",(job_id,role))
-                db.execute("UPDATE jobs SET state='BLOCKED',updated=? WHERE id=?",(int(time.time()),job_id))
+                db.execute("UPDATE steps SET status='BLOCKED' WHERE job_id=? AND role=?",
+                           (job_id,role))
+                db.execute("UPDATE jobs SET state='BLOCKED',updated=? WHERE id=?",
+                           (int(time.time()),job_id))
             raise
-        if fail_after==role:raise RuntimeError("SIMULATED_PROCESS_INTERRUPTION")
-    with db:db.execute("UPDATE jobs SET state='REVIEW_REQUIRED',updated=? WHERE id=?",(int(time.time()),job_id))
-    return {"job_id":job_id,"state":"REVIEW_REQUIRED","role_receipts":5,"independent_review":"NOT_ATTESTED","release":"BLOCKED"}
+        if fail_after==role:
+            raise RuntimeError("SIMULATED_PROCESS_INTERRUPTION")
+    with db:
+        db.execute("UPDATE jobs SET state='REVIEW_REQUIRED',updated=? WHERE id=?",
+                   (int(time.time()),job_id))
+    return {"job_id":job_id,"state":"REVIEW_REQUIRED","role_receipts":5,
+            "independent_review":"NOT_ATTESTED","release":"BLOCKED"}
+
 def main(argv=None):
     p=argparse.ArgumentParser()
     p.add_argument("--db",type=Path,required=True)
