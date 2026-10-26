@@ -7,6 +7,13 @@ from scripts.jw_jteam_faceless_render import validate_episode, DEFAULT_EPISODE
 
 
 class OwnerOnlyFacelessRenderTests(unittest.TestCase):
+    def test_public_video_does_not_expose_private_team_name(self):
+        from scripts import jw_jteam_faceless_render as module
+        source=Path(module.__file__).read_text(encoding="utf-8")
+        self.assertNotIn('"J TEAM / AUTO"',source)
+        self.assertNotIn('"J team / 설명 영상 / 광고 아님"',source)
+        self.assertIn('"AI 실전노트"',source)
+
     def test_original_fixture_has_five_unique_scopes(self):
         item=validate_episode(DEFAULT_EPISODE)
         self.assertEqual(item["publication"],"DRAFT_ONLY")
