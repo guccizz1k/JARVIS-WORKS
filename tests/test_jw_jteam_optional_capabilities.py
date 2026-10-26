@@ -7,8 +7,9 @@ from pathlib import Path
 
 from scripts.jw_jteam_optional_capabilities import (
     inspect_manifest, penpot_token_diff, whisper_transcript_gate,
-    ollama_loopback_probe, n8n_review_event,
+    ollama_loopback_probe, n8n_review_event, _local_open, _DenyRedirect,
 )
+import urllib.request
 
 
 class FakeResponse(io.BytesIO):
@@ -119,6 +120,24 @@ class TestJTeamOptionalCapabilities(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "OVERSIZED"):
             ollama_loopback_probe("demo", "synthetic",
                                   approved=True, synthetic=True, transport=fake)
+
+    def test_default_transport_refuses_off_host_urls(self):
+        req = urllib.request.Request("https://example.org/collect", data=b"synthetic")
+        with self.assertRaisesRegex(PermissionError, "REMOTE_URL_FORBIDDEN"):
+            _local_open(req, timeout=4)
+
+    def test_local_transport_blocks_redirects_and_proxies(self):
+        req = urllib.request.Request("http://127.0.0.1:11434/api/chat", data=b"{}")
+        handler = _DenyRedirect()
+        self.assertIsNone(handler.redirect_request(
+            req, None, 302, "redirect", {}, "https://external.example/collect"))
+        # The opener can be inspected without opening a socket.
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), _DenyRedirect())
+        self.assertTrue(any(isinstance(h, _DenyRedirect) for h in opener.handlers))
+        proxies = [h.proxies for h in opener.handlers
+                   if isinstance(h, urllib.request.ProxyHandler)]
+        self.assertEqual(proxies, [{}])
 
     def test_n8n_is_plan_only_without_dispatch(self):
         report = n8n_review_event("review_requested",
