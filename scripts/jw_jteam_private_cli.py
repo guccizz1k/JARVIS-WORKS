@@ -15,6 +15,8 @@ import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from scripts.jw_jteam_durable_dispatch import ROLES, dispatch, setup as setup_jobs
 from scripts.jw_jteam_integrated_gate import (
@@ -26,7 +28,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 CREDENTIAL_HINT = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{8,}|github_pat_|"
     r"-----BEGIN [A-Z ]*PRIVATE KEY-----|"
-    r"OPENAI_API_KEY\\s*[:=]|password\\s*[:=])"
+    r"OPENAI_API_KEY\s*[:=]|password\s*[:=])"
 )
 
 
@@ -87,7 +89,7 @@ def run_private(
             path.chmod(0o600)
         setup_jobs(db)
         setup_budget(db)
-        scope = settings.get("JTEAM_BUDGET_SCOPE", "2026-10")
+        scope = settings.get("JTEAM_BUDGET_SCOPE", datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m"))
         if not re.fullmatch(r"[0-9]{4}-[0-9]{2}", scope):
             raise ValueError("BUDGET_SCOPE_INVALID")
 
