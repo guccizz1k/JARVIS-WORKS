@@ -113,6 +113,21 @@ class UniversalJTeamOrderTests(unittest.TestCase):
         self.assertIn("[J1:", seen[0]["instructions"])
         self.assertIs(seen[0]["store"], False)
 
+    def test_format_transfer_always_in_youtube_instagram_writing(self):
+        for role in ROLES:
+            s = role_guidance(role, "인스타그램 캡션", domain="social_media")
+            self.assertIn("MANDATORY_SOCIAL_FORMAT_TRANSFER_V132", s)
+            self.assertIn("UNVERIFIED", s)
+
+    def test_format_strategy_read_only_and_not_in_software_domain(self):
+        result = plan("유튜브 쇼츠 제목 작성", domain="social_media")
+        self.assertEqual(result["social_format_strategy"]["pilot_posts"], 3)
+        self.assertEqual(result["social_format_strategy"]["source_effectiveness"],
+                         "NOT_VERIFIED_WITHOUT_INDEPENDENT_SOURCE")
+        self.assertIsNone(plan("Python 버그", domain="software")["social_format_strategy"])
+        self.assertFalse(result["publication_performed"])
+        self.assertEqual(result["paid_calls"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

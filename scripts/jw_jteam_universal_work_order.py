@@ -123,14 +123,23 @@ def role_guidance(role: str, instruction: str, *, domain: str | None = None,
         raise ValueError("UNKNOWN_JTEAM_ROLE")
     chosen = domain_for(instruction, domain=domain, config=obj)
     focus = obj["allowed_domains"][chosen]["role_focus"][role]
+    social_method = ""
+    if chosen == "social_media":
+        from scripts.jw_jteam_social_format import role_guidance as format_guidance
+        social_method = format_guidance(role)
     return (
         f"JTEAM_DOMAIN={chosen}; J1-J6 role={role}. {focus} "
         "This is advisory text, never authorization to publish, buy, merge, deploy "
         "or call paid models. Show actual evidence vs NOT RUN; no fake followers, "
         "copied or repetitive mass-produced media, unapproved account transfer "
         "or external upload of private source. Independent role-play is not "
-        "independent model execution."
+        "independent model execution." + social_method
     )
+
+
+def _social_format_strategy(instruction: str) -> dict:
+    from scripts.jw_jteam_social_format import social_brief
+    return social_brief(instruction)
 
 
 def plan(instruction: str, *, domain: str | None = None,
@@ -157,6 +166,9 @@ def plan(instruction: str, *, domain: str | None = None,
                    "focus": obj["allowed_domains"][chosen]["role_focus"][name],
                    "execution_status": "NOT_RUN"} for name in ROLES],
         "stages": stages, "issues": issues,
+        "social_format_strategy": (
+            _social_format_strategy(clean) if chosen == "social_media" else None
+        ),
         "approval": "REQUIRED_BEFORE_EXTERNAL_ACTION",
         "user_filming_required": False,
         "user_recording_required": False,
