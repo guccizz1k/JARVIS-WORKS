@@ -61,6 +61,7 @@ jobs:
         run: |
           python -m scripts.jw_agent_team_gate --root .
           python -m scripts.jw_skill_contract --root .
+          python scripts/jw_jteam_optional_capabilities.py --check
           python -m scripts.jw_evidence_gate --check-project .
           python scripts/jw_jteam_external_sources.py --check
           python -m scripts.jw_jteam_private_cli
