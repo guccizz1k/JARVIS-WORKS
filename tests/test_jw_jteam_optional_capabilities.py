@@ -188,5 +188,24 @@ class TestJTeamOptionalCapabilities(unittest.TestCase):
                              dispatch=True, approved=True, transport=fake)
 
 
+    def test_role_manifest_references_optional_project_skills_without_granting_power(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        team = json.loads((root / "agents/team/jarvis_v1/team.json").read_text(encoding="utf8"))
+        expected = {"deputy": "jt-audio-research",
+                    "deputy_manager": "jt-design-system-bridge",
+                    "manager": "jt-local-model-evaluation",
+                    "jarvis_lead": "jt-workflow-adapter"}
+        self.assertEqual(len(team["roles"]), 5)
+        self.assertEqual(team["optional_capabilities_mode"], "DISABLED_BY_DEFAULT")
+        self.assertFalse(team["actual_model_session_started"])
+        for role in team["roles"]:
+            if role["id"] in expected:
+                self.assertIn(expected[role["id"]], role["skills"])
+                self.assertTrue((root / ".agents/skills" / expected[role["id"]] /
+                                 "SKILL.md").is_file())
+            self.assertFalse(role["may_execute_paid_tools"])
+
+
 if __name__ == "__main__":
     unittest.main()
