@@ -44,3 +44,7 @@ Read `agents/team/jarvis_v1/tool_routing.json` and `docs/agents/JW_V119_J_TEAM_T
 ## J team staged activation V12.0
 
 Read `docs/agents/JW_V120_JTEAM_ACTIVATION.md` and execute the fail-closed readiness checker before claiming independent AI sessions. No actual runtime, provider receipt or A/B benchmark has been verified. Existing J1–J6 security and human approval gates remain authoritative.
+
+## J team OpenAI API prototype V12.1
+
+See `docs/agents/JW_V121_OPENAI_API_RUNNER.md`. API runner is dry-run by default; no paid model call without separate explicit approval and actual enforceable provider budget guard. It is not a deployed autonomous agent server. No main merge or production.
