@@ -43,7 +43,7 @@ jobs:
           print("PASS: private source, no model secret and paid dispatch disabled")
           PY
           git merge-base --is-ancestor 4fe542b9c5676ae3ee5237504426a938e422cd42 HEAD
-          git diff --exit-code 4fe542b9c5676ae3ee5237504426a938e422cd42 HEAD -- app/main.py
+          test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
       - name: Python 3.12
         uses: actions/setup-python@v5
         with:
