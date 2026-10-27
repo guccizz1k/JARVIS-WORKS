@@ -1,0 +1,49 @@
+{
+  "schema": "jw-jteam-contextual-media-tools-v1",
+  "harness": [
+    "J1",
+    "J2",
+    "J3",
+    "J4",
+    "J5",
+    "J6"
+  ],
+  "execution": "RECOMMEND_ONLY_NO_EXTERNAL_TOOL_EXECUTION",
+  "services": [
+    {
+      "id": "viralityai",
+      "base_url": "https://viralityai.net/",
+      "role": "deputy",
+      "access": "HUMAN_MANUAL_ONLY",
+      "license": "TERMS_RESTRICT_AUTOMATION_AND_COMMERCIAL_REUSE",
+      "note": "No bot, API, scrape, stored credentials, commercial redistribution without permission"
+    },
+    {
+      "id": "delphi",
+      "base_url": "https://delphi.tools/",
+      "role": "deputy_manager",
+      "access": "MANUAL_BROWSER_ONLY",
+      "license": "0BSD_WITH_SEPARATELY_LICENSED_COMPONENTS",
+      "note": "No automatic file upload, cloning or installing; third-party component licensing check before redistribution"
+    }
+  ],
+  "priorities": [
+    "EXISTING_TOOL_FIRST",
+    "MANUAL_RESEARCH_OPTIONAL",
+    "DELPHI_BROWSER_FALLBACK"
+  ],
+  "forbidden": [
+    "automated_virality_access",
+    "unapproved_data_transfer",
+    "silent_delphi_install",
+    "external_auth_or_account_link",
+    "unreviewed_commercial_reuse",
+    "cost_or_subscription",
+    "production_deployment",
+    "main_merge",
+    "copy_external_creative_assets"
+  ],
+  "confidentiality": "RESTRICTED_DATA_LOCAL_ONLY",
+  "require_review": "J1_J6_5_GATES_AND_HUMAN_EXTERNAL_ACTION_APPROVAL",
+  "spent_usd": 0
+}

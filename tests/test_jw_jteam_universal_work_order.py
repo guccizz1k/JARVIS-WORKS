@@ -129,5 +129,38 @@ class UniversalJTeamOrderTests(unittest.TestCase):
         self.assertEqual(result["paid_calls"], 0)
 
 
+    def test_tools_select_for_social_research_and_media_workflows(self):
+        research = plan("유튜브 바이럴 영상 포맷 조사", domain="social_media")
+        selected = research["contextual_tool_advice"]["selected"]
+        self.assertEqual([t["tool"] for t in selected],
+                         ["existing_public_research", "viralityai"])
+        self.assertTrue(all(not t["executed"] for t in selected))
+        self.assertFalse(research["publication_performed"])
+        subtitle = plan("쇼츠 자막 편집", domain="social_media")
+        self.assertEqual(
+            [t["tool"] for t in subtitle["contextual_tool_advice"]["selected"]],
+            ["existing_whisper_ffmpeg", "delphi"])
+
+    def test_private_information_does_not_route_to_vendor(self):
+        task = plan("유튜브 고객정보 첨부된 영상 분석", domain="social_media")
+        advice = task["contextual_tool_advice"]
+        self.assertEqual(advice["data_scope"], "RESTRICTED_LOCAL_ONLY")
+        self.assertEqual([x["tool"] for x in advice["selected"]],
+                         ["existing_local_jteam"])
+        self.assertEqual(advice["external_calls"], 0)
+
+    def test_non_social_development_not_randomly_assigned_delphi(self):
+        plan_result = plan("Python 코드 버그 수정", domain="software")
+        self.assertEqual(plan_result["contextual_tool_advice"]["selected"], [])
+        self.assertEqual(plan_result["release"], "BLOCKED")
+
+    def test_all_role_guidance_includes_contextual_advisory(self):
+        for role in ROLES:
+            guidance = role_guidance(role, "인스타 콘텐츠", domain="social_media")
+            self.assertIn("MANDATORY_CONTEXTUAL_TOOLS_V133", guidance)
+            self.assertIn("MANDATORY_SOCIAL_FORMAT_TRANSFER_V132", guidance)
+
+
+
 if __name__ == "__main__":
     unittest.main()
