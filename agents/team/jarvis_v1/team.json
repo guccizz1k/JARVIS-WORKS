@@ -25,11 +25,12 @@
     {
       "id": "deputy",
       "title_ko": "대리",
-      "mission": "Investigate GitHub projects, source licenses, risk and creative alternatives",
+      "mission": "Research across software, business, social media, marketing and everyday tasks; assess trustworthy sources, platform rules and realistic alternatives.",
       "depends_on": [],
       "skills": [
         "jw-solution-innovation",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-audio-research"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -43,11 +44,12 @@
     {
       "id": "deputy_manager",
       "title_ko": "차장",
-      "mission": "Audit accessible enterprise UI/UX, flows, static web and real browser tests",
+      "mission": "Design product UX, content strategy, editorial calendars, audience journeys and low-friction personal workflows.",
       "depends_on": [],
       "skills": [
         "jw-ui-ux-accessibility",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-design-system-bridge"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -61,7 +63,7 @@
     {
       "id": "manager",
       "title_ko": "과장",
-      "mission": "Prepare minimal code patches, regression tests and causal error fixes",
+      "mission": "Develop tested software or prepare original content assets, production briefs and business deliverables; do not claim external publication without proof.",
       "depends_on": [
         "deputy",
         "deputy_manager"
@@ -70,7 +72,8 @@
         "jw-verified-delivery",
         "jw-root-cause-debugging",
         "jw-trade-document-integrity",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-local-model-evaluation"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -84,7 +87,7 @@
     {
       "id": "director",
       "title_ko": "부장",
-      "mission": "Independently review enterprise RLS, security, finance, recovery, costs",
+      "mission": "Skeptically verify security, copyright, authenticity, platform compliance, revenue claims, evidence, recoverability and budget across every domain.",
       "depends_on": [
         "manager"
       ],
@@ -106,14 +109,15 @@
     {
       "id": "jarvis_lead",
       "title_ko": "총괄 자비스",
-      "mission": "Review all evidence and integrate commits only on isolated review branches",
+      "mission": "Route one-request work orders, integrate reviews, request external-action approvals, and verify outcomes without granting autonomous spending or publishing permissions.",
       "depends_on": [
         "director"
       ],
       "skills": [
         "jw-verified-delivery",
         "jw-evidence-retro",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jt-workflow-adapter"
       ],
       "can_commit": true,
       "may_execute_paid_tools": false,
@@ -128,5 +132,18 @@
   "display_name": "J team",
   "quality_standard": "SPECIALIST_EVIDENCE_BASED",
   "external_intelligence_contract": "agents/team/jarvis_v1/external_intelligence.json",
-  "external_intelligence_mode": "LOCAL_FIRST_REVIEW_ONLY"
+  "external_intelligence_mode": "LOCAL_FIRST_REVIEW_ONLY",
+  "universal_work_order_contract": "agents/team/jarvis_v1/universal_work_order.json",
+  "operating_scope": [
+    "software",
+    "social_media",
+    "business",
+    "research",
+    "everyday"
+  ],
+  "universal_runtime_status": "PLAN_ONLY_UNTIL_ACTUAL_CONNECTORS_AND_MODELS",
+  "optional_capabilities_contract": "agents/team/jarvis_v1/capability_routing.json",
+  "optional_capabilities_mode": "DISABLED_BY_DEFAULT",
+  "code_context_workboard_contract": "agents/team/jarvis_v1/code_context_workboard.json",
+  "code_context_workboard_mode": "OFFLINE_REVIEW_ONLY"
 }

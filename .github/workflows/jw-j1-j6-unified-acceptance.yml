@@ -3,6 +3,7 @@ name: JW J1-J6 unified engineering acceptance (review only)
 on:
   push:
     branches:
+      - review/private-main-acceptance-20261027
       - review/j1-j6-unified-acceptance-20261024
       - review/v91-live-pg-gateway-alignment-20261024
       - review/v92-postgres-quote-write-j1j6-20261025
@@ -40,18 +41,17 @@ jobs:
           git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
           git merge-base --is-ancestor efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD
           test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
-          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt requirements-dev.txt
-          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql' ':!db/review/v99_live_tenant_row_read_rollback.sql' ':!db/review/v99_live_customer_withcheck_rollback.sql'
-          python - <<'PY'
-          import subprocess
-          changed=set(subprocess.check_output(
-            ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
-          assert changed <= {"app/pg_connection_gate_v87.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_dev_entry_v92.py","app/pg_quote_read_v93.py","app/pg_dev_entry_v93.py"},changed
-          print("PASS: only explicitly reviewed V8.7/V8.8 gate changes, original product backend unchanged")
-          PY
+          # Verify the protected product tree against the current (already reviewed) main.
+          # Old V9 baseline intentionally predates the V11.7 UI work now on main.
+          git merge-base --is-ancestor 64fbdb7947dce891394202762e685ba2b9ac2ccb HEAD
+          git diff --exit-code 64fbdb7947dce891394202762e685ba2b9ac2ccb HEAD -- app/ migrations/ security/ requirements.txt requirements-dev.txt
+          git diff --exit-code 64fbdb7947dce891394202762e685ba2b9ac2ccb HEAD -- db/
+          echo "PASS: original ancestry retained and current main app/DB/security/requirements unchanged"
       - name: Install product regression prerequisites
         run: |
-          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          # Full suite includes Gitingest isolated synthetic pilot; install its pinned
+          # test-only dependency without activating vendor network or business data.
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt -r requirements-jteam-external-pilot.txt
           python -m pip install 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
           sudo apt-get update -qq
           sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor
@@ -211,9 +211,9 @@ jobs:
         run: |
           python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
           python -m pytest -q tests/test_jw_evidence_gate.py tests/test_j6_postgres_restore.py tests/test_jw_integrated_acceptance.py -ra --junitxml=jw-j1j6-methodology.xml
-          python scripts/jw_evidence_gate.py --check-project .
-          python scripts/jw_evidence_gate.py --check docs/agents/V90_AGENT_ADOPTION_EVIDENCE.json
-          python scripts/jw_evidence_gate.py --check docs/agents/J6_V90_NEXT_STAGE_EVIDENCE.json
+          python -m scripts.jw_evidence_gate --check-project .
+          python -m scripts.jw_evidence_gate --check docs/agents/V90_AGENT_ADOPTION_EVIDENCE.json
+          python -m scripts.jw_evidence_gate --check docs/agents/J6_V90_NEXT_STAGE_EVIDENCE.json
       - name: J5 encrypted SQLite restore and J3 release remains BLOCKED
         run: |
           python -m scripts.recovery_gate_v72 > jw-j1j6-sqlite-recovery.json

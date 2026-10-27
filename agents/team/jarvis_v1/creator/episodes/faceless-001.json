@@ -1,0 +1,64 @@
+{
+  "schema": "jw-original-short-v1",
+  "episode_id": "faceless-001",
+  "topic": "반복 업무를 줄이는 세 단계",
+  "aspect_ratio": "9:16",
+  "rights": "PROJECT_ORIGINAL_TEXT_AND_PROGRAMMATIC_GRAPHICS",
+  "ai_disclosure": "NON_REALISTIC_EXPLANATORY_ANIMATION",
+  "slides": [
+    {
+      "title": "반복 업무, 어디부터?",
+      "subtitle": "도구보다 흐름을 먼저 정리합니다",
+      "points": [
+        "자료가 흩어진 곳",
+        "손으로 다시 입력하는 곳",
+        "오류를 다시 확인하는 곳"
+      ]
+    },
+    {
+      "title": "1. 자료를 한곳으로",
+      "subtitle": "반복 입력의 출발점 찾기",
+      "points": [
+        "메일·파일·전표 목록화",
+        "자료 유입 경로 정리",
+        "동일 항목 기준 만들기"
+      ]
+    },
+    {
+      "title": "2. 기준에 맞게 분류",
+      "subtitle": "임의 판단보다 확인 가능한 규칙",
+      "points": [
+        "종류·날짜·거래번호",
+        "중복 발견 및 표시",
+        "판단 어려우면 검토 요청"
+      ]
+    },
+    {
+      "title": "3. 마지막은 검증",
+      "subtitle": "민감한 업무는 승인 후 실행",
+      "points": [
+        "권한·금액·누락 확인",
+        "결과 기록 보존",
+        "실패 시 다시 확인"
+      ]
+    },
+    {
+      "title": "작게 자동화하세요",
+      "subtitle": "빠른 처리보다 정확한 반복",
+      "points": [
+        "한 작업으로 시작",
+        "결과를 측정",
+        "검증되면 범위 확장"
+      ]
+    }
+  ],
+  "description": "손으로 반복하는 업무를 줄이려면 도구부터 늘리기보다 업무 흐름과 검증 기준부터 정하는 것이 좋습니다. 이 영상은 원본 텍스트와 자체 제작 모션 그래픽입니다.",
+  "hashtags": [
+    "업무자동화",
+    "생산성",
+    "AI활용",
+    "업무팁"
+  ],
+  "publication": "DRAFT_ONLY",
+  "source_facts": "GENERAL_PRACTICAL_WORKFLOW_NOT_NEWS"
+}

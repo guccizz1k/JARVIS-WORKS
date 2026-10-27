@@ -1,0 +1,60 @@
+{
+  "schema": "jw-jteam-optional-capabilities-v1",
+  "harness": [
+    "J1",
+    "J2",
+    "J3",
+    "J4",
+    "J5",
+    "J6"
+  ],
+  "mode": "OFFLINE_FIRST_REVIEW_ONLY",
+  "external_network": "DENY_BY_DEFAULT",
+  "integration_owner": "jarvis_lead",
+  "no_existing_tool_replacement": true,
+  "capabilities": [
+    {
+      "name": "Penpot",
+      "skill": "jt-design-system-bridge",
+      "owner": "deputy_manager",
+      "status": "OFF_BY_DEFAULT",
+      "runtime": "EXPORTED_TOKENS_ONLY",
+      "source": "https://github.com/penpot/penpot",
+      "license_review": "MPL-2.0"
+    },
+    {
+      "name": "Whisper",
+      "skill": "jt-audio-research",
+      "owner": "deputy",
+      "status": "OFF_BY_DEFAULT",
+      "runtime": "TRANSCRIPT_VALIDATION_ONLY",
+      "source": "https://github.com/openai/whisper",
+      "license_review": "MIT"
+    },
+    {
+      "name": "Ollama",
+      "skill": "jt-local-model-evaluation",
+      "owner": "manager",
+      "status": "OFF_BY_DEFAULT",
+      "runtime": "OPT_IN_LOOPBACK_SYNTHETIC_ONLY",
+      "source": "https://github.com/ollama/ollama",
+      "license_review": "CHECK_MODEL_LICENSE"
+    },
+    {
+      "name": "n8n",
+      "skill": "jt-workflow-adapter",
+      "owner": "jarvis_lead",
+      "status": "OFF_BY_DEFAULT",
+      "runtime": "OPT_IN_LOOPBACK_EVENT_ONLY",
+      "source": "https://github.com/n8n-io/n8n",
+      "license_review": "SUSTAINABLE_USE_LICENSE"
+    }
+  ],
+  "no_auto_install": true,
+  "no_auto_model_download": true,
+  "no_public_url": true,
+  "no_provider_secret": true,
+  "no_production_deploy": true,
+  "actions_extra_usd_limit": 5,
+  "openai_monthly_krw_limit": 50000
+}

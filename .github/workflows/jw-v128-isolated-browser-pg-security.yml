@@ -3,6 +3,7 @@ name: JW V12.8 isolated browser PG17 and security proof
 on:
   push:
     branches:
+      - review/private-main-acceptance-20261027
       - review/v128-jteam-private-execution-hardening-20261026
   workflow_dispatch:
 
