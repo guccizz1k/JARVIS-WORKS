@@ -49,7 +49,9 @@ jobs:
           echo "PASS: original ancestry retained and current main app/DB/security/requirements unchanged"
       - name: Install product regression prerequisites
         run: |
-          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          # Full suite includes Gitingest isolated synthetic pilot; install its pinned
+          # test-only dependency without activating vendor network or business data.
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt -r requirements-jteam-external-pilot.txt
           python -m pip install 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
           sudo apt-get update -qq
           sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor
