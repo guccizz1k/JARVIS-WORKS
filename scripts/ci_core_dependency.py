@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 CONTRACT=ROOT/"config/core_dependency.json"
 WORKFLOW=ROOT/".github/workflows/jw-core-first-required.yml"
-CORE_SHA="80de56963a34f8ba37cf808c60829eb434d33cf9"
+CORE_SHA="49317324331759d3d9e49338dc591d67af1517f3"
 
 def verify(root=ROOT):
     root=Path(root)

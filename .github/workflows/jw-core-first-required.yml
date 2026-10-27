@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   core-first:
-    uses: guccizz1k/JARVIS-CORE/.github/workflows/core-works-preflight.yml@80de56963a34f8ba37cf808c60829eb434d33cf9
+    uses: guccizz1k/JARVIS-CORE/.github/workflows/core-works-preflight.yml@49317324331759d3d9e49338dc591d67af1517f3
     with:
       project: jarvis-works
   business-review:
