@@ -125,6 +125,8 @@ def role_guidance(role: str, instruction: str, *, domain: str | None = None,
     focus = obj["allowed_domains"][chosen]["role_focus"][role]
     from scripts.jw_jteam_code_context_board import role_instructions as codeboard_role
     codeboard_guidance = codeboard_role(role)
+    from scripts.jw_jteam_thinking import role_guidance as thinking_guidance
+    mental_framework = thinking_guidance(role)
     from scripts.jw_jteam_contextual_tools import role_guidance as optional_tool_guidance
     tool_guidance = optional_tool_guidance(role)
     social_method = ""
@@ -137,7 +139,7 @@ def role_guidance(role: str, instruction: str, *, domain: str | None = None,
         "or call paid models. Show actual evidence vs NOT RUN; no fake followers, "
         "copied or repetitive mass-produced media, unapproved account transfer "
         "or external upload of private source. Independent role-play is not "
-        "independent model execution." + social_method + tool_guidance + codeboard_guidance
+        "independent model execution." + social_method + tool_guidance + codeboard_guidance + mental_framework
     )
 
 
@@ -154,6 +156,11 @@ def _advice_for_tools(instruction: str, domain: str) -> dict:
 def _codeboard_advice(text: str, domain: str) -> dict:
     from scripts.jw_jteam_code_context_board import advise
     return advise(text, domain=domain)
+
+
+def _thinking_plan(task: str, domain: str) -> dict:
+    from scripts.jw_jteam_thinking import make_plan
+    return make_plan(task, domain=domain)
 
 
 def plan(instruction: str, *, domain: str | None = None,
@@ -180,6 +187,7 @@ def plan(instruction: str, *, domain: str | None = None,
                    "focus": obj["allowed_domains"][chosen]["role_focus"][name],
                    "execution_status": "NOT_RUN"} for name in ROLES],
         "stages": stages, "issues": issues,
+        "evidence_thinking_method": _thinking_plan(clean, chosen),
         "code_context_workboard_advice": _codeboard_advice(clean, chosen),
         "contextual_tool_advice": _advice_for_tools(clean, chosen),
         "social_format_strategy": (

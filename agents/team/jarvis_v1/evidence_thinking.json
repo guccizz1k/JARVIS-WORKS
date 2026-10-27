@@ -1,0 +1,141 @@
+{
+  "schema": "jw-jarvis-evidence-thinking-v1",
+  "source": "USER_PROVIDED_SEVEN_AI_TREND_IMAGES_2026_10_27",
+  "status": "METHOD_GUIDANCE_NOT_COGNITIVE_MODIFICATION",
+  "methods": {
+    "systems": {
+      "title": "System thinking and long-horizon strategy",
+      "domains": [
+        "software",
+        "business",
+        "research",
+        "everyday"
+      ],
+      "actions": [
+        "Identify the system boundary, actors and feedback loops",
+        "Separate leading indicators from final outcomes",
+        "Model 2 viable alternatives and major risks",
+        "Choose a reversible test and its decision threshold"
+      ],
+      "metric": "Evidence-backed decision quality and measured downstream outcome"
+    },
+    "learning": {
+      "title": "Evidence-informed spaced learning",
+      "domains": [
+        "software",
+        "research",
+        "everyday"
+      ],
+      "actions": [
+        "Define one observable performance skill",
+        "Practice retrieval from memory instead of rereading only",
+        "Interleave a second related problem type",
+        "Review on days 1, 3 and 7, adjusting to measured errors"
+      ],
+      "metric": "Unaided recall and new-problem transfer, not speed multipliers"
+    },
+    "apprenticeship": {
+      "title": "Expert mentoring by deliberate practice",
+      "domains": [
+        "software",
+        "business",
+        "research",
+        "social_media"
+      ],
+      "actions": [
+        "Assess current work samples against explicit rubric",
+        "Break work into novice-to-advanced milestones",
+        "Assign one realistic simulation or real-world exercise",
+        "Independently review and revise based on errors"
+      ],
+      "metric": "Rubric scores on authentic tasks and error recurrence"
+    },
+    "reflection": {
+      "title": "Decision journal and metacognitive feedback",
+      "domains": [
+        "software",
+        "business",
+        "research",
+        "everyday"
+      ],
+      "actions": [
+        "Record decision, assumptions and date before outcome",
+        "Identify counterexamples and confidence calibration",
+        "Compare predicted and observed results",
+        "Change a process only when there is evidence"
+      ],
+      "metric": "Calibration, decision outcomes and repeated-error rate"
+    },
+    "life_design": {
+      "title": "User-directed priorities and sustainable routines",
+      "domains": [
+        "everyday",
+        "business"
+      ],
+      "actions": [
+        "Ask which values and goals the user explicitly selects",
+        "Map calendar/energy constraints without sensitive assumptions",
+        "Design one optional habit with a sustainable workload",
+        "Review user-reported usefulness; preserve autonomy"
+      ],
+      "metric": "User-chosen goal progress and subjective usefulness, self-reported"
+    },
+    "leverage": {
+      "title": "High-leverage work and realistic constraints",
+      "domains": [
+        "software",
+        "business",
+        "research",
+        "social_media",
+        "everyday"
+      ],
+      "actions": [
+        "Find repeated steps and identify bottleneck with observed evidence",
+        "Prioritize reuse, delegation or automation by risk and cost",
+        "Pilot one reversible low-cost change with quality gates",
+        "Measure actual time saved, correctness and new overhead"
+      ],
+      "metric": "Measured time saved net of review costs, quality and reliability"
+    },
+    "aspiration": {
+      "title": "Values-aligned long-term development",
+      "domains": [
+        "everyday",
+        "business",
+        "research"
+      ],
+      "actions": [
+        "Translate desired future identity into optional observable behaviors",
+        "Choose one near-term milestone and supportive context",
+        "Rehearse with a small real-world task",
+        "Evaluate progress and revise without psychological claims"
+      ],
+      "metric": "User-defined behavior completion and measured progress"
+    }
+  },
+  "disallowed_claims": [
+    "10x_learning_guarantee",
+    "top_1_percent_in_90_days",
+    "ten_years_in_one_year_guarantee",
+    "billionaire_neural_install",
+    "personality_or_memory_reprogramming",
+    "mind_reading",
+    "guaranteed_wealth_or_health"
+  ],
+  "default_selection": {
+    "software": "systems",
+    "social_media": "apprenticeship",
+    "business": "leverage",
+    "research": "learning",
+    "everyday": "reflection"
+  },
+  "evidence_required": true,
+  "user_autonomy": true,
+  "no_external_calls": true,
+  "no_private_data_upload": true,
+  "no_automatic_schedule": true,
+  "no_paid_resources": true,
+  "no_main_merge": true,
+  "scores": "NOT_MEASURED",
+  "change_control": "J1_J6_GATE_AND_APPROVAL"
+}

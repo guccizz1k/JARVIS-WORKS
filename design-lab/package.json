@@ -1,0 +1,15 @@
+{
+  "name": "jw-design-lab",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/motion.js --bundle --format=esm --target=es2022 --outfile=dist/motion.bundle.js"
+  },
+  "dependencies": {
+    "motion": "14.6.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

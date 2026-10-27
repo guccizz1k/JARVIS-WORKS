@@ -30,7 +30,8 @@
       "skills": [
         "jw-solution-innovation",
         "jw-external-intelligence",
-        "jt-audio-research"
+        "jt-audio-research",
+        "jw-cognitive-strategy"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -49,7 +50,9 @@
       "skills": [
         "jw-ui-ux-accessibility",
         "jw-external-intelligence",
-        "jt-design-system-bridge"
+        "jt-design-system-bridge",
+        "jw-design-intelligence",
+        "jw-component-intake"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -73,7 +76,8 @@
         "jw-root-cause-debugging",
         "jw-trade-document-integrity",
         "jw-external-intelligence",
-        "jt-local-model-evaluation"
+        "jt-local-model-evaluation",
+        "jw-motion-interactions"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -95,7 +99,8 @@
         "jw-tenant-security-review",
         "jw-messenger-ocr-recovery",
         "jw-render-capacity-cost",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jw-cognitive-strategy"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -117,7 +122,8 @@
         "jw-verified-delivery",
         "jw-evidence-retro",
         "jw-external-intelligence",
-        "jt-workflow-adapter"
+        "jt-workflow-adapter",
+        "jw-cognitive-strategy"
       ],
       "can_commit": true,
       "may_execute_paid_tools": false,
@@ -145,5 +151,7 @@
   "optional_capabilities_contract": "agents/team/jarvis_v1/capability_routing.json",
   "optional_capabilities_mode": "DISABLED_BY_DEFAULT",
   "code_context_workboard_contract": "agents/team/jarvis_v1/code_context_workboard.json",
-  "code_context_workboard_mode": "OFFLINE_REVIEW_ONLY"
+  "code_context_workboard_mode": "OFFLINE_REVIEW_ONLY",
+  "pro_design_system_contract": "agents/team/jarvis_v1/pro_design_system.json",
+  "pro_design_execution": "ISOLATED_LAB_ONLY"
 }

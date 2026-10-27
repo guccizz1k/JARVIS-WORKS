@@ -31,7 +31,7 @@ class TestRegistry(unittest.TestCase):
         self.assertIn(needle, ' '.join(audit(self.root)))
 
     def test_valid_fixture(self):self.assertEqual(audit(self.root), [])
-    def test_exactly_fifteen(self):self.assertEqual((len(APPROVED),len(NEW)),(15,13))
+    def test_exactly_nineteen(self):self.assertEqual((len(APPROVED),len(NEW)),(19,17))
     def test_unknown_skill(self):
         (self.root/'.agents/skills/random-upstream').mkdir();self.fail_contains('unreviewed skill')
     def test_missing_skill(self):
@@ -106,6 +106,16 @@ class TestRegistry(unittest.TestCase):
         file = self.root/'.agents/skills/jw-api-property-testing/SKILL.md'
         file.write_text(file.read_text().replace('BLOCKED','PENDING'))
         self.fail_contains('missing safety policy')
+
+    def test_cognitive_strategy_skill_missing_is_rejected(self):
+        (self.root/'.agents/skills/jw-cognitive-strategy/SKILL.md').unlink()
+        self.fail_contains('unsafe skill path')
+
+    def test_cognitive_skill_requires_j1_j6_bounds(self):
+        p=self.root/'.agents/skills/jw-cognitive-strategy/SKILL.md'
+        p.write_text(p.read_text().replace('BLOCKED','PENDING'))
+        self.fail_contains('missing safety policy')
+
 
 
 if __name__ == '__main__':
