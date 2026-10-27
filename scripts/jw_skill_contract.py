@@ -15,6 +15,8 @@ NEW = frozenset({'jw-tenant-security-review', 'jw-trade-document-integrity',
                  'jw-ui-ux-accessibility', 'jw-root-cause-debugging',
                  'jw-solution-innovation', 'jw-external-intelligence',
                  'jw-api-property-testing',
+                 'jw-design-intelligence', 'jw-motion-interactions',
+                 'jw-component-intake',
                  'jt-design-system-bridge', 'jt-audio-research',
                  'jt-local-model-evaluation', 'jt-workflow-adapter'})
 APPROVED = OLD | NEW

@@ -112,7 +112,7 @@ def intake_21st_component(proposal: dict) -> dict:
     parsed = urlsplit(source)
     if (parsed.scheme != "https" or parsed.hostname not in TRUSTED_HOSTS
             or parsed.username or parsed.password or parsed.port is not None
-            or not parsed.path or parsed.fragment):
+            or not parsed.path or parsed.fragment or parsed.query):
         raise ValueError("UNTRUSTED_COMPONENT_SOURCE")
     if proposal["framework"] not in ("react", "vanilla"):
         raise ValueError("UNSUPPORTED_FRAMEWORK")

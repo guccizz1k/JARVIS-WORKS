@@ -107,7 +107,7 @@ class DesignFactoryTests(unittest.TestCase):
 
     def test_javascript_control_char_rejected(self):
         with self.assertRaisesRegex(ValueError, "CONTROL_CHARACTER"):
-            intake_21st_component(dict(EXAMPLE, title="x\\ny"))
+            intake_21st_component(dict(EXAMPLE, title="x\ny"))
 
     def test_unsupported_framework(self):
         with self.assertRaisesRegex(ValueError, "UNSUPPORTED_FRAMEWORK"):
