@@ -1,0 +1,62 @@
+{
+  "schema": "jw-jteam-pro-design-v1",
+  "harness": [
+    "J1",
+    "J2",
+    "J3",
+    "J4",
+    "J5",
+    "J6"
+  ],
+  "owner": "jarvis_lead",
+  "status": "REVIEW_ONLY",
+  "product_stack": "HTML_CSS_VANILLA_JS_FASTAPI",
+  "sources": [
+    {
+      "id": "ui-ux-pro-max",
+      "url": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+      "use": "CURATED_DESIGN_GUIDANCE_NOT_AUTO_INSTALLED",
+      "license": "MIT"
+    },
+    {
+      "id": "motion",
+      "url": "https://github.com/motiondivision/motion",
+      "use": "PINNED_VANILLA_JS_PILOT",
+      "version": "14.6.0",
+      "license": "MIT"
+    },
+    {
+      "id": "21st-mcp",
+      "url": "https://github.com/21st-dev/magic-mcp",
+      "use": "OFFLINE_COMPONENT_INTAKE_ONLY",
+      "license": "UPSTREAM_AND_COMPONENT_LICENSE_REVIEW"
+    }
+  ],
+  "colors": {
+    "background": "#f5f7fa",
+    "surface": "#ffffff",
+    "text": "#1b2838",
+    "muted": "#425268",
+    "primary": "#126c70",
+    "primary_hover": "#0d5559",
+    "border": "#dbe4ea",
+    "focus": "#15817e"
+  },
+  "radius_px": {
+    "card": 16,
+    "button": 10
+  },
+  "motion_ms": {
+    "fast": 120,
+    "normal": 240
+  },
+  "no_auto_install": true,
+  "no_auto_mcp_connection": true,
+  "no_provider_keys": true,
+  "no_external_upload": true,
+  "no_automatic_spend": true,
+  "no_production_changes": true,
+  "private_repo_only": true,
+  "no_main_merge": true,
+  "approval": "USER_RELEASE_SIGNOFF_REQUIRED"
+}
