@@ -1,0 +1,76 @@
+name: JW isolated pro-design Motion real Chromium acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "design-lab/**"
+      - "scripts/jw_jteam_design_factory.py"
+      - "agents/team/jarvis_v1/pro_design_system.json"
+      - ".agents/skills/jw-design-intelligence/SKILL.md"
+      - ".agents/skills/jw-motion-interactions/SKILL.md"
+      - ".agents/skills/jw-component-intake/SKILL.md"
+      - "tests/test_jw_jteam_design_factory.py"
+      - "AGENTS.md"
+      - ".github/workflows/jw-design-system-pilot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-ui-design-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-design:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      JTEAM_PAID_API_APPROVED: "NO"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check owner privacy and price boundary
+        run: |
+          python - <<'PY'
+          import json,os
+          data=json.load(open(os.environ["GITHUB_EVENT_PATH"],encoding="utf8"))
+          assert data["repository"]["private"] is True
+          assert os.environ["JTEAM_PAID_API_APPROVED"] == "NO"
+          assert not os.environ.get("API_KEY_21ST")
+          print("PASS: PRIVATE and no 21st key or paid model calls")
+          PY
+      - name: Offline skill/token test
+        run: |
+          python scripts/jw_jteam_design_factory.py --check
+          python -m unittest discover -s tests -p 'test_jw_jteam_design_factory.py' -v
+          python -m unittest discover -s tests -p 'test_jw_skill_contract.py' -v
+      - name: Install pinned local Motion and build isolated bundle
+        working-directory: design-lab
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+          node --check dist/motion.bundle.js
+      - name: Install Chromium for isolated visual acceptance
+        run: |
+          python -m pip install 'playwright==1.56.0'
+          python -m playwright install --with-deps chromium
+      - name: Browser real UI and reduced-motion proof
+        run: python design-lab/e2e_browser.py
+      - name: Save responsive screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-design-lab-responsive-proof
+          path: design-lab/evidence/*.png
+          retention-days: 3
+          if-no-files-found: ignore
