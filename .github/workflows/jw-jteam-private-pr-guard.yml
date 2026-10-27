@@ -2,7 +2,7 @@ name: J team private PR guard (no paid models)
 
 on:
   pull_request:
-    branches: [main, review/v131-jteam-four-skills-20261027, review/v132-social-format-transfer-20261027]
+    branches: [main, review/v131-jteam-four-skills-20261027, review/v132-social-format-transfer-20261027, review/v133-contextual-virality-delphi-20261027]
     paths:
       - "agents/team/jarvis_v1/**"
       - ".agents/skills/jw-*/SKILL.md"
@@ -69,6 +69,7 @@ jobs:
           python scripts/jw_jteam_optional_capabilities.py --check
           python scripts/jw_jteam_social_format.py --check
           python scripts/jw_jteam_contextual_tools.py --check
+          python scripts/jw_jteam_code_context_board.py --check
           python -m scripts.jw_evidence_gate --check-project .
           python scripts/jw_jteam_external_sources.py --check
           python -m scripts.jw_jteam_private_cli

@@ -1,0 +1,57 @@
+{
+  "schema": "jw-jteam-code-context-workboard-v1",
+  "harness": [
+    "J1",
+    "J2",
+    "J3",
+    "J4",
+    "J5",
+    "J6"
+  ],
+  "authority": "J5_IS_SOURCE_OF_TRUTH",
+  "execution": "OFFLINE_REVIEW_ONLY",
+  "required_order": [
+    "deputy",
+    "deputy_manager",
+    "manager",
+    "director",
+    "jarvis_lead"
+  ],
+  "tools": [
+    {
+      "id": "codebase-memory-mcp",
+      "source": "https://github.com/DeusData/codebase-memory-mcp",
+      "usage": "LOCAL_GRAPH_EXPORT_ONLY",
+      "risk": "INSTALLER_CAN_WRITE_AGENT_CONFIG_AND_START_DAEMON",
+      "license": "MIT"
+    },
+    {
+      "id": "paperclip",
+      "source": "https://github.com/paperclipai/paperclip",
+      "usage": "READ_ONLY_TASK_SNAPSHOT_ONLY",
+      "risk": "HEARTBEAT_CAN_EXECUTE_AGENTS_AND_SPEND",
+      "license": "MIT"
+    },
+    {
+      "id": "trail-code",
+      "source": "https://github.com/trailhq/Trail-Code",
+      "usage": "COMPARISON_CANDIDATE_NOT_INSTALLED",
+      "risk": "INSTALLER_CAN_INSTALL_HOOKS",
+      "license": "VERIFY_PINNED_RELEASE"
+    }
+  ],
+  "no_auto_install": true,
+  "no_heartbeats": true,
+  "no_external_auth": true,
+  "no_public_port": true,
+  "no_paid_api": true,
+  "no_remote_code_upload": true,
+  "no_job_status_mutation": true,
+  "no_j5_state_replacement": true,
+  "no_main_merge": true,
+  "no_prod_deploy": true,
+  "no_production_data": true,
+  "budget_actions_extra_usd": 5,
+  "budget_api_krw": 50000,
+  "evidence": "EXACT_SHA_SYNTHETIC_FIXTURES_NOT_REAL_VENDOR_PROOF"
+}
