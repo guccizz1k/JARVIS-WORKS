@@ -1,0 +1,31 @@
+name: WORKS product checks require JARVIS-CORE first
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-first:
+    uses: guccizz1k/JARVIS-CORE/.github/workflows/core-works-preflight.yml@80de56963a34f8ba37cf808c60829eb434d33cf9
+    with:
+      project: jarvis-works
+  business-review:
+    needs: core-first
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify pinned CORE call and product source boundaries
+        run: |
+          python3 -m scripts.ci_core_dependency
+          python3 -m unittest discover -s tests -p 'test_ci_core_dependency.py' -v
+      - name: Preserve business modules and syntax
+        run: |
+          python3 -m compileall -q app scripts
+          echo "PASS: CORE first, business source syntax review. Full product regression separately required."
