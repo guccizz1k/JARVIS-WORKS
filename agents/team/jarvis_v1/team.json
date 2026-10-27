@@ -143,5 +143,7 @@
   ],
   "universal_runtime_status": "PLAN_ONLY_UNTIL_ACTUAL_CONNECTORS_AND_MODELS",
   "optional_capabilities_contract": "agents/team/jarvis_v1/capability_routing.json",
-  "optional_capabilities_mode": "DISABLED_BY_DEFAULT"
+  "optional_capabilities_mode": "DISABLED_BY_DEFAULT",
+  "code_context_workboard_contract": "agents/team/jarvis_v1/code_context_workboard.json",
+  "code_context_workboard_mode": "OFFLINE_REVIEW_ONLY"
 }

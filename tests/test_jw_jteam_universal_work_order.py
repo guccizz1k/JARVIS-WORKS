@@ -162,5 +162,35 @@ class UniversalJTeamOrderTests(unittest.TestCase):
 
 
 
+    def test_codebase_memory_impact_hint_in_actual_work_order(self):
+        result = plan("코드 함수 수정 영향 테스트", domain="software")
+        evidence = result["code_context_workboard_advice"]
+        self.assertEqual(evidence["candidates"][0]["id"], "codebase-memory-mcp")
+        self.assertEqual(evidence["alternative"], "trail-code")
+        self.assertEqual(evidence["system_of_record"], "J5")
+        self.assertFalse(evidence["external_runtime_executed"])
+        self.assertEqual(result["independent_models_run"], 0)
+
+    def test_paperclip_dashboard_is_read_only_plan(self):
+        result = plan("J TEAM 에이전트 작업 현황 확인", domain="everyday")
+        note = result["code_context_workboard_advice"]
+        self.assertEqual(note["candidates"][0]["id"], "paperclip")
+        self.assertFalse(note["configuration_written"])
+        self.assertEqual(note["cost_usd"], 0)
+        self.assertEqual(note["release"], "BLOCKED")
+        self.assertFalse(result["publication_performed"])
+
+    def test_codeboard_not_for_instagram_writing(self):
+        result = plan("인스타그램 콘텐츠 글 써줘", domain="social_media")
+        self.assertEqual(result["code_context_workboard_advice"]["candidates"], [])
+        self.assertIn("MANDATORY_SOCIAL_FORMAT_TRANSFER_V132",
+                      role_guidance("manager", "인스타 글", domain="social_media"))
+
+    def test_role_review_no_hidden_autonomous_execution(self):
+        for role in ROLES:
+            policy = role_guidance(role, "코드 수정", domain="software")
+            self.assertIn("OPTIONAL_CODE_CONTEXT_WORKBOARD_V134", policy)
+
+
 if __name__ == "__main__":
     unittest.main()
