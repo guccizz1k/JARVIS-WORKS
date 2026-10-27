@@ -127,17 +127,19 @@ def analyze_code_graph(export: dict) -> dict:
             raise ValueError("GRAPH_EDGE_OUTSIDE_INDEX")
         reverse.setdefault(dst, set()).add(src)
     missing = sorted(set(changed).difference(files))
+    if tests.difference(files):
+        raise ValueError("GRAPH_TEST_OUTSIDE_INDEX")
     fresh = source_sha == index_sha
     seen = set(changed) & files
-    queue = deque((p, 0) for p in seen)
+    # Traverse all reachable indexed nodes. A fixed depth would silently miss
+    # long dependency chains and create a false sense of impact coverage.
+    queue = deque(seen)
     while queue:
-        path, depth = queue.popleft()
-        if depth >= 6:
-            continue
+        path = queue.popleft()
         for dependent in sorted(reverse.get(path, ())):
             if dependent not in seen:
                 seen.add(dependent)
-                queue.append((dependent, depth + 1))
+                queue.append(dependent)
     related = sorted(t for t in seen if t in tests)
     digest = hashlib.sha256(json.dumps({
         "sha": source_sha, "changed": sorted(changed),

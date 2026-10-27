@@ -172,5 +172,27 @@ class ContextBoardTests(unittest.TestCase):
             role_instructions("outsider")
 
 
+    def test_dependency_chain_beyond_six_hops_is_not_silently_truncated(self):
+        g = {
+            "sha": SHA, "indexed_sha": SHA,
+            "files": [f"src/chain{i}.py" for i in range(9)] + ["tests/test_chain.py"],
+            "changed": ["src/chain0.py"],
+            "edges": [{"src": f"src/chain{i+1}.py",
+                       "dst": f"src/chain{i}.py"} for i in range(8)]
+                     + [{"src": "tests/test_chain.py", "dst": "src/chain8.py"}],
+            "related_tests": ["tests/test_chain.py"],
+        }
+        out = analyze_code_graph(g)
+        self.assertEqual(len(out["impact_candidate_paths"]), 10)
+        self.assertEqual(out["related_test_candidates"], ["tests/test_chain.py"])
+        self.assertEqual(out["status"], "GRAPH_EXPORT_REVIEW")
+
+    def test_exported_test_not_in_index_is_rejected(self):
+        g = deepcopy(GRAPH)
+        g["related_tests"] = ["tests/test_missing.py"]
+        with self.assertRaisesRegex(ValueError, "GRAPH_TEST_OUTSIDE_INDEX"):
+            analyze_code_graph(g)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -29,3 +29,5 @@ The existing private PR CI runs these and all Python regression. Do not interpre
 
 ## Rollback
 Revert this V13.4 change as a separate branch/commit; retain existing V13.0–V13.3 candidates, team manifest, J1–J6 RLS and J5 ledger unchanged.
+
+**Graph correctness safeguard:** Full reverse dependency traversal is mandatory even for chains deeper than 6 edges; declared related tests missing from the indexed file universe fail closed. This detects candidate scope only and cannot replace complete regression. Synthetic provenance is still not vendor-execution proof.
