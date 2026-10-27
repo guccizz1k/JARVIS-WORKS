@@ -3,6 +3,7 @@ name: JW J1-J6 unified engineering acceptance (review only)
 on:
   push:
     branches:
+      - review/private-main-acceptance-20261027
       - review/j1-j6-unified-acceptance-20261024
       - review/v91-live-pg-gateway-alignment-20261024
       - review/v92-postgres-quote-write-j1j6-20261025

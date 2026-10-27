@@ -3,6 +3,7 @@ name: J team V13 zero-filming short build
 on:
   push:
     branches:
+      - review/private-main-acceptance-20261027
       - review/v130-jteam-universal-work-orders-20261026
     paths:
       - "scripts/jw_jteam_faceless_render.py"
