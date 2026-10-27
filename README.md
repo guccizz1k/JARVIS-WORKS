@@ -1,3 +1,6 @@
+# JARVIS-WORKS — BUSINESS PRODUCT (CORE-first planned)
+This repository contains B2B customer product code. Generic J TEAM/J1–J6 development orchestration has been copied to JARVIS-CORE review PR and is pending verified migration. Existing local copies stay only for compatibility. The CORE-first required private reusable workflow needs GitHub Actions private sharing enabled by the owner; see config/core_dependency.json. No production launch or main merge is implied.
+
 # JARVIS WORKS V2.8 — 첨부파일/읽음기록 PostgreSQL 보안 하네스 강화 (미배포)
 
 - **사용 중인 FastAPI 웹앱은 여전히 SQLite 기반 데모이며, 기업 실데이터 입력 금지**입니다. PostgreSQL 17용 V2.8 패치·공격 검사는 기존 V2.7 정책 위에 **일회성 격리 시험 DB**에서만 적용하는 별도 후보입니다.

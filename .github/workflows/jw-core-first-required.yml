@@ -1,0 +1,15 @@
+name: WORKS product checks require JARVIS-CORE first
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-first:
+    uses: guccizz1k/JARVIS-CORE/.github/workflows/core-works-preflight.yml@49317324331759d3d9e49338dc591d67af1517f3
+    with:
+      project: jarvis-works
+  business-review:
+    needs: core-first
+    uses: ./.github/workflows/jw-j1-j6-unified-acceptance.yml

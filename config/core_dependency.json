@@ -1,0 +1,11 @@
+{
+  "schema": "jw-core-first-dependency-v1",
+  "project": "jarvis-works",
+  "core_repo": "guccizz1k/JARVIS-CORE",
+  "core_sha": "49317324331759d3d9e49338dc591d67af1517f3",
+  "required": true,
+  "fail_closed": true,
+  "no_customer_data_transfer": true,
+  "no_paid_model_runtime": true,
+  "operation": "REVIEW_CI_ONLY"
+}
