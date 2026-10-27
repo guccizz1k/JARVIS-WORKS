@@ -191,6 +191,23 @@ class UniversalJTeamOrderTests(unittest.TestCase):
             policy = role_guidance(role, "코드 수정", domain="software")
             self.assertIn("OPTIONAL_CODE_CONTEXT_WORKBOARD_V134", policy)
 
+    def test_seven_method_brief_attached_to_existing_five_role_plan(self):
+        for domain in ("software", "social_media", "business", "research", "everyday"):
+            with self.subTest(domain=domain):
+                plan_result = plan("합성 연습 과제", domain=domain)
+                p = plan_result["evidence_thinking_method"]
+                self.assertEqual(p["domain"], domain)
+                self.assertEqual(p["actual_improvement"], "NOT_MEASURED")
+                self.assertEqual(p["paid_calls"], 0)
+                self.assertEqual(p["release"], "BLOCKED")
+                self.assertEqual(plan_result["independent_models_run"], 0)
+
+    def test_all_five_role_instructions_inherit_seven_method_policy(self):
+        for name in ROLES:
+            hints = role_guidance(name, "원인 분석", domain="software")
+            self.assertIn("JARVIS_SEVEN_METHODS_V136", hints)
+            self.assertIn("J1-J6", hints)
+
 
 if __name__ == "__main__":
     unittest.main()

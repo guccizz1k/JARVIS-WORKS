@@ -30,7 +30,8 @@
       "skills": [
         "jw-solution-innovation",
         "jw-external-intelligence",
-        "jt-audio-research"
+        "jt-audio-research",
+        "jw-cognitive-strategy"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -98,7 +99,8 @@
         "jw-tenant-security-review",
         "jw-messenger-ocr-recovery",
         "jw-render-capacity-cost",
-        "jw-external-intelligence"
+        "jw-external-intelligence",
+        "jw-cognitive-strategy"
       ],
       "can_commit": false,
       "may_execute_paid_tools": false,
@@ -120,7 +122,8 @@
         "jw-verified-delivery",
         "jw-evidence-retro",
         "jw-external-intelligence",
-        "jt-workflow-adapter"
+        "jt-workflow-adapter",
+        "jw-cognitive-strategy"
       ],
       "can_commit": true,
       "may_execute_paid_tools": false,
