@@ -43,5 +43,13 @@ class CoreDependencyTests(unittest.TestCase):
         def edit(root):
             path=root/"config/core_dependency.json";data=path.read_bytes();path.unlink();p=root/"data.json";p.write_bytes(data);path.symlink_to(p)
         self.fixture(edit)
+    def test_project_full_gate_depends_on_core(self):
+        caller=(ROOT/".github/workflows/jw-core-first-required.yml").read_text(encoding="utf8")
+        suite=(ROOT/".github/workflows/jw-j1-j6-unified-acceptance.yml").read_text(encoding="utf8")
+        self.assertIn("needs: core-first", caller)
+        self.assertIn("uses: ./.github/workflows/jw-j1-j6-unified-acceptance.yml", caller)
+        self.assertIn("  workflow_call:", suite)
+        self.assertIn("j1-j6-independent-aggregate:", suite)
+
 if __name__=="__main__":
     unittest.main()
