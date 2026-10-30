@@ -49,13 +49,16 @@ async def verify() -> str:
                     _HOST + path, headers={"X-JW-Stage-Key": key})
                 if no_cookie.status_code != 401:
                     return "FAIL_MISSING_SESSION_" + str(n) + "_" + str(no_cookie.status_code)
-                forged = await c.get(
-                    _HOST + path,
-                    headers={
-                        "X-JW-Stage-Key": key,
-                        "Cookie": "__Host-jw_session=not-a-real-verified-session-token-abcdefghijk",
-                    },
-                )
+                # Retry once only on transient gateway errors caused by
+                # zero-downtime worker rotation; a persistent 5xx stays FAIL.
+                forged_headers = {
+                    "X-JW-Stage-Key": key,
+                    "Cookie": "__Host-jw_session=not-a-real-verified-session-token-abcdefghijk",
+                }
+                forged = await c.get(_HOST + path, headers=forged_headers)
+                if forged.status_code in (502, 503, 504):
+                    await asyncio.sleep(4)
+                    forged = await c.get(_HOST + path, headers=forged_headers)
                 if forged.status_code != 401:
                     return "FAIL_FORGED_SESSION_" + str(n) + "_" + str(forged.status_code)
         return "PASS_HOSTED_HTTPS_STAGE_GATE_NO_SESSION_FORGED_SESSION"
@@ -65,7 +68,9 @@ async def verify() -> str:
 
 
 async def _after_startup() -> None:
-    await asyncio.sleep(3)
+    # Render's old worker may still be draining after new uvicorn startup.
+    # Probe external HTTPS after the service cutover settles.
+    await asyncio.sleep(14)
     result = await verify()
     _LOG.warning("STAGE1_HOSTED_HTTPS_NEGATIVE=%s", result)
 
