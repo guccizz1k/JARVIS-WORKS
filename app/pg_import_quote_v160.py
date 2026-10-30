@@ -131,7 +131,8 @@ def create_quote_from_confirmed_import(
                 raise HTTPException(409,"Import cannot be converted")
             if (type(filehash) is not str or not _SHA.fullmatch(filehash)):
                 raise HTTPException(409,"Source file hash unavailable")
-            if not hmac.compare_digest(digest,payload.preview_digest):
+            if (type(digest) is not str or not _SHA.fullmatch(digest)
+                or not hmac.compare_digest(digest,payload.preview_digest)):
                 raise HTTPException(409,"Preview changed; review again")
             doc,day,lines,money=_verified_doc(encoded,digest)
             if (payload.confirmed_customer!=doc["company"] or
