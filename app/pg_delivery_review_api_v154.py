@@ -42,7 +42,8 @@ def _issuer_keys() -> tuple[bytes, bytes]:
     """Read only externally controlled verification secrets; never log them."""
     a = os.environ.get("JW_V154_DISPATCH_VERIFY_KEY_HEX", "")
     b = os.environ.get("JW_V154_RECEIPT_VERIFY_KEY_HEX", "")
-    if not (_HEX_KEY.fullmatch(a) and _HEX_KEY.fullmatch(b)\n            and len(a) % 2 == 0 and len(b) % 2 == 0):
+    if not (_HEX_KEY.fullmatch(a) and _HEX_KEY.fullmatch(b)
+            and len(a) % 2 == 0 and len(b) % 2 == 0):
         raise RuntimeError("V154 external issuer verification keys unavailable")
     dispatch, receipt = bytes.fromhex(a), bytes.fromhex(b)
     if hmac.compare_digest(dispatch, receipt):
