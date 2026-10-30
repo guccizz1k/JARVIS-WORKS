@@ -55,6 +55,35 @@ def create_app():
             return {"mode":"sealed-awaiting-stage-key","release":"BLOCKED","stage1":"FAIL"}
         return ProtectedStage(app,"")
     enabled=jw_v104_standalone.preflight()
+    if not enabled:
+        # Report names of failed checks only; never echo a DSN or password.
+        import logging
+        bad = []
+        checks = {
+            "DEV_ENV": os.getenv("JW_ENV") in ("dev","development","test"),
+            "API_ACK": os.getenv("JW_STAGE_API_ACK") == jw_v104_standalone.ACK,
+            "INSECURE_DEV": os.getenv("JW_INSECURE_LOCAL_DEV") != "1",
+            "SUPAVISOR_ACK": os.getenv("JW_STAGE1_SUPAVISOR_ACK") == "V134_REVIEW_POOLER_ONLY",
+            "EXPECTED_HOST": bool(os.getenv("JW_STAGE_EXPECTED_DB_HOST")),
+            "EXPECTED_DATABASE": bool(os.getenv("JW_STAGE_EXPECTED_DB_NAME")),
+            "DISTINCT_DSN": os.getenv("JW_PG_STAGE_DSN", "") != os.getenv("JW_PG_AUTH_STAGE_DSN", ""),
+            "TRADE_DSN": jw_v104_standalone._safe_dsn(
+                os.getenv("JW_PG_STAGE_DSN", ""), "jw_trade_gateway_v90"),
+            "AUTH_DSN": jw_v104_standalone._safe_dsn(
+                os.getenv("JW_PG_AUTH_STAGE_DSN", ""), "jw_auth_gateway_v90"),
+        }
+        for name, expected in jw_v104_standalone.REQUIRED_MODES.items():
+            checks["MODE_" + name] = os.getenv(name) == expected
+        try:
+            origins = jw_v104_standalone.pg_v90_integrated_entry._origins()
+            checks["HTTPS_ORIGIN"] = (len(origins) == 1
+                and jw_v104_standalone._safe_origin(next(iter(origins))))
+        except Exception:
+            checks["HTTPS_ORIGIN"] = False
+        bad = [name for name, passed in checks.items() if not passed]
+        logging.getLogger("jarvis.stage1").warning(
+            "STAGE1_CONFIG_PREFLIGHT=BLOCKED invalid_checks=%s",
+            ",".join(bad) if bad else "UNKNOWN")
     if enabled:
         # Render connects with its own role-scoped DSNs; never infer live DB
         # access from syntactically valid env settings or a green HTTP deploy.
