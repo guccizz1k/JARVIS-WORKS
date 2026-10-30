@@ -125,3 +125,57 @@ BEGIN
  OR (SELECT count(*) FROM jw_dev.review_delivery_items_v151)<>1
  THEN RAISE EXCEPTION 'FAIL_V151_INVALID_TEST_LEFT_PARTIAL_DATA'; END IF;
 END $v151_assert$;
+
+DO $v151_source_assert$
+DECLARE rejected boolean;
+BEGIN
+ rejected:=false;
+ BEGIN
+  INSERT INTO jw_dev.review_delivery_receipts_v151
+    (order_id,org_id,source_sha256,evidence_sha256,
+     dispatch_document_sha256,recipient_document_sha256,
+     dispatch_actor,recipient_actor,subtotal_krw,vat_krw,total_krw)
+   VALUES('jw-v151-order','jw-v151-foreign',repeat('1',64),repeat('b',64),
+          repeat('3',64),repeat('4',64),repeat('5',32),repeat('6',32),
+          7000,700,7700);
+ EXCEPTION WHEN check_violation THEN rejected:=true;
+ END;
+ IF NOT rejected THEN RAISE EXCEPTION 'FAIL_V151_FOREIGN_TENANT_ORDER'; END IF;
+
+ rejected:=false;
+ BEGIN
+  INSERT INTO jw_dev.review_delivery_items_v151
+    (order_id,source_item_id,position,quantity,unit_price_krw)
+   VALUES('jw-v151-order','jw-v151-item',1,2,3500);
+ EXCEPTION WHEN check_violation THEN rejected:=true;
+ END;
+ IF NOT rejected THEN RAISE EXCEPTION 'FAIL_V151_WRONG_SOURCE_POSITION'; END IF;
+
+ rejected:=false;
+ BEGIN
+  INSERT INTO jw_dev.review_delivery_items_v151
+    (order_id,source_item_id,position,quantity,unit_price_krw)
+   VALUES('jw-v151-order','jw-v151-item',0,3,3500);
+ EXCEPTION WHEN check_violation THEN rejected:=true;
+ END;
+ IF NOT rejected THEN RAISE EXCEPTION 'FAIL_V151_WRONG_SOURCE_QUANTITY'; END IF;
+
+ rejected:=false;
+ BEGIN
+  INSERT INTO jw_dev.review_delivery_items_v151
+    (order_id,source_item_id,position,quantity,unit_price_krw)
+   VALUES('jw-v151-order','jw-v151-item',0,2,99999);
+ EXCEPTION WHEN check_violation THEN rejected:=true;
+ END;
+ IF NOT rejected THEN RAISE EXCEPTION 'FAIL_V151_WRONG_SOURCE_PRICE'; END IF;
+
+ IF EXISTS(
+  SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+   WHERE n.nspname='jw_dev' AND p.proname IN
+         ('v151_order_source_guard','v151_line_source_guard')
+     AND (p.prosecdef OR EXISTS(
+       SELECT 1 FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) acl
+        WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE'
+     ))
+ ) THEN RAISE EXCEPTION 'FAIL_V151_PUBLIC_OR_DEFINER_TRIGGER'; END IF;
+END $v151_source_assert$;
