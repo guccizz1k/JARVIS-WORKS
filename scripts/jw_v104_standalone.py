@@ -27,12 +27,10 @@ REQUIRED_MODES = {
 
 
 def _safe_dsn(raw: str, principal: str) -> bool:
-    if not raw or not raw.strip():
+    if not raw:
         return False
     try:
-        # Ignore only copy/paste whitespace outside the complete DSN;
-        # keep all host, login, TLS, role and password checks unchanged.
-        d = conninfo_to_dict(raw.strip())
+        d = conninfo_to_dict(raw)
         keys = frozenset({"host", "port", "dbname", "user", "password",
                           "sslmode", "connect_timeout", "sslrootcert"})
         if set(d) - keys:
