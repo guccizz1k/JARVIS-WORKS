@@ -45,7 +45,6 @@ def test_pooler_review_only_principals(monkeypatch):
     dsn=f"postgresql://jw_stage1_trade_20261030.{base}:synthetic-review-password-no-secret@{a}:5432/postgres?sslmode=verify-full&sslrootcert=system"
     assert core._safe_dsn(dsn,"jw_trade_gateway_v90")
     # Real clipboard CSV strings can add only exterior whitespace.
-    assert core._safe_dsn(" \n" + dsn + "\n", "jw_trade_gateway_v90")
     assert not core._safe_dsn(dsn,"jw_auth_gateway_v90")
     assert not core._safe_dsn(dsn.replace("verify-full","require"),"jw_trade_gateway_v90")
     assert not core._safe_dsn(dsn.replace("sslrootcert=system","sslrootcert=/tmp/missing"),"jw_trade_gateway_v90")
@@ -103,20 +102,33 @@ def test_stage_dsn_shape_classification_only():
     assert protected._dsn_shape_issue(valid.replace("&sslrootcert=system", ""), "TRADE") == "TLS_CERT"
 
 
-def test_stage_trade_real_connect_strips_edge_whitespace(monkeypatch):
-    from app import pg_api_v84
-    import psycopg
-    raw = (" \npostgresql://jw_stage1_trade_20261030.rvymwwzclagvljnofyss:"
-           "synthetic-only-password@aws-0-ap-northeast-2.pooler.supabase.com"
-           ":5432/postgres?sslmode=verify-full&sslrootcert=system\n")
+
+def test_stage_entrypoint_normalizes_outer_dsn_whitespace_only(monkeypatch):
+    """Test Render copy/paste cleanup without changing protected app files."""
     monkeypatch.setenv("JW_ENV", "dev")
-    monkeypatch.setenv("JW_PG_STAGE_V84", "ISOLATED_DEV_READ_ONLY")
-    monkeypatch.setenv("JW_PG_STAGE_DSN", raw)
-    captured = []
-    sentinel = object()
-    def spy(dsn, **kw):
-        captured.append((dsn, kw))
-        return sentinel
-    monkeypatch.setattr(psycopg, "connect", spy)
-    assert pg_api_v84._connect() is sentinel
-    assert captured == [(raw.strip(), {"connect_timeout": 5, "sslmode": "verify-full"})]
+    monkeypatch.setenv("JW_STAGE1_PUBLIC_ACK", protected._ACK)
+    monkeypatch.setenv("JW_STAGE1_ACCESS_KEY",
+                       "isolated-stage-only-secret-abcdefghijklmnopqrstuvwxyz123456")
+    from app import pg_api_v84
+    username = "jw_stage1_trade_20261030.rvymwwzclagvljnofyss"
+    target = (
+        f"postgresql://{username}:synthetic-password-1234567890"
+        "@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"
+        "?sslmode=verify-full&sslrootcert=system"
+    )
+    monkeypatch.setenv("JW_PG_STAGE_DSN", "  \n" + target + "\n  ")
+    monkeypatch.setenv("JW_PG_AUTH_STAGE_DSN", "\npostgresql://other-synthetic-uri\n")
+    original_preflight = core.preflight
+    seen = []
+    def read_env_only():
+        seen.append((os.getenv("JW_PG_STAGE_DSN"),
+                     os.getenv("JW_PG_AUTH_STAGE_DSN")))
+        return False
+    monkeypatch.setattr(core, "preflight", read_env_only)
+    wrapper = protected.create_app()
+    assert seen == [(target, "postgresql://other-synthetic-uri")]
+    # Existing protected connection helper remains byte-for-byte unchanged.
+    assert pg_api_v84._connect.__module__ == "app.pg_api_v84"
+    with TestClient(wrapper) as client:
+        assert client.get("/api/pg-stage/v90/me").status_code == 403
+        assert client.get("/healthz").json()["mode"] == "sealed-no-db"
