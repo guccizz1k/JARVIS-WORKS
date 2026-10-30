@@ -21,6 +21,7 @@ from psycopg import errors
 from . import pg_quote_api_v92 as quotes
 from . import pg_v90_integrated_entry as sessions
 from .pg_delivery_evidence_gate_v147 import DeliveryProofRejected
+from .pg_delivery_request_limit_v155 import ReviewBodyLimitV155
 from .pg_delivery_review_reservation_v151 import (
     PendingReviewRejected, reserve_delivery_review_v151,
 )
@@ -174,4 +175,5 @@ def register_v154_delivery_review(app: FastAPI) -> bool:
     router.add_api_route("/orders/{order_id}/delivery-review",
                          get_delivery_review_status, methods=["GET"])
     app.include_router(router)
+    app.add_middleware(ReviewBodyLimitV155)
     return True
