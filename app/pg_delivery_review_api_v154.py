@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from psycopg import errors
 
 from . import pg_quote_api_v92 as quotes
+from . import pg_delivery_writer_v159 as dedicated_writer
 from . import pg_v90_integrated_entry as sessions
 from .pg_delivery_evidence_gate_v147 import DeliveryProofRejected
 from .pg_delivery_request_limit_v155 import ReviewBodyLimitV155
@@ -59,6 +60,8 @@ def enabled() -> bool:
         and os.environ.get("JW_V154_ISSUER_INDEPENDENCE_ACK")
             == "EXTERNAL_ISSUER_KEYS_VERIFIED"
         and quotes.enabled() and sessions.v90_enabled()
+        and (not os.getenv("JW_PG_DELIVERY_WRITER_V159")
+             or dedicated_writer.enabled())
         and os.environ.get("JW_ENV", "").lower()
             in ("dev", "development", "test")
         and os.environ.get("JW_INSECURE_LOCAL_DEV") != "1"
@@ -85,7 +88,12 @@ def create_delivery_review(
     quotes._origin_checked(request)  # explicit pre-approved HTTPS origin
     session_hash = sessions._session_hash(request)
     dispatch_key, receipt_key = _issuer_keys()
-    with sessions._pg_validated_cursor(session_hash) as (cur, identity):
+    writer_cursor = (
+        dedicated_writer.validated_writer_cursor
+        if os.getenv("JW_PG_DELIVERY_WRITER_V159")
+        else sessions._pg_validated_cursor
+    )
+    with writer_cursor(session_hash) as (cur, identity):
         csrf = request.headers.get("X-CSRF-Token", "")
         if not csrf or not hmac.compare_digest(str(identity[4]), csrf):
             raise HTTPException(403, "Invalid CSRF token")
