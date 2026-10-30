@@ -33,3 +33,37 @@ def test_probe_source_is_readonly_and_denies_unauthed_access():
     assert "__Host-jw_session" in source
     assert "PASS_HOSTED_HTTPS_STAGE_GATE_NO_SESSION_FORGED_SESSION" in source
     assert "PASS_HOSTED_HTTPS_A_B_C" not in source
+
+
+def test_compatible_fastapi_startup_hook(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from scripts import jw_v134_protected_stage as stage
+    from scripts import jw_v104_standalone as core
+    from scripts import jw_v135_stage_connection_probe as db_probe
+    from scripts import jw_v138_supabase_ca
+
+    monkeypatch.setenv("JW_ENV", "dev")
+    monkeypatch.setenv("JW_STAGE1_PUBLIC_ACK", "V134_STAGE1_PUBLIC_ISOLATED_ONLY")
+    monkeypatch.setenv("JW_STAGE1_ACCESS_KEY", "synthetic-stage-test-access-key-abcdefghijklmnopqrstuvwxyz")
+    monkeypatch.setenv("JW_STAGE1_SAFE_HTTPS_PROBE", probe._ACK)
+    monkeypatch.setattr(jw_v138_supabase_ca, "install", lambda: "/synthetic/ca")
+    monkeypatch.setattr(core, "preflight", lambda: True)
+    monkeypatch.setattr(db_probe, "verify", lambda: (True, "ROLE_SCOPED_TEST"))
+    observed = []
+
+    def fake_product_app():
+        app = FastAPI(docs_url=None)
+        @app.get("/healthz")
+        def health():
+            return {"mode": "isolated_pg_api_only", "release": "BLOCKED"}
+        return app
+    monkeypatch.setattr(core, "create_app", fake_product_app)
+    monkeypatch.setattr(probe, "schedule", lambda: observed.append("startup"))
+    wrapped = stage.create_app()
+    with TestClient(wrapped) as client:
+        result = client.get("/healthz")
+        assert result.status_code == 200
+        assert result.json()["mode"] == "isolated_pg_api_only"
+        assert client.get("/api/pg-stage/v84/customers").status_code == 403
+    assert observed == ["startup"]
