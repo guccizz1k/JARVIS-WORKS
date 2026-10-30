@@ -31,7 +31,7 @@ def _load_guard():
 def test_adversarial_mutation_is_rejected(deleted, replacement, guard, tmp_path):
     original = SQL.read_text(encoding="utf-8")
     assert original.count(deleted) >= 1, "Original fixture drift; cannot trust mutation test"
-    mutated = original.replace(deleted, replacement, 1)
+    mutated = original.replace(deleted, replacement)
     assert mutated != original
     forged_sql = tmp_path / "forged.sql"
     forged_sql.write_text(mutated, encoding="utf-8")
