@@ -1,0 +1,56 @@
+{
+  "schema": "jw_dev",
+  "source_kind": "development_postgresql_catalog_metadata_only",
+  "source_pg_major": 17,
+  "source_checked_date": "2026-10-25",
+  "target": "Render isolated PostgreSQL 17, NOT populated, NOT verified",
+  "data_rows_extracted": false,
+  "function_source_extracted_to_repository": false,
+  "migration_authorized": false,
+  "counts_and_md5": {
+    "tables": {
+      "n": 35,
+      "digest": "bf7fc91148e97f76c2ce3db9b36c7e88"
+    },
+    "columns": {
+      "n": 282,
+      "digest": "fe8668253cbd47cd1fca476f4c197cba"
+    },
+    "constraints": {
+      "n": 183,
+      "digest": "95ed448f8960c3f77ad0cde7524b3939"
+    },
+    "indexes": {
+      "n": 87,
+      "digest": "1e73dfca79aed3115c520278b594790d"
+    },
+    "policies": {
+      "n": 40,
+      "digest": "db72c51b0631c47141777184716ffdbd"
+    },
+    "triggers": {
+      "n": 45,
+      "digest": "5554555894129d46481b618819e17a90"
+    },
+    "functions": {
+      "n": 28,
+      "digest": "e1737c0023b05a9858bc52beba6fb1f5"
+    },
+    "sequences": {
+      "n": 1,
+      "digest": "cae40181281188d2db2ed178d627cdf3"
+    },
+    "table_acl": {
+      "n": 40,
+      "digest": "8b867e19bc6e9dc32296fec205a667e7"
+    },
+    "function_acl": {
+      "n": 18,
+      "digest": "d7fe6c93c7f2944490efb34ad2be4a1a"
+    },
+    "forced_rls": {
+      "n": 35,
+      "force_rls": 35
+    }
+  }
+}

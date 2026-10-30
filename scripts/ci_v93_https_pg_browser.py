@@ -113,6 +113,10 @@ def main() -> int:
     os.environ.pop("JW_INSECURE_LOCAL_DEV",None)
     v90.stage._connect=lambda: psycopg.connect(fixture.TRADE_DSN,connect_timeout=5)
     app=FastAPI()
+    # Mount the real review-only PostgreSQL messenger HTTP + WebSocket on the SAME TLS server.
+    assert v90.register_v90_messenger(app)
+    from app import pg_auth_v85 as auth
+    assert auth.register_v85_auth(app)
     assert write.register_v92_quote_api(app)
     assert read.register_v93_quote_reader(app)
 
@@ -138,6 +142,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="jw-v93-https-") as tmp:
         key,crt=_ssl_files(Path(tmp))
         config=uvicorn.Config(app,host="127.0.0.1",port=8769,log_level="error",
+                              ws="websockets-sansio",
                               ssl_keyfile=str(key),ssl_certfile=str(crt),access_log=False)
         server=uvicorn.Server(config)
         thread=threading.Thread(target=server.run,daemon=True)
@@ -200,8 +205,245 @@ def main() -> int:
                   throw Error('Company A quote lost after switch');
                 return 'JW_V93_HTTPS_TENANT_B_DENIAL_AND_RECOVERY_PASS';
             }""","JW_V93_HTTPS_TENANT_B_DENIAL_AND_RECOVERY_PASS")
+            # V10.4 extension: quote + B2B messenger share one verified HTTPS origin.
+            assertion(r"""async () => {
+              if(location.origin!=='https://127.0.0.1:8769')
+                throw Error('Untrusted stage origin');
+              const request=async (url,method='GET',value,csrf)=>{
+                const headers={'Accept':'application/json'};
+                if(value!==undefined) headers['Content-Type']='application/json';
+                if(csrf)headers['X-CSRF-Token']=csrf;
+                const r=await fetch(url,{method,credentials:'same-origin',headers,
+                  body:value===undefined?undefined:JSON.stringify(value)});
+                return {code:r.status,data:await r.json()};
+              };
+              await fetch('/qa/set/A',{credentials:'same-origin'});
+              const csrf=(await(await fetch('/qa/info')).json()).csrf;
+              const noCsrf=await request('/api/pg-stage/v90/chats','POST',{other_org_id:'ci-b'});
+              if(noCsrf.code!==403) throw Error('Missing messenger CSRF was allowed');
+              const opened=await request('/api/pg-stage/v90/chats','POST',{other_org_id:'ci-b'},csrf);
+              if(opened.code!==200||!opened.data.connection_id)
+                throw Error('PG messenger start failed '+opened.code);
+              const id=opened.data.connection_id;
+              const path='/api/pg-stage/v90/chats/'+encodeURIComponent(id)+'/messages';
+              const body={request_id:'v104-https-wss-msg-001',body:'JW_PG_HTTPS_WSS_A_TO_B'};
+              const sent=await request(path,'POST',body,csrf);
+              if(sent.code!==200||!sent.data.message_id) throw Error('PG send failed '+sent.code);
+              const replay=await request(path,'POST',body,csrf);
+              if(replay.code!==200||replay.data.message_id!==sent.data.message_id)
+                throw Error('Replay duplicated messenger message');
+              await fetch('/qa/set/B',{credentials:'same-origin'});
+              const b=await request(path);
+              if(b.code!==200||JSON.stringify(b.data).indexOf('JW_PG_HTTPS_WSS_A_TO_B')<0)
+                throw Error('Authorized B lost PG messenger message');
+              const events=await new Promise((resolve,reject)=>{
+                const socket=new WebSocket('wss://127.0.0.1:8769'+
+                  '/api/pg-stage/v90/chats/'+encodeURIComponent(id)+'/stream?after=0');
+                let checkpoint=false,done=false;
+                const timeout=setTimeout(()=>{
+                  if(!done){done=true;socket.close();reject(Error('WSS replay timeout'));}
+                },8000);
+                socket.onmessage=e=>{
+                  const item=JSON.parse(e.data);
+                  if(item.type==='ready')checkpoint=true;
+                  if(item.type==='message'&&JSON.stringify(item.data).includes('JW_PG_HTTPS_WSS_A_TO_B')){
+                    done=true;clearTimeout(timeout);socket.close();
+                    if(!checkpoint)reject(Error('Missing WSS checkpoint'));else resolve(true);
+                  }
+                };
+                socket.onerror=()=>{if(!done){done=true;clearTimeout(timeout);reject(Error('WSS TLS/handshake failed'));}};
+                socket.onclose=()=>{if(!done){done=true;clearTimeout(timeout);reject(Error('WSS closed without replay'));}};
+              });
+              if(!events)throw Error('WSS events absent');
+              await fetch('/qa/set/C',{credentials:'same-origin'});
+              const forbidden=await request(path);
+              if(forbidden.code!==403)throw Error('Nonmember C read A/B chat '+forbidden.code);
+              await fetch('/qa/set/A',{credentials:'same-origin'});
+              const quotes=await request('/api/pg-stage/v92/quotes');
+              if(quotes.code!==200||!quotes.data.some(q=>q.title==='J1-J6 HTTPS PG 견적'))
+                throw Error('Finance quote changed after websocket session switch');
+              return 'JW_V104_ONE_HTTPS_ORIGIN_PG17_QUOTE_WSS_CHAT_A_B_C_PASS';
+            }""","JW_V104_ONE_HTTPS_ORIGIN_PG17_QUOTE_WSS_CHAT_A_B_C_PASS",timeout=90)
+            cli("screenshot",f"--filename={PROOF/'jw_v104_https_pg_quote_chat.png'}")
+            print("PASS: verified localhost HTTPS PG17 quote + messenger + WSS replay, tenant A/B/C, CSRF and dedupe",flush=True)
             from scripts.ci_v93_finance_restore import restore_proof
             restore_proof()
+            # V10.6: do this AFTER the unchanged 13-table restore, so its
+            # fingerprint remains meaningful and the auth fixture adds no
+            # tables to the independently verified restore baseline.
+            from scripts.ci_v106_real_pg_auth import prepare_real_auth, PASSWORD
+            with psycopg.connect(fixture.root_dsn,autocommit=True) as pg:
+                pg.execute((fixture.ROOT/'scripts/ci_v127_ephemeral_order.sql').read_text(encoding='utf-8'))
+            prepare_real_auth(fixture)
+            assertion(r"""async () => {
+              const req=async(path,method='GET',body,csrf)=>{
+                const h={'Accept':'application/json'};
+                if(body!==undefined)h['Content-Type']='application/json';
+                if(csrf)h['X-CSRF-Token']=csrf;
+                const r=await fetch(path,{method,headers:h,credentials:'same-origin',
+                  body:body===undefined?undefined:JSON.stringify(body)});
+                return {code:r.status,data:await r.json()};
+              };
+              const auth='/api/pg-stage/v85/';
+              const root='/api/pg-stage/v92/quotes';
+              const bad=await req(auth+'login','POST',
+                {email:'a@invalid.test',password:'wrong-ci-password'});
+              if(bad.code!==401)throw Error('Real PG failed-password login not denied: '+bad.code);
+              const a=await req(auth+'login','POST',
+                {email:'a@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(a.code!==200||!a.data.csrf_token||a.data.backend!=='postgresql_auth_stage')
+                throw Error('Real PG A credential login failed '+a.code);
+              const csrfA=a.data.csrf_token;
+              const me=await req('/api/pg-stage/v90/me');
+              if(me.code!==200||me.data.org_id!=='ci-a'||me.data.csrf_token!==csrfA)
+                throw Error('Newly issued PG session not accepted by business role');
+              const quote={request_id:'v106-real-auth-quote-0001',customer_id:'ci-customer-a',
+                title:'REAL PG AUTH QUOTE',vat_mode:'taxable',
+                items:[{name:'A',quantity:3,unit_price:101},{name:'B',quantity:2,unit_price:503}]};
+              const created=await req(root,'POST',quote,csrfA);
+              if(created.code!==201||created.data.money.total!==1440)
+                throw Error('PG auth-to-finance write failed '+created.code);
+              const replay=await req(root,'POST',quote,csrfA);
+              if(replay.code!==200||replay.data.quote_id!==created.data.quote_id)
+                throw Error('Authorized PG quote retry not idempotent');
+              const orderPath='/api/pg-stage/v92/order-drafts';
+              const previewPath='/api/pg-stage/v92/quote-review-previews/'+created.data.quote_id;
+              const preview=await req(previewPath);
+              if(preview.code!==200||preview.data.money.total!==1440||
+                 preview.data.source_document_verified!==false||
+                 !/^[a-f0-9]{64}$/.test(preview.data.preview_sha256))
+                throw Error('Server-grounded quote preview unavailable');
+              const reviewPath='/api/pg-stage/v92/quote-reviews';
+              const reviewBody={quote_id:created.data.quote_id,
+                preview_sha256:preview.data.preview_sha256,preview_checked:true};
+              const premature=await req(orderPath,'POST',{
+                request_id:'v128-no-receipt-0001',quote_id:created.data.quote_id,
+                original_checked:true},csrfA);
+              if(premature.code!==422)
+                throw Error('Bare client original_checked was enough to create an order');
+              const forged=await req(orderPath,'POST',{
+                request_id:'v128-fake-receipt-0001',quote_id:created.data.quote_id,
+                original_checked:true,review_receipt_id:'f'.repeat(32)},csrfA);
+              if(forged.code!==409)
+                throw Error('Forged approval receipt accepted');
+              const badDigest=await req(reviewPath,'POST',{
+                ...reviewBody,preview_sha256:'0'.repeat(64)},csrfA);
+              if(badDigest.code!==409)
+                throw Error('Stale quote preview digest was accepted');
+              const noReviewCsrf=await req(reviewPath,'POST',reviewBody);
+              if(noReviewCsrf.code!==403)
+                throw Error('Preview acknowledgement bypassed CSRF');
+              const acknowledged=await req(reviewPath,'POST',reviewBody,csrfA);
+              if(acknowledged.code!==201||!acknowledged.data.review_receipt_id||
+                 acknowledged.data.source_document_verified!==false)
+                throw Error('Verified preview acknowledgement not saved');
+              const renewed=await req(reviewPath,'POST',reviewBody,csrfA);
+              if(renewed.code!==201||renewed.data.review_receipt_id===
+                 acknowledged.data.review_receipt_id)
+                throw Error('Fresh review must not return old eventually-expiring receipt');
+              const fromQuote={request_id:'v127-order-request-0001',
+                quote_id:created.data.quote_id,original_checked:true,
+                review_receipt_id:renewed.data.review_receipt_id};
+              const rejectUnchecked=await req(orderPath,'POST',{
+                ...fromQuote,original_checked:false},csrfA);
+              if(rejectUnchecked.code!==422)
+                throw Error('Order draft accepted unchecked source');
+              const noOrderCSRF=await req(orderPath,'POST',fromQuote);
+              if(noOrderCSRF.code!==403)
+                throw Error('Order draft created without CSRF');
+              const order=await req(orderPath,'POST',fromQuote,csrfA);
+              if(order.code!==201||!order.data.draft_only||
+                 order.data.approval_posted!==false||order.data.money.total!==1440)
+                throw Error('Source-grounded draft order not created');
+              const orderId=order.data.order_id;
+              const orderRetry=await req(orderPath,'POST',fromQuote,csrfA);
+              if(orderRetry.code!==200||orderRetry.data.order_id!==orderId)
+                throw Error('Order duplicate replay not idempotent');
+              const conflict=await req(orderPath,'POST',{
+                ...fromQuote,request_id:'v127-different-request-0002'},csrfA);
+              if(conflict.code!==409)
+                throw Error('Second request silently duplicated order');
+              const ownOrder=await req(orderPath+'/'+orderId);
+              if(ownOrder.code!==200||ownOrder.data.money.total!==1440||
+                 ownOrder.data.items.length!==2||
+                 ownOrder.data.source_quote_id!==created.data.quote_id)
+                throw Error('Order draft not linked to source quote');
+              const chat=await req('/api/pg-stage/v90/chats','POST',
+                  {other_org_id:'ci-b'},csrfA);
+              if(chat.code!==200||!chat.data.connection_id)
+                throw Error('PG auth-to-messenger start failed');
+              const msgs='/api/pg-stage/v90/chats/'+chat.data.connection_id+'/messages';
+              const sent=await req(msgs,'POST',
+                {request_id:'v106-real-auth-message-0001',body:'V106_REAL_AUTH_PG_A_TO_B'},csrfA);
+              if(sent.code!==200||!sent.data.message_id)
+                throw Error('PG auth-to-messenger send failed');
+              const noCSRF=await req(msgs,'POST',
+                {request_id:'v106-no-csrf-attempt',body:'DENIED'});
+              if(noCSRF.code!==403)throw Error('New PG auth bypassed business CSRF');
+              const badLogout=await req(auth+'logout','POST',undefined,'wrong');
+              if(badLogout.code!==403)throw Error('Bad PG logout CSRF accepted');
+              const validLogout=await req(auth+'logout','POST',undefined,csrfA);
+              if(validLogout.code!==200||validLogout.data.ok!==true)
+                throw Error('PG A logout failed');
+              const revoked=await req('/api/pg-stage/v90/me');
+              if(revoked.code!==401)throw Error('Logged-out A retained business access');
+              const b=await req(auth+'login','POST',
+                {email:'b@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(b.code!==200||!b.data.csrf_token)throw Error('Real PG B login failed');
+              const foreignOrder=await req(orderPath+'/'+orderId);
+              if(foreignOrder.code!==404)throw Error('B read A draft order');
+              const foreign=await req(root+'/'+created.data.quote_id);
+              if(foreign.code!==404)throw Error('PG B accessed PG A financial document');
+              const recv=await req(msgs);
+              if(recv.code!==200||!JSON.stringify(recv.data).includes('V106_REAL_AUTH_PG_A_TO_B'))
+                throw Error('PG B cannot receive authorized A message');
+              const blogout=await req(auth+'logout','POST',undefined,b.data.csrf_token);
+              if(blogout.code!==200)throw Error('B logout failed');
+              const bRevoked=await req(msgs);
+              if(bRevoked.code!==401)throw Error('Logged-out B retained chat');
+              const c=await req(auth+'login','POST',
+                {email:'c@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(c.code!==200||!c.data.csrf_token)
+                throw Error('Real PG C login failed');
+              const cMe=await req('/api/pg-stage/v90/me');
+              if(cMe.code!==200||cMe.data.org_id!=='ci-c')
+                throw Error('Real PG C session has wrong tenant');
+              const cOrder=await req(orderPath+'/'+orderId);
+              if(cOrder.code!==404)throw Error('C read A draft order');
+              const cForeign=await req(root+'/'+created.data.quote_id);
+              if(cForeign.code!==404)throw Error('PG C accessed A financial document');
+              const cCreate=await req(root,'POST',{
+                request_id:'v126-c-forged-cross-tenant-0001',
+                customer_id:'ci-customer-a',title:'FORBIDDEN',vat_mode:'taxable',
+                items:[{name:'test',quantity:1,unit_price:1}]
+              },c.data.csrf_token);
+              if(cCreate.code!==404)throw Error('PG C created foreign-customer quote');
+              const cChat=await req(msgs);
+              if(cChat.code!==403)throw Error('PG C read nonmember A/B messages');
+              const cLogout=await req(auth+'logout','POST',undefined,c.data.csrf_token);
+              if(cLogout.code!==200)throw Error('Real PG C logout failed');
+              const cRevoked=await req('/api/pg-stage/v90/me');
+              if(cRevoked.code!==401)throw Error('Logged-out C retained PG session');
+              const again=await req(auth+'login','POST',
+                {email:'a@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(again.code!==200)throw Error('Real PG A relogin failed');
+              const aQuote=await req(root+'/'+created.data.quote_id);
+              if(aQuote.code!==200||aQuote.data.money.total!==1440)
+                throw Error('PG A finance recovery after logout failed');
+              return 'JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS';
+            }""","JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS",timeout=110)
+            with psycopg.connect(fixture.root_dsn) as root:
+                events=root.execute("""
+                    SELECT event_type,count(*) FROM jw_dev.security_events
+                    GROUP BY event_type ORDER BY event_type
+                """).fetchall()
+                if dict(events)!={"login_success":4,"logout":3}:
+                    raise AssertionError("Actual PostgreSQL auth events inconsistent")
+            print("PASS: real PG17 independent credential login, hashed DB sessions, "
+                  "login failure, CSRF, A->quote+chat->B, logout revocation, "
+                  "A/B/C tenant denial, C auth revocation, and relogin recovery",flush=True)
+            print("LIMIT: synthetic A/B fixture on disposable PG17; MFA not enabled; "
+                  "Render isolated Postgres not yet provisioned/connected",flush=True)
             print("PASS: real Chromium browser -> HTTPS -> V9.3 API -> PG17 nonprivileged session; quote form/GET/tenant denial",flush=True)
             print("LIMIT: localhost self-signed synthetic CA; QA-only cookie issuer; not hosted production HTTPS or real Supabase auth",flush=True)
             return 0

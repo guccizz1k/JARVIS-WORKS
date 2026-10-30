@@ -1,0 +1,99 @@
+name: JW eight-stage J1-J6 release gate (read-only, no skips)
+on:
+  push:
+    branches:
+      - review/v99-v110-eight-stage-acceptance-20261025
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v99-eight-stages
+  cancel-in-progress: true
+jobs:
+  live-supabase-nosession-rls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    env:
+      JW_ENV: review
+      JW_V97_LIVE_ACK: READ_ONLY_SUPAVISOR_ACCEPTANCE_V97
+      JW_V99_RLS_ACK: READ_ONLY_V99_NONSESSION_RLS
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Review real DB fail-closed contracts and 8 phase no-skip receipts
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pytest -q tests/test_ci_v99_live_nosession_rls.py tests/test_jw_eight_stage_release_gate.py \
+            tests/test_ci_v97_supavisor_restricted_auth.py tests/test_ci_v97_independent_boundary.py \
+            -ra --junitxml=jw-v99-eight-stage-junit.xml
+      - name: Real two custom-role auth and no-session ten-table RLS observation (NO WRITES)
+        env:
+          JW_V97_TRADE_DSN: ${{ secrets.JW_V97_TRADE_DSN }}
+          JW_V97_AUTH_DSN: ${{ secrets.JW_V97_AUTH_DSN }}
+        run: |
+          python -m scripts.ci_v97_supavisor_restricted_auth > jw-stage-auth.json
+          python -m scripts.ci_v99_live_nosession_rls > jw-stage-rls.json
+          python - <<'PY'
+          import json
+          auth=json.load(open('jw-stage-auth.json'))
+          rls=json.load(open('jw-stage-rls.json'))
+          print("Real custom-role catalog verification:",auth.get("decision"),auth.get("reason"))
+          print("Real denied-session ten-table RLS:",rls.get("decision"),rls.get("reason"),
+                "rollback",rls.get("rollback"),"tables",rls.get("tested_tables"))
+          assert auth["decision"]=="PASS" and auth["authenticated"] is True
+          assert rls["decision"]=="INCONCLUSIVE" and rls["rollback"]=="PASS"
+          assert rls["row_rls_proof"]=="NOT_PROVEN_WITHOUT_POSITIVE_CONTROL"
+          assert rls["cross_tenant_abc"]=="NOT_VERIFIED"
+          assert auth["production_cutover"] is False and rls["production_cutover"] is False
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-eight-stage-real-supabase-readonly
+          path: |
+            jw-v99-eight-stage-junit.xml
+            jw-stage-auth.json
+            jw-stage-rls.json
+          retention-days: 3
+          if-no-files-found: ignore
+  every-stage-evaluated:
+    needs: [live-supabase-nosession-rls]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: jw-eight-stage-real-supabase-readonly
+      - name: Independently report all 8 stages; never imply release
+        run: |
+          python -m scripts.jw_eight_stage_release_gate \
+            --rls jw-stage-rls.json --auth jw-stage-auth.json \
+            --out jw-eight-stage-release-report.json
+          python - <<'PY'
+          import json,os
+          v=json.load(open('jw-eight-stage-release-report.json'))
+          assert v["commit"]==os.environ["GITHUB_SHA"]
+          assert v["release"]=="BLOCKED" and not v["production_deployed"]
+          assert v["review_integrity"]=="PASS"
+          assert len(v["stages"])==8
+          assert all(x["evaluation"]=="ATTEMPTED" and x["status"]!="SKIP" for x in v["stages"])
+          for s in v["stages"]:
+              print("stage",s["stage"],s["version"],s["status"],s["evidence"])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v99-v110-eight-stage-failclosed-report
+          path: jw-eight-stage-release-report.json
+          retention-days: 3
+          if-no-files-found: ignore
