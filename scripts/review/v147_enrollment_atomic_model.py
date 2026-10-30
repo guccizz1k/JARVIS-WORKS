@@ -7,6 +7,7 @@ No user accounts, passwords, secrets, roles or provider credentials are stored.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from app.pg_signup_review_gate_v146 import EnrollmentIntent, ReviewDecision
@@ -30,7 +31,7 @@ class ReservationRejected(ValueError):
 
 
 def initialize_test_db(path: Path) -> None:
-    with sqlite3.connect(str(path)) as db:
+    with closing(sqlite3.connect(str(path))) as db:
         db.execute("PRAGMA foreign_keys=ON")
         db.executescript(DDL)
 
@@ -54,7 +55,7 @@ def reserve_for_human_review(path: Path, *, intent: EnrollmentIntent,
         email_nonce == business_nonce):
         raise ReservationRejected("Review reservation rejected")
     try:
-        with sqlite3.connect(str(path), timeout=3, isolation_level=None) as db:
+        with closing(sqlite3.connect(str(path), timeout=3, isolation_level=None)) as db:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("BEGIN IMMEDIATE")
             try:
