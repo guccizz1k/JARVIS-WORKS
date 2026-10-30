@@ -430,8 +430,8 @@ def main() -> int:
               const aQuote=await req(root+'/'+created.data.quote_id);
               if(aQuote.code!==200||aQuote.data.money.total!==1440)
                 throw Error('PG A finance recovery after logout failed');
-              return 'JW_V128_PG17_REVIEW_RECEIPT_A_B_C_PASS';
-            }""","JW_V128_PG17_REVIEW_RECEIPT_A_B_C_PASS",timeout=110)
+              return 'JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS';
+            }""","JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS",timeout=110)
             with psycopg.connect(fixture.root_dsn) as root:
                 events=root.execute("""
                     SELECT event_type,count(*) FROM jw_dev.security_events

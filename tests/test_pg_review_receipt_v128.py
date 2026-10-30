@@ -13,7 +13,7 @@ def test_browser_requires_server_review_instead_of_client_boolean():
         "premature.code!==422", "forged.code!==409", "badDigest.code!==409",
         "noReviewCsrf.code!==403", "acknowledged.code!==201",
         "source_document_verified!==false",
-        "JW_V128_PG17_REVIEW_RECEIPT_A_B_C_PASS",
+        "JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS",
     ):
         assert needle in a
 
@@ -54,3 +54,9 @@ def test_reacknowledgement_issues_fresh_immutable_receipt():
     s=src("scripts/ci_v127_ephemeral_order.sql")
     assert "UNIQUE(org_id,actor_id,quote_id,source_sha256)" not in s
     assert "GRANT UPDATE" not in s and "GRANT DELETE" not in s
+
+def test_browser_marker_is_backward_compatible_with_previous_suite():
+    marker="JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS"
+    assert marker in src("scripts/ci_v93_https_pg_browser.py")
+    assert marker in src("tests/test_ci_v126_authenticated_three_tenant.py")
+    assert marker in src("tests/test_pg_order_draft_v127.py")

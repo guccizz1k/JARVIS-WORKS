@@ -34,7 +34,7 @@ def test_browser_exercises_negative_and_replay_cases():
     for fragment in ("original_checked:false", "rejectUnchecked.code!==422",
                      "noOrderCSRF.code!==403", "orderRetry.code!==200",
                      "conflict.code!==409", "foreignOrder.code!==404",
-                     "cOrder.code!==404", "JW_V128_PG17_REVIEW_RECEIPT_A_B_C_PASS"):
+                     "cOrder.code!==404", "JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS"):
         assert fragment in s
     assert "restore_proof()" in s
     assert s.index("restore_proof()") < s.index("ci_v127_ephemeral_order.sql")
