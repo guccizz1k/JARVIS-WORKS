@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from psycopg.conninfo import conninfo_to_dict
 
 from app import pg_api_v84, pg_auth_v85, pg_v90_integrated_entry
-from app import pg_quote_api_v92, pg_quote_read_v93
+from app import pg_quote_api_v92, pg_quote_read_v93, pg_invoice_preview_v145
 
 ACK = "PRIVATE_HTTPS_PG_ONLY"
 REQUIRED_MODES = {
@@ -120,6 +120,7 @@ def create_app() -> FastAPI:
         pg_v90_integrated_entry.register_v90_messenger(app),
         pg_quote_api_v92.register_v92_quote_api(app),
         pg_quote_read_v93.register_v93_quote_reader(app),
+        pg_invoice_preview_v145.register_v145_invoice_preview(app),
     ):
         if not registered:
             raise RuntimeError("BLOCKED: an isolated PostgreSQL router is disabled")
