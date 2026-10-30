@@ -161,6 +161,9 @@ def create_app():
         if os.getenv("JW_STAGE1_POSITIVE_HTTPS_PROBE") == "V141_REVIEW_ONLY_NONMESSENGER_SYNTHETIC_A_B_C":
             from scripts import jw_v141_hosted_https_abc
             app.on_event("startup")(jw_v141_hosted_https_abc.schedule)
+        if os.getenv("JW_STAGE2_AUTH_HTTPS_PROBE") == "V143_ISOLATED_SYNTHETIC_AUTH_HTTPS_ONESHOT":
+            from scripts import jw_v143_hosted_https_auth
+            app.on_event("startup")(jw_v143_hosted_https_auth.schedule)
         # Preserve the existing product's health route but do not advertise
         # acceptance or customer data until independent E2E evidence exists.
     else:
