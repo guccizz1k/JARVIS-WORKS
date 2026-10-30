@@ -80,7 +80,7 @@ BEGIN
  BEGIN
   UPDATE jw_dev.review_signup_requests_v151 SET status='APPROVED'
    WHERE request_id=repeat('a',32);
- EXCEPTION WHEN check_violation THEN denied:=true;
+ EXCEPTION WHEN check_violation OR insufficient_privilege THEN denied:=true;
  END;
  IF NOT denied THEN RAISE EXCEPTION 'FAIL_V151_UNAUTHORIZED_SIGNUP_APPROVAL'; END IF;
 
@@ -88,7 +88,7 @@ BEGIN
  BEGIN
   UPDATE jw_dev.review_delivery_receipts_v151
    SET physical_delivery_verified=true WHERE order_id='jw-v151-order';
- EXCEPTION WHEN check_violation THEN denied:=true;
+ EXCEPTION WHEN check_violation OR insufficient_privilege THEN denied:=true;
  END;
  IF NOT denied THEN RAISE EXCEPTION 'FAIL_V151_PHYSICAL_DELIVERY_FORGED'; END IF;
 
@@ -96,7 +96,7 @@ BEGIN
  BEGIN
   UPDATE jw_dev.review_delivery_receipts_v151
    SET invoice_posted=true WHERE order_id='jw-v151-order';
- EXCEPTION WHEN check_violation THEN denied:=true;
+ EXCEPTION WHEN check_violation OR insufficient_privilege THEN denied:=true;
  END;
  IF NOT denied THEN RAISE EXCEPTION 'FAIL_V151_FINANCE_POSTING_FORGED'; END IF;
 
@@ -179,3 +179,45 @@ BEGIN
      ))
  ) THEN RAISE EXCEPTION 'FAIL_V151_PUBLIC_OR_DEFINER_TRIGGER'; END IF;
 END $v151_source_assert$;
+
+
+DO $v152_immutable$
+DECLARE tab_name text; assign_expr text; refused boolean;
+BEGIN
+ FOR tab_name, assign_expr IN
+ SELECT t, a FROM (VALUES
+  ('review_signup_requests_v151','status=status'),
+  ('review_signup_nonces_v151','purpose=purpose'),
+  ('review_delivery_receipts_v151','org_id=org_id'),
+  ('review_delivery_nonces_v151','purpose=purpose'),
+  ('review_delivery_items_v151','position=position')
+ ) AS source(t,a)
+ LOOP
+  refused:=false;
+  BEGIN
+   EXECUTE format('UPDATE jw_dev.%I SET %s', tab_name, assign_expr);
+  EXCEPTION WHEN SQLSTATE '42501' THEN refused:=true;
+  END;
+  IF NOT refused THEN
+   RAISE EXCEPTION 'FAIL_V152_EVIDENCE_UPDATE_ACCEPTED:%',tab_name;
+  END IF;
+
+  refused:=false;
+  BEGIN
+   EXECUTE format('DELETE FROM jw_dev.%I', tab_name);
+  EXCEPTION WHEN SQLSTATE '42501' THEN refused:=true;
+  END;
+  IF NOT refused THEN
+   RAISE EXCEPTION 'FAIL_V152_EVIDENCE_DELETE_ACCEPTED:%',tab_name;
+  END IF;
+ END LOOP;
+
+ IF EXISTS(
+   SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='jw_dev' AND p.proname='v152_reject_evidence_mutation'
+      AND (p.prosecdef OR EXISTS (
+       SELECT 1 FROM aclexplode(COALESCE(p.proacl,acldefault('f',p.proowner))) a
+       WHERE a.grantee=0 AND a.privilege_type='EXECUTE'
+      ))
+ ) THEN RAISE EXCEPTION 'FAIL_V152_MUTATION_TRIGGER_PRIVILEGE'; END IF;
+END $v152_immutable$;
