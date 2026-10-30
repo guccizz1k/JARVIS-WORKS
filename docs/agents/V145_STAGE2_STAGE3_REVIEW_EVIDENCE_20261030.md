@@ -28,7 +28,7 @@
 
 ## Gates and evidence
 1. G1 syntax/compatibility: isolated `compileall` PASS; full product build/SDK environment NOT RUN.
-2. G2 function: local isolated pytest `18 passed` (arithmetic, tenant filters, no CSRF-bypassing mutation, duplicate invoice, invalid items).
+2. G2 function: local isolated pytest `19 passed` (arithmetic, tenant filters, no CSRF-bypassing mutation, duplicate invoice, invalid items).
 3. G3 regression: local unit and source checks PASS; J1–J6 **complete exact-new-SHA CI NOT RUN**.
 4. G4 UI: desktop product and real staging browser **NOT RUN**.
 5. G5 security: actual database catalog preflight PASS, forced-RLS policies read-only inspected, no grants/migrations; hosted test of new route NOT RUN.
