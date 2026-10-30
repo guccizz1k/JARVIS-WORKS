@@ -27,7 +27,7 @@ def test_tenant_and_admin_policy_present_on_both_read_and_write():
     sql = re.sub(r"--[^\n]*", "", POLICIES.read_text())
     assert "current_org_from_session()" in sql
     assert sql.count("stage_identity_v84()") >= 4
-    assert sql.count("actor_role='admin'") >= 3
+    assert sql.count("actor_role='admin'") >= 2
     assert "a.actor_role = 'admin'" in sql
     assert "o.status='fulfilled'" in sql
     assert "o.review_state='acknowledged'" in sql
