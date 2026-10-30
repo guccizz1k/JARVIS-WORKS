@@ -44,17 +44,18 @@ CREATE POLICY v159_invoice_read ON jw_dev.invoices
 
 CREATE POLICY v159_receipt_read ON jw_dev.review_delivery_receipts_v151
  FOR SELECT TO jw_delivery_writer_v159
- USING(org_id=jw_dev.current_org_from_session() AND EXISTS
+ USING(review_delivery_receipts_v151.org_id=jw_dev.current_org_from_session() AND EXISTS
   (SELECT 1 FROM jw_dev.stage_identity_v84() a
-   WHERE a.org_id=org_id AND a.actor_role='admin'));
+   WHERE a.org_id=review_delivery_receipts_v151.org_id AND a.actor_role='admin'));
 
 CREATE POLICY v159_receipt_insert ON jw_dev.review_delivery_receipts_v151
  FOR INSERT TO jw_delivery_writer_v159
- WITH CHECK(org_id=jw_dev.current_org_from_session() AND EXISTS
+ WITH CHECK(review_delivery_receipts_v151.org_id=jw_dev.current_org_from_session() AND EXISTS
   (SELECT 1 FROM jw_dev.stage_identity_v84() a
    WHERE a.org_id=org_id AND a.actor_role='admin') AND EXISTS
   (SELECT 1 FROM jw_dev.orders o
-   WHERE o.id=order_id AND o.org_id=org_id
+   WHERE o.id=review_delivery_receipts_v151.order_id
+     AND o.org_id=review_delivery_receipts_v151.org_id
      AND o.status='fulfilled' AND o.review_state='acknowledged'));
 
 CREATE POLICY v159_nonce_read ON jw_dev.review_delivery_nonces_v151
