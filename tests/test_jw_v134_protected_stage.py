@@ -66,3 +66,21 @@ def test_websocket_access_key_outer_gate(monkeypatch):
     with TestClient(wrapper) as cli:
         with pytest.raises(Exception):
             with cli.websocket_connect("/api/pg-stage/v90/stream"): pass
+
+
+def test_preflight_diagnostic_redacts_DSN(monkeypatch, caplog):
+    monkeypatch.setenv("JW_ENV", "dev")
+    monkeypatch.setenv("JW_STAGE1_PUBLIC_ACK", protected._ACK)
+    monkeypatch.setenv("JW_STAGE1_ACCESS_KEY", "fake-strong-key-abcdefghijklmnopqrstuvwxyz123456")
+    monkeypatch.setenv("JW_PG_STAGE_DSN", "postgresql://NEVER_LOG_TRADE_PASSWORD")
+    monkeypatch.setenv("JW_PG_AUTH_STAGE_DSN", "postgresql://NEVER_LOG_AUTH_PASSWORD")
+    monkeypatch.setattr(core, "preflight", lambda: False)
+    with caplog.at_level("WARNING", logger="jarvis.stage1"):
+        app = protected.create_app()
+    assert "STAGE1_CONFIG_PREFLIGHT=BLOCKED" in caplog.text
+    assert "TRADE_DSN" in caplog.text
+    assert "AUTH_DSN" in caplog.text
+    assert "NEVER_LOG_TRADE_PASSWORD" not in caplog.text
+    assert "NEVER_LOG_AUTH_PASSWORD" not in caplog.text
+    with TestClient(app) as client:
+        assert client.get("/healthz").json()["mode"] == "sealed-no-db"
