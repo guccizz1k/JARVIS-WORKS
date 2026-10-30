@@ -96,3 +96,31 @@ def test_8_concurrent_unique_requests_with_same_business_only_one(tmp_path):
         outcomes=list(pool.map(attempt,range(8)))
     assert outcomes.count(True)==1
     assert data(p)==(1,2)
+
+
+def test_sqlite_connections_closed_even_on_duplicate_failure(tmp_path, monkeypatch):
+    """Regression: sqlite3's connection context manager alone does NOT close."""
+    import sqlite3
+    created = []
+    original = sqlite3.connect
+
+    class Tracked(sqlite3.Connection):
+        was_closed = False
+
+        def close(self):
+            self.was_closed = True
+            return super().close()
+
+    def tracked_connect(*args, **kwargs):
+        connection = original(*args, factory=Tracked, **kwargs)
+        created.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", tracked_connect)
+    p = tmp_path / "tracked.sqlite"
+    initialize_test_db(p)
+    assert reserve_for_human_review(p, intent=BASE, decision=decision(), email_nonce=A, business_nonce=B)
+    with pytest.raises(ReservationRejected):
+        reserve_for_human_review(p, intent=BASE, decision=decision(), email_nonce=A, business_nonce=B)
+    assert len(created) == 3
+    assert all(connection.was_closed for connection in created)
