@@ -106,8 +106,9 @@ def main():
           "confirmed_quote_date":"2026-10-31",
           "confirmed_total_krw":7700}
     hdr={"Origin":"https://testserver","X-CSRF-Token":fixture.CSRF["A"]}
-    assert b.post(url,json=body,headers={"Origin":"https://testserver",
-           "X-CSRF-Token":fixture.CSRF["B"]}).status_code==404
+    denied=b.post(url,json=body,headers={"Origin":"https://testserver",
+           "X-CSRF-Token":fixture.CSRF["B"]})
+    assert denied.status_code==404,(denied.status_code,denied.text[:500])
     assert a.post(url,json={**body,"reviewed":False},headers=hdr).status_code==422
     assert a.post(url,json={**body,"confirmed_total_krw":7701},
                   headers=hdr).status_code==409
