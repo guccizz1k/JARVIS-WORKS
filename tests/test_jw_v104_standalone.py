@@ -67,6 +67,7 @@ def test_standalone_excludes_legacy_sqlite_and_document_production_routes(monkey
     assert client.get("/api/pg-stage/v90/me").status_code==401
     assert client.get("/api/pg-stage/v84/me").status_code==401
     assert client.get("/api/pg-stage/v92/quotes").status_code==401
+    assert client.get("/api/pg-stage/v145/orders/" + "a" * 32 + "/invoice-preview").status_code==401
     for route in ("/api/pg-stage/v85/login","/api/pg-stage/v90/chats",
                   "/api/pg-stage/v92/quotes"):
         assert client.post(route,json={}).status_code==422,route
