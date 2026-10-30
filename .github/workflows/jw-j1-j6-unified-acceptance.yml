@@ -15,6 +15,7 @@ on:
       - review/v99-v110-eight-stage-acceptance-20261025
       - review/v131-abc-finance-rollback-20261030
       - review/v156-j1j6-baseline-ci-fix-20261030
+      - review/v157-real-pg17-delivery-http-concurrency-20261030
   workflow_dispatch:
 
 permissions:
