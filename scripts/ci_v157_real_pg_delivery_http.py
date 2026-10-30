@@ -21,6 +21,12 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tempfile import TemporaryDirectory
+from threading import Thread
+import subprocess
+import socket
+
+import uvicorn
 
 from app import pg_delivery_review_api_v154 as delivery
 from app import pg_v90_integrated_entry as entry
@@ -166,6 +172,87 @@ def assertions():
         """).fetchone()
 
 
+def browser_https_real_pg(app):
+    """Actual headless Chromium DOM against live self-signed HTTPS + PG17.
+
+    Self-signed local-only certificate and synthetic session; this does NOT
+    validate trusted hosted TLS or actual official signer authenticity.
+    """
+    from playwright.sync_api import sync_playwright
+    from pathlib import Path
+    with TemporaryDirectory(prefix="jw-v157-https-") as directory:
+        key=Path(directory)/"tls-key.pem"
+        cert=Path(directory)/"tls-cert.pem"
+        subprocess.run([
+            "openssl","req","-x509","-nodes","-newkey","rsa:2048",
+            "-keyout",str(key),"-out",str(cert),"-days","1",
+            "-subj","/CN=localhost"
+        ],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        config=uvicorn.Config(app,host="127.0.0.1",port=8777,
+                              ssl_keyfile=str(key),ssl_certfile=str(cert),
+                              log_level="error",access_log=False)
+        server=uvicorn.Server(config)
+        worker=Thread(target=server.run,daemon=True)
+        worker.start()
+        try:
+            for _ in range(70):
+                if server.started:break
+                time.sleep(.1)
+            assert server.started,"Uvicorn HTTPS fixture not started"
+            path="/api/pg-stage/v155/review-console"
+            with sync_playwright() as pw:
+                browser=pw.chromium.launch(headless=True,args=["--no-sandbox"])
+                try:
+                    for size in (320,390,768,1280):
+                        context=browser.new_context(
+                            ignore_https_errors=True,
+                            viewport={"width":size,"height":850})
+                        context.add_cookies([{
+                            "name":"__Host-jw_session","value":TOKENS["A"],
+                            "url":"https://localhost:8777",
+                            "secure":True,"httpOnly":True,"sameSite":"Strict"
+                        }])
+                        page=context.new_page()
+                        response=page.goto("https://localhost:8777"+path,
+                                           wait_until="networkidle",timeout=25000)
+                        assert response.status==200,(size,response.status)
+                        assert page.locator("h1").inner_text()=="납품 증거 검토"
+                        assert page.locator("#order-id").count()==1
+                        assert page.evaluate(
+                            "document.documentElement.scrollWidth <= innerWidth"),size
+                        page.locator("#order-id").fill("invalid")
+                        page.locator("#submit").click()
+                        assert "32자리" in page.locator("#review-result").inner_text()
+                        page.locator("#order-id").fill(ORDER_A)
+                        page.locator("#submit").click()
+                        page.locator("#review-result").get_by_text(
+                            "검토 대기 중").wait_for(timeout=10000)
+                        assert "입금은 진행되지 않았습니다" in page.locator(
+                            "#review-result").inner_text()
+                        if size==390:
+                            out=ROOT/"artifacts/v157"
+                            out.mkdir(parents=True,exist_ok=True)
+                            page.screenshot(path=str(out/"review-console-https.png"))
+                        context.close()
+                    context=browser.new_context(ignore_https_errors=True)
+                    context.add_cookies([{
+                        "name":"__Host-jw_session","value":TOKENS["M"],
+                        "url":"https://localhost:8777",
+                        "secure":True,"httpOnly":True,"sameSite":"Strict"
+                    }])
+                    resp=context.request.get("https://localhost:8777"+path)
+                    assert resp.status==403,resp.status
+                    context.close()
+                finally:
+                    browser.close()
+        finally:
+            server.should_exit=True
+            worker.join(timeout=10)
+            assert not worker.is_alive(),"HTTPS fixture failed to stop"
+    print("PASS_V157_CHROMIUM_REAL_LOCAL_HTTPS_PG_UI_320_390_768_1280",flush=True)
+    print("PASS_V157_BROWSER_MEMBER_FORBIDDEN_AND_REVIEW_ONLY_STATUS",flush=True)
+
+
 def main():
     bootstrap()
     app=configure()
@@ -236,6 +323,7 @@ def main():
               ).format(sql.Identifier(table)),(ORDER_B,)).fetchone()==(0,)
         assert admin.execute("SELECT count(*) FROM pg_policies WHERE schemaname='jw_dev' AND policyname LIKE 'v153_%'").fetchone()==(6,)
         assert admin.execute("SELECT relforcerowsecurity FROM pg_class WHERE oid='jw_dev.review_delivery_receipts_v151'::regclass").fetchone()==(True,)
+    browser_https_real_pg(app)
     print("PASS_V157_REAL_PG17_TWO_TCP_DELIVERY_POST_ONE_201_ONE_409",flush=True)
     print("PASS_V157_REAL_HTTP_GET_A_ADMIN_B_FOREIGN_MEMBER_FORBIDDEN",flush=True)
     print("PASS_V157_DB_ATOMIC_RECEIPT_NONCE_LINE_AUDIT_AND_INJECTED_ROLLBACK",flush=True)
