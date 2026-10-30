@@ -13,6 +13,7 @@ on:
       - review/v97-restricted-supavisor-login-20261025
       - review/v98-supavisor-hop-aware-ssl-20261025
       - review/v99-v110-eight-stage-acceptance-20261025
+      - review/v131-abc-finance-rollback-20261030
   workflow_dispatch:
 
 permissions:
