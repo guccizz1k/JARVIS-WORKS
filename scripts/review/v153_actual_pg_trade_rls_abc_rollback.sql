@@ -45,14 +45,14 @@ INSERT INTO jw_dev.review_delivery_receipts_v151
  (order_id,org_id,source_sha256,evidence_sha256,
   dispatch_document_sha256,recipient_document_sha256,
   dispatch_actor,recipient_actor,subtotal_krw,vat_krw,total_krw)
- VALUES(repeat('c',32),repeat('a',32),repeat('1',64),repeat('2',64),
+ VALUES(repeat('c',32),repeat('a',32),repeat('1',64),repeat('e',64),
         repeat('3',64),repeat('4',64),repeat('5',32),repeat('6',32),
         7000,700,7700);
 INSERT INTO jw_dev.review_delivery_nonces_v151
  (nonce,order_id,purpose,issuer,proof_sha256)
  VALUES
- (repeat('7',32),repeat('c',32),'dispatch','synthetic-a-dispatch',repeat('8',64)),
- (repeat('9',32),repeat('c',32),'receipt','synthetic-a-receipt',repeat('a',64));
+ (repeat('0',32),repeat('c',32),'dispatch','synthetic-a-dispatch',repeat('8',64)),
+ (repeat('b',32),repeat('c',32),'receipt','synthetic-a-receipt',repeat('a',64));
 INSERT INTO jw_dev.review_delivery_items_v151
  (order_id,source_item_id,position,quantity,unit_price_krw)
  VALUES(repeat('c',32),repeat('5',32),0,2,3500);
