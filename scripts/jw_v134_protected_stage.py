@@ -14,6 +14,46 @@ from scripts import jw_v104_standalone
 
 _ACK = "V134_STAGE1_PUBLIC_ISOLATED_ONLY"
 
+def _dsn_shape_issue(raw: str, principal: str) -> str:
+    """A fixed failure label only: never logs password, user input, or URL."""
+    if not raw:
+        return "MISSING"
+    if raw != raw.strip():
+        return "LEADING_OR_TRAILING_WHITESPACE"
+    if not raw.startswith("postgresql://"):
+        return "NOT_A_POSTGRES_URL"
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+        d = conninfo_to_dict(raw)
+    except Exception:
+        return "URI_PARSE"
+    expected_role = {
+        "TRADE": "jw_stage1_trade_20261030",
+        "AUTH": "jw_stage1_auth_20261030",
+    }[principal] + ".rvymwwzclagvljnofyss"
+    checks = (
+        ("USERNAME", d.get("user") == expected_role),
+        ("HOST", d.get("host") == "aws-0-ap-northeast-2.pooler.supabase.com"),
+        ("DATABASE", d.get("dbname") == "postgres"),
+        ("PORT", d.get("port", "5432") == "5432"),
+        ("TLS_MODE", d.get("sslmode") == "verify-full"),
+        ("TLS_CERT", d.get("sslrootcert") == "system"),
+        ("PASSWORD", len(d.get("password", "")) >= 16),
+        ("UNEXPECTED_OPTIONS", not (set(d) - {
+            "host", "port", "dbname", "user", "password", "sslmode",
+            "connect_timeout", "sslrootcert"})),
+    )
+    for name, good in checks:
+        if not good:
+            return name
+    try:
+        timeout = int(d.get("connect_timeout", "5"))
+        if not 1 <= timeout <= 5:
+            return "TIMEOUT"
+    except ValueError:
+        return "TIMEOUT"
+    return "UNKNOWN"
+
 class ProtectedStage:
     def __init__(self, app: FastAPI, secret: str):
         self.app=app
@@ -84,6 +124,14 @@ def create_app():
         logging.getLogger("jarvis.stage1").warning(
             "STAGE1_CONFIG_PREFLIGHT=BLOCKED invalid_checks=%s",
             ",".join(bad) if bad else "UNKNOWN")
+        if not checks["TRADE_DSN"]:
+            logging.getLogger("jarvis.stage1").warning(
+                "STAGE1_DSN_SHAPE_TRADE=%s",
+                _dsn_shape_issue(os.getenv("JW_PG_STAGE_DSN", ""), "TRADE"))
+        if not checks["AUTH_DSN"]:
+            logging.getLogger("jarvis.stage1").warning(
+                "STAGE1_DSN_SHAPE_AUTH=%s",
+                _dsn_shape_issue(os.getenv("JW_PG_AUTH_STAGE_DSN", ""), "AUTH"))
     if enabled:
         # Render connects with its own role-scoped DSNs; never infer live DB
         # access from syntactically valid env settings or a green HTTP deploy.
