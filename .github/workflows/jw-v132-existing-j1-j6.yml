@@ -1,0 +1,20 @@
+name: JW V13.2 full existing J1-J6 product review exact-head
+
+on:
+  push:
+    branches:
+      - review/v131-abc-finance-rollback-20261030
+    paths:
+      - .github/workflows/jw-v132-existing-j1-j6.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v132-full-acceptance-review
+  cancel-in-progress: true
+
+jobs:
+  existing-j1-j6:
+    uses: ./.github/workflows/jw-j1-j6-unified-acceptance.yml
