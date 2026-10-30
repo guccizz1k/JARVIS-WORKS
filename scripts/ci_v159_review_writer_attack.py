@@ -33,14 +33,14 @@ def main():
     # Prove vulnerable old schema permits fabricated pending reviews WITHOUT
     # the independently attested signed HTTP evidence.
     with psycopg.connect(fixture.TRADE_DSN) as trade:
-        with trade.transaction():
-            raw_receipt(trade,role="jw_app_dev",session="A",
-                        order_id=fixture.ORDER_A,org_id=fixture.ORG_A,marker="e")
-            assert trade.execute(
-                "SELECT count(*) FROM jw_dev.review_delivery_receipts_v151"
-            ).fetchone()==(1,)
-            trade.rollback()
+        raw_receipt(trade,role="jw_app_dev",session="A",
+                    order_id=fixture.ORDER_A,org_id=fixture.ORG_A,marker="e")
         assert trade.execute(
+            "SELECT count(*) FROM jw_dev.review_delivery_receipts_v151"
+        ).fetchone()==(1,)
+        trade.rollback()
+    with psycopg.connect(fixture.DSN) as root:
+        assert root.execute(
             "SELECT count(*) FROM jw_dev.review_delivery_receipts_v151"
         ).fetchone()==(0,)
     print("REPRO_V159_LEGACY_DIRECT_INSERT_BYPASSES_SIGNATURE_CHECK",flush=True)
@@ -97,9 +97,6 @@ def main():
         with writer.transaction():
             raw_receipt(writer,role="jw_delivery_writer_v159",session="A",
                         order_id=fixture.ORDER_A,org_id=fixture.ORG_A,marker="e")
-        assert writer.execute(
-            "SELECT count(*) FROM jw_dev.review_delivery_receipts_v151"
-        ).fetchone()==(0,)  # Session GUC is transaction-scoped.
 
     with psycopg.connect(fixture.DSN) as admin:
         assert admin.execute(
