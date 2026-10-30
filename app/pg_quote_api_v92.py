@@ -227,7 +227,7 @@ def create_order_draft(request: Request, payload: OrderFromQuote,
         new_id = uuid.uuid4().hex
         stamp = datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="seconds")
         day = stamp[:10]
-        cur.execute("""INSERT INTO jw_dev.orders
+        cur.execute("""INSERT INTO jw_dev.order_drafts_v127
             (id,org_id,customer_id,quote_id,customer_name_snapshot,doc_no,title,
              status,review_state,vat_mode,due_date,created_at,updated_at,
              order_date,source_import_id,source_document_meta)
@@ -240,7 +240,7 @@ def create_order_draft(request: Request, payload: OrderFromQuote,
         inserted = cur.fetchone()
         if not inserted:
             cur.execute("""SELECT id,source_import_id,source_document_meta
-                           FROM jw_dev.orders
+                           FROM jw_dev.order_drafts_v127
                            WHERE org_id=%s AND (quote_id=%s OR source_import_id=%s)""",
                         (org, payload.quote_id, key))
             old = cur.fetchall()
@@ -258,7 +258,7 @@ def create_order_draft(request: Request, payload: OrderFromQuote,
                     "created": False, "draft_only": True, "approval_posted": False,
                     "money": amount}
         for line_id, name, qty, price, pos in lines:
-            cur.execute("""INSERT INTO jw_dev.order_items
+            cur.execute("""INSERT INTO jw_dev.order_draft_items_v127
                 (id,order_id,source_quote_item_id,name,quantity,unit_price,position)
                 VALUES (%s,%s,%s,%s,%s,%s,%s)""",
                 (uuid.uuid4().hex, new_id, line_id, name, qty, price, pos))

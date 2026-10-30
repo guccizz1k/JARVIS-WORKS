@@ -20,7 +20,7 @@ def test_stage_route_never_enabled_for_production():
 
 def test_ephemeral_pg_order_tables_are_force_rls_and_insert_only():
     s=read("scripts/ci_v127_ephemeral_order.sql").upper()
-    for fragment in ("CREATE TABLE JW_DEV.ORDERS", "CREATE TABLE JW_DEV.ORDER_ITEMS",
+    for fragment in ("CREATE TABLE JW_DEV.ORDER_DRAFTS_V127", "CREATE TABLE JW_DEV.ORDER_DRAFT_ITEMS_V127",
                      "FORCE ROW LEVEL SECURITY", "CREATE POLICY CI_ORDER_INSERT",
                      "CREATE POLICY CI_ORDER_ITEM_INSERT", "WITH CHECK",
                      "UNIQUE(ORG_ID,QUOTE_ID)"):
@@ -38,3 +38,13 @@ def test_browser_exercises_negative_and_replay_cases():
         assert fragment in s
     assert "restore_proof()" in s
     assert s.index("restore_proof()") < s.index("ci_v127_ephemeral_order.sql")
+
+
+def test_not_posting_to_live_business_order_or_payment_tables():
+    stage=read("scripts/ci_v127_ephemeral_order.sql").upper()
+    engine=read("app/pg_quote_api_v92.py")
+    assert "CREATE TABLE JW_DEV.ORDER_DRAFTS_V127" in stage
+    assert "CREATE TABLE JW_DEV.ORDER_DRAFT_ITEMS_V127" in stage
+    assert "CREATE TABLE JW_DEV.ORDERS " not in stage
+    assert "INSERT INTO jw_dev.orders" not in engine
+    assert "INSERT INTO jw_dev.payments" not in engine

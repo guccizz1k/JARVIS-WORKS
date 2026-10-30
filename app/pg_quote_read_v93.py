@@ -93,7 +93,7 @@ def get_order_draft(order_id: str, request: Request, response: Response):
         raise HTTPException(404, "Order draft not found")
     with _checked(request) as (cur, identity):
         cur.execute("""SELECT id,quote_id,title,status,review_state,vat_mode
-                       FROM jw_dev.orders WHERE id=%s AND org_id=%s""",
+                       FROM jw_dev.order_drafts_v127 WHERE id=%s AND org_id=%s""",
                     (order_id, identity[2]))
         order = cur.fetchone()
         if not order:
@@ -101,7 +101,7 @@ def get_order_draft(order_id: str, request: Request, response: Response):
         if order[3] != "draft" or order[4] != "original_checked":
             raise HTTPException(409, "Order draft status not verifiable")
         cur.execute("""SELECT name,quantity,unit_price,position
-                       FROM jw_dev.order_items WHERE order_id=%s
+                       FROM jw_dev.order_draft_items_v127 WHERE order_id=%s
                        ORDER BY position,id""", (order_id,))
         lines = cur.fetchall()
         if not 1 <= len(lines) <= 40 or any(

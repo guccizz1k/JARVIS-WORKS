@@ -22,7 +22,7 @@ def test_browser_real_company_c_denials_and_recovery():
         "cForeign.code!==404", "cCreate.code!==404",
         "cChat.code!==403", "cRevoked.code!==401",
         'login_success":4,"logout":3',
-        "JW_V126_REAL_PG_AUTH_A_B_C_FINANCE_CHAT_REVOCATION_PASS",
+        "JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS",
     ):
         assert evidence in source
     assert "ONLY_EPHEMERAL_LOCAL_DATABASE" in source
