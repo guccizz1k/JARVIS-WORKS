@@ -84,3 +84,18 @@ def test_preflight_diagnostic_redacts_DSN(monkeypatch, caplog):
     assert "NEVER_LOG_AUTH_PASSWORD" not in caplog.text
     with TestClient(app) as client:
         assert client.get("/healthz").json()["mode"] == "sealed-no-db"
+
+
+def test_stage_dsn_shape_classification_only():
+    host = "aws-0-ap-northeast-2.pooler.supabase.com"
+    user = "jw_stage1_trade_20261030.rvymwwzclagvljnofyss"
+    valid = (f"postgresql://{user}:synthetic-test-password-1234567890@{host}"
+             ":5432/postgres?sslmode=verify-full&sslrootcert=system")
+    assert protected._dsn_shape_issue(valid, "TRADE") == "UNKNOWN"
+    assert protected._dsn_shape_issue("", "TRADE") == "MISSING"
+    assert protected._dsn_shape_issue(" setting,connection_string", "TRADE") == "LEADING_OR_TRAILING_WHITESPACE"
+    assert protected._dsn_shape_issue("setting,connection_string", "TRADE") == "NOT_A_POSTGRES_URL"
+    assert protected._dsn_shape_issue(valid.replace(user, "not-a-role"), "TRADE") == "USERNAME"
+    assert protected._dsn_shape_issue(valid.replace(host, "wrong.host"), "TRADE") == "HOST"
+    assert protected._dsn_shape_issue(valid.replace("verify-full", "require"), "TRADE") == "TLS_MODE"
+    assert protected._dsn_shape_issue(valid.replace("&sslrootcert=system", ""), "TRADE") == "TLS_CERT"
