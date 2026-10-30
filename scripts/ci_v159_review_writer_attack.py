@@ -122,16 +122,46 @@ def main():
         else:
             raise AssertionError("FAIL_V159_MEMBER_WRITE")
 
+    # Actual V15.4 HTTP signed evidence now uses a separate writer login and
+    # its session identity; ordinary trade login remains read-only on ledger.
+    from app import pg_delivery_writer_v159 as dedicated
+    import os
+    os.environ.update({
+        "JW_PG_DELIVERY_WRITER_V159":
+            "ISOLATED_DEV_SEPARATE_REVIEW_WRITER",
+        "JW_PG_DELIVERY_WRITER_DSN": writer_dsn,
+        "JW_PG_STAGE_DSN": "ci-v159-separate-trade-credential",
+        "JW_PG_AUTH_STAGE_DSN": "ci-v159-separate-auth-credential",
+    })
+    dedicated._connect=lambda: psycopg.connect(writer_dsn,connect_timeout=5)
+    app=fixture.configure()
+    assert dedicated.enabled()
+    client_b=fixture.client(app,"B")
+    signed=fixture.proof_pair(fixture.ORDER_B,fixture.ORG_B,fixture.LINE_B)
+    response=fixture.send(client_b,fixture.ORDER_B,signed,"B")
+    assert response.status_code==201,(response.status_code,response.text[:450])
+    assert response.json()["status"]=="PENDING_HUMAN_REVIEW"
+    assert fixture.send(client_b,fixture.ORDER_B,signed,"B").status_code==409
+    url="/api/pg-stage/v154/orders/"+fixture.ORDER_B+"/delivery-review"
+    assert client_b.get(url).status_code==200
+    assert fixture.client(app,"A").get(url).status_code==404
     with psycopg.connect(fixture.DSN) as admin:
         assert admin.execute(
             "SELECT count(*) FROM jw_dev.review_delivery_receipts_v151"
+        ).fetchone()==(2,)
+        assert admin.execute(
+            "SELECT count(*) FROM jw_dev.review_delivery_nonces_v151"
+        ).fetchone()==(2,)
+        assert admin.execute(
+            "SELECT count(*) FROM jw_dev.review_delivery_items_v151"
         ).fetchone()==(1,)
         assert admin.execute(
             "SELECT count(*) FROM jw_dev.invoices"
         ).fetchone()==(0,)
         assert admin.execute(
             "SELECT count(*) FROM jw_dev.audit_logs"
-        ).fetchone()==(0,)
+        ).fetchone()==(1,)
+    print("PASS_V159_ACTUAL_SIGNED_HTTP_WITH_SEPARATE_SQL_WRITER",flush=True)
     print("PASS_V159_GENERAL_TRADE_DIRECT_FORGERY_DENIED",flush=True)
     print("PASS_V159_SEPARATE_LIMITED_WRITER_ROLE_NOT_ADOPTABLE_BY_TRADE",flush=True)
     print("PASS_V159_INDEPENDENT_LOGIN_RLS_TENANT_AND_MEMBER_DENIED",flush=True)
