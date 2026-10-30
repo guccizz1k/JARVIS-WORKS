@@ -157,7 +157,7 @@ def create_app():
         app=jw_v104_standalone.create_app()
         if os.getenv("JW_STAGE1_SAFE_HTTPS_PROBE") == "V140_ISOLATED_READONLY_HTTPS_DENIAL_ONLY":
             from scripts import jw_v140_safe_live_https_probe
-            app.add_event_handler("startup", jw_v140_safe_live_https_probe.schedule)
+            app.on_event("startup")(jw_v140_safe_live_https_probe.schedule)
         # Preserve the existing product's health route but do not advertise
         # acceptance or customer data until independent E2E evidence exists.
     else:
