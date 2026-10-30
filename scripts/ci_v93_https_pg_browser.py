@@ -335,24 +335,45 @@ def main() -> int:
               if(blogout.code!==200)throw Error('B logout failed');
               const bRevoked=await req(msgs);
               if(bRevoked.code!==401)throw Error('Logged-out B retained chat');
+              const c=await req(auth+'login','POST',
+                {email:'c@invalid.test',password:'CI-v106-disposable-auth-password-only'});
+              if(c.code!==200||!c.data.csrf_token)
+                throw Error('Real PG C login failed');
+              const cMe=await req('/api/pg-stage/v90/me');
+              if(cMe.code!==200||cMe.data.org_id!=='ci-c')
+                throw Error('Real PG C session has wrong tenant');
+              const cForeign=await req(root+'/'+created.data.quote_id);
+              if(cForeign.code!==404)throw Error('PG C accessed A financial document');
+              const cCreate=await req(root,'POST',{
+                request_id:'v126-c-forged-cross-tenant-0001',
+                customer_id:'ci-customer-a',title:'FORBIDDEN',vat_mode:'taxable',
+                items:[{name:'test',quantity:1,unit_price:1}]
+              },c.data.csrf_token);
+              if(cCreate.code!==404)throw Error('PG C created foreign-customer quote');
+              const cChat=await req(msgs);
+              if(cChat.code!==403)throw Error('PG C read nonmember A/B messages');
+              const cLogout=await req(auth+'logout','POST',undefined,c.data.csrf_token);
+              if(cLogout.code!==200)throw Error('Real PG C logout failed');
+              const cRevoked=await req('/api/pg-stage/v90/me');
+              if(cRevoked.code!==401)throw Error('Logged-out C retained PG session');
               const again=await req(auth+'login','POST',
                 {email:'a@invalid.test',password:'CI-v106-disposable-auth-password-only'});
               if(again.code!==200)throw Error('Real PG A relogin failed');
               const aQuote=await req(root+'/'+created.data.quote_id);
               if(aQuote.code!==200||aQuote.data.money.total!==1440)
                 throw Error('PG A finance recovery after logout failed');
-              return 'JW_V106_REAL_PG_AUTH_LOGIN_QUOTE_CHAT_LOGOUT_RLS_PASS';
-            }""","JW_V106_REAL_PG_AUTH_LOGIN_QUOTE_CHAT_LOGOUT_RLS_PASS",timeout=110)
+              return 'JW_V126_REAL_PG_AUTH_A_B_C_FINANCE_CHAT_REVOCATION_PASS';
+            }""","JW_V126_REAL_PG_AUTH_A_B_C_FINANCE_CHAT_REVOCATION_PASS",timeout=110)
             with psycopg.connect(fixture.root_dsn) as root:
                 events=root.execute("""
                     SELECT event_type,count(*) FROM jw_dev.security_events
                     GROUP BY event_type ORDER BY event_type
                 """).fetchall()
-                if dict(events)!={"login_success":3,"logout":2}:
+                if dict(events)!={"login_success":4,"logout":3}:
                     raise AssertionError("Actual PostgreSQL auth events inconsistent")
             print("PASS: real PG17 independent credential login, hashed DB sessions, "
                   "login failure, CSRF, A->quote+chat->B, logout revocation, "
-                  "tenant denial, and relogin recovery",flush=True)
+                  "A/B/C tenant denial, C auth revocation, and relogin recovery",flush=True)
             print("LIMIT: synthetic A/B fixture on disposable PG17; MFA not enabled; "
                   "Render isolated Postgres not yet provisioned/connected",flush=True)
             print("PASS: real Chromium browser -> HTTPS -> V9.3 API -> PG17 nonprivileged session; quote form/GET/tenant denial",flush=True)
