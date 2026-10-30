@@ -180,8 +180,12 @@ def main():
         assert source[1]=="draft" and source[2].startswith("ENC1:")
         assert root.execute("SELECT count(*) FROM jw_dev.quote_items WHERE quote_id=%s",
                             (quote_id,)).fetchone()==(1,)
+        actions=root.execute("""SELECT action FROM jw_dev.audit_logs
+                          WHERE entity_id=%s ORDER BY action""",(quote_id,)).fetchall()
+        assert actions==[("approved_import_to_draft",),
+                         ("human_preview_acknowledged",)],actions
         assert root.execute("""SELECT count(*) FROM jw_dev.audit_logs
-                          WHERE entity_id=%s""",(quote_id,)).fetchone()==(1,)
+                          WHERE entity_id=%s""",(order_id,)).fetchone()==(1,)
         assert root.execute("SELECT count(*) FROM jw_dev.order_drafts_v127 WHERE id=%s",
                             (order_id,)).fetchone()==(1,)
         assert root.execute("SELECT count(*) FROM jw_dev.order_draft_items_v127 WHERE order_id=%s",
