@@ -251,29 +251,19 @@ def acknowledge_quote_preview(request: Request, payload: QuotePreviewAcknowledge
         stamp = int(time.time())
         cur.execute("""INSERT INTO jw_dev.quote_review_receipts_v128
               (id,org_id,actor_id,quote_id,source_sha256,created_epoch)
-              VALUES (%s,%s,%s,%s,%s,%s)
-              ON CONFLICT (org_id,actor_id,quote_id,source_sha256)
-              DO NOTHING RETURNING id""",
+              VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
             (receipt, org, actor, payload.quote_id, digest, stamp))
         inserted = cur.fetchone()
-        if inserted:
-            cur.execute("""INSERT INTO jw_dev.audit_logs
-                (id,org_id,actor_id,entity_type,entity_id,action,detail,created_at)
-                VALUES (%s,%s,%s,'quote_preview',%s,'human_preview_acknowledged',%s,%s)""",
-                (uuid.uuid4().hex, org, actor, payload.quote_id,
-                 json.dumps({"preview_sha256": digest}, sort_keys=True),
-                 datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="seconds")))
-            receipt = inserted[0]
-            response.status_code = 201
-        else:
-            cur.execute("""SELECT id FROM jw_dev.quote_review_receipts_v128
-                  WHERE org_id=%s AND actor_id=%s AND quote_id=%s
-                  AND source_sha256=%s""",
-                  (org, actor, payload.quote_id, digest))
-            found = cur.fetchone()
-            if not found:
-                raise HTTPException(409, "Cannot reconcile preview acknowledgement")
-            receipt = found[0]
+        if not inserted:
+            raise HTTPException(503, "Preview acknowledgement was not persisted")
+        receipt = inserted[0]
+        cur.execute("""INSERT INTO jw_dev.audit_logs
+            (id,org_id,actor_id,entity_type,entity_id,action,detail,created_at)
+            VALUES (%s,%s,%s,'quote_preview',%s,'human_preview_acknowledged',%s,%s)""",
+            (uuid.uuid4().hex, org, actor, payload.quote_id,
+             json.dumps({"preview_sha256": digest}, sort_keys=True),
+             datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="seconds")))
+        response.status_code = 201
     response.headers["Cache-Control"] = "no-store"
     return {"review_receipt_id": receipt, "quote_id": payload.quote_id,
             "preview_sha256": digest, "source_document_verified": False}

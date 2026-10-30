@@ -45,8 +45,7 @@ CREATE TABLE jw_dev.quote_review_receipts_v128 (
  id text PRIMARY KEY, org_id text NOT NULL REFERENCES jw_dev.organizations(id),
  actor_id text NOT NULL, quote_id text NOT NULL REFERENCES jw_dev.quotes(id),
  source_sha256 text NOT NULL CHECK (source_sha256 ~ '^[a-f0-9]{64}$'),
- created_epoch bigint NOT NULL,
- UNIQUE(org_id,actor_id,quote_id,source_sha256)
+ created_epoch bigint NOT NULL
 );
 ALTER TABLE jw_dev.quote_review_receipts_v128 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jw_dev.quote_review_receipts_v128 FORCE ROW LEVEL SECURITY;

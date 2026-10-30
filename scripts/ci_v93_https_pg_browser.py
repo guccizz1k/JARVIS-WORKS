@@ -337,9 +337,13 @@ def main() -> int:
               if(acknowledged.code!==201||!acknowledged.data.review_receipt_id||
                  acknowledged.data.source_document_verified!==false)
                 throw Error('Verified preview acknowledgement not saved');
+              const renewed=await req(reviewPath,'POST',reviewBody,csrfA);
+              if(renewed.code!==201||renewed.data.review_receipt_id===
+                 acknowledged.data.review_receipt_id)
+                throw Error('Fresh review must not return old eventually-expiring receipt');
               const fromQuote={request_id:'v127-order-request-0001',
                 quote_id:created.data.quote_id,original_checked:true,
-                review_receipt_id:acknowledged.data.review_receipt_id};
+                review_receipt_id:renewed.data.review_receipt_id};
               const rejectUnchecked=await req(orderPath,'POST',{
                 ...fromQuote,original_checked:false},csrfA);
               if(rejectUnchecked.code!==422)
