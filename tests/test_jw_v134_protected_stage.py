@@ -15,8 +15,13 @@ def test_weak_stage_key_denied(monkeypatch):
     monkeypatch.setenv("JW_ENV","dev")
     monkeypatch.setenv("JW_STAGE1_PUBLIC_ACK",protected._ACK)
     monkeypatch.setenv("JW_STAGE1_ACCESS_KEY","short")
-    with pytest.raises(RuntimeError,match="weak"):
-        protected.create_app()
+    with TestClient(protected.create_app()) as client:
+        check=client.get("/healthz")
+        assert check.status_code==200 and check.json()["stage1"]=="FAIL"
+        assert check.json()["mode"]=="sealed-awaiting-stage-key"
+        assert client.get("/api/pg-stage/v90/me").status_code==403
+        assert client.get("/api/pg-stage/v90/me", headers={
+            "X-JW-Stage-Key":"x"*80}).status_code==403
 
 def test_sealed_no_db_and_all_routes_denied(monkeypatch):
     monkeypatch.setenv("JW_ENV","dev")
