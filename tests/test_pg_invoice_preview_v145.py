@@ -110,3 +110,15 @@ def test_disabled_gate_stays_closed():
         with pytest.raises(HTTPException) as exc:
             preview.invoice_preview(OID, SimpleNamespace(), Response())
         assert exc.value.status_code == 404
+
+
+def test_only_readonly_verified_stage2_checks_are_allowed():
+    from pathlib import Path
+    source = Path(__file__).parents[1] / "scripts/review/v145_signup_readiness_readonly.sql"
+    query = source.read_text()
+    assert "PASS_EXISTING_PREREQUISITES_ONLY" in query
+    assert "'BLOCKED'::text AS stage2_release_acceptance" in query
+    assert "'NOT_VERIFIED'::text AS email_delivery_and_password_reset" in query
+    for forbidden in ("INSERT INTO ", "UPDATE jw_dev.", "DELETE FROM ",
+                      "CREATE ROLE", "GRANT ", "COMMIT;", "ALTER TABLE "):
+        assert forbidden not in query
