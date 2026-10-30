@@ -74,6 +74,18 @@ async def verify() -> str:
             after = await client.get(HOST + ME)
             _check("REVOKED_A_" + str(after.status_code), after.status_code == 401)
             client.cookies.clear()
+            # A successful login resets failed-attempt history. After logout,
+            # five fresh wrong attempts are permitted (401), then 15-minute
+            # lockout denies both wrong and correct passwords (429).
+            for attempt in range(5):
+                denied = await _login(client, "a", "synthetic-wrong-after-logout")
+                _check("FAILED_ATTEMPT_A_" + str(attempt) + "_" + str(denied.status_code),
+                       denied.status_code == 401)
+            locked = await _login(client, "a", "synthetic-wrong-after-logout")
+            _check("LOGIN_LOCKOUT_A_" + str(locked.status_code), locked.status_code == 429)
+            locked_good = await _login(client, "a", PWD)
+            _check("VALID_PASSWORD_LOCKED_A_" + str(locked_good.status_code),
+                   locked_good.status_code == 429)
             response = await _login(client, "b", PWD)
             _check("MFA_REQUIRED_B_" + str(response.status_code), response.status_code == 401)
             response = await _login(client, "b", PWD, "f" * 32)
@@ -93,7 +105,7 @@ async def verify() -> str:
             replay = await _login(client, "b", PWD, RECOVERY)
             _check("RECOVERY_REPLAY_DENIED_" + str(replay.status_code),
                    replay.status_code == 401)
-        return "PASS_HOSTED_V143_PG_LOGIN_LOGOUT_CSRF_MFA_RECOVERY_REPLAY"
+        return "PASS_HOSTED_V144_PG_LOGIN_LOGOUT_CSRF_MFA_RECOVERY_LOCKOUT"
     except ValueError as exc:
         return "FAIL_" + str(exc)
     except Exception:
