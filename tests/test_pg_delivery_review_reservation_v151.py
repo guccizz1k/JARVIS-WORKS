@@ -86,7 +86,10 @@ def test_verified_actor_and_order_are_locked_before_pending_review_writes(verifi
     assert digest == "e"*64
     statements = [s for s, _ in cur.sql]
     joined = "\n".join(statements)
-    assert "FOR UPDATE" in joined
+    assert "pg_advisory_xact_lock" in joined
+    assert "hashtextextended" in joined
+    assert joined.index("pg_advisory_xact_lock") < joined.index("FROM jw_dev.orders")
+    assert "FOR UPDATE" not in joined
     assert joined.index("FROM jw_dev.orders") < joined.index("INSERT INTO jw_dev.review_delivery_receipts_v151")
     assert len([x for x in statements if "INSERT INTO jw_dev.review_delivery_nonces_v151" in x]) == 2
     assert len([x for x in statements if "INSERT INTO jw_dev.review_delivery_items_v151" in x]) == 2
