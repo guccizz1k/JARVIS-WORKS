@@ -19,6 +19,7 @@ def exercise_real_pg_lineage(app, root_dsn, clients):
     with psycopg.connect(root_dsn) as root:
         root.execute("ALTER TABLE jw_dev.quotes ADD COLUMN status text NOT NULL DEFAULT 'draft'")
         root.execute("ALTER TABLE jw_dev.quotes ADD COLUMN vat_mode text NOT NULL DEFAULT 'taxable'")
+        root.execute("ALTER TABLE jw_dev.invoices ADD COLUMN status text NOT NULL DEFAULT 'open'")
         root.execute("""CREATE TABLE jw_dev.import_previews(
             id text PRIMARY KEY,org_id text NOT NULL,quote_id text NOT NULL,
             status text NOT NULL)""")
@@ -38,9 +39,6 @@ def exercise_real_pg_lineage(app, root_dsn, clients):
             FOR SELECT TO jw_app_dev USING (org_id=jw_dev.current_org_from_session())""")
         root.execute("""CREATE POLICY ci_v158_payment_read ON jw_dev.payments
             FOR SELECT TO jw_app_dev USING (org_id=jw_dev.current_org_from_session())""")
-        root.execute("""INSERT INTO jw_dev.quotes(id,org_id,customer_id,doc_no)
-            VALUES(repeat('e',32),repeat('a',32),repeat('0',32),'Q-A'),
-                  (repeat('f',32),repeat('b',32),repeat('8',32),'Q-B')""")
         root.execute("""INSERT INTO jw_dev.import_previews(id,org_id,quote_id,status)
             VALUES(repeat('5',32),repeat('a',32),repeat('e',32),'confirmed')""")
         root.execute("""INSERT INTO jw_dev.invoices(id,org_id,order_id)
