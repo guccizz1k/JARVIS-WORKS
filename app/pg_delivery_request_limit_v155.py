@@ -31,7 +31,8 @@ class ReviewBodyLimitV155:
         if (len(lengths) > 1 or
             any(not v.isascii() or not v.isdigit() for v in lengths)):
             return await self._reject(send, 400, "Invalid Content-Length")
-        if lengths and int(lengths[0]) > _MAX_RAW_BYTES:
+        # Never convert attacker-supplied megabyte-long decimal headers to int.
+        if lengths and (len(lengths[0]) > 5 or int(lengths[0]) > _MAX_RAW_BYTES):
             return await self._reject(send, 413, "Review envelope too large")
 
         total = 0
