@@ -8,11 +8,11 @@ INSERT INTO jw_dev.users(id,org_id,email,password_hash,name,role,created_at) VAL
  (repeat('3',32),repeat('a',32),'v153-a@invalid.test','invalid-synthetic-only','User A','admin',now()::text),
  (repeat('4',32),repeat('b',32),'v153-b@invalid.test','invalid-synthetic-only','User B','admin',now()::text);
 INSERT INTO jw_dev.users(id,org_id,email,password_hash,name,role,created_at)
- VALUES(repeat('e',32),repeat('a',32),'v153-staff@invalid.test','invalid-synthetic-only','Staff A','staff',now()::text);
+ VALUES(repeat('e',32),repeat('a',32),'v153-member@invalid.test','invalid-synthetic-only','Member A','member',now()::text);
 INSERT INTO jw_dev.sessions(token_hash,user_id,expires_at,csrf_token,created_at) VALUES
  ('jw-v153-a',repeat('3',32),(now()+interval '30 minutes')::text,'synthetic',now()::text),
  ('jw-v153-b',repeat('4',32),(now()+interval '30 minutes')::text,'synthetic',now()::text),
- ('jw-v153-staff',repeat('e',32),(now()+interval '30 minutes')::text,'synthetic',now()::text);
+ ('jw-v153-member',repeat('e',32),(now()+interval '30 minutes')::text,'synthetic',now()::text);
 INSERT INTO jw_dev.customers(id,org_id,name,created_at) VALUES
  (repeat('1',32),repeat('a',32),'V153 Customer A',now()::text),
  (repeat('2',32),repeat('b',32),'V153 Customer B',now()::text);
@@ -119,12 +119,12 @@ BEGIN
  END;
  IF NOT refused THEN RAISE EXCEPTION 'FAIL_V153_UNKNOWN_SESSION_INSERT'; END IF;
 END $unknown$;
-SELECT pg_catalog.set_config('jw.session_hash','jw-v153-staff',true);
+SELECT pg_catalog.set_config('jw.session_hash','jw-v153-member',true);
 DO $staff$
 DECLARE refused boolean:=false;
 BEGIN
  IF jw_dev.current_org_from_session()<>repeat('a',32)
- OR (SELECT count(*) FROM jw_dev.stage_identity_v84() WHERE actor_role='staff')<>1
+ OR (SELECT count(*) FROM jw_dev.stage_identity_v84() WHERE actor_role='member')<>1
  OR EXISTS(SELECT 1 FROM jw_dev.review_delivery_receipts_v151)
  OR EXISTS(SELECT 1 FROM jw_dev.review_delivery_nonces_v151)
  OR EXISTS(SELECT 1 FROM jw_dev.review_delivery_items_v151)
