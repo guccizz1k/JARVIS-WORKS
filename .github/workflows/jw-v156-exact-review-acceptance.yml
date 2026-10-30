@@ -1,0 +1,94 @@
+name: JW V15.6 exact-SHA review security and API regression
+
+on:
+  push:
+    branches:
+      - review/v156-j1j6-baseline-ci-fix-20261030
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v156-guarded-review-ci
+  cancel-in-progress: true
+
+jobs:
+  isolated-api-and-evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONWARNINGS: error
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check protected production source and exact reviewed app allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt requirements-dev.txt
+          python - <<'PY'
+          import subprocess
+          approved = {
+           'app/pg_connection_gate_v87.py',
+           'app/pg_delivery_evidence_gate_v147.py',
+           'app/pg_delivery_request_limit_v155.py',
+           'app/pg_delivery_review_api_v154.py',
+           'app/pg_delivery_review_console_v155.py',
+           'app/pg_delivery_review_reservation_v151.py',
+           'app/pg_dev_entry_v92.py',
+           'app/pg_dev_entry_v93.py',
+           'app/pg_invoice_preview_v145.py',
+           'app/pg_live_dryrun_v88.py',
+           'app/pg_quote_api_v92.py',
+           'app/pg_quote_read_v93.py',
+           'app/pg_signup_review_gate_v146.py',
+          }
+          changed = set(subprocess.check_output([
+           'git','diff','--name-only','c29a955dc2afd28d4d283838bddef617b3487bc7','HEAD','--','app/'
+          ], text=True).splitlines())
+          assert changed <= approved, sorted(changed - approved)
+          print('PASS_V156_EXACT_APP_PROTECTED_BASELINE')
+          PY
+      - name: Install isolated review dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt
+      - name: Compile isolated review source
+        run: |
+          python -m compileall -q app scripts
+      - name: Test reviewed API, RLS contracts, race and J1/J6 evidence
+        run: |
+          python -m pytest -q -ra --junitxml=review-v156.xml \
+            tests/test_pg_delivery_review_api_v154.py \
+            tests/test_pg_delivery_review_reservation_v151.py \
+            tests/test_v151_private_review_ledger_contract.py \
+            tests/test_v153_restricted_role_rls_contract.py \
+            tests/test_v155_review_console_and_limits.py \
+            tests/test_v155_static_security_and_entry_contract.py \
+            tests/test_v155_threaded_collision_reference.py \
+            tests/test_jw_ci_preservation_gate.py \
+            tests/test_jw_integrated_acceptance.py
+      - name: Evidence integrity rejects failure, errors and skips
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('review-v156.xml').getroot()
+          suite=root.find('testsuite') if root.tag=='testsuites' else root
+          stats={x:int(suite.attrib.get(x,0)) for x in ('tests','failures','errors','skipped')}
+          assert stats['tests'] >= 30,stats
+          assert stats['failures']==stats['errors']==stats['skipped']==0,stats
+          print('PASS_V156_EXACT_SHA_REVIEW_SUITE',stats)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v156-review-junit
+          path: review-v156.xml
+          retention-days: 1
+          if-no-files-found: ignore
