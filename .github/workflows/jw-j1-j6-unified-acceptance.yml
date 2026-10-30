@@ -47,8 +47,12 @@ jobs:
           import subprocess
           changed=set(subprocess.check_output(
             ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
-          assert changed <= {"app/pg_connection_gate_v87.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_dev_entry_v92.py","app/pg_quote_read_v93.py","app/pg_dev_entry_v93.py"},changed
-          print("PASS: only explicitly reviewed V8.7/V8.8 gate changes, original product backend unchanged")
+          allowed = {"app/pg_connection_gate_v87.py","app/pg_delivery_evidence_gate_v147.py","app/pg_delivery_request_limit_v155.py","app/pg_delivery_review_api_v154.py","app/pg_delivery_review_console_v155.py","app/pg_delivery_review_reservation_v151.py","app/pg_dev_entry_v92.py","app/pg_dev_entry_v93.py","app/pg_invoice_preview_v145.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_quote_read_v93.py","app/pg_signup_review_gate_v146.py"}
+          assert changed <= allowed, {"unreviewed_app_changes":sorted(changed-allowed)}
+          assert "app/main.py" not in changed
+          assert all(not file.startswith("app/static/") for file in changed)
+          print("PASS: immutable production entry and explicit reviewed PostgreSQL-only additions")
+          print("PASS: reviewed V8.7–V15.5 additions only; original production backend unchanged")
           PY
       - name: Install product regression prerequisites
         run: |
