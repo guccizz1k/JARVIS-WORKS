@@ -158,6 +158,9 @@ def create_app():
         if os.getenv("JW_STAGE1_SAFE_HTTPS_PROBE") == "V140_ISOLATED_READONLY_HTTPS_DENIAL_ONLY":
             from scripts import jw_v140_safe_live_https_probe
             app.on_event("startup")(jw_v140_safe_live_https_probe.schedule)
+        if os.getenv("JW_STAGE1_POSITIVE_HTTPS_PROBE") == "V141_REVIEW_ONLY_NONMESSENGER_SYNTHETIC_A_B_C":
+            from scripts import jw_v141_hosted_https_abc
+            app.on_event("startup")(jw_v141_hosted_https_abc.schedule)
         # Preserve the existing product's health route but do not advertise
         # acceptance or customer data until independent E2E evidence exists.
     else:
