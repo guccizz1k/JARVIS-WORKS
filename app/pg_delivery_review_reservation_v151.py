@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 from typing import Any, Mapping
+from uuid import uuid4
 
 from fastapi import HTTPException
 
@@ -140,4 +141,15 @@ def reserve_delivery_review_v151(
             VALUES (%s,%s,%s,%s,%s)""",
             (order_id, item["source_order_item_id"], item["position"],
              item["quantity"], item["unit_price"]))
+    # Audit write is mandatory and part of the SAME database transaction.
+    # Failed audit insertion must roll back both receipt and proof nonces.
+    audit_detail = json.dumps({
+        "source": "v154_signed_delivery_pending_review",
+        "source_sha256": review.source_sha256,
+        "evidence_sha256": review.evidence_sha256,
+    }, sort_keys=True, separators=(",", ":"))
+    cur.execute("""INSERT INTO jw_dev.audit_logs
+        (id,org_id,actor_id,entity_type,entity_id,action,detail,created_at)
+        VALUES (%s,%s,%s,'delivery_review',%s,'request',%s,now()::text)""",
+        (uuid4().hex, org_id, validated_identity[1], order_id, audit_detail))
     return review.evidence_sha256
