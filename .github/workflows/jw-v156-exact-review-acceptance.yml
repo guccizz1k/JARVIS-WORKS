@@ -68,7 +68,7 @@ jobs:
           python -m compileall -q app scripts
       - name: Test reviewed API, RLS contracts, race and J1/J6 evidence
         run: |
-          python -m pytest -q -ra --junitxml=review-v156.xml \
+          python -m pytest -q -ra -o asyncio_default_fixture_loop_scope=function --junitxml=review-v156.xml \
             tests/test_pg_delivery_review_api_v154.py \
             tests/test_pg_delivery_review_reservation_v151.py \
             tests/test_v151_private_review_ledger_contract.py \
