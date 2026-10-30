@@ -16,6 +16,40 @@ _EXPECTED = (
 )
 
 
+def _failure_code(exc: Exception) -> str:
+    """Reduce psycopg failures to vetted labels; never disclose exception text."""
+    code = getattr(exc, "sqlstate", None)
+    if code in ("28P01", "28000"):
+        return "AUTHENTICATION_REJECTED"
+    if code == "42501":
+        return "PG_ROLE_PERMISSION"
+    if code == "3D000":
+        return "PG_DATABASE_NOT_FOUND"
+    # Match static substrings in memory; log ONLY a fixed label.
+    detail = str(exc).lower()
+    patterns = (
+        ("password authentication failed", "AUTHENTICATION_REJECTED"),
+        ("tenant or user not found", "POOLER_USER_REJECTED"),
+        ("invalid user", "POOLER_USER_REJECTED"),
+        ("could not translate host name", "DNS_RESOLUTION"),
+        ("name or service not known", "DNS_RESOLUTION"),
+        ("certificate verify failed", "TLS_CERTIFICATE"),
+        ("certificate verify", "TLS_CERTIFICATE"),
+        ("ssl certificate", "TLS_CERTIFICATE"),
+        ("timeout expired", "NETWORK_TIMEOUT"),
+        ("connection timed out", "NETWORK_TIMEOUT"),
+        ("connection refused", "NETWORK_REFUSED"),
+        ("server closed the connection unexpectedly", "SERVER_DISCONNECTED"),
+        ("permission denied", "PG_ROLE_PERMISSION"),
+        ("not permitted to set role", "PG_ROLE_PERMISSION"),
+        ("no such host", "DNS_RESOLUTION"),
+    )
+    for needle, label in patterns:
+        if needle in detail:
+            return label
+    return "PG_CONNECT_OR_QUERY_OTHER"
+
+
 def verify() -> tuple[bool, str]:
     """Check real login and catalog without accessing customer records or writing."""
     for label, open_db, login_name, role_name, membership in _EXPECTED:
@@ -46,7 +80,7 @@ def verify() -> tuple[bool, str]:
                           WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')""")
                     if cur.fetchone() != (35, 35):
                         return False, label + "_FORCED_RLS_CATALOG"
-        except Exception:
-            # Never log an exception: a connection driver may embed a DSN.
-            return False, label + "_TLS_CONNECT_OR_QUERY"
+        except Exception as exc:
+            # Never log raw exceptions: drivers may embed a connection URI.
+            return False, label + "_" + _failure_code(exc)
     return True, "BOTH_SEPARATE_REAL_ROLE_CONNECTIONS"
