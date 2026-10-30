@@ -94,6 +94,8 @@ def test_verified_actor_and_order_are_locked_before_pending_review_writes(verifi
                    "INSERT INTO jw_dev.payments" in s or
                    "UPDATE jw_dev.orders" in s for s in statements)
     assert not any("COMMIT" in s or "SET ROLE" in s for s in statements)
+    assert len([x for x in statements if "INSERT INTO jw_dev.audit_logs" in x]) == 1
+    assert statements[-1].find("INSERT INTO jw_dev.audit_logs") >= 0
 
 
 @pytest.mark.parametrize("identity", [
@@ -143,3 +145,32 @@ def test_no_registered_api_no_privileged_dsn_no_autonomous_commit():
     for forbidden in ("@router", "include_router(", "psycopg.connect(",
                       "SET LOCAL ROLE", "COMMIT;", "GRANT ", "service_role"):
         assert forbidden not in source
+
+
+def test_audit_failure_propagates_without_autonomous_commit(verified):
+    class AuditFailureCursor(CursorStub):
+        def execute(self, statement, params=None):
+            if "INSERT INTO jw_dev.audit_logs" in statement:
+                self.sql.append((statement, params))
+                raise RuntimeError("synthetic audit constraint")
+            super().execute(statement, params)
+
+    cur = AuditFailureCursor()
+    with pytest.raises(RuntimeError, match="synthetic audit constraint"):
+        run(cur)
+    statements = [sql for sql, _ in cur.sql]
+    assert "INSERT INTO jw_dev.review_delivery_receipts_v151" in "\n".join(statements)
+    assert "INSERT INTO jw_dev.audit_logs" in statements[-1]
+    assert not any("COMMIT" in sql for sql in statements)
+
+
+def test_audit_payload_contains_only_source_digests(verified):
+    cur = CursorStub()
+    run(cur)
+    sql, params = next((sql, params) for sql, params in cur.sql
+                       if "INSERT INTO jw_dev.audit_logs" in sql)
+    import json
+    audit = json.loads(params[-1])
+    assert set(audit) == {"source", "source_sha256", "evidence_sha256"}
+    assert "signature" not in params[-1] and "nonce" not in params[-1]
+    assert params[1] == ORG and params[2] == ACTOR
