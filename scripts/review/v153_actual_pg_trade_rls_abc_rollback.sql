@@ -7,9 +7,12 @@ INSERT INTO jw_dev.organizations(id,name,created_at) VALUES
 INSERT INTO jw_dev.users(id,org_id,email,password_hash,name,role,created_at) VALUES
  (repeat('3',32),repeat('a',32),'v153-a@invalid.test','invalid-synthetic-only','User A','admin',now()::text),
  (repeat('4',32),repeat('b',32),'v153-b@invalid.test','invalid-synthetic-only','User B','admin',now()::text);
+INSERT INTO jw_dev.users(id,org_id,email,password_hash,name,role,created_at)
+ VALUES(repeat('e',32),repeat('a',32),'v153-staff@invalid.test','invalid-synthetic-only','Staff A','staff',now()::text);
 INSERT INTO jw_dev.sessions(token_hash,user_id,expires_at,csrf_token,created_at) VALUES
  ('jw-v153-a',repeat('3',32),(now()+interval '30 minutes')::text,'synthetic',now()::text),
- ('jw-v153-b',repeat('4',32),(now()+interval '30 minutes')::text,'synthetic',now()::text);
+ ('jw-v153-b',repeat('4',32),(now()+interval '30 minutes')::text,'synthetic',now()::text),
+ ('jw-v153-staff',repeat('e',32),(now()+interval '30 minutes')::text,'synthetic',now()::text);
 INSERT INTO jw_dev.customers(id,org_id,name,created_at) VALUES
  (repeat('1',32),repeat('a',32),'V153 Customer A',now()::text),
  (repeat('2',32),repeat('b',32),'V153 Customer B',now()::text);
@@ -116,6 +119,28 @@ BEGIN
  END;
  IF NOT refused THEN RAISE EXCEPTION 'FAIL_V153_UNKNOWN_SESSION_INSERT'; END IF;
 END $unknown$;
+SELECT pg_catalog.set_config('jw.session_hash','jw-v153-staff',true);
+DO $staff$
+DECLARE refused boolean:=false;
+BEGIN
+ IF jw_dev.current_org_from_session()<>repeat('a',32)
+ OR (SELECT count(*) FROM jw_dev.stage_identity_v84() WHERE actor_role='staff')<>1
+ OR EXISTS(SELECT 1 FROM jw_dev.review_delivery_receipts_v151)
+ OR EXISTS(SELECT 1 FROM jw_dev.review_delivery_nonces_v151)
+ OR EXISTS(SELECT 1 FROM jw_dev.review_delivery_items_v151)
+ THEN RAISE EXCEPTION 'FAIL_V153_NON_ADMIN_CAN_READ_REVIEW_EVIDENCE'; END IF;
+ BEGIN
+  INSERT INTO jw_dev.review_delivery_receipts_v151
+   (order_id,org_id,source_sha256,evidence_sha256,
+    dispatch_document_sha256,recipient_document_sha256,
+    dispatch_actor,recipient_actor,subtotal_krw,vat_krw,total_krw)
+  VALUES(repeat('c',32),repeat('a',32),repeat('1',64),repeat('f',64),
+         repeat('3',64),repeat('4',64),repeat('5',32),repeat('6',32),
+         7000,700,7700);
+ EXCEPTION WHEN insufficient_privilege THEN refused:=true;
+ END;
+ IF NOT refused THEN RAISE EXCEPTION 'FAIL_V153_NON_ADMIN_CAN_INSERT_REVIEW_EVIDENCE'; END IF;
+END $staff$;
 RESET ROLE;
 
 DO $catalog$
