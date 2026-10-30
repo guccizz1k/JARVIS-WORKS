@@ -168,7 +168,8 @@ def main():
     bootstrap()
     app=configure()
     a,b,m=client(app,"A"),client(app,"B"),client(app,"M")
-    assert a.get("/api/pg-stage/v155/review-console").status_code==200
+    opened=a.get("/api/pg-stage/v155/review-console")
+    assert opened.status_code==200,("admin console",opened.status_code,opened.text[:450],dict(a.cookies))
     assert m.get("/api/pg-stage/v155/review-console").status_code==403
     packet=proof_pair(ORDER_A,ORG_A,LINE_A)
     review_url="/api/pg-stage/v154/orders/"+ORDER_A+"/delivery-review"
