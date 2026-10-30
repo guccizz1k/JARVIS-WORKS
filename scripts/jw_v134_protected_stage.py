@@ -47,7 +47,13 @@ def create_app():
         raise RuntimeError("Stage1 preview is explicitly non-production")
     secret=os.getenv("JW_STAGE1_ACCESS_KEY","")
     if len(secret)<40:
-        raise RuntimeError("Stage1 access key missing or weak")
+        # A deployed preview may be inspected while credentials are withheld.
+        # No request can satisfy both a >=32-byte header and the empty secret.
+        app=FastAPI(docs_url=None,openapi_url=None,redoc_url=None)
+        @app.get("/healthz")
+        def awaiting_secret():
+            return {"mode":"sealed-awaiting-stage-key","release":"BLOCKED","stage1":"FAIL"}
+        return ProtectedStage(app,"")
     enabled=jw_v104_standalone.preflight()
     if enabled:
         app=jw_v104_standalone.create_app()
