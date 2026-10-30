@@ -94,6 +94,14 @@ def create_app():
         def awaiting_secret():
             return {"mode":"sealed-awaiting-stage-key","release":"BLOCKED","stage1":"FAIL"}
         return ProtectedStage(app,"")
+    # Render's multiline UI may add whitespace outside a pasted URI.
+    # Only the isolated stage entrypoint normalizes it, before preflight and
+    # before the original PostgreSQL connectors read their environment.
+    # Never strip or alter the password, username, TLS fields inside the URL.
+    for env_key in ("JW_PG_STAGE_DSN", "JW_PG_AUTH_STAGE_DSN"):
+        raw = os.getenv(env_key, "")
+        if raw and raw != raw.strip():
+            os.environ[env_key] = raw.strip()
     enabled=jw_v104_standalone.preflight()
     if not enabled:
         # Report names of failed checks only; never echo a DSN or password.
