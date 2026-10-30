@@ -73,6 +73,7 @@ class FakeClient:
         self.actor=None
         self.b_consumed=False
         self.a_revoked=False
+        self.a_failed_attempts=0
         self.events=[]
         self.leak=leak
         self.cookies=CookieJar()
@@ -84,9 +85,14 @@ class FakeClient:
         if url.endswith("/login"):
             actor=json["email"].split("@")[0][-1]
             self.events.append(("login",actor))
+            if actor=="a" and self.a_failed_attempts>=5:
+                return Resp(429)
             if json["password"] != probe.PWD:
+                if actor=="a":
+                    self.a_failed_attempts+=1
                 return Resp(401)
             if actor=="a":
+                self.a_failed_attempts=0
                 self.actor="a"
                 return Resp(200,{"backend":"postgresql_auth_stage","csrf_token":"z"*40},True)
             code=json.get("recovery_code","")
@@ -124,8 +130,10 @@ def _mock(monkeypatch, leak=False):
 
 def test_two_account_hosted_auth_contract_and_mfa_one_time(monkeypatch):
     result,fake=_mock(monkeypatch)
-    assert result=="PASS_HOSTED_V143_PG_LOGIN_LOGOUT_CSRF_MFA_RECOVERY_REPLAY"
+    assert result=="PASS_HOSTED_V144_PG_LOGIN_LOGOUT_CSRF_MFA_RECOVERY_LOCKOUT"
     assert fake.b_consumed and fake.a_revoked
+    assert fake.a_failed_attempts==5
+    assert len([evt for evt in fake.events if evt==("login","a")])==9
     assert len([evt for evt in fake.events if evt==("login","b")])==4
 
 
