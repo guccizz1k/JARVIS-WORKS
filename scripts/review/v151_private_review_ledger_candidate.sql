@@ -93,3 +93,52 @@ REVOKE ALL ON TABLE
  jw_dev.review_delivery_items_v151
  FROM PUBLIC, anon, authenticated, jw_app_dev, jw_auth_stage_v85,
       jw_stage1_trade_20261030, jw_stage1_auth_20261030;
+
+-- Restrict future INSERTs to the existing tenant's acknowledged fulfilled
+-- order and exact source item snapshots. SECURITY INVOKER preserves source RLS.
+-- New functions are NON-PUBLIC and never activate posting/approvals.
+CREATE FUNCTION jw_dev.v151_order_source_guard()
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, jw_dev
+AS $v151order$
+BEGIN
+ IF NOT EXISTS (
+  SELECT 1 FROM jw_dev.orders o
+   WHERE o.id=NEW.order_id AND o.org_id=NEW.org_id
+     AND o.status='fulfilled' AND o.review_state='acknowledged'
+ ) THEN
+  RAISE EXCEPTION USING ERRCODE='23514',
+    MESSAGE='V151_SOURCE_ORDER_REJECTED';
+ END IF;
+ RETURN NEW;
+END $v151order$;
+
+CREATE TRIGGER v151_order_source_insert
+ BEFORE INSERT ON jw_dev.review_delivery_receipts_v151
+ FOR EACH ROW EXECUTE FUNCTION jw_dev.v151_order_source_guard();
+
+CREATE FUNCTION jw_dev.v151_line_source_guard()
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, jw_dev
+AS $v151line$
+BEGIN
+ IF NOT EXISTS (
+  SELECT 1 FROM jw_dev.order_items i
+   WHERE i.id=NEW.source_item_id AND i.order_id=NEW.order_id
+     AND i.position=NEW.position AND i.quantity=NEW.quantity
+     AND i.unit_price=NEW.unit_price_krw
+ ) THEN
+  RAISE EXCEPTION USING ERRCODE='23514',
+    MESSAGE='V151_SOURCE_ITEM_REJECTED';
+ END IF;
+ RETURN NEW;
+END $v151line$;
+
+CREATE TRIGGER v151_line_source_insert
+ BEFORE INSERT ON jw_dev.review_delivery_items_v151
+ FOR EACH ROW EXECUTE FUNCTION jw_dev.v151_line_source_guard();
+
+REVOKE ALL ON FUNCTION jw_dev.v151_order_source_guard(),
+                       jw_dev.v151_line_source_guard()
+ FROM PUBLIC, anon, authenticated, jw_app_dev, jw_auth_stage_v85,
+      jw_stage1_trade_20261030, jw_stage1_auth_20261030;
