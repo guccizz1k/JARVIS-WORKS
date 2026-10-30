@@ -58,7 +58,7 @@ def reserve_delivery_review_v151(
     """
     if (not isinstance(validated_identity, tuple)
         or len(validated_identity) != 6
-        or validated_identity[0] != "jw_app_dev"
+        or validated_identity[0] not in ("jw_app_dev", "jw_delivery_writer_v159")
         or validated_identity[3] != "admin"
         or not isinstance(validated_identity[2], str)
         or not _ID.fullmatch(validated_identity[2])
@@ -75,11 +75,17 @@ def reserve_delivery_review_v151(
         validated_identity[2], validated_identity[3]
     ):
         _deny()
-    # Lock source order, so two compliant writers serialize on the same row.
+    # Transaction-scoped advisory lock serializes same-order writers WITHOUT
+    # granting the dedicated review writer UPDATE privilege on source orders.
+    # The PRIMARY KEY receipt is a separate final concurrency arbiter.
+    cur.execute(
+        "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(%s,0))",
+        (order_id,),
+    )
     cur.execute("""SELECT id,quote_id,doc_no,customer_id,
                           customer_name_snapshot,status,review_state,vat_mode,title
-                   FROM jw_dev.orders WHERE id=%s AND org_id=%s
-                   FOR UPDATE""", (order_id, org_id))
+                   FROM jw_dev.orders WHERE id=%s AND org_id=%s""",
+                (order_id, org_id))
     order = cur.fetchone()
     if order is None:
         _deny()

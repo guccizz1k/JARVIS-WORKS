@@ -65,7 +65,9 @@ def test_real_pg_fixture_is_review_only_and_rejects_source_spoofing():
 def test_private_writer_remains_unmounted_and_has_no_approval_or_payment_api():
     code = WRITER.read_text()
     assert "stage_identity_v84()" in code
-    assert "FOR UPDATE" in code
+    assert "pg_advisory_xact_lock" in code
+    assert "hashtextextended" in code
+    assert "FOR UPDATE" not in code
     assert "evaluate_delivery(" in code
     assert "review_delivery_nonces_v151" in code
     assert "PENDING_HUMAN_REVIEW" in code
