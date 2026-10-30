@@ -21,6 +21,8 @@ from psycopg import errors
 from . import pg_quote_api_v92 as quotes
 from . import pg_v90_integrated_entry as sessions
 from .pg_delivery_evidence_gate_v147 import DeliveryProofRejected
+from .pg_delivery_request_limit_v155 import ReviewBodyLimitV155
+from .pg_delivery_review_console_v155 import register_v155_review_console
 from .pg_delivery_review_reservation_v151 import (
     PendingReviewRejected, reserve_delivery_review_v151,
 )
@@ -119,6 +121,47 @@ def create_delivery_review(
     }
 
 
+def get_delivery_review_status(
+    order_id: str, request: Request, response: Response,
+) -> dict[str, Any]:
+    """Tenant-admin-only status; never expose proof payloads or signatures."""
+    if not enabled():
+        raise HTTPException(404, "Delivery review unavailable")
+    if not _ID.fullmatch(order_id):
+        raise HTTPException(404, "Review not found")
+    try:
+        with sessions._pg_validated_cursor(sessions._session_hash(request)) as (
+            cur, identity,
+        ):
+            if identity[3] != "admin":
+                raise HTTPException(403, "Administrator role required")
+            cur.execute(
+                """SELECT source_sha256,evidence_sha256,status,created_at
+                   FROM jw_dev.review_delivery_receipts_v151
+                   WHERE order_id=%s AND org_id=%s""",
+                (order_id, identity[2]),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, "Review not found")
+    except (errors.InsufficientPrivilege, errors.UndefinedTable):
+        raise HTTPException(503, "Review storage unavailable") from None
+    source_sha, evidence_sha, state, created_at = row
+    if state != "PENDING_HUMAN_REVIEW":
+        raise HTTPException(503, "Unexpected review state")
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "order_id": order_id,
+        "source_sha256": source_sha,
+        "evidence_sha256": evidence_sha,
+        "status": state,
+        "created_at": created_at,
+        "physical_delivery_verified": False,
+        "invoice_posted": False,
+        "payment_posted": False,
+    }
+
+
 def register_v154_delivery_review(app: FastAPI) -> bool:
     """Only opt into the isolated PG-only ASGI entrypoint, never app.main."""
     requested = os.environ.get("JW_PG_DELIVERY_REVIEW_V154", "")
@@ -130,5 +173,10 @@ def register_v154_delivery_review(app: FastAPI) -> bool:
     router = APIRouter(prefix=_PREFIX, tags=["Isolated signed delivery review"])
     router.add_api_route("/orders/{order_id}/delivery-review", create_delivery_review,
                          methods=["POST"], response_model=None)
+    router.add_api_route("/orders/{order_id}/delivery-review",
+                         get_delivery_review_status, methods=["GET"])
     app.include_router(router)
+    if not register_v155_review_console(app, enabled):
+        raise RuntimeError('BLOCKED: V155 console registration failed')
+    app.add_middleware(ReviewBodyLimitV155)
     return True
