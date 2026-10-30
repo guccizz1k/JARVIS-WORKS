@@ -44,6 +44,8 @@ def test_pooler_review_only_principals(monkeypatch):
     base="rvymwwzclagvljnofyss"
     dsn=f"postgresql://jw_stage1_trade_20261030.{base}:synthetic-review-password-no-secret@{a}:5432/postgres?sslmode=verify-full&sslrootcert=system"
     assert core._safe_dsn(dsn,"jw_trade_gateway_v90")
+    # Real clipboard CSV strings can add only exterior whitespace.
+    assert core._safe_dsn(" \n" + dsn + "\n", "jw_trade_gateway_v90")
     assert not core._safe_dsn(dsn,"jw_auth_gateway_v90")
     assert not core._safe_dsn(dsn.replace("verify-full","require"),"jw_trade_gateway_v90")
     assert not core._safe_dsn(dsn.replace("sslrootcert=system","sslrootcert=/tmp/missing"),"jw_trade_gateway_v90")
@@ -99,3 +101,22 @@ def test_stage_dsn_shape_classification_only():
     assert protected._dsn_shape_issue(valid.replace(host, "wrong.host"), "TRADE") == "HOST"
     assert protected._dsn_shape_issue(valid.replace("verify-full", "require"), "TRADE") == "TLS_MODE"
     assert protected._dsn_shape_issue(valid.replace("&sslrootcert=system", ""), "TRADE") == "TLS_CERT"
+
+
+def test_stage_trade_real_connect_strips_edge_whitespace(monkeypatch):
+    from app import pg_api_v84
+    import psycopg
+    raw = (" \npostgresql://jw_stage1_trade_20261030.rvymwwzclagvljnofyss:"
+           "synthetic-only-password@aws-0-ap-northeast-2.pooler.supabase.com"
+           ":5432/postgres?sslmode=verify-full&sslrootcert=system\n")
+    monkeypatch.setenv("JW_ENV", "dev")
+    monkeypatch.setenv("JW_PG_STAGE_V84", "ISOLATED_DEV_READ_ONLY")
+    monkeypatch.setenv("JW_PG_STAGE_DSN", raw)
+    captured = []
+    sentinel = object()
+    def spy(dsn, **kw):
+        captured.append((dsn, kw))
+        return sentinel
+    monkeypatch.setattr(psycopg, "connect", spy)
+    assert pg_api_v84._connect() is sentinel
+    assert captured == [(raw.strip(), {"connect_timeout": 5, "sslmode": "verify-full"})]
