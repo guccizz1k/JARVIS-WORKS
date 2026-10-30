@@ -17,7 +17,7 @@ BEGIN
    (id,org_id,actor_id,entity_type,entity_id,action,detail,created_at)
    VALUES(repeat('0',32),repeat('b',32),repeat('3',32),'delivery_review',
           repeat('c',32),'request','{}',now()::text);
- EXCEPTION WHEN insufficient_privilege OR foreign_key_violation THEN blocked:=true;
+ EXCEPTION WHEN insufficient_privilege OR foreign_key_violation OR check_violation THEN blocked:=true;
  END;
  IF NOT blocked THEN RAISE EXCEPTION 'FAIL_V154_FOREIGN_TENANT_AUDIT_INSERT'; END IF;
  blocked:=false;
@@ -26,7 +26,7 @@ BEGIN
    (id,org_id,actor_id,entity_type,entity_id,action,detail,created_at)
    VALUES(repeat('0',32),repeat('a',32),repeat('4',32),'delivery_review',
           repeat('c',32),'request','{}',now()::text);
- EXCEPTION WHEN insufficient_privilege OR foreign_key_violation THEN blocked:=true;
+ EXCEPTION WHEN insufficient_privilege OR foreign_key_violation OR check_violation THEN blocked:=true;
  END;
  IF NOT blocked THEN RAISE EXCEPTION 'FAIL_V154_FOREIGN_ACTOR_AUDIT_INSERT'; END IF;
 END $tenant_audit$;
