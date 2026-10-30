@@ -90,8 +90,24 @@ def test_probes_separate_real_principals_and_forced_rls(monkeypatch):
     ({"auth_member":(True,True)},"AUTH_LOGIN_ROLE_OR_MEMBERSHIP"),
     ({"trade_superuser":True},"TRADE_LOGIN_ROLE_OR_MEMBERSHIP"),
     ({"trade_rls":34},"TRADE_FORCED_RLS_CATALOG"),
-    ({"break_connect":True},"TRADE_TLS_CONNECT_OR_QUERY"),
+    ({"break_connect":True},"TRADE_PG_CONNECT_OR_QUERY_OTHER"),
 ])
 def test_negative_probes_fail_closed_without_secrets(monkeypatch,kwargs,reason):
     module,_,_ = _load(monkeypatch,**kwargs)
     assert module.verify() == (False,reason)
+
+
+@pytest.mark.parametrize("error,reason",[
+    (RuntimeError("password authentication failed for unspecified principal"), "AUTHENTICATION_REJECTED"),
+    (RuntimeError("Tenant or user not found"), "POOLER_USER_REJECTED"),
+    (RuntimeError("certificate verify failed"), "TLS_CERTIFICATE"),
+    (RuntimeError("connection timed out"), "NETWORK_TIMEOUT"),
+    (RuntimeError("connection refused"), "NETWORK_REFUSED"),
+    (RuntimeError("could not translate host name"), "DNS_RESOLUTION"),
+    (RuntimeError("sensitive-db-secret-value"), "PG_CONNECT_OR_QUERY_OTHER"),
+])
+def test_connection_exception_classifier_never_echoes_secrets(monkeypatch, error, reason):
+    module, _, _ = _load(monkeypatch)
+    actual = module._failure_code(error)
+    assert actual == reason
+    assert "sensitive-db-secret-value" not in actual
