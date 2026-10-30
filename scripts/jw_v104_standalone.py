@@ -32,7 +32,7 @@ def _safe_dsn(raw: str, principal: str) -> bool:
     try:
         d = conninfo_to_dict(raw)
         keys = frozenset({"host", "port", "dbname", "user", "password",
-                          "sslmode", "connect_timeout"})
+                          "sslmode", "connect_timeout", "sslrootcert"})
         if set(d) - keys:
             return False
         host = os.getenv("JW_STAGE_EXPECTED_DB_HOST", "")
@@ -40,8 +40,26 @@ def _safe_dsn(raw: str, principal: str) -> bool:
         if not host or not dbname:
             return False
         timeout = int(d.get("connect_timeout", "5"))
+        pooler = os.getenv("JW_STAGE1_SUPAVISOR_ACK") == "V134_REVIEW_POOLER_ONLY"
+        if pooler:
+            # Only pre-approved, revocable test logins. No existing V90 role
+            # password rotation or privileged Supabase credentials permitted.
+            stage_role = {
+                "jw_trade_gateway_v90": "jw_stage1_trade_20261030",
+                "jw_auth_gateway_v90": "jw_stage1_auth_20261030",
+            }.get(principal)
+            expected_ref = "rvymwwzclagvljnofyss"
+            expected_user = stage_role + "." + expected_ref if stage_role else ""
+            if host != "aws-0-ap-northeast-2.pooler.supabase.com" or (
+                d.get("sslrootcert") != "system"
+            ):
+                return False
+        else:
+            expected_user = principal
+            if d.get("sslrootcert") not in (None, "system"):
+                return False
         return (
-            d.get("user") == principal
+            d.get("user") == expected_user
             and d.get("host") == host
             and d.get("dbname") == dbname
             and len(d.get("password", "")) >= 16
