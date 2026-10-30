@@ -1,0 +1,63 @@
+name: JW V13.4 actual hosted HTTPS sealed-before-credentials review
+
+on:
+  push:
+    branches:
+      - review/v131-abc-finance-rollback-20261030
+    paths:
+      - .github/workflows/jw-v134-hosted-seal-review.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v134-hosted-seal
+  cancel-in-progress: true
+
+jobs:
+  public-free-stage-is-sealed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Actual Render public HTTPS health, unauthorized HTTP and spoofed access-key denials
+        env:
+          STAGE: https://jw-stage1-secure-20261030.onrender.com
+        run: |
+          python - <<'PY'
+          import json, os, ssl, time, urllib.request, urllib.error
+          base=os.environ['STAGE']
+          assert base.startswith('https://') and base.endswith('.onrender.com')
+          def get(path, key=None):
+              headers={'Accept':'application/json'}
+              if key is not None: headers['X-JW-Stage-Key']=key
+              req=urllib.request.Request(base+path,headers=headers)
+              try:
+                  with urllib.request.urlopen(req,timeout=15,context=ssl.create_default_context()) as res:
+                      return res.status,res.read(4096)
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read(4096)
+          actual=None
+          for attempt in range(3):
+              try:
+                  status,body=get('/healthz')
+                  if status==200:
+                      actual=json.loads(body)
+                      break
+              except (OSError,TimeoutError) as e:
+                  if attempt==2: raise
+              time.sleep(3)
+          assert actual=={'mode':'sealed-awaiting-stage-key','release':'BLOCKED','stage1':'FAIL'}, actual
+          for header in (None,'x'*80):
+              status,_=get('/api/pg-stage/v90/me',header)
+              assert status==403,f'Business route exposed: HTTP {status}'
+              status,_=get('/api/pg-stage/v85/login',header)
+              assert status==403,f'Auth route exposed: HTTP {status}'
+          print('PASS_HOSTED_HTTPS_FREE_RENDER_SEALED_AND_BLOCKED')
+          print('SCOPE: transport and unauthenticated rejection only')
+          print('STAGE1: FAIL; real database logins and attached-data E2E NOT_RUN')
+          print('RELEASE: BLOCKED')
+          PY
