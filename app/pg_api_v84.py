@@ -34,7 +34,8 @@ def stage_enabled() -> bool:
 def _connect():
     if not stage_enabled():
         raise RuntimeError('PostgreSQL shadow API is disabled')
-    dsn = os.getenv('JW_PG_STAGE_DSN', '')
+    # Normalize only leading/trailing copy-paste whitespace, never DSN fields.
+    dsn = os.getenv('JW_PG_STAGE_DSN', '').strip()
     if not dsn:
         raise RuntimeError('Stage-only PostgreSQL DSN missing')
     try:
