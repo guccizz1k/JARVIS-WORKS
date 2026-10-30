@@ -272,6 +272,8 @@ def main() -> int:
             # fingerprint remains meaningful and the auth fixture adds no
             # tables to the independently verified restore baseline.
             from scripts.ci_v106_real_pg_auth import prepare_real_auth, PASSWORD
+            with psycopg.connect(fixture.root_dsn,autocommit=True) as pg:
+                pg.execute((fixture.ROOT/'scripts/ci_v127_ephemeral_order.sql').read_text(encoding='utf-8'))
             prepare_real_auth(fixture)
             assertion(r"""async () => {
               const req=async(path,method='GET',body,csrf)=>{
@@ -304,6 +306,33 @@ def main() -> int:
               const replay=await req(root,'POST',quote,csrfA);
               if(replay.code!==200||replay.data.quote_id!==created.data.quote_id)
                 throw Error('Authorized PG quote retry not idempotent');
+              const orderPath='/api/pg-stage/v92/order-drafts';
+              const fromQuote={request_id:'v127-order-request-0001',
+                quote_id:created.data.quote_id,original_checked:true};
+              const rejectUnchecked=await req(orderPath,'POST',{
+                ...fromQuote,original_checked:false},csrfA);
+              if(rejectUnchecked.code!==422)
+                throw Error('Order draft accepted unchecked source');
+              const noOrderCSRF=await req(orderPath,'POST',fromQuote);
+              if(noOrderCSRF.code!==403)
+                throw Error('Order draft created without CSRF');
+              const order=await req(orderPath,'POST',fromQuote,csrfA);
+              if(order.code!==201||!order.data.draft_only||
+                 order.data.approval_posted!==false||order.data.money.total!==1440)
+                throw Error('Source-grounded draft order not created');
+              const orderId=order.data.order_id;
+              const orderRetry=await req(orderPath,'POST',fromQuote,csrfA);
+              if(orderRetry.code!==200||orderRetry.data.order_id!==orderId)
+                throw Error('Order duplicate replay not idempotent');
+              const conflict=await req(orderPath,'POST',{
+                ...fromQuote,request_id:'v127-different-request-0002'},csrfA);
+              if(conflict.code!==409)
+                throw Error('Second request silently duplicated order');
+              const ownOrder=await req(orderPath+'/'+orderId);
+              if(ownOrder.code!==200||ownOrder.data.money.total!==1440||
+                 ownOrder.data.items.length!==2||
+                 ownOrder.data.source_quote_id!==created.data.quote_id)
+                throw Error('Order draft not linked to source quote');
               const chat=await req('/api/pg-stage/v90/chats','POST',
                   {other_org_id:'ci-b'},csrfA);
               if(chat.code!==200||!chat.data.connection_id)
@@ -326,6 +355,8 @@ def main() -> int:
               const b=await req(auth+'login','POST',
                 {email:'b@invalid.test',password:'CI-v106-disposable-auth-password-only'});
               if(b.code!==200||!b.data.csrf_token)throw Error('Real PG B login failed');
+              const foreignOrder=await req(orderPath+'/'+orderId);
+              if(foreignOrder.code!==404)throw Error('B read A draft order');
               const foreign=await req(root+'/'+created.data.quote_id);
               if(foreign.code!==404)throw Error('PG B accessed PG A financial document');
               const recv=await req(msgs);
@@ -342,6 +373,8 @@ def main() -> int:
               const cMe=await req('/api/pg-stage/v90/me');
               if(cMe.code!==200||cMe.data.org_id!=='ci-c')
                 throw Error('Real PG C session has wrong tenant');
+              const cOrder=await req(orderPath+'/'+orderId);
+              if(cOrder.code!==404)throw Error('C read A draft order');
               const cForeign=await req(root+'/'+created.data.quote_id);
               if(cForeign.code!==404)throw Error('PG C accessed A financial document');
               const cCreate=await req(root,'POST',{
@@ -362,8 +395,8 @@ def main() -> int:
               const aQuote=await req(root+'/'+created.data.quote_id);
               if(aQuote.code!==200||aQuote.data.money.total!==1440)
                 throw Error('PG A finance recovery after logout failed');
-              return 'JW_V126_REAL_PG_AUTH_A_B_C_FINANCE_CHAT_REVOCATION_PASS';
-            }""","JW_V126_REAL_PG_AUTH_A_B_C_FINANCE_CHAT_REVOCATION_PASS",timeout=110)
+              return 'JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS';
+            }""","JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS",timeout=110)
             with psycopg.connect(fixture.root_dsn) as root:
                 events=root.execute("""
                     SELECT event_type,count(*) FROM jw_dev.security_events

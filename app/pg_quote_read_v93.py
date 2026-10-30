@@ -87,10 +87,48 @@ def get_quote(quote_id: str, request: Request, response: Response):
     }
 
 
+
+def get_order_draft(order_id: str, request: Request, response: Response):
+    if not _ID.fullmatch(order_id):
+        raise HTTPException(404, "Order draft not found")
+    with _checked(request) as (cur, identity):
+        cur.execute("""SELECT id,quote_id,title,status,review_state,vat_mode
+                       FROM jw_dev.orders WHERE id=%s AND org_id=%s""",
+                    (order_id, identity[2]))
+        order = cur.fetchone()
+        if not order:
+            raise HTTPException(404, "Order draft not found")
+        if order[3] != "draft" or order[4] != "original_checked":
+            raise HTTPException(409, "Order draft status not verifiable")
+        cur.execute("""SELECT name,quantity,unit_price,position
+                       FROM jw_dev.order_items WHERE order_id=%s
+                       ORDER BY position,id""", (order_id,))
+        lines = cur.fetchall()
+        if not 1 <= len(lines) <= 40 or any(
+            type(q) is not int or not 1 <= q <= 100000
+            or type(p) is not int or not 0 <= p <= 1000000000
+            or type(pos) is not int or pos != i
+            for i, (_, q, p, pos) in enumerate(lines)
+        ):
+            raise HTTPException(503, "Invalid order draft details")
+        subtotal = sum(q * p for _, q, p, _ in lines)
+        if order[5] not in ("taxable", "exempt") or subtotal > v92._MAX_SUBTOTAL:
+            raise HTTPException(503, "Invalid order draft amount")
+        vat = (subtotal + 5) // 10 if order[5] == "taxable" else 0
+    response.headers["Cache-Control"] = "no-store"
+    return {"id": order[0], "source_quote_id": order[1], "title": order[2],
+            "status": order[3], "draft_only": True, "approval_posted": False,
+            "money": {"subtotal": subtotal, "vat": vat,
+                      "total": subtotal + vat},
+            "items": [{"name": name, "quantity": qty, "unit_price": price,
+                       "position": pos} for name, qty, price, pos in lines]}
+
+
 def create_router() -> APIRouter:
     router = APIRouter(prefix=_PREFIX, tags=["PG quote read (isolated only)"])
     router.add_api_route("/quotes", list_quotes, methods=["GET"])
     router.add_api_route("/quotes/{quote_id}", get_quote, methods=["GET"])
+    router.add_api_route("/order-drafts/{order_id}", get_order_draft, methods=["GET"])
     return router
 
 
