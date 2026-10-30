@@ -1,5 +1,6 @@
 """Real filesystem SQLite transaction model and concurrent duplicate requests."""
 import sqlite3
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import pytest
@@ -18,7 +19,7 @@ def decision(intent=BASE):
 
 
 def data(path):
-    with sqlite3.connect(str(path)) as db:
+    with closing(sqlite3.connect(str(path))) as db:
         return db.execute("SELECT count(*) FROM review_requests").fetchone()[0],db.execute("SELECT count(*) FROM used_nonces").fetchone()[0]
 
 
@@ -27,7 +28,7 @@ def test_review_reservation_not_account_creation(tmp_path):
     initialize_test_db(p)
     assert reserve_for_human_review(p,intent=BASE,decision=decision(),email_nonce=A,business_nonce=B)
     assert data(p)==(1,2)
-    with sqlite3.connect(str(p)) as db:
+    with closing(sqlite3.connect(str(p))) as db:
         assert db.execute("SELECT status FROM review_requests").fetchone()==("PENDING_HUMAN_REVIEW",)
 
 
