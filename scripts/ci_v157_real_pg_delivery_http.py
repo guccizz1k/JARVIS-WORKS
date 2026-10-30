@@ -324,6 +324,8 @@ def main():
         assert admin.execute("SELECT count(*) FROM pg_policies WHERE schemaname='jw_dev' AND policyname LIKE 'v153_%'").fetchone()==(6,)
         assert admin.execute("SELECT relforcerowsecurity FROM pg_class WHERE oid='jw_dev.review_delivery_receipts_v151'::regclass").fetchone()==(True,)
     browser_https_real_pg(app)
+    from scripts.ci_v158_trade_lineage import exercise_real_pg_lineage
+    exercise_real_pg_lineage(app, DSN, (a, b, m))
     print("PASS_V157_REAL_PG17_TWO_TCP_DELIVERY_POST_ONE_201_ONE_409",flush=True)
     print("PASS_V157_REAL_HTTP_GET_A_ADMIN_B_FOREIGN_MEMBER_FORBIDDEN",flush=True)
     print("PASS_V157_DB_ATOMIC_RECEIPT_NONCE_LINE_AUDIT_AND_INJECTED_ROLLBACK",flush=True)
