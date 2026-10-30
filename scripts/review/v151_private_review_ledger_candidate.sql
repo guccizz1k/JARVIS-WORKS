@@ -142,3 +142,41 @@ REVOKE ALL ON FUNCTION jw_dev.v151_order_source_guard(),
                        jw_dev.v151_line_source_guard()
  FROM PUBLIC, anon, authenticated, jw_app_dev, jw_auth_stage_v85,
       jw_stage1_trade_20261030, jw_stage1_auth_20261030;
+
+
+-- V15.2 proof audit integrity: review rows are write-once.
+-- A second privileged, audited approval record is required to progress; never
+-- mutate, delete or silently overwrite the original evidence. The owner/
+-- superuser can still manage schema, so this is not an independent trust root.
+CREATE FUNCTION jw_dev.v152_reject_evidence_mutation()
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, jw_dev
+AS $reject$
+BEGIN
+ RAISE EXCEPTION USING ERRCODE='42501',
+   MESSAGE='V152_REVIEW_EVIDENCE_IMMUTABLE';
+END $reject$;
+
+CREATE TRIGGER v152_review_signup_immutable
+ BEFORE UPDATE OR DELETE ON jw_dev.review_signup_requests_v151
+ FOR EACH ROW EXECUTE FUNCTION jw_dev.v152_reject_evidence_mutation();
+
+CREATE TRIGGER v152_review_signup_nonce_immutable
+ BEFORE UPDATE OR DELETE ON jw_dev.review_signup_nonces_v151
+ FOR EACH ROW EXECUTE FUNCTION jw_dev.v152_reject_evidence_mutation();
+
+CREATE TRIGGER v152_review_delivery_immutable
+ BEFORE UPDATE OR DELETE ON jw_dev.review_delivery_receipts_v151
+ FOR EACH ROW EXECUTE FUNCTION jw_dev.v152_reject_evidence_mutation();
+
+CREATE TRIGGER v152_review_delivery_nonce_immutable
+ BEFORE UPDATE OR DELETE ON jw_dev.review_delivery_nonces_v151
+ FOR EACH ROW EXECUTE FUNCTION jw_dev.v152_reject_evidence_mutation();
+
+CREATE TRIGGER v152_review_delivery_item_immutable
+ BEFORE UPDATE OR DELETE ON jw_dev.review_delivery_items_v151
+ FOR EACH ROW EXECUTE FUNCTION jw_dev.v152_reject_evidence_mutation();
+
+REVOKE ALL ON FUNCTION jw_dev.v152_reject_evidence_mutation()
+ FROM PUBLIC, anon, authenticated, jw_app_dev, jw_auth_stage_v85,
+      jw_stage1_trade_20261030, jw_stage1_auth_20261030;
