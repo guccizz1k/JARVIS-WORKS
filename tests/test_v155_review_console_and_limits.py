@@ -76,7 +76,7 @@ def test_actual_streaming_byte_limit_before_json():
 
 
 @pytest.mark.parametrize("value,expected",[
-    (b"16385",413),(b"-1",400),(b"abc",400),(b"16384",204)])
+    (b"16385",413),(b"9"*10000,413),(b"-1",400),(b"abc",400),(b"16384",204)])
 def test_request_length_boundary(value,expected):
     result=asyncio.run(run_raw_guard([(b"content-length",value)],
       [{"type":"http.request","body":b"x","more_body":False}]))
