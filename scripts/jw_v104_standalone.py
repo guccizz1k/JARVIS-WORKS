@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from psycopg.conninfo import conninfo_to_dict
 
 from app import pg_api_v84, pg_auth_v85, pg_v90_integrated_entry
-from app import pg_quote_api_v92, pg_quote_read_v93, pg_invoice_preview_v145, pg_delivery_review_api_v154, pg_trade_lineage_v158
+from app import pg_quote_api_v92, pg_quote_read_v93, pg_invoice_preview_v145, pg_delivery_review_api_v154, pg_trade_lineage_v158, pg_import_quote_v160
 
 ACK = "PRIVATE_HTTPS_PG_ONLY"
 REQUIRED_MODES = {
@@ -130,6 +130,8 @@ def create_app() -> FastAPI:
     pg_delivery_review_api_v154.register_v154_delivery_review(app)
     # V15.8 only shows already-verified tenant-scoped record links; OFF by default.
     pg_trade_lineage_v158.register_v158_trade_lineage(app)
+    # Requires separately confirmed import evidence + encrypted source key.
+    pg_import_quote_v160.register_v160_pg_import_quote(app)
 
     @app.get("/healthz", include_in_schema=False)
     def health():
