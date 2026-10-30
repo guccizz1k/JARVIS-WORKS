@@ -4,6 +4,7 @@ No DSN, external credentials, persistent schema, or production tables. PostgreSQ
 multi-session verification remains an independent acceptance gate.
 """
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Barrier
@@ -13,7 +14,7 @@ import sqlite3
 def test_two_writers_same_order_only_one_atomic_review_and_audit():
     with TemporaryDirectory() as temp:
         database = str(Path(temp) / "review.sqlite")
-        with sqlite3.connect(database) as db:
+        with closing(sqlite3.connect(database)) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("""CREATE TABLE reviews(
                 order_id TEXT PRIMARY KEY,
@@ -28,11 +29,12 @@ def test_two_writers_same_order_only_one_atomic_review_and_audit():
                 id TEXT PRIMARY KEY,
                 order_id TEXT NOT NULL REFERENCES reviews(order_id),
                 actor_id TEXT NOT NULL)""")
+            db.commit()
         barrier = Barrier(2)
 
         def writer(label):
-            with sqlite3.connect(database, isolation_level=None,
-                                 timeout=3) as db:
+            with closing(sqlite3.connect(database, isolation_level=None,
+                                        timeout=3)) as db:
                 db.execute("PRAGMA foreign_keys=ON")
                 barrier.wait(timeout=3)
                 try:
@@ -57,7 +59,7 @@ def test_two_writers_same_order_only_one_atomic_review_and_audit():
             outcomes = [a.result(timeout=8), b.result(timeout=8)]
         assert sorted(outcomes) == ["created", "denied"]
 
-        with sqlite3.connect(database) as db:
+        with closing(sqlite3.connect(database)) as db:
             assert db.execute("SELECT count(*) FROM reviews").fetchone() == (1,)
             assert db.execute("SELECT count(*) FROM nonces").fetchone() == (2,)
             assert db.execute("SELECT count(*) FROM audits").fetchone() == (1,)
