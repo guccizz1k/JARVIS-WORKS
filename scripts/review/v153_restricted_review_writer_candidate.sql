@@ -8,7 +8,14 @@
 -- admin, and source must be an existing fulfilled+acknowledged order.
 CREATE POLICY v153_receipt_tenant_select
  ON jw_dev.review_delivery_receipts_v151 FOR SELECT TO jw_app_dev
- USING (org_id = (SELECT jw_dev.current_org_from_session()));
+ USING (
+   org_id = (SELECT jw_dev.current_org_from_session())
+   AND EXISTS (
+     SELECT 1 FROM jw_dev.stage_identity_v84() a
+     WHERE a.org_id=review_delivery_receipts_v151.org_id
+       AND a.actor_role='admin'
+   )
+ );
 
 CREATE POLICY v153_receipt_admin_insert
  ON jw_dev.review_delivery_receipts_v151 FOR INSERT TO jw_app_dev
