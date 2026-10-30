@@ -43,7 +43,7 @@ def wired(monkeypatch):
 
     monkeypatch.setattr(api.sessions, "_pg_validated_cursor", cursor)
 
-    def reserve(**kwargs):
+    def reserve(_cur, **kwargs):
         calls.append("reserve")
         assert kwargs["validated_identity"] == identity
         assert kwargs["order_id"] == "a" * 32
@@ -121,7 +121,7 @@ def test_body_extra_fields_and_oversized_envelopes_fail_closed(wired):
 def test_storage_rejects_invalid_proofs_and_missing_schema(wired, monkeypatch,
                                                          error, status):
     client, _, _ = wired
-    def reject(**_kwargs):
+    def reject(_cur, **_kwargs):
         raise error
     monkeypatch.setattr(api, "reserve_delivery_review_v151", reject)
     response = _post(client)
