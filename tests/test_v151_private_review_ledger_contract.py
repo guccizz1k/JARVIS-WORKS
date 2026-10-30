@@ -35,7 +35,7 @@ def test_no_untrusted_source_item_or_tenant_order_can_enter_review():
     for field in ("i.position=NEW.position", "i.quantity=NEW.quantity",
                   "i.unit_price=NEW.unit_price_krw"):
         assert field in sql
-    assert len(re.findall(r"SECURITY INVOKER", sql)) == 2
+    assert len(re.findall(r"SECURITY INVOKER", sql)) == 3
     assert not re.search(r"\bSECURITY DEFINER\b", sql)
     assert "REVOKE ALL ON FUNCTION" in sql
 
@@ -73,3 +73,25 @@ def test_private_writer_remains_unmounted_and_has_no_approval_or_payment_api():
                       "SET ROLE ", "GRANT ", "INSERT INTO jw_dev.invoices",
                       "INSERT INTO jw_dev.payments", "db.commit()"):
         assert forbidden not in code
+
+
+def test_v152_rejects_any_mutation_of_five_evidence_ledgers():
+    sql = _uncomment(DDL.read_text())
+    assert "v152_reject_evidence_mutation" in sql
+    assert "V152_REVIEW_EVIDENCE_IMMUTABLE" in sql
+    assert len(re.findall(r"BEFORE UPDATE OR DELETE ON jw_dev.review_", sql)) == 5
+    assert "REVOKE ALL ON FUNCTION jw_dev.v152_reject_evidence_mutation()" in sql
+    assert not re.search(r"\bSECURITY DEFINER\b", sql)
+
+
+def test_v152_real_postgresql_assertions_check_updates_and_deletes():
+    sql = _uncomment(CHECKS.read_text())
+    assert "FAIL_V152_EVIDENCE_UPDATE_ACCEPTED" in sql
+    assert "FAIL_V152_EVIDENCE_DELETE_ACCEPTED" in sql
+    assert "FAIL_V152_MUTATION_TRIGGER_PRIVILEGE" in sql
+    for table in (
+        "review_signup_requests_v151", "review_signup_nonces_v151",
+        "review_delivery_receipts_v151", "review_delivery_nonces_v151",
+        "review_delivery_items_v151",
+    ):
+        assert table in sql
