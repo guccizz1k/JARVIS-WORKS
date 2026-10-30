@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - review/v157-real-pg17-delivery-http-concurrency-20261030
+      - review/v158-trade-lineage-20261030
 
 permissions:
   contents: read
