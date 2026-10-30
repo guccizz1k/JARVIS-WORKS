@@ -6,7 +6,7 @@ CREATE TABLE jw_dev.order_drafts_v127 (
  quote_id text NOT NULL REFERENCES jw_dev.quotes(id),
  customer_name_snapshot text NOT NULL, doc_no text NOT NULL, title text NOT NULL,
  status text NOT NULL CHECK(status='draft'),
- review_state text NOT NULL CHECK(review_state='original_checked'),
+ review_state text NOT NULL CHECK(review_state='preview_acknowledged'),
  vat_mode text NOT NULL CHECK(vat_mode IN ('taxable','exempt')),
  due_date text NOT NULL,created_at text NOT NULL,updated_at text NOT NULL,
  order_date text NOT NULL,source_import_id text NOT NULL UNIQUE,
@@ -39,3 +39,24 @@ CREATE POLICY ci_order_item_insert ON jw_dev.order_draft_items_v127 FOR INSERT T
  JOIN jw_dev.quote_items q ON q.id=source_quote_item_id
  AND q.quote_id=o.quote_id WHERE o.id=order_id
  AND o.org_id=jw_dev.current_org_from_session()));
+
+-- V12.8 isolated receipt: authenticated reviewer, tenant and frozen quote digest.
+CREATE TABLE jw_dev.quote_review_receipts_v128 (
+ id text PRIMARY KEY, org_id text NOT NULL REFERENCES jw_dev.organizations(id),
+ actor_id text NOT NULL, quote_id text NOT NULL REFERENCES jw_dev.quotes(id),
+ source_sha256 text NOT NULL CHECK (source_sha256 ~ '^[a-f0-9]{64}$'),
+ created_epoch bigint NOT NULL,
+ UNIQUE(org_id,actor_id,quote_id,source_sha256)
+);
+ALTER TABLE jw_dev.quote_review_receipts_v128 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE jw_dev.quote_review_receipts_v128 FORCE ROW LEVEL SECURITY;
+GRANT SELECT,INSERT ON jw_dev.quote_review_receipts_v128 TO jw_app_dev;
+CREATE POLICY ci_review_select ON jw_dev.quote_review_receipts_v128
+ FOR SELECT TO jw_app_dev
+ USING(org_id=jw_dev.current_org_from_session() AND
+       actor_id=(SELECT actor_id FROM jw_dev.stage_identity_v84()));
+CREATE POLICY ci_review_insert ON jw_dev.quote_review_receipts_v128
+ FOR INSERT TO jw_app_dev
+ WITH CHECK(org_id=jw_dev.current_org_from_session() AND
+            actor_id=(SELECT actor_id FROM jw_dev.stage_identity_v84()) AND
+            EXISTS(SELECT 1 FROM jw_dev.quotes q WHERE q.id=quote_id AND q.org_id=org_id));

@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -170,12 +171,121 @@ def create_quote(request: Request, payload: QuoteDraft, response: Response) -> d
 
 
 
+
+# The receipt binds a *quote-value preview*. It does NOT prove that an uploaded
+# original PDF/XLSX/photo was inspected. That stronger gate remains separate.
+def _quote_snapshot(cur, org: str, quote_id: str):
+    cur.execute("""SELECT customer_id,customer_name_snapshot,doc_no,title,
+                          status,vat_mode FROM jw_dev.quotes
+                   WHERE id=%s AND org_id=%s""", (quote_id, org))
+    quote = cur.fetchone()
+    if not quote:
+        raise HTTPException(404, "Quote absent for this company")
+    customer, customer_name, quote_no, title, state, vat_mode = quote
+    if state not in ("draft", "sent") or vat_mode not in ("taxable", "exempt"):
+        raise HTTPException(409, "Quote state invalid for draft conversion")
+    cur.execute("""SELECT id,name,quantity,unit_price,position
+                   FROM jw_dev.quote_items WHERE quote_id=%s
+                   ORDER BY position,id""", (quote_id,))
+    lines = cur.fetchall()
+    if not 1 <= len(lines) <= 40 or any(
+        type(qty) is not int or not 1 <= qty <= 100000
+        or type(price) is not int or not 0 <= price <= 1000000000
+        or type(pos) is not int or pos != i
+        or not isinstance(name, str) or not name.strip() or len(name) > 150
+        for i, (_, name, qty, price, pos) in enumerate(lines)
+    ):
+        raise HTTPException(409, "Source quote lines cannot be verified")
+    subtotal = sum(qty * price for _, _, qty, price, _ in lines)
+    if subtotal > _MAX_SUBTOTAL:
+        raise HTTPException(409, "Source quote total cannot be verified")
+    vat = (subtotal + 5) // 10 if vat_mode == "taxable" else 0
+    amount = {"subtotal": subtotal, "vat": vat, "total": subtotal + vat}
+    snapshot = [quote_id, customer, quote_no, title, state,
+                vat_mode, [list(line) for line in lines], amount]
+    source_sha = hashlib.sha256(json.dumps(
+        snapshot, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":")).encode("utf-8")).hexdigest()
+    return quote, lines, amount, source_sha
+
+
+class QuotePreviewAcknowledgement(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    quote_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    preview_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    preview_checked: Literal[True]
+
+
+def quote_review_preview(quote_id: str, request: Request, response: Response):
+    if not enabled():
+        raise HTTPException(404, "Quote preview disabled")
+    if len(quote_id) != 32 or any(c not in "0123456789abcdef" for c in quote_id):
+        raise HTTPException(404, "Quote preview not found")
+    with v90._pg_validated_cursor(v90._session_hash(request)) as (cur, identity):
+        quote, lines, amount, digest = _quote_snapshot(cur, identity[2], quote_id)
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "quote_id": quote_id, "customer": quote[1], "title": quote[3],
+        "vat_mode": quote[5], "money": amount,
+        "items": [{"name": name, "quantity": qty, "unit_price": price,
+                   "position": pos} for _, name, qty, price, pos in lines],
+        "preview_sha256": digest, "source_document_verified": False,
+    }
+
+
+def acknowledge_quote_preview(request: Request, payload: QuotePreviewAcknowledgement,
+                              response: Response):
+    if not enabled():
+        raise HTTPException(404, "Quote review disabled")
+    _origin_checked(request)
+    with v90._pg_validated_cursor(v90._session_hash(request)) as (cur, identity):
+        _, actor, org, _, csrf, _ = identity
+        if not request.headers.get("X-CSRF-Token") or not hmac.compare_digest(
+            str(csrf), request.headers.get("X-CSRF-Token", "")
+        ):
+            raise HTTPException(403, "Invalid CSRF")
+        _, _, _, digest = _quote_snapshot(cur, org, payload.quote_id)
+        if not hmac.compare_digest(digest, payload.preview_sha256):
+            raise HTTPException(409, "Quote preview has changed")
+        receipt = uuid.uuid4().hex
+        stamp = int(time.time())
+        cur.execute("""INSERT INTO jw_dev.quote_review_receipts_v128
+              (id,org_id,actor_id,quote_id,source_sha256,created_epoch)
+              VALUES (%s,%s,%s,%s,%s,%s)
+              ON CONFLICT (org_id,actor_id,quote_id,source_sha256)
+              DO NOTHING RETURNING id""",
+            (receipt, org, actor, payload.quote_id, digest, stamp))
+        inserted = cur.fetchone()
+        if inserted:
+            cur.execute("""INSERT INTO jw_dev.audit_logs
+                (id,org_id,actor_id,entity_type,entity_id,action,detail,created_at)
+                VALUES (%s,%s,%s,'quote_preview',%s,'human_preview_acknowledged',%s,%s)""",
+                (uuid.uuid4().hex, org, actor, payload.quote_id,
+                 json.dumps({"preview_sha256": digest}, sort_keys=True),
+                 datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="seconds")))
+            receipt = inserted[0]
+            response.status_code = 201
+        else:
+            cur.execute("""SELECT id FROM jw_dev.quote_review_receipts_v128
+                  WHERE org_id=%s AND actor_id=%s AND quote_id=%s
+                  AND source_sha256=%s""",
+                  (org, actor, payload.quote_id, digest))
+            found = cur.fetchone()
+            if not found:
+                raise HTTPException(409, "Cannot reconcile preview acknowledgement")
+            receipt = found[0]
+    response.headers["Cache-Control"] = "no-store"
+    return {"review_receipt_id": receipt, "quote_id": payload.quote_id,
+            "preview_sha256": digest, "source_document_verified": False}
+
+
 # A reviewed quote creates a *draft*, never an approved order or payment.
 class OrderFromQuote(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     request_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,100}$")
     quote_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     original_checked: Literal[True]
+    review_receipt_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
 def create_order_draft(request: Request, payload: OrderFromQuote,
@@ -187,42 +297,24 @@ def create_order_draft(request: Request, payload: OrderFromQuote,
         _, actor, org, _, csrf, _ = identity
         if not hmac.compare_digest(str(csrf), request.headers.get("X-CSRF-Token", "")):
             raise HTTPException(403, "Invalid CSRF")
-        cur.execute("""SELECT customer_id,customer_name_snapshot,doc_no,title,
-                              status,vat_mode FROM jw_dev.quotes
-                       WHERE id=%s AND org_id=%s""", (payload.quote_id, org))
-        quote = cur.fetchone()
-        if not quote:
-            raise HTTPException(404, "Quote absent for this company")
+        quote, lines, amount, source_sha = _quote_snapshot(cur, org, payload.quote_id)
         customer, customer_name, quote_no, title, state, vat_mode = quote
-        if state not in ("draft", "sent") or vat_mode not in ("taxable", "exempt"):
-            raise HTTPException(409, "Quote state invalid for draft conversion")
-        cur.execute("""SELECT id,name,quantity,unit_price,position
-                       FROM jw_dev.quote_items WHERE quote_id=%s
-                       ORDER BY position,id""", (payload.quote_id,))
-        lines = cur.fetchall()
-        if not 1 <= len(lines) <= 40 or any(
-            type(qty) is not int or not 1 <= qty <= 100000
-            or type(price) is not int or not 0 <= price <= 1000000000
-            or type(pos) is not int or pos != i
-            or not isinstance(name, str) or not name.strip() or len(name) > 150
-            for i, (_, name, qty, price, pos) in enumerate(lines)
-        ):
-            raise HTTPException(409, "Source quote lines cannot be verified")
-        subtotal = sum(qty * price for _, _, qty, price, _ in lines)
-        if subtotal > _MAX_SUBTOTAL:
-            raise HTTPException(409, "Source quote total cannot be verified")
-        vat = (subtotal + 5) // 10 if vat_mode == "taxable" else 0
-        amount = {"subtotal": subtotal, "vat": vat, "total": subtotal + vat}
-        source = [payload.quote_id, customer, quote_no, title, state,
-                  vat_mode, [list(line) for line in lines], amount]
-        source_sha = hashlib.sha256(json.dumps(
-            source, ensure_ascii=False, sort_keys=True,
-            separators=(",", ":")).encode("utf-8")).hexdigest()
+        cur.execute("""SELECT created_epoch FROM jw_dev.quote_review_receipts_v128
+                       WHERE id=%s AND org_id=%s AND actor_id=%s
+                       AND quote_id=%s AND source_sha256=%s""",
+                    (payload.review_receipt_id, org, actor, payload.quote_id,
+                     source_sha))
+        receipt = cur.fetchone()
+        if not receipt or not isinstance(receipt[0], int) or not 0 <= (
+            int(time.time()) - receipt[0]) <= 900:
+            raise HTTPException(409, "Missing, stale or foreign quote review receipt")
         key = "v127:" + hashlib.sha256(
             (str(org) + "\x00" + payload.request_id).encode("utf-8")).hexdigest()
         metadata = json.dumps({"kind": "reviewed_quote_to_order_draft",
                                "source_sha256": source_sha, "request_key": key,
-                               "original_checked": True},
+                               "review_receipt_id": payload.review_receipt_id,
+                               "quote_preview_acknowledged": True,
+                               "source_document_verified": False},
                               sort_keys=True, separators=(",", ":"))
         new_id = uuid.uuid4().hex
         stamp = datetime.now(ZoneInfo("Asia/Seoul")).isoformat(timespec="seconds")
@@ -231,7 +323,7 @@ def create_order_draft(request: Request, payload: OrderFromQuote,
             (id,org_id,customer_id,quote_id,customer_name_snapshot,doc_no,title,
              status,review_state,vat_mode,due_date,created_at,updated_at,
              order_date,source_import_id,source_document_meta)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,'draft','original_checked',%s,'',
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'draft','preview_acknowledged',%s,'',
                     %s,%s,%s,%s,%s)
             ON CONFLICT DO NOTHING RETURNING id""",
             (new_id, org, customer, payload.quote_id, customer_name,
@@ -279,6 +371,8 @@ def create_router() -> APIRouter:
     router = APIRouter(prefix=_PREFIX, tags=["PG quote create (isolated only)"])
     router.add_api_route("/quotes", create_quote, methods=["POST"], response_model=None)
     router.add_api_route("/order-drafts", create_order_draft, methods=["POST"], response_model=None)
+    router.add_api_route("/quote-review-previews/{quote_id}", quote_review_preview, methods=["GET"])
+    router.add_api_route("/quote-reviews", acknowledge_quote_preview, methods=["POST"], response_model=None)
     return router
 
 

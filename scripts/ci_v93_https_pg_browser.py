@@ -307,8 +307,39 @@ def main() -> int:
               if(replay.code!==200||replay.data.quote_id!==created.data.quote_id)
                 throw Error('Authorized PG quote retry not idempotent');
               const orderPath='/api/pg-stage/v92/order-drafts';
+              const previewPath='/api/pg-stage/v92/quote-review-previews/'+created.data.quote_id;
+              const preview=await req(previewPath);
+              if(preview.code!==200||preview.data.money.total!==1440||
+                 preview.data.source_document_verified!==false||
+                 !/^[a-f0-9]{64}$/.test(preview.data.preview_sha256))
+                throw Error('Server-grounded quote preview unavailable');
+              const reviewPath='/api/pg-stage/v92/quote-reviews';
+              const reviewBody={quote_id:created.data.quote_id,
+                preview_sha256:preview.data.preview_sha256,preview_checked:true};
+              const premature=await req(orderPath,'POST',{
+                request_id:'v128-no-receipt-0001',quote_id:created.data.quote_id,
+                original_checked:true},csrfA);
+              if(premature.code!==422)
+                throw Error('Bare client original_checked was enough to create an order');
+              const forged=await req(orderPath,'POST',{
+                request_id:'v128-fake-receipt-0001',quote_id:created.data.quote_id,
+                original_checked:true,review_receipt_id:'f'.repeat(32)},csrfA);
+              if(forged.code!==409)
+                throw Error('Forged approval receipt accepted');
+              const badDigest=await req(reviewPath,'POST',{
+                ...reviewBody,preview_sha256:'0'.repeat(64)},csrfA);
+              if(badDigest.code!==409)
+                throw Error('Stale quote preview digest was accepted');
+              const noReviewCsrf=await req(reviewPath,'POST',reviewBody);
+              if(noReviewCsrf.code!==403)
+                throw Error('Preview acknowledgement bypassed CSRF');
+              const acknowledged=await req(reviewPath,'POST',reviewBody,csrfA);
+              if(acknowledged.code!==201||!acknowledged.data.review_receipt_id||
+                 acknowledged.data.source_document_verified!==false)
+                throw Error('Verified preview acknowledgement not saved');
               const fromQuote={request_id:'v127-order-request-0001',
-                quote_id:created.data.quote_id,original_checked:true};
+                quote_id:created.data.quote_id,original_checked:true,
+                review_receipt_id:acknowledged.data.review_receipt_id};
               const rejectUnchecked=await req(orderPath,'POST',{
                 ...fromQuote,original_checked:false},csrfA);
               if(rejectUnchecked.code!==422)
@@ -395,8 +426,8 @@ def main() -> int:
               const aQuote=await req(root+'/'+created.data.quote_id);
               if(aQuote.code!==200||aQuote.data.money.total!==1440)
                 throw Error('PG A finance recovery after logout failed');
-              return 'JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS';
-            }""","JW_V127_PG17_QUOTE_ORDER_DRAFT_A_B_C_PASS",timeout=110)
+              return 'JW_V128_PG17_REVIEW_RECEIPT_A_B_C_PASS';
+            }""","JW_V128_PG17_REVIEW_RECEIPT_A_B_C_PASS",timeout=110)
             with psycopg.connect(fixture.root_dsn) as root:
                 events=root.execute("""
                     SELECT event_type,count(*) FROM jw_dev.security_events

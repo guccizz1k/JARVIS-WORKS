@@ -98,7 +98,7 @@ def get_order_draft(order_id: str, request: Request, response: Response):
         order = cur.fetchone()
         if not order:
             raise HTTPException(404, "Order draft not found")
-        if order[3] != "draft" or order[4] != "original_checked":
+        if order[3] != "draft" or order[4] != "preview_acknowledged":
             raise HTTPException(409, "Order draft status not verifiable")
         cur.execute("""SELECT name,quantity,unit_price,position
                        FROM jw_dev.order_draft_items_v127 WHERE order_id=%s
