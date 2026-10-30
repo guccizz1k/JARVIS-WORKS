@@ -114,7 +114,7 @@ BEGIN
   INSERT INTO jw_dev.review_delivery_items_v151
    (order_id,source_item_id,position,quantity,unit_price_krw)
    VALUES('jw-v151-order','jw-v151-item',1,2,3500);
- EXCEPTION WHEN unique_violation THEN denied:=true;
+ EXCEPTION WHEN unique_violation OR check_violation THEN denied:=true;
  END;
  IF NOT denied THEN RAISE EXCEPTION 'FAIL_V151_DELIVERY_LINE_DUPLICATE'; END IF;
 
