@@ -56,6 +56,15 @@ def create_app():
         return ProtectedStage(app,"")
     enabled=jw_v104_standalone.preflight()
     if enabled:
+        # Render connects with its own role-scoped DSNs; never infer live DB
+        # access from syntactically valid env settings or a green HTTP deploy.
+        import logging
+        from scripts import jw_v135_stage_connection_probe as connection_probe
+        enabled, checkpoint = connection_probe.verify()
+        logging.getLogger("jarvis.stage1").warning(
+            "STAGE1_REAL_PG_ROLE_PROBE=%s checkpoint=%s",
+            "PASS" if enabled else "BLOCKED", checkpoint)
+    if enabled:
         app=jw_v104_standalone.create_app()
         # Preserve the existing product's health route but do not advertise
         # acceptance or customer data until independent E2E evidence exists.
