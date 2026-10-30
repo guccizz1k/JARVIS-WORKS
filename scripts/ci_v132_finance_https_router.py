@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import hmac
 import os
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from psycopg import Error as PostgresError
@@ -24,14 +25,18 @@ class Payment(BaseModel):
     amount: int = Field(gt=0, le=10**16)
     reference: str = Field(min_length=8, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
     note: str = Field(default="", max_length=300)
-    paid_at: date
+    paid_at: str = Field(min_length=10, max_length=10, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
     @field_validator("paid_at")
     @classmethod
-    def not_future(cls, d: date):
-        if d > date.today():
+    def not_future(cls, value: str):
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("Invalid ISO date") from exc
+        if parsed > datetime.now(ZoneInfo("Asia/Seoul")).date():
             raise ValueError("Future settlement disallowed")
-        return d
+        return value
 
 class Reverse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -99,7 +104,7 @@ def register(app) -> bool:
                 _csrf(request, identity)
                 cur.execute("""SELECT jw_dev.record_payment_v83(%s,%s,%s,%s,%s)""",
                             (payload.invoice_id, payload.amount,
-                             payload.paid_at, payload.reference, payload.note))
+                             date.fromisoformat(payload.paid_at), payload.reference, payload.note))
                 row = cur.fetchone()
                 if not row or not isinstance(row[0], str):
                     raise HTTPException(503, "Missing payment confirmation")

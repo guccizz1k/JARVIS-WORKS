@@ -526,7 +526,7 @@ def main() -> int:
               const first={invoice_id:'ci-v132-invoice-a',amount:1000,
                  reference:'v132-first-payment-001',paid_at:today,note:'synthetic'};
               const noCsrf=await req(root+'payments','POST',first);
-              if(noCsrf.code!==403)throw Error('Financial CSRF bypass');
+              if(noCsrf.code!==403)throw Error('Financial CSRF bypass, status '+noCsrf.code+': '+JSON.stringify(noCsrf.data).slice(0,200));
               const [paid,replayed]=await Promise.all([
                   req(root+'payments','POST',first,csrf),
                   req(root+'payments','POST',first,csrf)]);
