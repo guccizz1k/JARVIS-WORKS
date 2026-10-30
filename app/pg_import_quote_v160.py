@@ -36,7 +36,7 @@ class ReviewedQuoteImport(BaseModel):
     customer_id: str=Field(pattern=r"^[a-f0-9]{32}$")
     reviewed: bool=Field()
     confirmed_customer: str=Field(min_length=1,max_length=120)
-    confirmed_quote_date: date
+    confirmed_quote_date: str=Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     confirmed_total_krw: int=Field(ge=1,le=10**15)
 
 
@@ -136,7 +136,7 @@ def create_quote_from_confirmed_import(
                 raise HTTPException(409,"Preview changed; review again")
             doc,day,lines,money=_verified_doc(encoded,digest)
             if (payload.confirmed_customer!=doc["company"] or
-                payload.confirmed_quote_date!=day or
+                payload.confirmed_quote_date!=day.isoformat() or
                 payload.confirmed_total_krw!=money["total"]):
                 raise HTTPException(409,"User confirmation differs from source")
             cur.execute("""SELECT count(*) FROM jw_dev.import_previews
