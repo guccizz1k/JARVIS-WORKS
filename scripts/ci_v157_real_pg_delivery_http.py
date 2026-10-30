@@ -115,7 +115,9 @@ def configure():
 
 def client(app,name):
     c=TestClient(app,base_url="https://testserver")
-    c.cookies.set("__Host-jw_session",TOKENS[name],domain="testserver",path="/")
+    # Explicit secure testserver cookie header; httpx CookieJar Domain may
+    # silently discard __Host- cookies under modern prefix enforcement.
+    c.headers.update({"Cookie":"__Host-jw_session="+TOKENS[name]})
     return c
 
 
