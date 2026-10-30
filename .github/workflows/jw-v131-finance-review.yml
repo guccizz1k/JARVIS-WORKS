@@ -1,0 +1,54 @@
+name: JW V13.1 finance RLS review-only SQL safety and mutant gates
+
+on:
+  push:
+    branches:
+      - review/v131-abc-finance-rollback-20261030
+    paths:
+      - .github/workflows/jw-v131-finance-review.yml
+      - scripts/review/v131_real_abc_finance_rollback.sql
+      - tests/test_v131_finance_review_contract.py
+      - tests/test_v131_finance_review_mutants.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v131-review-only-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  v131-offline-source-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile new source-contract tests
+        run: |
+          python -m py_compile tests/test_v131_finance_review_contract.py tests/test_v131_finance_review_mutants.py
+      - name: Offline SQL contract and six adversarial mutation controls
+        run: |
+          python -m pip install --disable-pip-version-check 'pytest==8.4.2'
+          python -m pytest -q -ra tests/test_v131_finance_review_contract.py tests/test_v131_finance_review_mutants.py
+      - name: Declare precise limited proof without promoting release
+        run: |
+          python - <<'PY'
+          import json, os
+          print(json.dumps({
+              "source_sha": os.environ["GITHUB_SHA"],
+              "test_scope": "V13.1_OFFLINE_SQL_SOURCE_GUARDS",
+              "real_database_execution": "SEPARATE_PREVIOUSLY_ATTESTED",
+              "new_https_e2e": "NOT_RUN",
+              "full_j1_j6": "NOT_RUN",
+              "release": "BLOCKED"
+          }, sort_keys=True))
+          PY
