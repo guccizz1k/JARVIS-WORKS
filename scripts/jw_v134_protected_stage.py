@@ -102,6 +102,10 @@ def create_app():
         raw = os.getenv(env_key, "")
         if raw and raw != raw.strip():
             os.environ[env_key] = raw.strip()
+    # The pooler requires the pinned Supabase public CA for verify-full.
+    # OpenSSL honors SSL_CERT_FILE for libpq's sslrootcert=system.
+    from scripts import jw_v138_supabase_ca
+    jw_v138_supabase_ca.install()
     enabled=jw_v104_standalone.preflight()
     if not enabled:
         # Report names of failed checks only; never echo a DSN or password.
