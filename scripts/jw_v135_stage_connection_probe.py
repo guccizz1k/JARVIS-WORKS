@@ -78,8 +78,41 @@ def verify() -> tuple[bool, str]:
                           FROM pg_catalog.pg_class c
                           JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
                           WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')""")
-                    if cur.fetchone() != (40, 40):
+                    # V17.0 promoted exactly three extra human-review/draft
+                    # tables: a stale 40-table gate would seal live staging on
+                    # every cold start, even though all 43 are FORCE RLS.
+                    if cur.fetchone() != (43, 43):
                         return False, label + "_FORCED_RLS_CATALOG"
+                    cur.execute("""SELECT count(*), count(*) FILTER
+                            (WHERE c.relrowsecurity AND c.relforcerowsecurity)
+                          FROM pg_catalog.pg_class c
+                          JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                          WHERE n.nspname='jw_dev' AND c.relkind='r'
+                          AND c.relname IN (
+                            'order_drafts_v127','order_draft_items_v127',
+                            'quote_review_receipts_v128')""")
+                    if cur.fetchone() != (3, 3):
+                        return False, label + "_V170_APPROVAL_FORCED_RLS"
+                    cur.execute("""SELECT count(*) FROM pg_catalog.pg_policies
+                         WHERE schemaname='jw_dev'
+                         AND (tablename, policyname) IN (
+                          ('order_drafts_v127','jw_v170_order_select'),
+                          ('order_drafts_v127','jw_v170_order_insert'),
+                          ('order_draft_items_v127','jw_v170_item_select'),
+                          ('order_draft_items_v127','jw_v170_item_insert'),
+                          ('quote_review_receipts_v128','jw_v170_receipt_select'),
+                          ('quote_review_receipts_v128','jw_v170_receipt_insert'))""")
+                    if cur.fetchone() != (6,):
+                        return False, label + "_V170_APPROVAL_POLICIES"
+                    cur.execute("""SELECT
+                      pg_catalog.has_table_privilege('jw_app_dev','jw_dev.order_drafts_v127','UPDATE'),
+                      pg_catalog.has_table_privilege('jw_app_dev','jw_dev.order_drafts_v127','DELETE'),
+                      pg_catalog.has_table_privilege('jw_app_dev','jw_dev.order_draft_items_v127','UPDATE'),
+                      pg_catalog.has_table_privilege('jw_app_dev','jw_dev.order_draft_items_v127','DELETE'),
+                      pg_catalog.has_table_privilege('jw_app_dev','jw_dev.quote_review_receipts_v128','UPDATE'),
+                      pg_catalog.has_table_privilege('jw_app_dev','jw_dev.quote_review_receipts_v128','DELETE')""")
+                    if cur.fetchone() != (False,)*6:
+                        return False, label + "_V170_APPROVAL_PRIVILEGE_ESCALATION"
                     # The DEV approval added five immutable review tables.
                     # Require their complete exact set, all FORCE RLS; never
                     # silently treat a missing/unsafe table as an acceptable

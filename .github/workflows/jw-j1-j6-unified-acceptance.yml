@@ -26,6 +26,7 @@ on:
       - review/v168-rls-parent-tenant-hardening-20261031
       - review/v169-cross-domain-full-lifecycle-20261031
       - review/v170-dev-approval-draft-schema-20261031
+      - review/v172-strict-document-fidelity-20261031
   workflow_dispatch:
 
 permissions:
@@ -59,7 +60,7 @@ jobs:
           import subprocess
           changed=set(subprocess.check_output(
             ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
-          allowed = {"app/pg_connection_gate_v87.py","app/pg_delivery_evidence_gate_v147.py","app/pg_delivery_request_limit_v155.py","app/pg_delivery_review_api_v154.py","app/pg_delivery_review_console_v155.py","app/pg_delivery_review_reservation_v151.py","app/pg_dev_entry_v92.py","app/pg_dev_entry_v93.py","app/pg_invoice_preview_v145.py","app/pg_trade_lineage_v158.py","app/pg_delivery_writer_v159.py","app/pg_import_quote_v160.py","app/pg_invoice_balance_v161.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_quote_read_v93.py","app/pg_signup_review_gate_v146.py"}
+          allowed = {"app/pg_connection_gate_v87.py","app/pg_delivery_evidence_gate_v147.py","app/pg_delivery_request_limit_v155.py","app/pg_delivery_review_api_v154.py","app/pg_delivery_review_console_v155.py","app/pg_delivery_review_reservation_v151.py","app/pg_dev_entry_v92.py","app/pg_dev_entry_v93.py","app/pg_invoice_preview_v145.py","app/pg_trade_lineage_v158.py","app/pg_delivery_writer_v159.py","app/pg_import_quote_v160.py","app/pg_invoice_balance_v161.py","app/import_engine.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_quote_read_v93.py","app/pg_signup_review_gate_v146.py"}
           assert changed <= allowed, {"unreviewed_app_changes":sorted(changed-allowed)}
           assert "app/main.py" not in changed
           assert all(not file.startswith("app/static/") for file in changed)
@@ -133,7 +134,7 @@ jobs:
           python -m scripts.ci_playwright_cli_smoke
           python -m scripts.ci_playwright_cli_document_e2e
           python -m scripts.ci_playwright_cli_quote_form_e2e
-          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ]; then
+          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v172-strict-document-fidelity-20261031" ]; then
             python -m py_compile scripts/ci_playwright_cli_v169_full_e2e.py
             python -m scripts.ci_playwright_cli_v169_full_e2e
           fi
