@@ -120,6 +120,11 @@ def main() -> None:
         raise RuntimeError("BLOCKED_V190_REQUIRES_LOCAL_DISPOSABLE_PG17")
     fixture.require_disposable()
     fixture.bootstrap()
+    # DEV already has this restricted RPC; the V90 disposable CI schema did not.
+    # Install only after the freshly allocated localhost PG17 guard succeeded.
+    with psycopg.connect(fixture.root_dsn) as root:
+        root.execute((Path(__file__).resolve().parents[1] /
+            "db/review/v190_disposable_pg17_attachment_download.sql").read_text())
     with TemporaryDirectory(prefix="jw-v190-https-") as tmp:
         key,crt=Path(tmp)/"key.pem",Path(tmp)/"cert.pem"
         subprocess.run(["openssl","req","-x509","-nodes","-newkey","rsa:2048",
