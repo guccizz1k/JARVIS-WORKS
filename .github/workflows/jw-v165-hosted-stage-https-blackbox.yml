@@ -1,0 +1,45 @@
+name: JW V16.5 actual Render HTTPS and Chromium public security E2E
+
+on:
+  push:
+    branches:
+      - review/v165-hosted-stage-https-blackbox-20261031
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v165-render-public-gate-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  external-render-https-blackbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify stage app code unchanged from actually deployed SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code b8f22a90e7dcdfd8cbf8b738cc35205c160cf736 HEAD -- app/ scripts/jw_v134_protected_stage.py scripts/jw_v135_stage_connection_probe.py scripts/jw_v104_standalone.py requirements.txt
+          grep -q 'len(ENDPOINTS) >= 20' scripts/ci_v165_hosted_https_blackbox.py
+      - name: Install pinned test-only web and Chromium dependencies
+        run: |
+          python -m pip install 'httpx==0.28.1' 'playwright==1.56.0'
+          python -m playwright install --with-deps chromium
+      - name: Real public HTTPS and Chromium 24-endpoint deny-all proofs
+        run: python -m scripts.ci_v165_hosted_https_blackbox
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v165-real-render-https-chromium
+          path: artifacts/v165/hosted-public-gate-390.png
+          retention-days: 1
+          if-no-files-found: ignore
