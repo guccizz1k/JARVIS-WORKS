@@ -35,6 +35,8 @@ class FakeCursor:
 
     def fetchone(self):
         sql = self.sqls[-1]
+        if "rolcanlogin, rolbypassrls" in sql:
+            return (self.writer_can_login,False)
         if "pg_catalog.pg_roles" in sql:
             return (self.login, "postgres", 170006, self.superuser,
                     False, False, False, self.member[0], self.member[1])
@@ -44,8 +46,6 @@ class FakeCursor:
             if "review_signup_requests_v151" in sql:
                 return (5, self.review_forced)
             return (40, self.forced)
-        if "rolcanlogin, rolbypassrls" in sql:
-            return (self.writer_can_login,False)
         if "has_table_privilege" in sql:
             return (self.direct_insert, False, False)
         raise AssertionError("Unexpected SQL")
