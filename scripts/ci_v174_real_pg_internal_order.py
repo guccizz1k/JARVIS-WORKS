@@ -244,21 +244,47 @@ def main():
     full_preview=a.get(URL+"/order-drafts/"+did+"/register-preview")
     assert full_preview.status_code==200,(full_preview.status_code,full_preview.text[:500])
     assert full_preview.json()["money"]["total"]==6600
-    converted=a.post(write,json={
+    # V17.6: 24 simultaneous genuine HTTP requests backed by independent
+    # restricted PostgreSQL connections. Exactly one order can commit; the
+    # other 23 must resolve to the same immutable source/idempotency key.
+    candidate={
         "draft_id":did,"review_receipt_id":receipt,
         "preview_sha256":full_preview.json()["preview_sha256"],
         "request_id":"v175-reviewed-actual-v92-order",
         "original_checked":True,"register_internal_only":True,
-    },headers=headers)
-    assert converted.status_code==201,(converted.status_code,converted.text[:700])
-    assert converted.json()["internal_order_only"] is True
-    assert converted.json()["external_acceptance_verified"] is False
+    }
+    def concurrent_register(_):
+        independent=fixture.client(app,"A")
+        try:
+            answer=independent.post(write,json=candidate,headers=headers)
+            return answer.status_code,answer.json()
+        finally:
+            independent.close()
+    with ThreadPoolExecutor(max_workers=12) as workers:
+        replies=list(workers.map(concurrent_register,range(24)))
+    codes=[code for code,_ in replies]
+    assert codes.count(201)==1 and codes.count(200)==23,codes
+    ids={body.get("order_id") for _,body in replies}
+    assert len(ids)==1 and None not in ids,ids
+    assert sum(body.get("created") is True for _,body in replies)==1
+    assert all(body.get("internal_order_only") is True
+               and body.get("external_acceptance_verified") is False
+               and body.get("invoice_issued") is False
+               and body.get("payment_recorded") is False for _,body in replies)
+    converted_body=next(body for code,body in replies if code==201)
+    assert converted_body["internal_order_only"] is True
+    assert converted_body["external_acceptance_verified"] is False
     with psycopg.connect(fixture.DSN) as root:
         v=root.execute("""SELECT q.status,o.status,o.quote_id FROM jw_dev.quotes q
           JOIN jw_dev.orders o ON o.quote_id=q.id WHERE q.id=%s""",(q2,)).fetchone()
         assert v==("draft","received",q2),v
         assert root.execute("""SELECT count(*) FROM jw_dev.order_items
-             WHERE order_id=%s""",(converted.json()["order_id"],)).fetchone()==(1,)
+             WHERE order_id=%s""",(converted_body["order_id"],)).fetchone()==(1,)
+        assert root.execute("""SELECT count(*) FROM jw_dev.audit_logs
+             WHERE entity_id=%s AND action='human_approved_internal_order_only'""",
+             (converted_body["order_id"],)).fetchone()==(1,)
+        assert root.execute("""SELECT count(*) FROM jw_dev.orders
+             WHERE quote_id=%s""",(q2,)).fetchone()==(1,)
         assert root.execute("""SELECT count(*) FROM jw_dev.invoices""").fetchone()==(0,)
         # The minimal V157 isolated fixture intentionally has no payments
         # table; assert the full flow never silently installs a finance writer.
@@ -267,6 +293,7 @@ def main():
         ).fetchone()==(None,)
     print("PASS_V175_REAL_PG17_V92_QUOTE_ACK_DRAFT_TO_V174_INTERNAL_ORDER_NO_STATUS_HACK",flush=True)
     print("PASS_V175_REAL_PG17_CANONICAL_RECEIPT_DIGEST_AND_AUDIT_FOLLOWS_SOURCE",flush=True)
+    print("PASS_V176_REAL_PG17_24_CONCURRENT_REQUESTS_ONE_COMMIT_NO_DUPLICATE_AUDIT",flush=True)
     print("LIMIT_V174_NOT_OFFICIAL_ACCEPTANCE_DELIVERY_INVOICE_BANK",flush=True)
 
 
