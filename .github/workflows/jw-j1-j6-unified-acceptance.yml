@@ -20,6 +20,7 @@ on:
       - review/v159-delivery-writer-privilege-boundary-20261031
       - review/v160-approved-import-to-pg-quote-20261031
       - review/v162-confirmed-import-lineage-20261031
+      - review/v164-stage-real-pg-catalog-40-20261031
       - review/v161-invoice-payment-balance-preview-20261031
   workflow_dispatch:
 
@@ -27,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: jw-j1-j6-unified-20261024
+  group: jw-j1-j6-unified-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:

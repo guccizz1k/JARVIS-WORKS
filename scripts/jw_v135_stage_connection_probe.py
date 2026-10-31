@@ -78,8 +78,40 @@ def verify() -> tuple[bool, str]:
                           FROM pg_catalog.pg_class c
                           JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
                           WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')""")
-                    if cur.fetchone() != (35, 35):
+                    if cur.fetchone() != (40, 40):
                         return False, label + "_FORCED_RLS_CATALOG"
+                    # The DEV approval added five immutable review tables.
+                    # Require their complete exact set, all FORCE RLS; never
+                    # silently treat a missing/unsafe table as an acceptable
+                    # general schema count change.
+                    cur.execute("""SELECT count(*), count(*) FILTER
+                          (WHERE c.relrowsecurity AND c.relforcerowsecurity)
+                        FROM pg_catalog.pg_class c
+                        JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                        WHERE n.nspname='jw_dev' AND c.relkind='r'
+                        AND c.relname IN (
+                          'review_signup_requests_v151',
+                          'review_signup_nonces_v151',
+                          'review_delivery_receipts_v151',
+                          'review_delivery_nonces_v151',
+                          'review_delivery_items_v151'
+                        )""")
+                    if cur.fetchone() != (5, 5):
+                        return False, label + "_REVIEW_LEDGER_FORCED_RLS"
+                    cur.execute("""SELECT rolcanlogin, rolbypassrls
+                          FROM pg_catalog.pg_roles
+                          WHERE rolname='jw_delivery_writer_v159'""")
+                    if cur.fetchone() != (False, False):
+                        return False, label + "_WRITER_ROLE_UNSAFE"
+                    cur.execute("""SELECT
+                        pg_catalog.has_table_privilege('jw_app_dev',
+                           'jw_dev.review_delivery_receipts_v151','INSERT'),
+                        pg_catalog.has_table_privilege('anon',
+                           'jw_dev.review_delivery_receipts_v151','INSERT'),
+                        pg_catalog.has_table_privilege('authenticated',
+                           'jw_dev.review_delivery_receipts_v151','INSERT')""")
+                    if cur.fetchone() != (False, False, False):
+                        return False, label + "_REVIEW_DIRECT_WRITE_GRANT"
         except Exception as exc:
             # Never log raw exceptions: drivers may embed a connection URI.
             return False, label + "_" + _failure_code(exc)
