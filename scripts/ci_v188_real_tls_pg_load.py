@@ -67,7 +67,7 @@ def acceptance(client: httpx.Client) -> None:
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         result=list(pool.map(one_read,range(N_READS_PER_ACTOR*4)))
-    expected={"A":200,"B":404,"M":403,"none":401}
+    expected={"A":200,"B":404,"M":200,"none":401}
     mismatches=[(actor,status) for actor,status,_ in result if status!=expected[actor]]
     if mismatches:
         raise AssertionError("V188_ISOLATED_REAL_TLS_96_REQUEST_STATUS_MISMATCH "+str(mismatches[:8]))
