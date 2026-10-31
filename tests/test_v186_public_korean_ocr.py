@@ -3,7 +3,7 @@ import pytest
 from scripts.ci_v186_public_korean_ocr import numeric_candidates, SAMPLES, ACK
 
 CASES=(
- ("사업자번호 301-85-41046",set()),
+ ("사업자번호 301-85-41046",{"3018541046"}),
  ("사업자번호 3018541046",{"3018541046"}),
  ("합계 3,980원",{"3980"}),
  ("합계 3 980원",set()),
