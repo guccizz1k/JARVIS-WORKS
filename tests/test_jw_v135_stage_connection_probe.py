@@ -53,7 +53,7 @@ class FakeCursor:
                 return (3, self.approval_forced)
             if "review_signup_requests_v151" in sql:
                 return (5, self.review_forced)
-            return (40, self.forced)
+            return (43, self.forced)
         if "has_table_privilege" in sql:
             if "jw_dev.order_drafts_v127" in sql:
                 return (self.new_table_write, False, False, False, False, False)
