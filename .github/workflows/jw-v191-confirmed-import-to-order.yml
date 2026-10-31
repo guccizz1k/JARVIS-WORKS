@@ -1,0 +1,59 @@
+name: JW V19.1 confirmed import to order real TLS PG17
+on:
+  push:
+    branches:
+      - review/v191-approved-import-to-order-real-tls-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v191-import-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  imported-quote-order:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing PostgreSQL and API dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Verify syntax, real TLS, source approval, and isolation gates
+        run: |
+          python -m py_compile scripts/ci_v191_https_approved_import_to_order.py
+          python - <<'PY'
+          from pathlib import Path
+          x=Path("scripts/ci_v191_https_approved_import_to_order.py").read_text()
+          for needle in ("fixture.disposable_root_check()",
+           "ONLY_EPHEMERAL_LOCAL_DATABASE","JW_DATA_KEY",
+           "import_api.register_v160_pg_import_quote(app)",
+           "v160","v174","20_FORGED_PREVIEWS","12_CONCURRENT",
+           "verify=str(cert)","trust_env=False"):
+              assert needle in x,needle
+          assert "TestClient(" not in x
+          assert "JW_PG_STAGE_DSN" not in x and "SUPABASE_DSN" not in x
+          print("PASS_V191_GUARDED_LOCAL_PG17_SOURCE_AND_SYNTAX")
+          PY
+      - name: Actual TLS / restricted PG17 source to order lifecycle
+        run: python -m scripts.ci_v191_https_approved_import_to_order
