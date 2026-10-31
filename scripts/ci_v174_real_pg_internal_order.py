@@ -260,7 +260,11 @@ def main():
         assert root.execute("""SELECT count(*) FROM jw_dev.order_items
              WHERE order_id=%s""",(converted.json()["order_id"],)).fetchone()==(1,)
         assert root.execute("""SELECT count(*) FROM jw_dev.invoices""").fetchone()==(0,)
-        assert root.execute("""SELECT count(*) FROM jw_dev.payments""").fetchone()==(0,)
+        # The minimal V157 isolated fixture intentionally has no payments
+        # table; assert the full flow never silently installs a finance writer.
+        assert root.execute(
+            "SELECT to_regclass('jw_dev.payments')"
+        ).fetchone()==(None,)
     print("PASS_V175_REAL_PG17_V92_QUOTE_ACK_DRAFT_TO_V174_INTERNAL_ORDER_NO_STATUS_HACK",flush=True)
     print("PASS_V175_REAL_PG17_CANONICAL_RECEIPT_DIGEST_AND_AUDIT_FOLLOWS_SOURCE",flush=True)
     print("LIMIT_V174_NOT_OFFICIAL_ACCEPTANCE_DELIVERY_INVOICE_BANK",flush=True)
