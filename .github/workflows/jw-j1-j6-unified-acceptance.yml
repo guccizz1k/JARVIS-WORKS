@@ -25,6 +25,7 @@ on:
       - review/v167-lineage-invoice-source-consistency-20261031
       - review/v168-rls-parent-tenant-hardening-20261031
       - review/v169-cross-domain-full-lifecycle-20261031
+      - review/v170-dev-approval-draft-schema-20261031
   workflow_dispatch:
 
 permissions:
@@ -132,7 +133,7 @@ jobs:
           python -m scripts.ci_playwright_cli_smoke
           python -m scripts.ci_playwright_cli_document_e2e
           python -m scripts.ci_playwright_cli_quote_form_e2e
-          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ]; then
+          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ]; then
             python -m py_compile scripts/ci_playwright_cli_v169_full_e2e.py
             python -m scripts.ci_playwright_cli_v169_full_e2e
           fi
