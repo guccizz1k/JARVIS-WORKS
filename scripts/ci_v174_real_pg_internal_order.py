@@ -7,6 +7,7 @@ V15.7 isolated restricted PostgreSQL login with force RLS.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,12 @@ Q = "7"*32
 D = "5"*32
 R = "6"*32
 I = "8"*32
-SRC = "f"*64
+# Independent V92 canonical hash, not derived from the V174 writer.
+SRC = hashlib.sha256(json.dumps([
+    Q, "0"*32, "Q-V174", "Human Approved Quote", "draft", "taxable",
+    [[I, "Synthetic hardware", 2, 3500, 0]],
+    {"subtotal":7000,"vat":700,"total":7700},
+], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 URL = "/api/pg-stage/v174"
 
 
@@ -92,7 +98,7 @@ def install():
             (id,org_id,customer_id,customer_name_snapshot,doc_no,title,
              status,vat_mode,created_at,updated_at)
             VALUES(%s,%s,%s,'Customer A','Q-V174','Human Approved Quote',
-                   'accepted','taxable',now()::text,now()::text)""",
+                   'draft','taxable',now()::text,now()::text)""",
             (Q,fixture.ORG_A,"0"*32))
         root.execute("""INSERT INTO jw_dev.quote_items
              (id,quote_id,name,quantity,unit_price,position)
