@@ -114,7 +114,7 @@ def run() -> None:
                "WHERE id=%s").format(sql.Identifier(original.SCHEMA)),
                (late,)).fetchone()==(0,), "FAIL_V192_FALSE_ZERO_RPO"
         load.tenant_barriers(recovered)
-        print("PASS_V192_REAL_PG17_SIGNED_DIGEST_ARCHIVE_TAMPER_REJECTED",flush=True)
+        print("PASS_V192_REAL_PG17_SHA256_ARCHIVE_TAMPER_REJECTED",flush=True)
         print("PASS_V192_86000_SNAPSHOT_ROWS_AND_43_RLS_62_POLICY_43_TRIGGER",flush=True)
         print("PASS_V192_POST_DUMP_DURABLE_COMMIT_NOT_IN_SNAPSHOT_EXPOSES_RPO_GAP",flush=True)
         print("MEASURED_V192_EPHEMERAL_DUMP_SECONDS="+str(round(dump_ended-t0,3)),flush=True)
