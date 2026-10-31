@@ -49,19 +49,19 @@ def parse_fields(untrusted_text: str) -> dict[str,str]:
         if not v or len(v)>180:
             continue
         # Every value must have its recognized label on that SAME line.
-        if "거래처" in v or "고객사" in v:
+        if re.match(r"^(거래처|고객사)\s*[:：]",v):
             after=re.split(r"[:：]",v,maxsplit=1)
             if len(after)==2:
                 name=after[1].strip()
                 if 1<=len(name)<=80 and not any(ord(c)<32 for c in name):
                     offer("counterparty",name)
-        elif "사업자" in v and "번호" in v:
+        elif re.match(r"^사업자(등록)?번호\s*[:：]",v):
             after=re.split(r"[:：]",v,maxsplit=1)
             if len(after)==2:
                 numbers=re.sub(r"[\s-]","",after[1])
                 if re.fullmatch(r"\d{10}",numbers):
                     offer("business_number",numbers)
-        elif "총금액" in v or "총합계" in v:
+        elif re.match(r"^(총금액|총합계)\s*[:：]",v):
             after=re.split(r"[:：]",v,maxsplit=1)
             if len(after)==2:
                 amount=after[1].strip().replace(",","")
