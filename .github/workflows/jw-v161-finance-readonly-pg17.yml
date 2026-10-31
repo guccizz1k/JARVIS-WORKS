@@ -1,0 +1,78 @@
+name: JW V16.1 actual PG17 invoice balance and RLS acceptance
+
+on:
+  push:
+    branches:
+      - review/v161-invoice-payment-balance-preview-20261031
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v161-finance-preview
+  cancel-in-progress: true
+
+jobs:
+  real-pg17-finance-readonly:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 4s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      JW_ENV: test
+      PYTHONWARNINGS: error
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Protected product invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
+          git diff --exit-code c0619644311f33148cdbd147f56c206dae889fbc HEAD -- app/main.py app/static/ security/ migrations/ requirements.txt
+      - name: Isolated compatible Python dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt
+          python -m pip install 'fastapi==0.128.2' 'starlette==0.50.0' 'anyio==4.13.0' 'httpx==0.28.1' 'pytest==9.0.2' 'pytest-asyncio==1.3.0'
+      - name: Compile all candidate app and scripts
+        run: python -m compileall -q app scripts
+      - name: Run strict source/finance unit regressions
+        run: |
+          python -m pytest -q -ra -o asyncio_default_fixture_loop_scope=function --junitxml=v161-balance-junit.xml tests/test_pg_invoice_balance_v161.py
+      - name: Exercise real PG17 isolated finance/RLS HTTP, recovery and negative tamper
+        run: python -m scripts.ci_v161_invoice_balance_pg
+      - name: Reject failed/skipped local proof
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('v161-balance-junit.xml').getroot()
+          node=root.find('testsuite') if root.tag=='testsuites' else root
+          stats={k:int(node.attrib.get(k,0)) for k in ('tests','failures','errors','skipped')}
+          assert stats['tests']>=17 and stats['failures']==stats['errors']==stats['skipped']==0,stats
+          print('PASS_V161_INDEPENDENT_ZERO_SKIP_JUNIT',stats)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v161-finance-junit
+          path: v161-balance-junit.xml
+          retention-days: 1
+          if-no-files-found: ignore
