@@ -23,6 +23,7 @@ on:
       - review/v164-stage-real-pg-catalog-40-20261031
       - review/v161-invoice-payment-balance-preview-20261031
       - review/v167-lineage-invoice-source-consistency-20261031
+      - review/v168-rls-parent-tenant-hardening-20261031
   workflow_dispatch:
 
 permissions:
