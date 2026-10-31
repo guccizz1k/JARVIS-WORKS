@@ -33,6 +33,7 @@ on:
       - review/v176-restricted-order-concurrency-20261031
       - review/v179-ocr-multiview-field-fusion-20261031
       - review/v180-restricted-manual-ledger-http-20261031
+      - review/v181-43table-rls-recovery-scale-20261031
   workflow_dispatch:
 
 permissions:
@@ -140,7 +141,7 @@ jobs:
           python -m scripts.ci_playwright_cli_smoke
           python -m scripts.ci_playwright_cli_document_e2e
           python -m scripts.ci_playwright_cli_quote_form_e2e
-          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v172-strict-document-fidelity-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v173-dev-review-index-fk-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v174-approved-internal-order-pg-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v175-original-quote-proof-and-invoice-preflight-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v176-restricted-order-concurrency-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v179-ocr-multiview-field-fusion-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v180-restricted-manual-ledger-http-20261031" ]; then
+          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v172-strict-document-fidelity-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v173-dev-review-index-fk-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v174-approved-internal-order-pg-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v175-original-quote-proof-and-invoice-preflight-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v176-restricted-order-concurrency-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v179-ocr-multiview-field-fusion-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v180-restricted-manual-ledger-http-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v181-43table-rls-recovery-scale-20261031" ]; then
             python -m py_compile scripts/ci_playwright_cli_v169_full_e2e.py
             python -m scripts.ci_playwright_cli_v169_full_e2e
           fi
@@ -449,8 +450,42 @@ jobs:
           python -m py_compile scripts/review/pg_order_activation_v174.py scripts/ci_v174_real_pg_internal_order.py
           python -m scripts.ci_v174_real_pg_internal_order
 
+  pg17-v181-scaled-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: J5 J3 actual isolated PostgreSQL17 43 table 62 policy scaled backup and restore
+        run: |
+          python -m pip install -r requirements-postgres-check.txt
+          python -m py_compile scripts/ci_v181_pg17_scaled_restore.py
+          python -m scripts.ci_v181_pg17_scaled_restore
+
   j1-j6-independent-aggregate:
-    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, pg17-v92-quote, pg17-v93-https-restore, security-methodology, pg17-v168-adversarial-rls, pg17-v174-internal-order]
+    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, pg17-v92-quote, pg17-v93-https-restore, security-methodology, pg17-v168-adversarial-rls, pg17-v174-internal-order, pg17-v181-scaled-restore]
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
