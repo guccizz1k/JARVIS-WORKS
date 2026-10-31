@@ -1,0 +1,57 @@
+name: JW V19.2 real PG17 backup integrity and RPO gap
+on:
+  push:
+    branches:
+      - review/v192-backup-integrity-rpo-gap-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v192-backup-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  disaster-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned disposable PG17 requirements
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Source isolation and syntax gate
+        run: |
+          python -m py_compile scripts/ci_v192_pg17_backup_integrity_rpo.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v192_pg17_backup_integrity_rpo.py").read_text()
+          for word in ("ONLY_EPHEMERAL_LOCAL_DATABASE","original.guard(dsn)",
+             "postgres:17","dump_ended","BLOCKED_V192_CORRUPTED_BACKUP_NOT_RESTORABLE",
+             "sha256sum","LIMIT_V192_REAL_STAGING_RTO_RPO_NOT_MEASURED"):
+              assert word in s,word
+          for word in ("JW_PG_STAGE_DSN","SUPABASE_DSN","render.com"):
+              assert word not in s
+          print("PASS_V192_ONLY_FRESH_LOCAL_PG17_SOURCE_GUARD")
+          PY
+      - name: Real PG17 86000-record snapshot restore / corruption / RPO gap
+        run: python -m scripts.ci_v192_pg17_backup_integrity_rpo
