@@ -134,6 +134,10 @@ def create_app() -> FastAPI:
     pg_import_quote_v160.register_v160_pg_import_quote(app)
     # Read-only existing invoice/payment balance; cannot post or reconcile.
     pg_invoice_balance_v161.register_v161_invoice_balance(app)
+    # V17.4 is disabled by default and registers no routes without an explicit
+    # non-production opt-in. Never calls a bank or posts legal invoices.
+    from scripts.review import pg_order_activation_v174
+    pg_order_activation_v174.register_v174_internal_order(app)
 
     @app.get("/healthz", include_in_schema=False)
     def health():
