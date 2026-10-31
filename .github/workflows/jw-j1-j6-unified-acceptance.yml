@@ -19,6 +19,7 @@ on:
       - review/v158-trade-lineage-20261030
       - review/v159-delivery-writer-privilege-boundary-20261031
       - review/v160-approved-import-to-pg-quote-20261031
+      - review/v162-confirmed-import-lineage-20261031
       - review/v161-invoice-payment-balance-preview-20261031
   workflow_dispatch:
 

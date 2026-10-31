@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/v160-approved-import-to-pg-quote-20261031
+      - review/v162-confirmed-import-lineage-20261031
 permissions:
   contents: read
 concurrency:

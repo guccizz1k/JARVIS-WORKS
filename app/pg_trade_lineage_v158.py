@@ -44,7 +44,7 @@ def _bounded_rows(cur, statement: str, params: tuple, limit: int) -> list[tuple]
 def _read_lineage(cur, quote_id: str, org: str) -> dict:
     # Both application-side and forced-RLS tenant isolation are required.
     cur.execute(
-        """SELECT id,status,customer_id,vat_mode,doc_no
+        """SELECT id,status,customer_id,vat_mode,doc_no,source_import_id
            FROM jw_dev.quotes WHERE id=%s AND org_id=%s""",
         (quote_id, org),
     )
@@ -56,6 +56,30 @@ def _read_lineage(cur, quote_id: str, org: str) -> dict:
         """SELECT id,status FROM jw_dev.import_previews
            WHERE quote_id=%s AND org_id=%s
            ORDER BY id LIMIT %s""", (quote_id, org), _MAX_IMPORTS)
+
+    # V16.0 intentionally did not grant UPDATE on import_previews. It stores
+    # the immutable approved import identity on quotes.source_import_id, so
+    # its confirmed preview has quote_id NULL. Resolve both forms without
+    # granting ordinary app SQL UPDATE/INSERT into evidence rows.
+    source_key = quote[5]
+    if isinstance(source_key, str) and source_key.startswith("v160:"):
+        prefix = "v160:" + org + ":"
+        if not source_key.startswith(prefix):
+            raise HTTPException(409, "Foreign source import reference")
+        preview_id = source_key[len(prefix):]
+        if not _ID.fullmatch(preview_id):
+            raise HTTPException(409, "Invalid source import reference")
+        if imports:
+            if len(imports) != 1 or imports[0] != (preview_id, "confirmed"):
+                raise HTTPException(409, "Source import relation mismatch")
+        else:
+            imports = _bounded_rows(cur,
+                """SELECT id,status FROM jw_dev.import_previews
+                   WHERE id=%s AND org_id=%s AND quote_id IS NULL
+                     AND status='confirmed'
+                   LIMIT %s""", (preview_id, org), 1)
+            if imports != [(preview_id, "confirmed")]:
+                raise HTTPException(409, "Confirmed source import missing")
 
     orders = _bounded_rows(cur,
         """SELECT id,status,review_state,customer_id,vat_mode
