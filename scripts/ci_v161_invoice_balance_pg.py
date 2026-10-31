@@ -54,7 +54,7 @@ def install_disposable_finance_fixture():
             ON jw_dev.payments FOR SELECT TO jw_app_dev
             USING(org_id=jw_dev.current_org_from_session() AND EXISTS
               (SELECT 1 FROM jw_dev.invoices inv
-                WHERE inv.id=invoice_id AND inv.org_id=org_id))""")
+                WHERE inv.id=invoice_id AND inv.org_id=jw_dev.payments.org_id))""")
         root.execute("""UPDATE jw_dev.orders SET vat_mode='exempt'
                  WHERE id=repeat('d',32)""")
         root.execute("""INSERT INTO jw_dev.invoices(
@@ -65,8 +65,8 @@ def install_disposable_finance_fixture():
               IB,fixture.ORG_B,fixture.ORDER_B,"8"*32))
         root.execute("""INSERT INTO jw_dev.invoice_items(
               id,invoice_id,source_order_item_id,name,quantity,unit_price,position)
-              VALUES(%s,%s,%s,'Synthetic A',2,3500,0),
-                    (%s,%s,%s,'Synthetic B',2,3500,0)""",
+              VALUES(%s,%s,%s,'Synthetic line A',2,3500,0),
+                    (%s,%s,%s,'Synthetic line B',2,3500,0)""",
               ("1"*32,IA,fixture.LINE_A,"3"*32,IB,fixture.LINE_B))
         root.execute("""INSERT INTO jw_dev.payments(
               id,org_id,invoice_id,amount,reversed_at)
@@ -94,6 +94,7 @@ def main():
     assert doc["recorded_active_payments_krw"]==3000
     assert doc["unpaid_balance_krw"]==4700
     assert doc["recorded_active_count"]==1
+    assert doc["source_item_links_verified"] is True
     assert doc["reversed_record_count"]==1
     assert doc["bank_reconciliation_verified"] is False
     assert doc["payment_posted_by_this_api"] is False
@@ -150,7 +151,7 @@ def main():
         root.execute("UPDATE jw_dev.payments SET amount=3000 WHERE id=%s",(PA,))
         root.execute("""UPDATE jw_dev.invoice_items SET quantity=3 WHERE invoice_id=%s""",
                      (IA,))
-    assert a.get(path(IA)).status_code==200
+    assert a.get(path(IA)).status_code==409
     with psycopg.connect(fixture.DSN) as root:
         root.execute("""UPDATE jw_dev.invoice_items SET quantity=2 WHERE invoice_id=%s""",
                      (IA,))
