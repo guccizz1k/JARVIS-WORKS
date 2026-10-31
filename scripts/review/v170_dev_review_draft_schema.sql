@@ -56,8 +56,8 @@ CREATE POLICY jw_v170_order_select ON jw_dev.order_drafts_v127 FOR SELECT TO jw_
  USING(org_id=jw_dev.current_org_from_session());
 CREATE POLICY jw_v170_order_insert ON jw_dev.order_drafts_v127 FOR INSERT TO jw_app_dev
  WITH CHECK(org_id=jw_dev.current_org_from_session() AND EXISTS(
- SELECT 1 FROM jw_dev.quotes q WHERE q.id=quote_id AND q.org_id=org_id
- AND q.customer_id=customer_id));
+ SELECT 1 FROM jw_dev.quotes q WHERE q.id=order_drafts_v127.quote_id AND q.org_id=order_drafts_v127.org_id
+ AND q.customer_id=order_drafts_v127.customer_id));
 CREATE POLICY jw_v170_item_select ON jw_dev.order_draft_items_v127 FOR SELECT TO jw_app_dev
  USING(EXISTS(SELECT 1 FROM jw_dev.order_drafts_v127 o WHERE o.id=order_id
  AND o.org_id=jw_dev.current_org_from_session()));
@@ -85,7 +85,7 @@ CREATE POLICY jw_v170_receipt_insert ON jw_dev.quote_review_receipts_v128
  FOR INSERT TO jw_app_dev
  WITH CHECK(org_id=jw_dev.current_org_from_session() AND
             actor_id=(SELECT actor_id FROM jw_dev.stage_identity_v84()) AND
-            EXISTS(SELECT 1 FROM jw_dev.quotes q WHERE q.id=quote_id AND q.org_id=org_id));
+            EXISTS(SELECT 1 FROM jw_dev.quotes q WHERE q.id=quote_review_receipts_v128.quote_id AND q.org_id=quote_review_receipts_v128.org_id));
 
 -- Every new table has forced RLS and only scoped SELECT/INSERT grants.
 -- The existing quote review API returns draft_only / approval_posted=false.
