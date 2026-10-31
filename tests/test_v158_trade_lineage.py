@@ -22,6 +22,9 @@ class LinkedCursor:
         self.review=review
         self.too_many=too_many
         self.denied=denied
+        self.source_key=None
+        self.no_import=False
+        self.inconsistent_import=False
         self.results=[]
         self.calls=[]
 
@@ -29,9 +32,13 @@ class LinkedCursor:
         if self.denied:raise errors.InsufficientPrivilege("synthetic denied")
         self.calls.append((statement,params))
         if "FROM jw_dev.quotes" in statement:
-            self.results=[(QUOTE,"draft","e"*32,"taxable","Q-123")] if not self.omit else []
+            self.results=[(QUOTE,"draft","e"*32,"taxable","Q-123",self.source_key)] if not self.omit else []
         elif "FROM jw_dev.import_previews" in statement:
-            self.results=[("f"*32,"confirmed")]
+            self.results=(
+                [] if self.no_import or (self.source_key is not None
+                  and "quote_id IS NULL" not in statement) else
+                [("e"*32 if self.inconsistent_import else "f"*32,"confirmed")]
+            )
         elif "FROM jw_dev.orders" in statement:
             self.results=[(ORDER,"fulfilled","acknowledged",
                            "e"*32 if not self.bad_order else "9"*32,"taxable")]
@@ -131,6 +138,37 @@ def test_missing_privileges_fail_closed(stage):
     resp=client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage")
     assert resp.status_code==503
     assert "synthetic" not in resp.text
+
+
+def test_v160_confirmed_source_is_linked_without_unsafe_preview_update(stage):
+    client,cur,_=stage
+    cur.source_key="v160:"+ORG+":"+"f"*32
+    resp=client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage")
+    assert resp.status_code==200,resp.text
+    assert resp.json()["source_imports"]==[
+        {"preview_id":"f"*32,"status":"confirmed"}]
+    assert any("quote_id IS NULL" in sql for sql,_ in cur.calls)
+    assert all("UPDATE jw_dev.import_previews" not in sql for sql,_ in cur.calls)
+
+
+def test_v160_foreign_source_pointer_fails_closed(stage):
+    client,cur,_=stage
+    cur.source_key="v160:"+("a"*32)+":"+"f"*32
+    assert client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage").status_code==409
+
+
+def test_v160_source_pointer_missing_fails_closed(stage):
+    client,cur,_=stage
+    cur.source_key="v160:"+ORG+":"+"f"*32
+    cur.no_import=True
+    assert client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage").status_code==409
+
+
+def test_v160_forged_source_relation_fails_closed(stage):
+    client,cur,_=stage
+    cur.source_key="v160:"+ORG+":"+"f"*32
+    cur.inconsistent_import=True
+    assert client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage").status_code==409
 
 
 def test_disabled_by_default_and_wrong_mode(monkeypatch):
