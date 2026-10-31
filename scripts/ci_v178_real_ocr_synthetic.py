@@ -64,7 +64,14 @@ def parse_fields(untrusted_text: str) -> dict[str,str]:
         elif re.match(r"^(총금액|총합계)\s*[:：]",v):
             after=re.split(r"[:：]",v,maxsplit=1)
             if len(after)==2:
-                amount=after[1].strip().replace(",","")
+                rawamount=after[1].strip()
+                # A comma in scanned currency must have exact thousands
+                # grouping. Silently stripping malformed commas changes value.
+                if "," in rawamount and not re.fullmatch(
+                    r"[0-9]{1,3}(?:,[0-9]{3})+",rawamount
+                ):
+                    continue
+                amount=rawamount.replace(",","")
                 if re.fullmatch(r"\d{1,16}",amount):
                     offer("total_amount",str(int(amount)))
     return output
