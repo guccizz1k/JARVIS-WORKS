@@ -52,6 +52,12 @@ def _proof(sql: str) -> bool:
     )
     if not all(fragment.lower() in sql.lower() for fragment in hard):
         return False
+    # Do not let a mutated prefix or one of several copies mask a removed guard.
+    if ("SET LOCAL lock_timeout = '1000ms';" not in sql
+            or "SET LOCAL statement_timeout = '20s';" not in sql
+            or sql.count("jw_dev.current_org_from_session()") != 6
+            or sql.count("actor_id=(SELECT actor_id FROM jw_dev.stage_identity_v84())") != 2):
+        return False
     if sql.count("CREATE TABLE jw_dev.") != 3 or sql.count("FORCE ROW LEVEL SECURITY") != 3:
         return False
     if sql.count("CREATE POLICY jw_v170_") != 6:
