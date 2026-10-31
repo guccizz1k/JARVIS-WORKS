@@ -366,8 +366,43 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+  pg17-v168-adversarial-rls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned PG17 client dependencies
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Reject ungated policies and verify real A/B restricted roles
+        run: |
+          python -m py_compile scripts/ci_v168_real_pg_rls.py
+          python -m scripts.ci_v168_real_pg_rls
+
   j1-j6-independent-aggregate:
-    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, pg17-v92-quote, pg17-v93-https-restore, security-methodology]
+    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, pg17-v92-quote, pg17-v93-https-restore, security-methodology, pg17-v168-adversarial-rls]
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
