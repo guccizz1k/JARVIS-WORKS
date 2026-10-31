@@ -37,6 +37,7 @@ on:
       - review/v182-real-dev-signup-readiness-43-rls-20261031
       - review/v183-external-https-boundary-20261031
       - review/v184-disposable-real-https-pg-order-20261031
+      - review/v185-43table-scaled-dr-20261031
   workflow_dispatch:
 
 permissions:
@@ -144,7 +145,7 @@ jobs:
           python -m scripts.ci_playwright_cli_smoke
           python -m scripts.ci_playwright_cli_document_e2e
           python -m scripts.ci_playwright_cli_quote_form_e2e
-          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v172-strict-document-fidelity-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v173-dev-review-index-fk-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v174-approved-internal-order-pg-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v175-original-quote-proof-and-invoice-preflight-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v176-restricted-order-concurrency-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v179-ocr-multiview-field-fusion-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v180-restricted-manual-ledger-http-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v181-43table-rls-recovery-scale-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v182-real-dev-signup-readiness-43-rls-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v183-external-https-boundary-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v184-disposable-real-https-pg-order-20261031" ]; then
+          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v172-strict-document-fidelity-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v173-dev-review-index-fk-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v174-approved-internal-order-pg-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v175-original-quote-proof-and-invoice-preflight-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v176-restricted-order-concurrency-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v179-ocr-multiview-field-fusion-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v180-restricted-manual-ledger-http-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v181-43table-rls-recovery-scale-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v182-real-dev-signup-readiness-43-rls-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v183-external-https-boundary-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v184-disposable-real-https-pg-order-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v185-43table-scaled-dr-20261031" ]; then
             python -m py_compile scripts/ci_playwright_cli_v169_full_e2e.py
             python -m scripts.ci_playwright_cli_v169_full_e2e
           fi
