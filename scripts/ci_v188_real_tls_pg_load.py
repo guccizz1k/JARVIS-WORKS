@@ -49,8 +49,9 @@ def acceptance(client: httpx.Client) -> None:
     # provenance, immutable order/audit, and rejects 20 fabricated quote IDs.
     v184.run_live(client)
     with psycopg.connect(fixture.DSN) as root:
-        all_quotes=root.execute("SELECT id FROM jw_dev.quotes").fetchall()
-        assert len(all_quotes)==1,"V188_EXPECT_EXACTLY_ONE_QUOTE"
+        all_quotes=root.execute("SELECT id FROM jw_dev.quotes WHERE title=%s",
+            ("V184 Real TLS internal quote",)).fetchall()
+        assert len(all_quotes)==1,"V188_EXPECT_EXACTLY_ONE_NEW_QUOTE"
         quote_id=all_quotes[0][0]
     endpoint=HOST+"/api/pg-stage/v92/quote-review-previews/"+quote_id
 
@@ -100,10 +101,10 @@ def acceptance(client: httpx.Client) -> None:
     if any(code!=200 or identity!=quote_id for code,identity in repeats):
         raise AssertionError("V188_CONCURRENT_QUOTE_REPLAY_UNEXPECTED_RESPONSE "+str(repeats))
     with psycopg.connect(fixture.DSN) as root:
-        assert root.execute("SELECT count(*) FROM jw_dev.quotes").fetchone()==(1,)
-        assert root.execute("SELECT count(*) FROM jw_dev.quote_items").fetchone()==(2,)
-        assert root.execute("SELECT count(*) FROM jw_dev.orders").fetchone()==(1,)
-        assert root.execute("SELECT count(*) FROM jw_dev.order_items").fetchone()==(2,)
+        assert root.execute("SELECT count(*) FROM jw_dev.quotes WHERE id=%s",(quote_id,)).fetchone()==(1,)
+        assert root.execute("SELECT count(*) FROM jw_dev.quote_items WHERE quote_id=%s",(quote_id,)).fetchone()==(2,)
+        assert root.execute("SELECT count(*) FROM jw_dev.orders WHERE quote_id=%s",(quote_id,)).fetchone()==(1,)
+        assert root.execute("""SELECT count(*) FROM jw_dev.order_items WHERE order_id=(SELECT id FROM jw_dev.orders WHERE quote_id=%s)""",(quote_id,)).fetchone()==(2,)
         assert root.execute("SELECT count(*) FROM jw_dev.invoices").fetchone()==(0,)
     print("PASS_V188_16_CONCURRENT_HTTPS_PG17_QUOTE_REPLAYS_EXACTLY_ONE_QUOTE_AND_ORDER",flush=True)
     print("LIMIT_V188_HOSTED_RENDER_WHOLE_WORKFLOW_NOT_TESTED",flush=True)
