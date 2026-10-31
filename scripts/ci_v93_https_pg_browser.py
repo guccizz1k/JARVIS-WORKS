@@ -109,6 +109,7 @@ def main() -> int:
        "JW_PG_MESSENGER_V90":"ISOLATED_DEV_MESSENGER_ONLY",
        "JW_PG_QUOTE_V92":"ISOLATED_DEV_QUOTE_V92",
        "JW_V90_ALLOWED_ORIGINS":BASE,
+       "JW_PG_INTERNAL_LEDGER_V180":"ISOLATED_DEV_UNRECONCILED_LEDGER_ONLY",
     })
     os.environ.pop("JW_INSECURE_LOCAL_DEV",None)
     v90.stage._connect=lambda: psycopg.connect(fixture.TRADE_DSN,connect_timeout=5)
@@ -123,6 +124,9 @@ def main() -> int:
     # Neither the production FastAPI app nor the stand-alone preview imports it.
     from scripts.ci_v132_finance_https_router import register as register_finance_ci
     assert register_finance_ci(app)
+    # Review-only V18.0 INTERNAL ledger, isolated PG17 HTTPS ONLY.
+    from scripts.review import pg_manual_ledger_v180
+    assert pg_manual_ledger_v180.register_v180_ledger(app)
 
     @app.get("/qa/")
     def page(): return HTMLResponse(QA_HTML,headers={"Cache-Control":"no-store"})
@@ -448,6 +452,9 @@ def main() -> int:
             # auth and trade logins, without changing real DEV schemas.
             with psycopg.connect(fixture.root_dsn,autocommit=True) as pg:
                 pg.execute((fixture.ROOT/'scripts/ci_v132_finance_ephemeral.sql').read_text(encoding='utf-8'))
+                # This CI-only schema addition matches the actual jw_dev.orders
+                # V18.0 provenance column. Never touches Supabase or production.
+                pg.execute("ALTER TABLE jw_dev.orders ADD COLUMN review_state text NOT NULL DEFAULT 'acknowledged'")
                 pg.execute((fixture.ROOT/'security/jw_dev_v83_payment_rpc.sql').read_text(encoding='utf-8'))
                 rows=pg.execute("""SELECT id,org_id,customer_id,quote_id
                                    FROM jw_dev.order_drafts_v127 WHERE org_id='ci-a'""").fetchall()
@@ -499,6 +506,25 @@ def main() -> int:
                   'jw_app_dev','jw_dev.payments','INSERT')""").fetchone()
                 if pay_grant!=(False,):
                     raise AssertionError("Direct payment INSERT not forbidden")
+                # V18.0: extra independently tenant-scoped synthetic invoice,
+                # never a real bank settlement or externally issued invoice.
+                pg.execute("""INSERT INTO jw_dev.quotes
+                     (id,org_id,customer_id,customer_name_snapshot,doc_no,title,
+                      status,vat_mode,created_at,updated_at)
+                     VALUES('ci-v180-quote-a','ci-a','ci-customer-a',
+                            'CI Customer A','ci-v180-quote-no','V180 Review',
+                            'draft','taxable',now()::text,now()::text)""")
+                pg.execute("""INSERT INTO jw_dev.orders
+                     (id,org_id,customer_id,quote_id,status,review_state)
+                     VALUES('ci-v180-order-a','ci-a','ci-customer-a',
+                            'ci-v180-quote-a','fulfilled','acknowledged')""")
+                pg.execute("""INSERT INTO jw_dev.invoices
+                     (id,org_id,order_id,customer_id,vat_mode,status)
+                     VALUES('ci-v180-invoice-a','ci-a','ci-v180-order-a',
+                            'ci-customer-a','taxable','issued')""")
+                pg.execute("""INSERT INTO jw_dev.invoice_items
+                     (id,invoice_id,name,quantity,unit_price)
+                     VALUES('ci-v180-item-a','ci-v180-invoice-a','Synthetic A',2,3500)""")
 
             assertion(r"""async () => {
               const req=async(path,method='GET',body,csrf)=>{
@@ -600,6 +626,113 @@ def main() -> int:
                 """).fetchone()
                 if row!=(1,1440,1,1,9900):
                     raise AssertionError(f"Real finance settlement summary incorrect: {row!r}")
+            # V18.0: true Chromium HTTPS + verified DB-backed A/B login,
+            # isolated V83 RPC, admin-reviewed unreconciled-only ledger.
+            assertion(r"""async () => {
+              const root='/api/pg-stage/v180/';
+              const req=async(path,method='GET',body,csrf)=>{
+                const h={'Accept':'application/json'};
+                if(body!==undefined)h['Content-Type']='application/json';
+                if(csrf)h['X-CSRF-Token']=csrf;
+                const r=await fetch(path,{method,credentials:'same-origin',
+                  headers:h,body:body===undefined?undefined:JSON.stringify(body)});
+                return {code:r.status,data:await r.json()};
+              };
+              if(location.protocol!=='https:')throw Error('V180 not HTTPS');
+              const before=await req(root+'invoices/ci-v180-invoice-a/ledger-preview');
+              if(before.code!==401)throw Error('Revoked C session accessed V180 ledger');
+              const login=await req('/api/pg-stage/v85/login','POST',{
+                email:'a@invalid.test',
+                password:'CI-v106-disposable-auth-password-only'
+              });
+              if(login.code!==200||!login.data.csrf_token)
+                throw Error('V180 independent A login failed');
+              const csrf=login.data.csrf_token;
+              const first=await req(root+'invoices/ci-v180-invoice-a/ledger-preview');
+              if(first.code!==200||first.data.recorded_active_krw!==0||
+                 first.data.bank_reconciliation_verified!==false||
+                 first.data.financial_settlement_verified!==false)
+                throw Error('V180 ledger preview falsely claims reconciliation');
+              if((await req(root+'invoices/ci-v132-invoice-b/ledger-preview')).code!==404)
+                throw Error('V180 foreign B invoice visible');
+              const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',
+                 year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+              const body={invoice_id:'ci-v180-invoice-a',amount_krw:1000,
+                 paid_at:day,reference:'ci-v180-payment-001',
+                 note:'INTERNAL_NOT_BANK_CONFIRMED',
+                 invoice_source_checked:true,internal_manual_entry_only:true,
+                 bank_reconciliation_verified:false,
+                 physical_delivery_independently_verified:false};
+              const noCsrf=await req(root+'manual-payments','POST',body);
+              if(noCsrf.code!==403)throw Error('V180 CSRF bypass');
+              const forgery=await req(root+'manual-payments','POST',{
+                   ...body,bank_reconciliation_verified:true},csrf);
+              if(forgery.code!==422)throw Error('V180 fake bank confirmation accepted');
+              const [paid,replayed]=await Promise.all([
+                req(root+'manual-payments','POST',body,csrf),
+                req(root+'manual-payments','POST',body,csrf)
+              ]);
+              if(paid.code!==200||replayed.code!==200||
+                 !paid.data.payment_id||
+                 paid.data.payment_id!==replayed.data.payment_id||
+                 paid.data.financial_settlement_verified!==false)
+                throw Error('V180 real PG concurrent payment replay failed');
+              const partial=await req(root+'invoices/ci-v180-invoice-a/ledger-preview');
+              if(partial.code!==200||partial.data.recorded_active_krw!==1000||
+                 partial.data.active_payment_count!==1)
+                throw Error('V180 partial recorded amount mismatch');
+              const denied=await req(root+'manual-payments','POST',{
+                ...body,invoice_id:'ci-v132-invoice-b',
+                reference:'ci-v180-foreign-002'},csrf);
+              if(denied.code!==404)throw Error('V180 cross-tenant write not 404');
+              const reversed=await req(root+'manual-payments/reverse','POST',{
+                invoice_id:body.invoice_id,payment_id:paid.data.payment_id,
+                reversal_approved:true,internal_manual_entry_only:true
+              },csrf);
+              if(reversed.code!==200||reversed.data.reversed!==true)
+                throw Error('V180 reversal not confirmed');
+              if((await req(root+'manual-payments','POST',body,csrf)).code!==409)
+                throw Error('V180 reversed idempotency key reused');
+              const full=await req(root+'manual-payments','POST',{
+                 ...body,amount_krw:7700,reference:'ci-v180-final-003'},csrf);
+              if(full.code!==200)throw Error('V180 full internal ledger entry denied');
+              const overpay=await req(root+'manual-payments','POST',{
+                 ...body,amount_krw:1,reference:'ci-v180-overpay-004'},csrf);
+              if(overpay.code!==409)throw Error('V180 overpayment accepted');
+              const final=await req(root+'invoices/ci-v180-invoice-a/ledger-preview');
+              if(final.code!==200||final.data.recorded_active_krw!==7700||
+                 final.data.reversed_payment_count!==1||
+                 final.data.bank_reconciliation_verified!==false)
+                 throw Error('V180 final ledger changed or falsely reconciled');
+              const b=await req('/api/pg-stage/v85/login','POST',{
+                email:'b@invalid.test',
+                password:'CI-v106-disposable-auth-password-only'});
+              if(b.code!==200)throw Error('V180 B login failed');
+              if((await req(root+'invoices/ci-v180-invoice-a/ledger-preview')).code!==404)
+                throw Error('V180 B sees A internal ledger');
+              return 'JW_V180_REAL_HTTPS_PG17_INTERNAL_UNRECONCILED_LEDGER_PASS';
+            }""","JW_V180_REAL_HTTPS_PG17_INTERNAL_UNRECONCILED_LEDGER_PASS",timeout=100)
+            with psycopg.connect(fixture.root_dsn) as root:
+                finance=root.execute("""SELECT
+                  (SELECT count(*) FROM jw_dev.payments
+                   WHERE invoice_id='ci-v180-invoice-a'),
+                  (SELECT count(*) FROM jw_dev.payments
+                   WHERE invoice_id='ci-v180-invoice-a'
+                     AND reversed_at IS NOT NULL),
+                  (SELECT coalesce(sum(amount),0) FROM jw_dev.payments
+                   WHERE invoice_id='ci-v180-invoice-a'
+                     AND reversed_at IS NULL),
+                  (SELECT count(*) FROM jw_dev.audit_logs a
+                   JOIN jw_dev.payments p ON p.id=a.entity_id
+                   WHERE p.invoice_id='ci-v180-invoice-a' AND a.action='create'),
+                  (SELECT count(*) FROM jw_dev.audit_logs a
+                   JOIN jw_dev.payments p ON p.id=a.entity_id
+                   WHERE p.invoice_id='ci-v180-invoice-a' AND a.action='reverse')
+                """).fetchone()
+                if finance!=(2,1,7700,2,1):
+                    raise AssertionError(f"V180 synthetic audit or finance corruption: {finance}")
+            print("PASS_V180_REAL_CHROMIUM_HTTPS_RESTRICTED_PG17_CSRF_TENANT_REPLAY_REVERSAL",flush=True)
+            print("LIMIT_V180_UNRECONCILED_INTERNAL_LEDGER_NOT_BANK_PROOF_OR_LEGAL_INVOICE",flush=True)
             print("PASS: browser HTTPS -> real V85 auth -> verified V90 trade role -> "
                   "original V83 PostgreSQL ledger RPC; A/B/C, CSRF, "
                   "concurrent idempotency, tenant denial, reversal and KRW 1440/9900",flush=True)
