@@ -135,7 +135,7 @@ def fingerprint(dsn: str):
 def deny_foreign_read_and_write(dsn: str):
     # PostgreSQL SUPERUSER can SET ROLE for the isolated READ and 19 INSERT
     # policies; no customer identities nor credentials are involved.
-    with psycopg.connect(dsn) as conn:
+    with psycopg.connect(dsn,autocommit=True) as conn:
         with conn.transaction():
             conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(ROLE)))
             conn.execute("SELECT set_config('jw.test_org','tenant-a',true)")
@@ -152,13 +152,13 @@ def deny_foreign_read_and_write(dsn: str):
                 stmt=sql.SQL("INSERT INTO {}.{} (id,org_id,value,proof_hash)"
                     " VALUES (%s,'tenant-b',1,'forged')").format(
                     sql.Identifier(SCHEMA),sql.Identifier(t))
-                with conn.transaction():
-                    try:
+                try:
+                    with conn.transaction():
                         conn.execute(stmt,("attacker-"+str(i),))
-                    except psycopg.errors.InsufficientPrivilege:
-                        pass
-                    else:
-                        raise AssertionError("V181 forged company insert allowed")
+                except psycopg.errors.InsufficientPrivilege:
+                    pass
+                else:
+                    raise AssertionError("V181 forged company insert allowed")
             conn.execute("SELECT set_config('jw.test_org','unknown',true)")
             for i in range(N_TABLES):
                 t="tenant_ledger_"+str(i).zfill(2)
@@ -166,8 +166,8 @@ def deny_foreign_read_and_write(dsn: str):
                     sql.Identifier(SCHEMA),sql.Identifier(t))
                 if conn.execute(stmt).fetchone()!=(0,):
                     raise AssertionError("V181 unauthenticated foreign visibility")
-            # No mutating SQL committed; all denied side effects rolled back.
-            conn.rollback()
+            # Only read queries and rejected INSERTS were attempted.
+            # Each rejected INSERT was rolled back to its own SAVEPOINT.
     print("PASS_V181_19_INSERT_DENIALS_43_TENANT_READ_BARRIERS",flush=True)
 
 
@@ -188,8 +188,8 @@ def run():
     baseline=None
     t0=time.monotonic()
     try:
-        create_test_schema(dsn)
         source_created=True
+        create_test_schema(dsn)
         deny_foreign_read_and_write(dsn)
         baseline=fingerprint(dsn)
         run_docker("exec","-e","PGPASSWORD",cid,
