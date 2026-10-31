@@ -16,6 +16,7 @@ from app.import_engine import verify
 from app.security_hardening import sealed_json
 from app import pg_import_quote_v160 as target
 from app import pg_quote_api_v92 as order_quote
+from app import pg_trade_lineage_v158 as lineage
 from pathlib import Path
 from scripts import ci_v157_real_pg_delivery_http as fixture
 
@@ -172,6 +173,37 @@ def main():
     assert retry.status_code==200,(retry.status_code,retry.text[:400])
     assert retry.json()["created"] is False and retry.json()["order_id"]==order_id
     assert b.get("/api/pg-stage/v92/quote-review-previews/"+quote_id).status_code==404
+    # V16.2 proof: V16.0 encrypted confirmed import does NOT update the
+    # original preview.quote_id, so read-only V15.8 lineage must resolve its
+    # immutable source_import_id without granting SQL UPDATE on evidence.
+    os.environ["JW_PG_TRADE_LINEAGE_V158"] = (
+        "ISOLATED_DEV_TRADE_LINEAGE_READ_ONLY")
+    assert lineage.register_v158_trade_lineage(app)
+    path="/api/pg-stage/v158/quotes/"+quote_id+"/lineage"
+    linked=a.get(path)
+    assert linked.status_code==200,(linked.status_code,linked.text[:450])
+    linked_body=linked.json()
+    assert linked_body["source_imports"]==[
+        {"preview_id":PREVIEW,"status":"confirmed"}]
+    assert linked_body["counts"]["source_imports"]==1
+    assert linked_body["counts"]["orders"]==0  # order draft, not confirmed order
+    assert linked_body["official_source_verified"] is False
+    assert b.get(path).status_code==404
+    with psycopg.connect(fixture.DSN) as root:
+        source=root.execute("""SELECT quote_id,status FROM jw_dev.import_previews
+                               WHERE id=%s""",(PREVIEW,)).fetchone()
+        assert source==(None,"confirmed"),source
+        root.execute("""UPDATE jw_dev.import_previews
+                        SET status='pending' WHERE id=%s""",(PREVIEW,))
+    denied=a.get(path)
+    assert denied.status_code==409,(denied.status_code,denied.text[:350])
+    with psycopg.connect(fixture.DSN) as root:
+        root.execute("""UPDATE jw_dev.import_previews
+                        SET status='confirmed' WHERE id=%s""",(PREVIEW,))
+    assert a.get(path).status_code==200
+    print("PASS_V162_REAL_PG17_APPROVED_IMPORT_SOURCE_LINEAGE_WITHOUT_UPDATE",flush=True)
+    print("PASS_V162_FOREIGN_MISSING_OR_REVOKED_SOURCE_DENIED",flush=True)
+
 
     with psycopg.connect(fixture.DSN) as root:
         source=root.execute("""SELECT source_import_id,status,source_document_meta
