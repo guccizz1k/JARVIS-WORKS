@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from psycopg.conninfo import conninfo_to_dict
 
 from app import pg_api_v84, pg_auth_v85, pg_v90_integrated_entry
-from app import pg_quote_api_v92, pg_quote_read_v93, pg_invoice_preview_v145, pg_delivery_review_api_v154, pg_trade_lineage_v158, pg_import_quote_v160
+from app import pg_quote_api_v92, pg_quote_read_v93, pg_invoice_preview_v145, pg_delivery_review_api_v154, pg_trade_lineage_v158, pg_import_quote_v160, pg_invoice_balance_v161
 
 ACK = "PRIVATE_HTTPS_PG_ONLY"
 REQUIRED_MODES = {
@@ -132,6 +132,8 @@ def create_app() -> FastAPI:
     pg_trade_lineage_v158.register_v158_trade_lineage(app)
     # Requires separately confirmed import evidence + encrypted source key.
     pg_import_quote_v160.register_v160_pg_import_quote(app)
+    # Read-only existing invoice/payment balance; cannot post or reconcile.
+    pg_invoice_balance_v161.register_v161_invoice_balance(app)
 
     @app.get("/healthz", include_in_schema=False)
     def health():
