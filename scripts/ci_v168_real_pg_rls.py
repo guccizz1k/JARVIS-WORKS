@@ -115,7 +115,10 @@ def bootstrap():
         root.execute("GRANT INSERT ON jw_dev.review_delivery_receipts_v151 TO jw_delivery_writer_v159")
         # Deliberately permissive parent RLS models an accidental relaxation.
         # Baseline child policy must NOT trust unbound parent IDs.
-        for parent in sorted(PARENT_TABLES):
+        # Never put a permissive parent-test policy on a table that is ALSO
+        # a subject of the candidate RLS hardening; permissive OR would
+        # mask the precise policy being independently tested.
+        for parent in sorted(PARENT_TABLES - set(CHILDREN)):
             root.execute(f"CREATE POLICY ci_parent_read_{parent} ON jw_dev.{parent} "
                          "FOR SELECT TO jw_app_dev,jw_delivery_writer_v159 USING (true)")
         for child,(parent,foreign,alias) in CHILDREN.items():
@@ -216,7 +219,14 @@ def check_business_rows(dsn,expected_deny_bad,check_member=False):
         assert query_as(dsn,"jw_app_dev","orgb",child,"good-b"),(child,"B owned")
         assert not query_as(dsn,"jw_app_dev","orga",child,"good-b"),(child,"foreign")
         invalid=query_as(dsn,"jw_app_dev","orga",child,"bad")
-        if expected_deny_bad:
+        # Parent tables which are themselves secured by the same tested
+        # RLS need not leak in the baseline. Four deliberately unbound
+        # parent proofs MUST reproduce the inconsistent relation.
+        baseline_exposed = child in {
+            "automation_statements_v60","evidence_records_v64",
+            "invoice_adjustments_v69","payments",
+        }
+        if expected_deny_bad or not baseline_exposed:
             assert not invalid,(child,"forged cross-tenant parent")
         else:
             assert invalid,(child,"baseline expected exposure")
