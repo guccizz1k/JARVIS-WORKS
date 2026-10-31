@@ -144,9 +144,22 @@ def bootstrap():
             USING(org_id=jw_dev.current_org_from_session())""")
         for table in sorted(PARENT_TABLES):
             for org in TENANTS:
-                root.execute("INSERT INTO jw_dev."+table+" (id,org_id"+(",order_id" if table=="review_delivery_receipts_v151" else "")+
-                    ") VALUES (%s,%s"+(",%s" if table=="review_delivery_receipts_v151" else "")+")",
-                    (f"{table}-{org}",org,*((f"orders-{org}",) if table=="review_delivery_receipts_v151" else ())))
+                # A parent table may also be a child with a NOT NULL source.
+                # Preserve the complete valid chain in real PostgreSQL.
+                columns=["id","org_id"]
+                values=[f"{table}-{org}",org]
+                if table in CHILDREN:
+                    parent,foreign,_=CHILDREN[table]
+                    columns.append(foreign)
+                    values.append(f"{parent}-{org}")
+                if table=="review_delivery_receipts_v151":
+                    columns.append("order_id")
+                    values.append(f"orders-{org}")
+                placeholders=",".join("%s" for _ in values)
+                root.execute(
+                    f"INSERT INTO jw_dev.{table} ({','.join(columns)}) VALUES ({placeholders})",
+                    tuple(values),
+                )
         for child,(parent,foreign,_) in CHILDREN.items():
             for actor,linked,id_suffix in [
                 ("orga","orga","good"),
