@@ -57,29 +57,40 @@ def test_12_line_amount_attacks_rejected(position,value):
 
 @pytest.mark.parametrize("case",[
     "hidden_row", "hidden_column", "formula", "unknown_item_header",
-    "duplicate_item_header", "multiple_sheets", "gap_between_items",
+    "duplicate_item_header", "duplicate_quantity_header",
+    "duplicate_price_header", "duplicate_name_header",
+    "multiple_sheets", "gap_between_items",
     "data_after_total", "unrecognized_meta", "duplicate_conflicting_meta",
     "excess_items", "hidden_extra_row",
 ])
-def test_12_ambiguous_workbook_structures_fail_closed(case):
+def test_16_ambiguous_workbook_structures_fail_closed(case):
     def mutate(wb):
         ws=wb.active
         if case=="hidden_row":
-            ws.row_dimensions[11].hidden=True
+            ws.row_dimensions[12].hidden=True
         elif case=="hidden_column":
             ws.column_dimensions["C"].hidden=True
         elif case=="formula":
-            ws.cell(11,3,"=45000*1")
+            ws.cell(12,3,"=45000*1")
         elif case=="unknown_item_header":
-            ws.cell(10,5,"할인율")
-            ws.cell(11,5,"10%")
+            ws.cell(11,5,"할인율")
+            ws.cell(12,5,"10%")
         elif case=="duplicate_item_header":
-            ws.cell(10,5,"금액")
-            ws.cell(11,5,999)
+            ws.cell(11,5,"금액")
+            ws.cell(12,5,999)
+        elif case=="duplicate_quantity_header":
+            ws.cell(11,5,"수량")
+            ws.cell(12,5,99)
+        elif case=="duplicate_price_header":
+            ws.cell(11,5,"단가")
+            ws.cell(12,5,99)
+        elif case=="duplicate_name_header":
+            ws.cell(11,5,"품목명")
+            ws.cell(12,5,"악성행")
         elif case=="multiple_sheets":
             wb.create_sheet("ambiguous")
         elif case=="gap_between_items":
-            ws.insert_rows(12)
+            ws.insert_rows(13)
         elif case=="data_after_total":
             ws.append(["합계",None,None,160000])
             ws.append(["추가 품목",1,100,100])
