@@ -24,6 +24,7 @@ on:
       - review/v161-invoice-payment-balance-preview-20261031
       - review/v167-lineage-invoice-source-consistency-20261031
       - review/v168-rls-parent-tenant-hardening-20261031
+      - review/v169-cross-domain-full-lifecycle-20261031
   workflow_dispatch:
 
 permissions:
@@ -131,6 +132,10 @@ jobs:
           python -m scripts.ci_playwright_cli_smoke
           python -m scripts.ci_playwright_cli_document_e2e
           python -m scripts.ci_playwright_cli_quote_form_e2e
+          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ]; then
+            python -m py_compile scripts/ci_playwright_cli_v169_full_e2e.py
+            python -m scripts.ci_playwright_cli_v169_full_e2e
+          fi
       - name: Record real Chromium evidence
         run: |
           python - <<'PY'
