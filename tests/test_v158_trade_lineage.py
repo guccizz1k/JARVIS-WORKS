@@ -25,6 +25,8 @@ class LinkedCursor:
         self.source_key=None
         self.no_import=False
         self.inconsistent_import=False
+        self.invoice_customer="e"*32
+        self.invoice_vat="taxable"
         self.results=[]
         self.calls=[]
 
@@ -48,7 +50,7 @@ class LinkedCursor:
         elif "FROM jw_dev.review_delivery_receipts" in statement:
             self.results=[("PENDING_HUMAN_REVIEW",)]
         elif "FROM jw_dev.invoices" in statement:
-            self.results=[(INVOICE,"open")]
+            self.results=[(INVOICE,"open",self.invoice_customer,self.invoice_vat)]
         elif "FROM jw_dev.payments" in statement:
             self.results=[("1"*32,800,None),("2"*32,600,"reversed")]
         else:
@@ -179,3 +181,37 @@ def test_disabled_by_default_and_wrong_mode(monkeypatch):
     monkeypatch.setenv("JW_PG_TRADE_LINEAGE_V158","incorrect")
     with pytest.raises(RuntimeError):
         mod.register_v158_trade_lineage(app)
+
+
+@pytest.mark.parametrize("bad_customer", [
+    None, "", 0, False, True, [], {}, "e"*31, "e"*33,
+    "E"*32, "a"*32, "0"*32, "\\x00", "e "*16,
+])
+def test_invoice_customer_mismatch_fails_closed_before_payment_lookup(stage,bad_customer):
+    client,cur,_=stage
+    cur.invoice_customer=bad_customer
+    response=client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage")
+    assert response.status_code==409,response.text
+    assert not any("FROM jw_dev.payments" in sql for sql,_ in cur.calls)
+
+
+@pytest.mark.parametrize("bad_vat", [
+    None, "", 0, False, True, [], {}, "tax", "taxable ",
+    " taxable", "exempt", "TAXABLE", "tAxable",
+])
+def test_invoice_vat_mismatch_fails_closed_before_payment_lookup(stage,bad_vat):
+    client,cur,_=stage
+    cur.invoice_vat=bad_vat
+    response=client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage")
+    assert response.status_code==409,response.text
+    assert not any("FROM jw_dev.payments" in sql for sql,_ in cur.calls)
+
+
+def test_invoice_source_matches_order_in_valid_lineage(stage):
+    client,cur,_=stage
+    response=client.get("/api/pg-stage/v158/quotes/"+QUOTE+"/lineage")
+    assert response.status_code==200,response.text
+    sqls=[sql for sql,_ in cur.calls]
+    assert any("SELECT id,status,customer_id,vat_mode" in sql and
+               "FROM jw_dev.invoices" in sql for sql in sqls)
+    assert response.json()["payment_reconciliation_verified"] is False
