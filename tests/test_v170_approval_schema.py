@@ -39,8 +39,9 @@ def _proof(sql: str) -> bool:
         "GRANT SELECT,INSERT ON jw_dev.quote_review_receipts_v128 TO jw_app_dev",
         "JW_DEV.CURRENT_ORG_FROM_SESSION()",  # case-insensitive
         "jw_dev.stage_identity_v84()",
-        "org_id=org_id",  # original FK-checked quote parent binding; scoped by current_org
-        "q.customer_id=customer_id",
+        "q.org_id=order_drafts_v127.org_id",
+        "q.customer_id=order_drafts_v127.customer_id",
+        "q.org_id=quote_review_receipts_v128.org_id",
         "actor_id=(SELECT actor_id FROM jw_dev.stage_identity_v84())",
         "FORCE ROW LEVEL SECURITY",
         "WITH CHECK",
@@ -64,6 +65,7 @@ def _proof(sql: str) -> bool:
         r"\b(DISABLE ROW LEVEL SECURITY|SECURITY DEFINER|DROP TABLE|TRUNCATE|DELETE FROM|UPDATE jw_dev|INSERT INTO jw_dev.payments)\b",
         r"SET ROLE (postgres|service_role)",
         r"CREATE TABLE jw_dev\.(orders|invoices|payments)\b",
+        r"q\.org_id\s*=\s*q\.org_id",
     )):
         return False
     return True
@@ -110,7 +112,9 @@ _MUTATIONS = [
     ("GRANT SELECT,INSERT ON jw_dev.order_drafts_v127,jw_dev.order_draft_items_v127 TO jw_app_dev", "GRANT ALL ON jw_dev.order_drafts_v127,jw_dev.order_draft_items_v127 TO jw_app_dev"),
     ("GRANT SELECT,INSERT ON jw_dev.quote_review_receipts_v128 TO jw_app_dev", "GRANT UPDATE ON jw_dev.quote_review_receipts_v128 TO jw_app_dev"),
     ("jw_dev.current_org_from_session()", "true"),
-    ("q.customer_id=customer_id", "true"),
+    ("q.customer_id=order_drafts_v127.customer_id", "true"),
+    ("q.org_id=order_drafts_v127.org_id", "q.org_id=q.org_id"),
+    ("q.org_id=quote_review_receipts_v128.org_id", "q.org_id=q.org_id"),
     ("actor_id=(SELECT actor_id FROM jw_dev.stage_identity_v84())", "true"),
     ("WITH CHECK", "WITHOUT CHECK"),
     ("forced <> 43", "forced < 43"),
