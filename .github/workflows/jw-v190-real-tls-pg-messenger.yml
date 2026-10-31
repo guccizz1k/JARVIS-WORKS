@@ -1,0 +1,56 @@
+name: JW V19.0 real TLS PG17 messenger attachments (review only)
+on:
+  push:
+    branches:
+      - review/v190-real-tls-pg-messenger-attachments-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v190-messenger-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-tls-messenger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing PG17 and FastAPI dependencies
+        run: python -m pip install -r requirements.txt -r requirements-postgres-check.txt
+      - name: Compile and check real HTTPS/test isolation
+        run: |
+          python -m py_compile scripts/ci_v190_https_pg_messenger_attachments.py
+          python - <<'PY'
+          from pathlib import Path
+          src=Path('scripts/ci_v190_https_pg_messenger_attachments.py').read_text()
+          for needle in ('ONLY_EPHEMERAL_LOCAL_DATABASE','fixture.require_disposable()',
+            'verify=str(crt)','trust_env=False','follow_redirects=False',
+            '20_FORGED_CHAT_IDS','12_CONCURRENT','CACHE_CONTROL'[:0]):
+            if needle:assert needle in src,needle
+          assert 'TestClient(' not in src
+          print('PASS_V190_DISPOSABLE_SOURCE_GUARD')
+          PY
+      - name: Actual verified TLS, PG17 RLS, signed attachment hash and 20 IDOR cases
+        run: python -m scripts.ci_v190_https_pg_messenger_attachments
