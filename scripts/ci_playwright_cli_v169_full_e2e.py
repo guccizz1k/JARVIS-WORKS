@@ -11,7 +11,28 @@ import os
 import sys
 
 from scripts.ci_playwright_cli_smoke import BASE, PROOF, assertion, cli, login, wait_http
-from tests.test_quote_import import qxlsx
+from io import BytesIO
+from openpyxl import Workbook
+
+
+def qxlsx() -> bytes:
+    wb=Workbook()
+    ws=wb.active
+    fields=[('문서종류','견적서'),('거래처','신규견적사'),
+        ('사업자번호','222-33-44444'),('견적일','2026-10-18'),
+        ('견적번호','QT-123'),('과세구분','과세'),
+        ('제목','시험용 외부 견적'),('공급가액',160000),
+        ('부가세',16000),('총금액',176000)]
+    for i,(key,val) in enumerate(fields,1):
+        ws.cell(i,1,key)
+        ws.cell(i,2,val)
+    ws.append(['품목명','수량','단가','금액'])
+    for item in [('유압 펌프',3,45000,135000),('조립 부품',2,12500,25000)]:
+        ws.append(item)
+    out=BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
 
 BROWSER_FLOW = r"""async () => {
   if(location.origin!=='http://127.0.0.1:8765')
