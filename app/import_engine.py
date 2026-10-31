@@ -217,7 +217,7 @@ def read_table(matrix):
                 if label is not None and str(label).strip() and not (unique_key(label,COLUMNS) or unique_key(label,OPTIONAL_COLUMNS)):
                     raise DocumentError(f'인식되지 않은 품목 열: {str(label)[:30]}. 양식 매핑이 필요합니다')
             if header is not None:raise DocumentError('품목 표 헤더가 여러 개입니다')
-            if len(set(x for x in keys if x))!=4:raise DocumentError('품목 표 헤더 중복')
+            if any(keys.count(field)!=1 for field in COLUMNS):raise DocumentError('품목 표 헤더 중복')
             header={k:keys.index(k) for k in COLUMNS}
             for field,aliases in OPTIONAL_COLUMNS.items():
                 positions=[i for i,x in enumerate(vals) if norm(x) in {norm(y) for y in aliases}]
