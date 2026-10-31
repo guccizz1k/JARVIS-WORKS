@@ -44,6 +44,7 @@ on:
       - review/v189-crash-recovery-ocr-confirmation-20261101
       - review/v190-real-tls-pg-messenger-attachments-20261101
       - review/v191-approved-import-to-order-real-tls-20261101
+      - review/v192-backup-integrity-rpo-gap-20261101
   workflow_dispatch:
 
 permissions:
