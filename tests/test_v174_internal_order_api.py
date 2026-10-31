@@ -39,13 +39,13 @@ class Cursor:
         sql = " ".join(sql.split())
         if "FROM jw_dev.order_drafts_v127" in sql:
             v = self.db["draft"]
-            if v and params == (DRAFT, self.context["org"]):
+            if v and params == (DRAFT, ORG):
                 self.row = (DRAFT, QA, "cust-a", "Example A",
                             v["title"], v["status"], v["review"],
                             v["vat"], v["meta"])
         elif "FROM jw_dev.quotes WHERE" in sql:
             q = self.db["quote"]
-            if params == (QA, self.context["org"]) and q:
+            if params == (QA, ORG) and q:
                 self.row = (QA, "cust-a", "Example A", q["title"],
                             q["status"], q["vat"])
         elif "FROM jw_dev.order_draft_items_v127" in sql:
@@ -55,7 +55,7 @@ class Cursor:
             if params == (QA,):
                 self.rows = self.db["q_lines"]
         elif "FROM jw_dev.quote_review_receipts_v128" in sql:
-            if params == (RECEIPT, self.context["org"], QA):
+            if params == (RECEIPT, ORG, QA):
                 self.row = self.db["receipt"]
         elif sql.startswith("SELECT id,quote_id,source_document_meta FROM jw_dev.orders"):
             org, key = params
