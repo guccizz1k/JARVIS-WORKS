@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from copy import deepcopy
+import hashlib
 import json
 import time
 
@@ -22,7 +23,12 @@ ACTOR = "1"*32
 QA = "c"*32
 DRAFT = "d"*32
 RECEIPT = "e"*32
-SOURCE = "f"*64
+# Independent digest oracle for the exact V92 quote snapshot: document/status/lines.
+SOURCE = hashlib.sha256(json.dumps([
+    QA, "cust-a", "Q-V174", "Approved internal quote", "draft", "taxable",
+    [["i"*32, "Widget", 2, 3500, 0]],
+    {"subtotal":7000, "vat":700, "total":7700},
+], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 CSRF = "v174-test-xsrf-token"
 TOKEN = "v174-isolated-cookie-" + "x"*50
 
@@ -43,10 +49,10 @@ class Cursor:
                 self.row = (DRAFT, QA, "cust-a", "Example A",
                             v["title"], v["status"], v["review"],
                             v["vat"], v["meta"])
-        elif "FROM jw_dev.quotes WHERE" in sql:
+        elif "FROM jw_dev.quotes" in sql:
             q = self.db["quote"]
             if params == (QA, ORG) and q:
-                self.row = (QA, "cust-a", "Example A", q["title"],
+                self.row = ("cust-a", "Example A", "Q-V174", q["title"],
                             q["status"], q["vat"])
         elif "FROM jw_dev.order_draft_items_v127" in sql:
             if params == (DRAFT,):
@@ -104,7 +110,7 @@ def stage(monkeypatch):
     db={
         "draft":{"title":"Approved internal quote","status":"draft",
                  "review":"preview_acknowledged","vat":"taxable","meta":meta},
-        "quote":{"title":"Approved internal quote","status":"accepted","vat":"taxable"},
+        "quote":{"title":"Approved internal quote","status":"draft","vat":"taxable"},
         "lines":[("l"*32,"i"*32,"Widget",2,3500,0)],
         "q_lines":[("i"*32,"Widget",2,3500,0)],
         "receipt":(ACTOR,SOURCE,int(time.time())),
@@ -215,8 +221,8 @@ def test_malformed_or_unchecked_approval_never_writes(stage,key,value):
 
 
 @pytest.mark.parametrize(("key","value"),[
-    ("status","draft"),
-    ("status","sent"),
+    ("status","accepted"),
+    ("status","cancelled"),
     ("status","rejected"),
     ("vat","exempt"),
     ("title","Altered title"),
@@ -326,3 +332,24 @@ def test_default_off_production_disabled(monkeypatch):
     monkeypatch.setenv("JW_ENV","production")
     with pytest.raises(RuntimeError,match="unsafe"):
         mod.register_v174_internal_order(FastAPI())
+
+
+
+def test_even_allowed_quote_status_transition_invalidates_signed_provenance(stage):
+    c,db,_=stage
+    assert preview(c).status_code==200
+    db["quote"]["status"]="sent"
+    # V92 allows draft and sent; old V174 accepted this despite stale digest.
+    assert preview(c).status_code==409
+    assert db["orders"]==[]
+
+
+def test_replaced_source_receipt_digest_is_rejected_even_with_same_lines(stage):
+    c,db,_=stage
+    assert preview(c).status_code==200
+    meta=json.loads(db["draft"]["meta"])
+    meta["source_sha256"]="f"*64
+    db["draft"]["meta"]=json.dumps(meta)
+    db["receipt"]=(ACTOR,"f"*64,int(time.time()))
+    assert preview(c).status_code==409
+    assert db["orders"]==[]

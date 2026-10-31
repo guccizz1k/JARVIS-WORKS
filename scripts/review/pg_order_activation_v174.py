@@ -79,23 +79,23 @@ def _source(cur, draft_id: str, org: str) -> dict:
     except (ValueError, TypeError, KeyError, AttributeError):
         raise HTTPException(409, "Draft provenance invalid") from None
 
-    cur.execute(
-        """SELECT id,customer_id,customer_name_snapshot,title,status,vat_mode
-           FROM jw_dev.quotes WHERE id=%s AND org_id=%s""", (quote_id, org))
-    source = cur.fetchone()
-    if source != (quote_id, customer_id, customer_name, title, "accepted", vat):
-        raise HTTPException(409, "Accepted quote source mismatch")
+    # V17.5: V92 legitimately leaves a reviewed quote in "draft" (or "sent").
+    # The V174 "accepted" condition was unreachable from the actual V92 API,
+    # and manual fixture seeding concealed that integration defect.
+    # Recompute the canonical V92 hash (including quote status, document
+    # number and EVERY source line) rather than trusting stored metadata.
+    quote, quote_items, _, recomputed_digest = quotes._quote_snapshot(
+        cur, org, quote_id)
+    if (quote[0] != customer_id or quote[1] != customer_name
+            or quote[3] != title or quote[5] != vat
+            or not hmac.compare_digest(recomputed_digest, digest)):
+        raise HTTPException(409, "Original quote digest or source mismatch")
 
     cur.execute(
         """SELECT id,source_quote_item_id,name,quantity,unit_price,position
            FROM jw_dev.order_draft_items_v127 WHERE order_id=%s
            ORDER BY position,id LIMIT 41""", (did,))
     draft_items = cur.fetchall()
-    cur.execute(
-        """SELECT id,name,quantity,unit_price,position
-           FROM jw_dev.quote_items WHERE quote_id=%s
-           ORDER BY position,id LIMIT 41""", (quote_id,))
-    quote_items = cur.fetchall()
     if (not 1 <= len(draft_items) <= 40
             or len(draft_items) != len(quote_items)):
         raise HTTPException(409, "Source line count mismatch")
