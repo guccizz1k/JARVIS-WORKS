@@ -138,6 +138,10 @@ def create_app() -> FastAPI:
     # non-production opt-in. Never calls a bank or posts legal invoices.
     from scripts.review import pg_order_activation_v174
     pg_order_activation_v174.register_v174_internal_order(app)
+    # V18.0 is disabled by default; records INTERNAL unreconciled entries
+    # only via restricted V83 RPC. Never claims actual bank settlement.
+    from scripts.review import pg_manual_ledger_v180
+    pg_manual_ledger_v180.register_v180_ledger(app)
 
     @app.get("/healthz", include_in_schema=False)
     def health():
