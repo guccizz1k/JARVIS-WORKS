@@ -42,6 +42,7 @@ on:
       - review/v187-kftc-bank-page-contract-20261031
       - review/v188-real-tls-pg-load-ocr50-20261101
       - review/v189-crash-recovery-ocr-confirmation-20261101
+      - review/v190-real-tls-pg-messenger-attachments-20261101
   workflow_dispatch:
 
 permissions:
