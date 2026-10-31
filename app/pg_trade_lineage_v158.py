@@ -106,11 +106,13 @@ def _read_lineage(cur, quote_id: str, org: str) -> dict:
             evidence = receipt[0] if receipt else "NOT_SUBMITTED"
 
         invoices = _bounded_rows(cur,
-            """SELECT id,status FROM jw_dev.invoices
+            """SELECT id,status,customer_id,vat_mode FROM jw_dev.invoices
                WHERE order_id=%s AND org_id=%s
                ORDER BY id LIMIT %s""", (order_id, org), _MAX_INVOICES)
         invoice_results = []
-        for invoice_id, invoice_state in invoices:
+        for invoice_id, invoice_state, invoice_customer, invoice_vat in invoices:
+            if invoice_customer != customer_id or invoice_vat != vat_mode:
+                raise HTTPException(409, "Inconsistent invoice-to-order source")
             payments = _bounded_rows(cur,
                 """SELECT id,amount,reversed_at FROM jw_dev.payments
                    WHERE invoice_id=%s AND org_id=%s
