@@ -110,6 +110,60 @@ BEGIN
  THEN RAISE EXCEPTION 'FAIL_V177_RESTRICTED_LINEAGE'; END IF;
  -- Intentionally DO NOT SELECT audit_logs under jw_app_dev; audit is INSERT-only.
 END $restricted$;
+-- Twenty-three independently checked malicious calls against REAL V83 RPC,
+-- PostgreSQL permissions, and RLS. Every wrong SQLSTATE fails the entire
+-- transaction. PL/pgSQL exception blocks are subtransactions.
+DO $redteam$
+DECLARE test_no integer; observed text; expected text;
+BEGIN
+ FOR test_no IN 1..23 LOOP
+   observed:=NULL;
+   BEGIN
+     CASE test_no
+       WHEN 1 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),0,CURRENT_DATE,'V177_ATTACK_001','synthetic');
+       WHEN 2 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),-1,CURRENT_DATE,'V177_ATTACK_002','synthetic');
+       WHEN 3 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),NULL,CURRENT_DATE,'V177_ATTACK_003','synthetic');
+       WHEN 4 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),10000000000000001,CURRENT_DATE,'V177_ATTACK_004','synthetic');
+       WHEN 5 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,NULL,'V177_ATTACK_005','synthetic');
+       WHEN 6 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE+1,'V177_ATTACK_006','synthetic');
+       WHEN 7 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,NULL,'synthetic');
+       WHEN 8 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,'','synthetic');
+       WHEN 9 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,'short','synthetic');
+       WHEN 10 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,repeat('z',101),'synthetic');
+       WHEN 11 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,'V177_ATTACK_011',NULL);
+       WHEN 12 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,'V177_ATTACK_012',repeat('z',301));
+       WHEN 13 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,'V177_ATTACK_013','synthetic');
+       WHEN 14 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),7700,CURRENT_DATE,'V177_ATTACK_014','synthetic');
+       WHEN 15 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),1,CURRENT_DATE,'V177_TEST_PAYMENT_001','SYNTHETIC_NOT_BANK_SETTLEMENT');
+       WHEN 16 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),7700,CURRENT_DATE,'V177_TEST_PAYMENT_001','changed-note');
+       WHEN 17 THEN PERFORM jw_dev.record_payment_v83(repeat('5',32),7700,CURRENT_DATE-1,'V177_TEST_PAYMENT_001','SYNTHETIC_NOT_BANK_SETTLEMENT');
+       WHEN 18 THEN PERFORM jw_dev.record_payment_v83(repeat('9',32),1,CURRENT_DATE,'V177_ATTACK_018','synthetic');
+       WHEN 19 THEN INSERT INTO jw_dev.payments
+         (id,org_id,invoice_id,amount,paid_at,reference,note,created_at)
+         VALUES(repeat('9',32),'jw-v177-orga',repeat('5',32),1,
+                CURRENT_DATE::text,'V177_ATTACK_019','direct forbidden',now()::text);
+       WHEN 20 THEN UPDATE jw_dev.payments SET amount=0 WHERE invoice_id=repeat('5',32);
+       WHEN 21 THEN DELETE FROM jw_dev.payments WHERE invoice_id=repeat('5',32);
+       WHEN 22 THEN PERFORM count(*) FROM jw_dev.audit_logs;
+       WHEN 23 THEN INSERT INTO jw_dev.invoices
+         (id,org_id,order_id,customer_id,customer_name_snapshot,doc_no,
+          status,vat_mode,due_date,created_at)
+         VALUES(repeat('9',32),'jw-v177-orgb',repeat('3',32),'jw-v177-ca',
+                'Foreign invoice','V177-FORGED-I','issued','taxable','',now()::text);
+     END CASE;
+   EXCEPTION WHEN OTHERS THEN
+     GET STACKED DIAGNOSTICS observed = RETURNED_SQLSTATE;
+   END;
+   expected := CASE WHEN test_no IN (18,19,20,21,22,23)
+                    THEN '42501' ELSE '23514' END;
+   IF observed IS DISTINCT FROM expected THEN
+     RAISE EXCEPTION 'V177_NEGATIVE_%_SQLSTATE_%_EXPECTED_%',
+       test_no,COALESCE(observed,'ACCEPTED'),expected;
+   END IF;
+ END LOOP;
+ IF (SELECT count(*) FROM jw_dev.payments WHERE invoice_id=repeat('5',32))<>1
+ THEN RAISE EXCEPTION 'V177_NEGATIVE_SUITE_MUTATED_PAYMENT'; END IF;
+END $redteam$;
 RESET ROLE;
 DO $owner_verify$
 DECLARE payment_id text;
