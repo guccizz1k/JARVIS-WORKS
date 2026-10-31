@@ -160,6 +160,9 @@ def mutation_resistance(dsn: str, baseline: dict) -> None:
 
 def run() -> None:
     dsn=os.getenv("JW_PG_CI_ROOT_DSN","")
+    if (os.getenv("JW_ENV")!="review"
+            or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE"):
+        raise RuntimeError("BLOCKED_V185_NO_DISPOSABLE_DATABASE_PERMISSION")
     original.guard(dsn)
     config=conninfo_to_dict(dsn)
     env=os.environ.copy()
