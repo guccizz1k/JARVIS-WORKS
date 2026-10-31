@@ -38,7 +38,7 @@ def numeric_candidates(output: str) -> set[str]:
     if type(output) is not str or len(output)>20_000:
         return set()
     # Do not concatenate numbers across arbitrary labels or lines.
-    matches=re.findall(r"(?<!\d)(?:\d{1,3}(?:[,]\d{3})+|\d{4,12})(?!\d)",output)
+    matches=re.findall(r"(?<![\d-])(?:\d{3}-\d{2}-\d{5}|\d{1,3}(?:[,]\d{3})+|\d{4,12})(?![\d-])",output)
     return {re.sub(r"\D","",m) for m in matches}
 
 
