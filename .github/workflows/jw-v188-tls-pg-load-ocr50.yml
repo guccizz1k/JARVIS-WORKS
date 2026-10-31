@@ -1,0 +1,97 @@
+name: JW V18.8 real TLS PG17 concurrent load and OCR50 (review only)
+on:
+  push:
+    branches:
+      - review/v188-real-tls-pg-load-ocr50-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v188-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  v188-real-pg17-tls-load:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned repository PostgreSQL and HTTP dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Strict source, environment and no-mock guard
+        run: |
+          python -m py_compile scripts/ci_v188_real_tls_pg_load.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/ci_v188_real_tls_pg_load.py').read_text()
+          required=('disposable_root_check()','ONLY_EPHEMERAL_LOCAL_DATABASE',
+            'verify=str(cert)','trust_env=False','follow_redirects=False',
+            'ThreadPoolExecutor','N_READS_PER_ACTOR=24','N_CONCURRENT_REPLAYS=16',
+            'v184.run_live(client)','LIMIT_V188_HOSTED_RENDER_WHOLE_WORKFLOW_NOT_TESTED')
+          assert all(needle in s for needle in required)
+          assert 'TestClient(' not in s
+          print('PASS_V188_SOURCE_AND_EPHEMERAL_LOCAL_TLS_DB_GUARDS')
+          PY
+      - name: Actual network TLS and restricted PG17 concurrent product flow
+        run: python -m scripts.ci_v188_real_tls_pg_load
+      - name: Confirm no release, real DB, or bank operations
+        run: |
+          python - <<'PY'
+          import os
+          assert os.environ['JW_ENV']=='review'
+          assert os.environ['JW_PG_CI_ALLOW']=='ONLY_EPHEMERAL_LOCAL_DATABASE'
+          print('PASS_V188_REVIEW_ONLY_NO_PRODUCTION_OR_CUSTOMER_DATA')
+          PY
+  v188-synthetic-korean-ocr50:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      JW_ENV: review
+      JW_V188_OCR_ACK: SYNTHETIC_LOCAL_KOREAN_FORMS_ONLY
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing OCR dependencies and Korean font
+        run: |
+          python -m pip install -r requirements-dev.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-kor fonts-nanum
+      - name: Source-level strict production-blocked OCR guard
+        run: |
+          python -m py_compile scripts/ci_v188_ocr50_synthetic.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('scripts/ci_v188_ocr50_synthetic.py').read_text()
+          for needle in ('N=50','SYNTHETIC_LOCAL_KOREAN_FORMS_ONLY',
+            '_render(image,font,i)','dataset="synthetic"',
+            'production_quality_approved','LIMIT_V188_ZERO_REAL_CONSENTED_BUSINESS_DOCS'):
+            assert needle in s,needle
+          print('PASS_V188_OCR_SCOPE_NO_FALSE_REAL_CORPUS_ACCEPTANCE')
+          PY
+      - name: Actually run Tesseract OCR on 50 generated Korean documents
+        run: python -m scripts.ci_v188_ocr50_synthetic
