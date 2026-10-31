@@ -34,6 +34,16 @@ def parse_fields(untrusted_text: str) -> dict[str,str]:
     if type(untrusted_text) is not str or len(untrusted_text) > 20_000:
         raise ValueError("Oversized untrusted OCR")
     output={}
+    poisoned=set()
+    def offer(field: str, value: str) -> None:
+        # Repeated contradictory OCR labels must abstain rather than guess.
+        if field in poisoned:
+            return
+        if field in output and output[field] != value:
+            poisoned.add(field)
+            output.pop(field,None)
+        else:
+            output[field]=value
     for line in untrusted_text.splitlines():
         v=line.strip()
         if not v or len(v)>180:
@@ -44,19 +54,19 @@ def parse_fields(untrusted_text: str) -> dict[str,str]:
             if len(after)==2:
                 name=after[1].strip()
                 if 1<=len(name)<=80 and not any(ord(c)<32 for c in name):
-                    output["counterparty"]=name
+                    offer("counterparty",name)
         elif "사업자" in v and "번호" in v:
             after=re.split(r"[:：]",v,maxsplit=1)
             if len(after)==2:
                 numbers=re.sub(r"[\s-]","",after[1])
                 if re.fullmatch(r"\d{10}",numbers):
-                    output["business_number"]=numbers
+                    offer("business_number",numbers)
         elif "총금액" in v or "총합계" in v:
             after=re.split(r"[:：]",v,maxsplit=1)
             if len(after)==2:
                 amount=after[1].strip().replace(",","")
                 if re.fullmatch(r"\d{1,16}",amount):
-                    output["total_amount"]=str(int(amount))
+                    offer("total_amount",str(int(amount)))
     return output
 
 
