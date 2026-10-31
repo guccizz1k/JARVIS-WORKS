@@ -60,10 +60,10 @@ def _proof(sql: str) -> bool:
     if sql.count(" FOR INSERT TO jw_app_dev") != 3:
         return False
     if any(re.search(p,sql,re.I) for p in (
-        r"GRANT\\s+(UPDATE|DELETE|TRUNCATE|ALL)\\b",
-        r"\\b(DISABLE ROW LEVEL SECURITY|SECURITY DEFINER|DROP TABLE|TRUNCATE|DELETE FROM|UPDATE jw_dev|INSERT INTO jw_dev.payments)\\b",
+        r"GRANT\s+(UPDATE|DELETE|TRUNCATE|ALL)\b",
+        r"\b(DISABLE ROW LEVEL SECURITY|SECURITY DEFINER|DROP TABLE|TRUNCATE|DELETE FROM|UPDATE jw_dev|INSERT INTO jw_dev.payments)\b",
         r"SET ROLE (postgres|service_role)",
-        r"CREATE TABLE jw_dev\\.(orders|invoices|payments)\\b",
+        r"CREATE TABLE jw_dev\.(orders|invoices|payments)\b",
     )):
         return False
     return True
