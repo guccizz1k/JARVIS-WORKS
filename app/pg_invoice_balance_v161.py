@@ -41,7 +41,7 @@ def _preview(cur,invoice_id: str,org: str) -> dict:
     source=cur.fetchone()
     if source!=(order_id,customer_id,vat_mode):
         raise HTTPException(409,"Invoice source order mismatch")
-    cur.execute("""SELECT name,quantity,unit_price,position
+    cur.execute("""SELECT name,quantity,unit_price,position,source_order_item_id
                    FROM jw_dev.invoice_items
                    WHERE invoice_id=%s ORDER BY position,id LIMIT 42""",
                 (invoice_id,))
@@ -49,12 +49,22 @@ def _preview(cur,invoice_id: str,org: str) -> dict:
     if not 1<=len(lines)<=40:
         raise HTTPException(409,"Invoice lines must be reviewed")
     subtotal=0
-    for pos,(name,quantity,unit_price,position) in enumerate(lines):
+    checked_linked_items=0
+    for pos,(name,quantity,unit_price,position,source_id) in enumerate(lines):
         if (type(name) is not str or not name.strip() or len(name)>150
             or type(quantity) is not int or not 1<=quantity<=100000
             or type(unit_price) is not int or not 0<=unit_price<=1000000000
             or type(position) is not int or position!=pos):
             raise HTTPException(409,"Inconsistent invoice items")
+        if source_id is not None:
+            cur.execute("""SELECT name,quantity,unit_price,position
+                           FROM jw_dev.order_items
+                           WHERE id=%s AND order_id=%s""",
+                        (source_id,order_id))
+            source_line=cur.fetchone()
+            if source_line!=(name,quantity,unit_price,position):
+                raise HTTPException(409,"Invoice source item mismatch")
+            checked_linked_items+=1
         subtotal+=quantity*unit_price
     if not 1<=subtotal<=quotes._MAX_SUBTOTAL:
         raise HTTPException(409,"Invalid invoice amount")
@@ -81,6 +91,7 @@ def _preview(cur,invoice_id: str,org: str) -> dict:
     return {
         "invoice_id":invoice_id,"source_order_id":order_id,
         "invoice_status":state,"currency":"KRW",
+        "source_item_links_verified":checked_linked_items==len(lines),
         "subtotal_krw":subtotal,"vat_krw":vat,"gross_krw":gross,
         "recorded_active_payments_krw":paid,
         "recorded_active_count":len(payments)-reversed_count,
