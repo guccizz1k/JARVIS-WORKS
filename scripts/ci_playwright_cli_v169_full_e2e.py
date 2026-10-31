@@ -96,7 +96,7 @@ BROWSER_FLOW = r"""async () => {
     recipient_org_id:other.org_id}),201,'new-messenger-thread');
   const safeText='V169 synthetic document reviewed: '+invoice.id;
   const sent=check(await request('/messenger/threads/'+thread.id+'/messages','POST',{
-    content:safeText,request_id:'v169-synth-'+invoice.id}),201,'send-messenger-message');
+    content:safeText,request_id:invoice.id}),201,'send-messenger-message');
   if(!sent.id)throw Error('Messenger persisted no message ID');
   if(check(await request('/invoices/'+invoice.id),200,'invoice-post-message').balance!==0)
     throw Error('Messenger mutated invoice balance');
