@@ -28,18 +28,19 @@ def enabled() -> bool:
 
 
 def _preview(cur,invoice_id: str,org: str) -> dict:
-    cur.execute("""SELECT id,order_id,status,vat_mode
+    cur.execute("""SELECT id,order_id,status,vat_mode,customer_id
                    FROM jw_dev.invoices WHERE id=%s AND org_id=%s""",
                 (invoice_id,org))
     invoice=cur.fetchone()
     if not invoice:raise HTTPException(404,"Invoice not found")
-    _,order_id,state,vat_mode=invoice
+    _,order_id,state,vat_mode,customer_id=invoice
     if vat_mode not in ("taxable","exempt"):
         raise HTTPException(409,"Unexpected VAT mode")
-    cur.execute("""SELECT id FROM jw_dev.orders
+    cur.execute("""SELECT id,customer_id,vat_mode FROM jw_dev.orders
                    WHERE id=%s AND org_id=%s""",(order_id,org))
-    if cur.fetchone()!=(order_id,):
-        raise HTTPException(409,"Invoice source order unavailable")
+    source=cur.fetchone()
+    if source!=(order_id,customer_id,vat_mode):
+        raise HTTPException(409,"Invoice source order mismatch")
     cur.execute("""SELECT name,quantity,unit_price,position
                    FROM jw_dev.invoice_items
                    WHERE invoice_id=%s ORDER BY position,id LIMIT 42""",
