@@ -118,7 +118,7 @@ def bootstrap():
         # Never put a permissive parent-test policy on a table that is ALSO
         # a subject of the candidate RLS hardening; permissive OR would
         # mask the precise policy being independently tested.
-        for parent in sorted(PARENT_TABLES - set(CHILDREN)):
+        for parent in sorted(PARENT_TABLES - set(CHILDREN) - {'review_delivery_receipts_v151'}):
             root.execute(f"CREATE POLICY ci_parent_read_{parent} ON jw_dev.{parent} "
                          "FOR SELECT TO jw_app_dev,jw_delivery_writer_v159 USING (true)")
         for child,(parent,foreign,alias) in CHILDREN.items():
