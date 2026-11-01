@@ -131,7 +131,7 @@ def run() -> None:
     case.main()  # actual HTTPS, PG17, 20 forged signatures + 12 concurrent replays
     baseline=source_fingerprint(dsn)
     restore_db="jw_v196_"+secrets.token_hex(6)
-    assert restore_db.startswith("jw_v196_") and len(restore_db)==19
+    assert restore_db.startswith("jw_v196_") and len(restore_db)==20
     cpath="/tmp/"+restore_db+".pgdump"
     created=False
     with TemporaryDirectory(prefix="jw-v196-encrypted-dr-") as directory:
