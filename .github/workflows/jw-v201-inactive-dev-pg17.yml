@@ -1,0 +1,66 @@
+name: JW V20.1 inactive Supabase-DEV shape migration, PG17 and rollback (review only)
+on:
+  push:
+    branches:
+      - review/v201-dev-import-closed-migration-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v201-inactive-pg17-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  v201-inactive-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned original real DB dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Block accidental real DEV DSN and compile
+        run: |
+          python -m py_compile scripts/ci_v201_inactive_migration_pg17.py
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/review/v201_proposed_dev_no_login_migration.sql').read_text()
+          b=Path('scripts/review/v201_proposed_dev_no_login_rollback.sql').read_text()
+          r=Path('scripts/ci_v201_inactive_migration_pg17.py').read_text()
+          for term in ('NOLOGIN NOINHERIT NOBYPASSRLS',
+                       'SET LOCAL lock_timeout',
+                       'FORCE ROW LEVEL SECURITY',
+                       'extensions.hmac',
+                       'current_actor_from_session_v82()',
+                       'v201_receipt_immutable'):
+              assert term in p, term
+          assert 'PASSWORD' not in p
+          assert "INSERT INTO jw_dev.v201_approval_secrets" not in p
+          assert "BLOCKED_V201_ROLLBACK_HAS_DATA" in b
+          assert 'fixture.disposable_root_check()' in r
+          for term in ('JW_PG_STAGE_DSN','JW_PG_AUTH_STAGE_DSN','onrender.com','supabase.co'):
+              assert term not in r, term
+          print('PASS_V201_STATIC_PRODUCTION_GUARDS',flush=True)
+          PY
+      - name: Real PostgreSQL17 inactive role, RLS, HMAC, rollback
+        run: python -m scripts.ci_v201_inactive_migration_pg17
