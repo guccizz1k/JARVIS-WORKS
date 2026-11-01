@@ -35,7 +35,7 @@ jobs:
           import subprocess,tinycss2
           base='1f7c7307fa6bf4575ea7851fe7ae7d79e7caa1be'
           changed=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
-          allowed={'app/static/index.html','app/static/premium_v206.js','app/static/premium_v206.css',
+          allowed={'app/static/index.html','app/static/motion_v203.js','app/static/premium_v206.js','app/static/premium_v206.css',
                    'scripts/ci_v206_premium_browser.py','.github/workflows/jw-v206-premium-browser.yml'}
           assert changed<=allowed,changed-allowed
           for path in ('app/static/app.js','app/main.py','app/static/premium_v205.js',
