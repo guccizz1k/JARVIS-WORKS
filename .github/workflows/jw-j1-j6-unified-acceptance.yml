@@ -54,6 +54,7 @@ on:
       - review/v199-real-shape-import-writer-20261101
       - review/v200-dev-import-preflight-dsn-20261101
       - review/v201-dev-import-closed-migration-20261101
+      - review/v202-reference-bento-ui-20261101
   workflow_dispatch:
 
 permissions:
@@ -81,16 +82,34 @@ jobs:
           git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
           git merge-base --is-ancestor efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD
           test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
-          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt requirements-dev.txt
+          # V20.2 authorizes ONLY an isolated static UI skin + index links;
+          # immutable business, money, auth, contracts and all older JS/CSS
+          # continue to be pinned to the baseline source unchanged.
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py migrations/ security/ requirements.txt requirements-dev.txt
+          if [ "$GITHUB_REF_NAME" = "review/v202-reference-bento-ui-20261101" ]; then
+            python - <<'PY'
+          import subprocess
+          baseline="efc7dbab8fed5f7291bde1512da5f11566dd9e4e"
+          changed=set(subprocess.check_output(["git","diff","--name-only",baseline,"HEAD","--","app/static/"],text=True).splitlines())
+          allowed={"app/static/index.html","app/static/bento_v202.css","app/static/bento_v202.js"}
+          assert changed==allowed, {"unexpected_UI_files":sorted(changed^allowed)}
+          print("PASS: V202 ONLY pinned HTML, additive skin and render JS")
+          PY
+          else
+            git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/static/
+          fi
           git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql' ':!db/review/v99_live_tenant_row_read_rollback.sql' ':!db/review/v99_live_customer_withcheck_rollback.sql' ':!db/review/v108_source_schema_fingerprints.json'
           python - <<'PY'
-          import subprocess
+          import subprocess,os
           changed=set(subprocess.check_output(
             ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
           allowed = {"app/pg_connection_gate_v87.py","app/pg_delivery_evidence_gate_v147.py","app/pg_delivery_request_limit_v155.py","app/pg_delivery_review_api_v154.py","app/pg_delivery_review_console_v155.py","app/pg_delivery_review_reservation_v151.py","app/pg_dev_entry_v92.py","app/pg_dev_entry_v93.py","app/pg_invoice_preview_v145.py","app/pg_trade_lineage_v158.py","app/pg_delivery_writer_v159.py","app/pg_import_quote_v160.py","app/pg_invoice_balance_v161.py","app/import_engine.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_quote_read_v93.py","app/pg_signup_review_gate_v146.py"}
+          ref=os.environ.get("GITHUB_REF_NAME","")
+          if ref=="review/v202-reference-bento-ui-20261101":
+            allowed|={"app/static/index.html","app/static/bento_v202.css","app/static/bento_v202.js"}
           assert changed <= allowed, {"unreviewed_app_changes":sorted(changed-allowed)}
           assert "app/main.py" not in changed
-          assert all(not file.startswith("app/static/") for file in changed)
+          assert all(not file.startswith("app/static/") for file in changed if ref!="review/v202-reference-bento-ui-20261101")
           print("PASS: immutable production entry and explicit reviewed PostgreSQL-only additions")
           print("PASS: reviewed V8.7–V15.5 additions only; original production backend unchanged")
           PY
