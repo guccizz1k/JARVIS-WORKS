@@ -249,6 +249,47 @@ def actual_http(client):
                 raise AssertionError("V195_RECEIPT_MUTATION_ALLOWED")
         assert root.execute("SELECT count(*) FROM jw_dev.v195_approval_receipts",
                             ()).fetchone()==(1,)
+
+    # Force an audit receipt UNIQUE violation AFTER the status UPDATE inside
+    # the SECURITY DEFINER function. PostgreSQL must roll back the whole
+    # function call, leaving the second preview PENDING with no receipt.
+    second=secrets.token_hex(16)
+    with psycopg.connect(fixture.DSN) as root:
+        row=root.execute("""SELECT org_id,uploaded_by,preview_digest
+          FROM jw_dev.import_previews WHERE id=%s""",(pid,)).fetchone()
+        assert row==(fixture.ORG_A,"1"*32,digest)
+        root.execute("""INSERT INTO jw_dev.import_previews(
+          id,org_id,uploaded_by,file_sha256,normalized_json,
+          preview_digest,status,quote_id)
+          SELECT %s,org_id,uploaded_by,%s,normalized_json,
+                 preview_digest,'pending',NULL
+          FROM jw_dev.import_previews WHERE id=%s""",
+          (second,hashlib.sha256(secrets.token_bytes(32)).hexdigest(),pid))
+    conflict=json.dumps({
+      "schema":"jw-import-approval-v195","preview_id":second,
+      "org_id":fixture.ORG_A,"actor_id":"1"*32,
+      "preview_digest":digest,"approved":True,
+      "company":"Customer A","quote_date":"2026-10-31",
+      "total_krw":176000
+    },ensure_ascii=False,sort_keys=True,separators=(",",":"))
+    collision_signature=hmac.new(review._approval_key,conflict.encode(),
+                                 hashlib.sha256).hexdigest()
+    try:
+        with psycopg.connect(review._reviewer_dsn) as approver:
+            approver.execute("""SELECT jw_dev.v195_confirm_import(
+              %s,%s,%s,%s,%s,%s,%s)""",(
+              second,fixture.ORG_A,"1"*32,digest,
+              conflict,collision_signature,receipt_id))
+    except psycopg.errors.UniqueViolation:
+        pass
+    else:
+        raise AssertionError("V195_DUPLICATE_RECEIPT_DID_NOT_ABORT")
+    with psycopg.connect(fixture.DSN) as root:
+        assert root.execute("SELECT status FROM jw_dev.import_previews WHERE id=%s",
+            (second,)).fetchone()==("pending",),"V195_PARTIAL_APPROVAL_COMMIT"
+        assert root.execute("SELECT count(*) FROM jw_dev.v195_approval_receipts",
+            ()).fetchone()==(1,),"V195_ORPHANED_OR_DUPLICATED_RECEIPT"
+    print("PASS_V195_FORCED_AUDIT_INSERT_FAILURE_ATOMIC_ROLLBACK",flush=True)
     print("PASS_V195_SINGLE_COMMITTED_HMAC_RECEIPT_AND_IMMUTABLE_AUDIT",
           flush=True)
 
