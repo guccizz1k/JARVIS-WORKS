@@ -227,7 +227,11 @@ def register_internal_order(request: Request, payload: InternalOrderApproval,
                   source_document_meta)
                  VALUES(%s,%s,%s,%s,%s,%s,%s,'received','acknowledged',%s,
                         '',%s,%s,%s,%s,%s)
-                 ON CONFLICT (quote_id) DO NOTHING RETURNING id""",
+                 -- Both quote_id and source_import_id have independent
+                 -- UNIQUE constraints. Under concurrent identical retries,
+                 -- either conflict may win. DO NOTHING all UNIQUE conflicts,
+                 -- then verify *exact* source key/provenance below.
+                 ON CONFLICT DO NOTHING RETURNING id""",
                 (oid, org, source["customer_id"], source["quote_id"],
                  source["customer_name"], doc_no, source["title"],
                  source["vat_mode"], stamp, stamp, stamp[:10],
