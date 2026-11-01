@@ -44,7 +44,7 @@ jobs:
           assert "fetch(" not in js and "XMLHttpRequest" not in js
           assert "/static/sunset_v204.svg" in css
           assert "prefers-reduced-motion" in css
-          assert 'document.querySelector(\'#nav [data-page="'+ " in js
+          assert 'data-v204-nav' in js and 'data-page' in js
           print('PASS_V204_SAFE_STATIC_SVG_API_UI',flush=True)
           PY
       - name: Install Chromium for four responsive viewports
