@@ -124,7 +124,7 @@ def register(app:FastAPI)->bool:
             actor,org=_identity(request,ident)
             cur.execute("""SELECT normalized_json,preview_digest,status,
                          uploaded_by FROM jw_dev.import_previews
-                         WHERE id=%s AND org_id=%s FOR UPDATE""",(preview_id,org))
+                         WHERE id=%s AND org_id=%s""",(preview_id,org))
             row=cur.fetchone()
             if not row:
                 raise HTTPException(404,"Preview unavailable")
