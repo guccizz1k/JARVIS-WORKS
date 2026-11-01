@@ -28,6 +28,7 @@ REVOKE ALL ON jw_dev.import_previews FROM jw_dev_import_writer_v201,
 REVOKE EXECUTE ON FUNCTION jw_dev.current_org_from_session(),
  jw_dev.current_actor_from_session_v82()
  FROM jw_dev_import_writer_v201,jw_dev_import_approval_owner_v201;
+REVOKE USAGE ON SCHEMA extensions FROM jw_dev_import_approval_owner_v201;
 REVOKE USAGE ON SCHEMA jw_dev FROM jw_dev_import_writer_v201,
  jw_dev_import_review_executor_v201,jw_dev_import_approval_owner_v201;
 DROP ROLE jw_dev_import_writer_v201;
