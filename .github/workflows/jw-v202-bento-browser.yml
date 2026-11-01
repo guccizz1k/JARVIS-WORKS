@@ -35,7 +35,7 @@ jobs:
           assert 'id="jw-v202-theme-toggle"' in index
           assert '/static/bento_v202.css' in index
           assert '/static/bento_v202.js' in index
-          assert index.index('data-page="dashboard"') < index.index('data-page="imports"')
+          assert index.index('data-page="imports"') < index.index('data-page="dashboard"')
           assert '@media(max-width:760px)' in skin
           assert '@media(prefers-reduced-motion:reduce)' in skin
           assert 'evidenceDashboardV64(d.evidence)' in script
