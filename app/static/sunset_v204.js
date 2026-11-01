@@ -46,8 +46,8 @@
     selection==='trades'?[all[0],all[1],all[2],['청구',0]]:all;
   const mx=Math.max(1,...blocks.map(x=>x[1]));
   return '<div class="v204-chart-grid"></div><div class="v204-chart-bars">'
-   +blocks.map((x,i)=>'<div class="v204-chart-bar-container"><div class="v204-chart-bar'+(i===2?' chosen':'')+'" style="--bar-height:'+Math.max(4,Math.round(x[1]/mx*83))+'%">'
-   +'<span class="v204-chart-value">'+x[1]+'</span></div><span>'+safe(x[0])+'</span></div>').join('')
+   +blocks.map((x,i)=>'<button type="button" class="v204-chart-bar-container" data-v204-inspect="'+safe(x[0])+'" aria-label="'+safe(x[0])+' '+x[1]+'건, 상세 보기"><div class="v204-chart-bar'+(i===2?' chosen':'')+'" style="--bar-height:'+Math.max(4,Math.round(x[1]/mx*83))+'%">'
+   +'<span class="v204-chart-value">'+x[1]+'</span></div><span>'+safe(x[0])+'</span></button>').join('')
    +'</div>';
  }
  dashboardPage = function v204Dashboard() {
@@ -107,8 +107,53 @@
    +'<p style="font-size:10px;line-height:1.8;color:#fff3e9bc;padding:12px 7px">모든 수치는 현재 로그인 기업의 조회 데이터입니다. 시간대별 변화·가상 회의 일정·AI 실시간 처리율은 제공하지 않습니다. 금액은 기록된 청구 및 입금 데이터 기준입니다.</p>'
    +'</div>';
  };
- document.querySelectorAll('.sidebar .nav-item').forEach(b=>b.setAttribute('data-v204-label',(b.innerText||'업무 메뉴').trim().replace(/대표 기능/g,'').slice(0,29)));
+ // Video reference navigation: floating top pill, while preserving upload-first original menu.
+ const dock=document.createElement('nav');dock.id='v204-floating-nav';dock.className='v204-floating-nav';
+ dock.setAttribute('aria-label','상단 업무 화면 전환');
+ [['dashboard','홈','⌂'],['imports','문서','▤'],['orders','거래','⇄'],['invoices','정산','◎'],['messenger','메신저','◌']].forEach(([page,label,icon])=>{
+   const b=document.createElement('button');b.type='button';b.dataset.v204Nav=page;
+   b.className='v204-nav-pill';b.setAttribute('aria-label',label+' 화면 열기');
+   const symbol=document.createElement('span');symbol.textContent=icon;symbol.setAttribute('aria-hidden','true');
+   const copy=document.createElement('span');copy.textContent=label;b.append(symbol,copy);dock.appendChild(b);
+ });
+ document.querySelector('.app-shell .topbar')?.appendChild(dock);
+ const syncNav=()=>dock.querySelectorAll('button').forEach(b=>b.setAttribute('aria-current',state.page===b.dataset.v204Nav?'page':'false'));
+ document.querySelectorAll('.sidebar .nav-item').forEach(b=>{
+   b.setAttribute('data-v204-label',(b.innerText||'업무 메뉴').trim().replace(/대표 기능/g,'').slice(0,29));
+   b.addEventListener('click',()=>requestAnimationFrame(syncNav));
+ });
+ const navRoot=document.getElementById('nav');
+ if(navRoot)new MutationObserver(syncNav).observe(navRoot,{subtree:true,attributes:true,attributeFilter:['class']});
+ syncNav();
+ let inspectFocus=null;
+ function closeInspector(){
+   const node=document.querySelector('.jw-v204 > .v204-overlay');if(!node)return;
+   node.classList.add('v204-closing');
+   if(matchMedia('(prefers-reduced-motion:reduce)').matches){node.remove();inspectFocus?.focus();return;}
+   setTimeout(()=>{node.remove();inspectFocus?.focus();},235);
+ }
+ function openInspector(kind,origin){
+   const d=state.dashboard||{};
+   const specs={'거래처':['등록된 거래처',n(d.customers),'현재 기업에 등록된 거래처 기준입니다.','customers'],
+    '견적':['등록된 견적',n(d.quotes),'현재 기업에 등록된 견적서 기준입니다.','quotes'],
+    '수주·발주':['수주·발주 문서',n(d.orders),'현재 기업에 등록된 수주·발주 문서 기준입니다.','orders'],
+    '청구':['청구 문서',n(d.invoices),'현재 기업에 등록된 청구 문서 기준입니다.','invoices']};
+   const info=specs[kind];if(!info)return;
+   document.querySelector('.jw-v204 > .v204-overlay')?.remove();inspectFocus=origin;
+   const root=document.querySelector('.jw-v204');if(!root)return;
+   const overlay=document.createElement('div');overlay.className='v204-overlay';
+   overlay.innerHTML='<section class="v204-details" role="dialog" aria-modal="true" aria-labelledby="v204-inspect-title">'
+   +'<button type="button" class="v204-close" aria-label="상세 창 닫기" data-v204-close>×</button>'
+   +'<p class="v204-kicker">ACTUAL BUSINESS DATA</p><h2 id="v204-inspect-title">'+safe(info[0])+'</h2>'
+   +'<div class="v204-inspect-value">'+info[1]+'<span> 건</span></div><p>'+safe(info[2])+'</p>'
+   +'<button type="button" class="v204-inspect-go" data-v204-nav="'+info[3]+'">해당 업무 열기 ↗</button>'
+   +'</section>';
+   root.appendChild(overlay);overlay.querySelector('.v204-close').focus();
+ }
  document.addEventListener('click',function (ev) {
+  if(ev.target.closest('[data-v204-close]')||ev.target.classList.contains('v204-overlay')){closeInspector();return;}
+  const bar=ev.target.closest('.jw-v204 [data-v204-inspect]');
+  if(bar){openInspector(bar.dataset.v204Inspect,bar);return;}
   const nav=ev.target.closest('[data-v204-nav]');
   if(nav){const target=nav.getAttribute('data-v204-nav');if(!['dashboard','imports','automation','messenger','customers','quotes','orders','invoices','audit','security'].includes(target))return;
     const button=document.querySelector('#nav [data-page="'+target+'"]');if(button&&!button.hidden)button.click();return;}
@@ -119,4 +164,5 @@
    root.querySelectorAll('[data-v204-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b===filter)));
    canvas.innerHTML=chartSection(state.dashboard||{},type);}
  });
+ document.addEventListener('keydown',ev=>{if(ev.key==='Escape')closeInspector();});
 })();
