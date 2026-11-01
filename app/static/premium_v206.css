@@ -458,3 +458,16 @@ html[data-jw206-theme="dark"] .app-shell:not(.hidden){
  .app-shell .sidebar,.jw206-dashboard *, .app-shell .v204-nav-pill,
  .app-shell .main-content.jw-v203-entering{animation:none!important;transition:none!important;transform:none!important}
 }
+
+/* Never visually unhide role-gated entries regardless of "more" visibility. */
+.app-shell .sidebar #nav .nav-item[hidden]{display:none!important}
+/* Avoid inherited vintage strong white text in the airy light theme. */
+.app-shell:not(.hidden) .main-content .jw-messenger h2,
+.app-shell:not(.hidden) .main-content .jw-company-option,
+.app-shell:not(.hidden) .main-content .jw-thread b,
+.app-shell:not(.hidden) .main-content .jw-chat-head,
+.app-shell:not(.hidden) .main-content .jw-msg p,
+.app-shell:not(.hidden) .main-content .notice b,
+.app-shell:not(.hidden) .main-content .panel strong{
+ color:var(--jw206-text)!important;
+}
