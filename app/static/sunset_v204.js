@@ -108,18 +108,20 @@
    +'</div>';
  };
  // Video reference navigation: floating top pill, while preserving upload-first original menu.
- const dock=document.createElement('nav');dock.id='v204-floating-nav';dock.className='v204-floating-nav';
+ const dock=document.createElement('nav');dock.id='v204-floating-nav';dock.className='v204-top-tabs v204-floating-nav';
  dock.setAttribute('aria-label','상단 업무 화면 전환');
- [['dashboard','홈','⌂'],['imports','문서','▤'],['orders','거래','⇄'],['invoices','정산','◎'],['messenger','메신저','◌']].forEach(([page,label,icon])=>{
+ [['dashboard','홈','workflow'],['imports','문서','doc'],['orders','거래','trade'],['invoices','정산','coins'],['messenger','메신저','message']].forEach(([page,label,icon])=>{
    const b=document.createElement('button');b.type='button';b.dataset.v204Nav=page;
    b.className='v204-nav-pill';b.setAttribute('aria-label',label+' 화면 열기');
-   const symbol=document.createElement('span');symbol.textContent=icon;symbol.setAttribute('aria-hidden','true');
+   const symbol=document.createElement('span');symbol.innerHTML=ico(icon);symbol.setAttribute('aria-hidden','true');
    const copy=document.createElement('span');copy.textContent=label;b.append(symbol,copy);dock.appendChild(b);
  });
  document.querySelector('.app-shell .topbar')?.appendChild(dock);
  const syncNav=()=>dock.querySelectorAll('button').forEach(b=>b.setAttribute('aria-current',state.page===b.dataset.v204Nav?'page':'false'));
  document.querySelectorAll('.sidebar .nav-item').forEach(b=>{
    b.setAttribute('data-v204-label',(b.innerText||'업무 메뉴').trim().replace(/대표 기능/g,'').slice(0,29));
+   const rail=b.querySelector('.nav-ico'),map={dashboard:'workflow',imports:'doc',automation:'workflow',messenger:'message',customers:'trade',quotes:'doc',orders:'trade',invoices:'coins',audit:'calendar',security:'check'};
+   if(rail && map[b.dataset.page])rail.innerHTML=ico(map[b.dataset.page]);
    b.addEventListener('click',()=>requestAnimationFrame(syncNav));
  });
  const navRoot=document.getElementById('nav');
