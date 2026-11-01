@@ -160,7 +160,39 @@ BEGIN
   OR v_facts->>'preview_digest' IS DISTINCT FROM p_digest
   OR v_facts->'approved' IS DISTINCT FROM 'true'::jsonb
   OR coalesce(length(v_facts->>'company'),0)<1
-  OR coalesce(v_facts->>'quote_date','') !~ '^\\d{4}-\\d{2}-\\d{2}$'
+  OR coalesce(v_facts->>'quote_date','') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}
+  OR coalesce(v_facts->>'total_krw','') !~ '^[0-9]{1,15}$'
+  OR (v_facts->>'total_krw')::bigint < 1 THEN
+  RAISE EXCEPTION 'V201 approval facts mismatch' USING ERRCODE='42501';
+ END IF;
+ SELECT encode(extensions.hmac(convert_to(p_statement,'UTF8'),s.secret,'sha256'),'hex')
+ INTO v_expected FROM jw_dev.v201_approval_secrets s WHERE s.name='active';
+ IF v_expected IS NULL OR v_expected <> p_signature THEN
+  RAISE EXCEPTION 'V201 signature absent/invalid' USING ERRCODE='42501';
+ END IF;
+ UPDATE jw_dev.import_previews SET status='confirmed'
+  WHERE id=p_id AND org_id=p_org AND uploaded_by=p_actor
+  AND preview_digest=p_digest AND status='pending' AND quote_id IS NULL
+ RETURNING id INTO v_id;
+ IF v_id IS DISTINCT FROM p_id THEN
+  RAISE EXCEPTION 'V201 missing/duplicate preview' USING ERRCODE='42501';
+ END IF;
+ INSERT INTO jw_dev.v201_approval_receipts
+ (id,preview_id,org_id,actor_id,preview_digest,statement,signature)
+ VALUES(p_receipt_id,p_id,p_org,p_actor,p_digest,p_statement,p_signature);
+ RETURN p_receipt_id;
+END $fn$;
+REVOKE ALL ON FUNCTION jw_dev.v201_confirm_import(
+ text,text,text,text,text,text,text) FROM PUBLIC,anon,authenticated,jw_app_dev;
+ALTER FUNCTION jw_dev.v201_confirm_import(
+ text,text,text,text,text,text,text) OWNER TO jw_dev_import_approval_owner_v201;
+REVOKE CREATE ON SCHEMA jw_dev FROM jw_dev_import_approval_owner_v201;
+GRANT EXECUTE ON FUNCTION jw_dev.v201_confirm_import(
+ text,text,text,text,text,text,text) TO jw_dev_import_review_executor_v201;
+-- Critical: writer, executor and owner remain NOLOGIN, have no memberships.
+-- No approval secret rows, no live API credentials or routes enabled.
+COMMIT;
+
   OR coalesce(v_facts->>'total_krw','') !~ '^[0-9]{1,15}$'
   OR (v_facts->>'total_krw')::bigint < 1 THEN
   RAISE EXCEPTION 'V201 approval facts mismatch' USING ERRCODE='42501';
