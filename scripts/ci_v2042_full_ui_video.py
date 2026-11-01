@@ -34,7 +34,7 @@ class WalkthroughHandler(SunsetHandler):
 def init_cursor(page):
     page.evaluate("""() => {
       const style=document.createElement('style');
-      style.textContent=\`
+      style.textContent=`
         #jw-tour-label{position:fixed;right:24px;bottom:22px;z-index:1000;color:#fff;font:750 16px 'Noto Sans KR',Arial,sans-serif;letter-spacing:-.4px;
         border:1px solid #fff6e088;border-radius:17px;background:#1f1d2dd9;box-shadow:0 12px 35px #130d20a6;backdrop-filter:blur(16px);
         padding:13px 18px;max-width:64vw;pointer-events:none;white-space:pre-line;line-height:1.5}
@@ -45,7 +45,7 @@ def init_cursor(page):
         @keyframes jw-tour-hit{0%{box-shadow:0 0 0 3px #ffeac6ab,0 0 20px #ffc986cf;transform:translate(-50%,-50%) scale(.75)}
         100%{box-shadow:0 0 0 20px #ffeac600;transform:translate(-50%,-50%) scale(1)}}
         @media(max-width:600px){#jw-tour-label{right:9px;bottom:10px;padding:10px 12px;max-width:86vw;font-size:13px}}
-      \`;
+      `;
       document.head.appendChild(style);
       const label=document.createElement('div');label.id='jw-tour-label';document.body.appendChild(label);
       const dot=document.createElement('div');dot.id='jw-tour-cursor';document.body.appendChild(dot);
