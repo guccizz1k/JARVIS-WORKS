@@ -75,7 +75,7 @@ def check_panels(page,mode,name,width):
     }""")
     assert ret["theme"]==mode and ret["node"],(name,ret)
     assert ret["mainOverflow"]<=1,(name,ret)
-    if width>=1050:
+    if width>=761:
       geom=page.evaluate("""()=>{
         const a=document.querySelector('#main-content').getBoundingClientRect();
         const b=document.querySelector('.sidebar').getBoundingClientRect();
@@ -138,7 +138,7 @@ def run_page(page,url,width,height):
     page.reload(wait_until="domcontentloaded")
     assert page.evaluate("document.documentElement.dataset.jw206Theme")=="dark"
     # On mobile verify actual right drawer touch path.
-    if width<950:
+    if width<=760:
       page.evaluate("""async()=>{
        state.user={name:'검증',org_name:'검증 기업',role:'admin',csrf_token:'test'};
        state.csrf='test';showApp();await navigate('dashboard');
