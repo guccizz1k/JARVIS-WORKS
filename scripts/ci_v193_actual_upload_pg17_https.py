@@ -64,6 +64,7 @@ def expect(res,code,label):
 def prepare():
     if os.getenv("JW_ENV")!="review" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE" or "@127.0.0.1:5432/postgres" not in os.getenv("JW_PG_CI_ROOT_DSN",""):
         raise RuntimeError("BLOCKED_V193_NONDISPOSABLE_DATABASE")
+    fixture.disposable_root_check()
     app,_=old.prepare()
     with psycopg.connect(fixture.DSN) as db:
         db.execute((Path(__file__).resolve().parent/
