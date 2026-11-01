@@ -97,7 +97,17 @@ def run():
                     assert page.locator("html").get_attribute("data-jw-theme")=="blue"
                     page.locator("#jw-v202-theme-toggle").click()
                     assert page.locator("html").get_attribute("data-jw-theme")=="green"
-                    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+                    overflow=page.evaluate("""() => ({
+                        viewport:innerWidth,
+                        scrollWidth:document.documentElement.scrollWidth,
+                        offenders:Array.from(document.querySelectorAll('#app-shell *'))
+                            .filter(el=>el.getBoundingClientRect().right > innerWidth+1)
+                            .slice(0,6).map(el=>({
+                                tag:el.tagName,cls:el.className,
+                                right:Math.round(el.getBoundingClientRect().right)
+                            }))
+                    })""")
+                    assert overflow["scrollWidth"]<=overflow["viewport"]+1,overflow
                     assert not errors,errors
                     dest=OUT/("dashboard-"+str(width)+".png")
                     page.screenshot(path=str(dest),full_page=True,animations="disabled")
