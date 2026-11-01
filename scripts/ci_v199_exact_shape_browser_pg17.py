@@ -190,6 +190,8 @@ def run_browser():
             "scripts/review/v199_disposable_actual_shape_import_writer.sql").read_text())
     writer_dsn=make_conninfo(fixture.DSN,user="jw_ci_v199_import_writer",password=pw)
     exact.configure_disposable_writer(writer_dsn)
+    exact.configure_disposable_approver(base.review._reviewer_dsn,
+                                        base.review._approval_key)
     os.environ["JW_V90_ALLOWED_ORIGINS"]=HOST
     assert exact.register(app)
     assert invoice.register_v145_invoice_preview(app)
