@@ -5,6 +5,7 @@ LABEL org.jarvisworks.scope="review-only-offline-import-v204"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1
 WORKDIR /srv
 RUN python -m pip install --no-cache-dir 'openpyxl>=3.1.5,<4' 'pdfplumber>=0.11.9,<1'
-COPY app/__init__.py app/import_engine.py app/import_worker.py /srv/app/
+COPY app/import_engine.py app/import_worker.py /srv/app/
+RUN touch /srv/app/__init__.py
 USER 65532:65532
 ENTRYPOINT ["python","-m","app.import_worker"]
