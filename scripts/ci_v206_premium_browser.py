@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json,os
 from pathlib import Path
+from urllib.parse import urlsplit
 from threading import Thread
 from http.server import ThreadingHTTPServer
 from playwright.sync_api import sync_playwright
@@ -10,6 +11,22 @@ from scripts.ci_v202_bento_browser import Handler, ROOT
 
 OUT=ROOT/"artifacts/v206-premium-review"
 PAGES=["dashboard","imports","orders","messenger","automation","invoices","quotes","customers","audit","security"]
+class CompleteV206Fixture(WalkthroughHandler):
+    """Synthetic API returns real-shape quote money; avoids false UI errors from old partial fixture."""
+    def do_GET(self):
+        path=urlsplit(self.path).path
+        if path=="/api/quotes":
+            Handler.requests.append(("GET",path))
+            data=[{"id":"q1","status":"draft","doc_no":"Q-2026-113",
+              "title":"검증용 견적", "customer_name":"검증 기업",
+              "money":{"subtotal":160000,"vat":16000,"total":176000},
+              "items":[{"name":"샘플 업무","quantity":1,"unit_price":160000,"line_total":160000}]}]
+            raw=json.dumps(data,ensure_ascii=False).encode()
+            self.send_response(200);self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw)
+            return
+        return super().do_GET()
+
 
 def login(page,url):
     page.goto(url,wait_until="networkidle")
@@ -40,6 +57,7 @@ def go(page,name):
     page.wait_for_function("(n)=>state.page===n && document.querySelector('#main-content')?.innerText?.length>18",arg=name,timeout=16000)
     page.wait_for_timeout(110)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth+1"),name
+    assert page.locator("#toast.error.visible").count()==0,("business UI error toast",name,page.locator("#toast").inner_text())
 
 def check_panels(page,mode,name,width):
     ret=page.evaluate("""()=>{
@@ -144,7 +162,7 @@ def main():
     if os.getenv("JW_ENV")!="review":raise RuntimeError("review only")
     OUT.mkdir(parents=True,exist_ok=True)
     Handler.requests=[]
-    http=ThreadingHTTPServer(("127.0.0.1",0),WalkthroughHandler)
+    http=ThreadingHTTPServer(("127.0.0.1",0),CompleteV206Fixture)
     Thread(target=http.serve_forever,daemon=True).start()
     url=f"http://127.0.0.1:{http.server_port}/"
     try:
