@@ -63,7 +63,7 @@
   const scheduled=[...issues.map(x=>({...x,stage:'확인 필요'})),...drafts.map(x=>({...x,stage:'초안 검토'}))];
   return '<div class="jw-v204 v204-enter" aria-label="JARVIS WORKS 노을 글래스 업무 대시보드">'
    +'<section class="v204-head" aria-label="업무 핵심 현황">'
-   +'<div class="v204-glass v204-hero"><div class="v204-kicker">JARVIS WORKS / BUSINESS SPACE</div><h1>안녕하세요, '+safe(user.name||'사용자')+'님</h1>'
+   +'<div class="v204-glass v204-hero"><div class="v204-kicker">JARVIS WORKS / BUSINESS SPACE · 업무 대시보드</div><h1>안녕하세요, '+safe(user.name||'사용자')+'님</h1>'
      +'<p>기업의 업무 흐름을 더 스마트하게.<br>문서 검토부터 거래·정산까지 하나의 워크스페이스에서 관리합니다.</p></div>'
    +stat('등록된 문서',docTotal+'건','견적 · 발주 · 청구', 'workflow','imports','#94f3c2')
    +stat('검토할 항목',issues.length+'건','실제 업무 위험 알림','doc','automation','#9dccff')
@@ -108,6 +108,11 @@
    +'</div>';
  };
  // Video reference navigation: floating top pill, while preserving upload-first original menu.
+ const top=document.querySelector('.app-shell .topbar');
+ const brand=document.createElement('div');brand.className='v204-global-brand';
+ brand.setAttribute('aria-label','JARVIS WORKS 로고');
+ brand.innerHTML='<span class="v204-brand-mark" aria-hidden="true">JW</span><span class="v204-brand-copy">JARVIS WORKS<small>BUSINESS WORKSPACE</small></span>';
+ top?.appendChild(brand);
  const dock=document.createElement('nav');dock.id='v204-floating-nav';dock.className='v204-top-tabs v204-floating-nav';
  dock.setAttribute('aria-label','상단 업무 화면 전환');
  [['dashboard','홈','workflow'],['imports','문서','doc'],['orders','거래','trade'],['invoices','정산','coins'],['messenger','메신저','message']].forEach(([page,label,icon])=>{
