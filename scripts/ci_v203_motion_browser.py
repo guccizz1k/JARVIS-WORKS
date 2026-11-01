@@ -68,7 +68,7 @@ def scenario(page,base,*,width:int,record:bool):
     if record:
         page.wait_for_timeout(380)
         page.screenshot(path=str(OUT/"motion-modal.png"),full_page=False)
-    page.locator('#modal-root [data-action="close"]').click()
+    page.locator('#modal-root .close-x[data-action="close"]').click()
     assert page.locator("#modal-root [role=dialog]").count()==0
     page.locator('[data-page="audit"]').click()
     page.wait_for_function("""() => state.page==='audit'&&document.querySelector('#main-content h1')?.textContent==='변경 이력'""")
