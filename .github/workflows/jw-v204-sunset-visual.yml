@@ -2,7 +2,7 @@ name: JW V20.4 Sunset Reference Glass UI — real Chromium and security (review)
 on:
   push:
     branches:
-      - review/v204-sunset-glass-fidelity-20261101
+      - review/v2041-sunset-motion-final-20261101
 permissions:
   contents: read
 concurrency:
