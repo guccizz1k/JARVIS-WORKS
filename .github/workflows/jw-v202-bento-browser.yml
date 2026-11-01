@@ -1,0 +1,60 @@
+name: JW V20.2 reference-led UI browser acceptance (review only)
+on:
+  push:
+    branches:
+      - review/v202-reference-bento-ui-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v202-ui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  chromium-bento-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate changed JS, HTML/UX contracts and CI harness
+        run: |
+          node --check app/static/bento_v202.js
+          node --check app/static/app.js
+          python -m py_compile scripts/ci_v202_bento_browser.py
+          python - <<'PY'
+          from pathlib import Path
+          index=Path('app/static/index.html').read_text()
+          skin=Path('app/static/bento_v202.css').read_text()
+          script=Path('app/static/bento_v202.js').read_text()
+          assert '<html lang="ko">' in index
+          assert 'id="jw-v202-theme-toggle"' in index
+          assert '/static/bento_v202.css' in index
+          assert '/static/bento_v202.js' in index
+          assert index.index('data-page="dashboard"') < index.index('data-page="imports"')
+          assert '@media(max-width:760px)' in skin
+          assert '@media(prefers-reduced-motion:reduce)' in skin
+          assert 'evidenceDashboardV64(d.evidence)' in script
+          assert 'state.dashboard' in script and 'state.quotes' in script
+          assert "localStorage.setItem('jw-v202-theme'" in script
+          assert 'fetch(' not in script and 'XMLHttpRequest' not in script
+          print('PASS_V202_SOURCE_API_INTEGRITY_NAVIGATION_CSS_ACCESSIBILITY')
+          PY
+      - name: Install Playwright Chromium for isolated local UI smoke
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Test dashboard with synthetic tenant HTTP API (3 viewport sizes)
+        run: python -m scripts.ci_v202_bento_browser
+      - name: Upload screenshots as review-only proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v202-bento-chromium-screens
+          path: artifacts/v202-ui/
+          if-no-files-found: ignore
+          retention-days: 14
