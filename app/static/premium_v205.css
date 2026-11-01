@@ -430,3 +430,24 @@
 .app-shell:not(.hidden) ~ #modal-root .overlay.jw205-closing .modal{
  animation:jw205-modal-out 165ms ease-in both!important;
 }
+
+/* Chromium visual review: programmatic navigation focus drew a bright cyan
+   rectangle around the entire page. Keep focus indicators on actionable controls,
+   but avoid painting a giant outline around the main landmark after every route. */
+.app-shell:not(.hidden) #main-content:focus,
+.app-shell:not(.hidden) #main-content:focus-visible{
+ outline:none!important;
+}
+.app-shell:not(.hidden) #main-content :is(button,a,input,select,textarea):focus-visible{
+ outline:2px solid #ffe0b9!important;outline-offset:3px!important;
+}
+/* Modal form footer needs its own breathing space on both touch and desktop. */
+.app-shell:not(.hidden) ~ #modal-root .modal-body form>.modal-bottom{
+ margin-top:22px;gap:10px;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body .form-grid{
+ row-gap:17px;
+}
+@media(max-width:760px){
+ .app-shell:not(.hidden) ~ #modal-root .modal-body form>.modal-bottom{margin-top:17px}
+}
