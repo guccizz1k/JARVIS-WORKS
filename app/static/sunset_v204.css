@@ -247,3 +247,18 @@ body{font-family:Inter,"Noto Sans KR",-apple-system,BlinkMacSystemFont,sans-seri
  }
  .app-shell .topbar .v204-top-tabs.v204-floating-nav svg{display:none}
 }
+
+/* Mobile menu must remain above floating tabs, not be intercepted at 390px. */
+@media(max-width:760px){
+ .app-shell .topbar #toggle-menu{
+  position:absolute!important;left:8px!important;top:12px!important;z-index:26!important;
+  display:grid!important;place-items:center!important;
+  width:36px!important;height:36px!important;min-width:36px!important;
+  background:linear-gradient(140deg,#fffaf1,#efd7bf)!important;color:#483238!important;
+  border:1px solid #fff9f1!important;border-radius:12px!important;
+  box-shadow:0 5px 18px #291d2850!important;
+ }
+ .app-shell .topbar .v204-top-tabs.v204-floating-nav{
+  left:calc(50% + 8px)!important;max-width:calc(100vw - 121px)!important;
+ }
+}
