@@ -46,6 +46,14 @@ def login(page,base):
     assert page.evaluate("typeof window.JW_UI_MOTION === 'object'")
     assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1"),"horizontal overflow"
 
+def click_route(page,width,target):
+    if width<=760:
+        page.locator("#toggle-menu").click()
+        assert page.locator("#toggle-menu").get_attribute("aria-expanded")=="true"
+        page.locator(f'#sidebar [data-page="{target}"]').click()
+    else:
+        page.locator(f'#v204-floating-nav [data-v204-nav="{target}"]').click()
+
 def interactions(page,width,video):
     # 1. Chart is real: shows counts from synthetic company API, never fake hourly series.
     chart=page.locator(".v204-chart")
@@ -65,27 +73,27 @@ def interactions(page,width,video):
     page.wait_for_function("() => document.querySelector('.v204-overlay')===null")
     assert page.locator(".v204-overlay").count()==0
     # 2. Actual business navigation, not decorative simulation.
-    page.locator('#v204-floating-nav [data-v204-nav="orders"]').click()
+    click_route(page,width,"orders")
     page.wait_for_function("() => state.page==='orders' && document.querySelector('#main-content .page-head')")
     assert "수주·발주 관리" in page.locator("#main-content").inner_text()
     assert page.locator('#v204-floating-nav [data-v204-nav="orders"]').get_attribute("aria-current")=="page"
     if video:
         page.wait_for_timeout(420)
         page.screenshot(path=str(OUT/"03-trade-screen.png"),full_page=False)
-    page.locator('#v204-floating-nav [data-v204-nav="dashboard"]').click()
+    click_route(page,width,"dashboard")
     page.wait_for_selector(".jw-v204")
     assert page.locator('#v204-floating-nav [data-v204-nav="dashboard"]').get_attribute("aria-current")=="page"
     if video:
         page.wait_for_timeout(500)
         page.screenshot(path=str(OUT/"04-return-dashboard.png"),full_page=False)
     # 3. Document path enters the existing upload workflow (original source still functional).
-    page.locator('#v204-floating-nav [data-v204-nav="imports"]').click()
+    click_route(page,width,"imports")
     page.wait_for_function("() => state.page==='imports' && document.querySelector('#main-content')?.textContent?.includes('문서')")
     assert "문서" in page.locator("#main-content").inner_text()
     if video:
         page.wait_for_timeout(350)
         page.screenshot(path=str(OUT/"05-real-documents.png"),full_page=False)
-    page.locator('#v204-floating-nav [data-v204-nav="dashboard"]').click()
+    click_route(page,width,"dashboard")
     page.wait_for_selector(".jw-v204")
     assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
     if width<=760:
