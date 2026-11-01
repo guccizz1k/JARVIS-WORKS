@@ -196,6 +196,7 @@ def run() -> None:
             unpacked.write_bytes(recovered)
             isolated.run_docker("cp",str(unpacked),cid+":"+cpath,timeout=15)
             unpacked.unlink()
+            restore_started=time.monotonic()
             isolated.run_docker("exec","-e","PGPASSWORD",cid,
                 "pg_restore","-U","postgres","-h","127.0.0.1",
                 "--dbname",restore_db,"--no-owner","--exit-on-error",cpath,
@@ -255,7 +256,7 @@ def run() -> None:
             print("PASS_V196_TWENTY_POST_RESTORE_FORGED_APPROVALS_DENIED",flush=True)
             print("PASS_V196_POST_BACKUP_COMMIT_MISSING_SNAPSHOT_RPO_NOT_ZERO",flush=True)
             print("MEASURED_V196_EPHEMERAL_DUMP_SECONDS="+str(round(dumped-start,3)),flush=True)
-            print("MEASURED_V196_EPHEMERAL_RESTORE_SECONDS="+str(round(restored-dumped,3)),flush=True)
+            print("MEASURED_V196_EPHEMERAL_RESTORE_SECONDS="+str(round(restored-restore_started,3)),flush=True)
             print("LIMIT_V196_NOT_HOSTED_DR_OR_PRODUCTION_RTO_RPO",flush=True)
         finally:
             if created:
