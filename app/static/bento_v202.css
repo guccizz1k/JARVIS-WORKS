@@ -128,4 +128,4 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px soli
 @media(prefers-reduced-motion:reduce){.jw-v202-metric{animation:none}.jw-v202-track b,.nav-item,.btn{transition:none}}
 
 /* Secondary upload shortcut is not a second active navigation tab. */
-.sidebar .nav-item.nav-primary:not(.active){background:transparent;color:#69766c;box-shadow:none}
+.sidebar .nav-item.nav-primary:not(.active){background:transparent!important;color:#69766c!important;box-shadow:none!important;border:0!important;margin:2px 0;min-height:52px}
