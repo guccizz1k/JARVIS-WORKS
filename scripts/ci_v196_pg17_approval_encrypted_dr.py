@@ -50,7 +50,7 @@ def source_fingerprint(dsn: str) -> dict:
                 json.dumps(rows,ensure_ascii=False,default=str,
                     separators=(",",":")).encode()).hexdigest())
         expected={
-            "import_previews":2,"v195_approval_receipts":1,
+            "import_previews":3,"v195_approval_receipts":1,
             "v195_approval_secrets":1,
         }
         for key,n in expected.items():
