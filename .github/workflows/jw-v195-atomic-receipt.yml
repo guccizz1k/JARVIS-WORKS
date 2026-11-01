@@ -48,7 +48,7 @@ jobs:
           s=Path("scripts/review/v195_disposable_atomic_approval_receipt.sql").read_text()
           t=Path("scripts/review/pg_import_preview_v195.py").read_text()
           for token in ("fixture.disposable_root_check()","ONLY_EPHEMERAL_LOCAL_DATABASE",
-             "verify=str(cert)","trust_env=False","PASS_V194_20_DIRECT_DB",
+             "verify=str(cert)","trust_env=False","PASS_V195_20_FORGED_SIGNED_RPC",
              "make_conninfo","has_column_privilege"):
             assert token in r,token
           for token in ("REVOKE UPDATE(status)","v195_confirm_import",
@@ -59,7 +59,7 @@ jobs:
             assert token in t,token
           assert "TestClient(" not in r
           assert not any(n in s+t for n in ("JW_PG_STAGE_DSN","SUPABASE_SERVICE_KEY"))
-          print("PASS_V194_STATIC_TWO_CREDENTIAL_ISOLATED_GUARD",flush=True)
+          print("PASS_V195_STATIC_SIGNED_RECEIPT_GUARD",flush=True)
           PY
       - name: Real TLS signed receipt and 20 forged HMAC plus direct-role bypass tests
-        run: python -m scripts.ci_v195_separate_reviewer_https
+        run: python -m scripts.ci_v195_atomic_approval_receipt_https
