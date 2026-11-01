@@ -101,10 +101,10 @@ def run_page(page,url,width,height):
       dialog.wait_for(state="visible")
       info=page.evaluate("""()=>{
         const d=document.querySelector("#modal-root .modal");
-        return {background:getComputedStyle(d).backgroundImage,color:getComputedStyle(d).color,
+        return {background:getComputedStyle(d).backgroundColor,color:getComputedStyle(d).color,
                 theme:document.documentElement.dataset.jw206Theme};
       }""")
-      assert "gradient" in info["background"],info
+      assert info["background"].startswith("rgba("),info
       if width==1440:
         page.screenshot(path=str(OUT/f"modal-{mode}-{width}.png"))
       page.locator("#modal-root .close-x").click()
