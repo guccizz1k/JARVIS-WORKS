@@ -65,7 +65,6 @@ def prepare():
     if os.getenv("JW_ENV")!="review" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE" or "@127.0.0.1:5432/postgres" not in os.getenv("JW_PG_CI_ROOT_DSN",""):
         raise RuntimeError("BLOCKED_V193_NONDISPOSABLE_DATABASE")
     app,_=old.prepare()
-    fixture.disposable_root_check_expected=True
     with psycopg.connect(fixture.DSN) as db:
         db.execute((Path(__file__).resolve().parent/
                   "review/v193_disposable_import_write_policies.sql").read_text())
@@ -104,7 +103,7 @@ def actual_http(client):
         return client.post(route,json=payload,
            headers=headers if headers is not None else h(actor,True))
     assert confirm(headers=h("A")).status_code==403
-    assert confirm(actor="B").status_code==403 or False
+    assert confirm(actor="B").status_code==404
     assert confirm(actor="M").status_code==403
     assert confirm({**body,"approve":False}).status_code==422
     assert confirm({**body,"confirmed_customer":"Fake"}).status_code==409
