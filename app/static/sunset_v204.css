@@ -230,3 +230,20 @@ body{font-family:Inter,"Noto Sans KR",-apple-system,BlinkMacSystemFont,sans-seri
 .app-shell .v204-global-brand{pointer-events:none}
 .app-shell .v204-floating-nav svg,.app-shell .sidebar .nav-ico svg{height:17px;width:17px;vertical-align:middle;display:block;flex:none}
 @media(max-width:760px){.app-shell .v204-global-brand{display:none}}
+
+/* Gate4 regression: base V20.4 @media hid the floating navigation at <=760px.
+   Keep actual mobile top tabs available, horizontally scrollable and keyboard focusable. */
+@media(max-width:760px){
+ .app-shell .topbar .v204-top-tabs.v204-floating-nav{
+  display:flex!important;position:absolute;top:10px;left:50%;right:auto;
+  width:max-content;max-width:calc(100vw - 114px);
+  transform:translateX(-50%);overflow-x:auto;overflow-y:hidden;
+  scrollbar-width:none;scroll-behavior:smooth;z-index:12;
+ }
+ .app-shell .topbar .v204-top-tabs.v204-floating-nav::-webkit-scrollbar{display:none}
+ .app-shell .topbar .v204-top-tabs.v204-floating-nav button{
+  display:inline-flex;align-items:center;flex:none;padding:8px 11px;
+  min-height:35px;font-size:10px;white-space:nowrap;
+ }
+ .app-shell .topbar .v204-top-tabs.v204-floating-nav svg{display:none}
+}
