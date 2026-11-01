@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: jw-v204-sunset-${{ github.ref }}
+  group: jw-v204-video-browser-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   real-browser-animation:
