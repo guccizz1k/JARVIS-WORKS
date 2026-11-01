@@ -84,7 +84,7 @@ def main():
         page.evaluate("""async ()=>{state.user={name:'B',org_name:'Empty',role:'member'};state.dashboard={
           customers:0,quotes:0,orders:0,invoices:0,collected:0,outstanding:0,
           recent_quotes:[],recent_orders:[],issues:[]};state.quotes=[];
-          state.automationDraftSummary={total:0,recent:[]};showApp();await navigate('dashboard');}""")
+          state.automationDraftSummary={total:0,recent:[]};showApp();document.querySelector('#main-content').innerHTML=dashboardPage();}""")
         assert page.locator(".jw-v204 .v204-stat").first.inner_text().find("0건")>=0
         assert page.locator(".v204-approvals .v204-task").count()==0
         assert "12,540,000" not in page.locator(".jw-v204").inner_text()
