@@ -2,6 +2,9 @@
 -- This grants only narrowly scoped columns on a recreated blank import_previews
 -- test table, protected by FORCE RLS and verified request-session functions.
 BEGIN;
+-- Prevent duplicate-byte concurrent imports per tenant even while pending.
+CREATE UNIQUE INDEX v193_import_source_unique
+ ON jw_dev.import_previews(org_id,file_sha256);
 GRANT INSERT (id,org_id,uploaded_by,file_sha256,normalized_json,
               preview_digest,status,quote_id)
   ON jw_dev.import_previews TO jw_app_dev;
