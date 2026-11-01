@@ -56,7 +56,7 @@ on:
       - review/v201-dev-import-closed-migration-20261101
       - review/v202-reference-bento-ui-20261101
       - review/v203-kinetic-ui-navigation-20261101
-      - review/v204-sunset-glass-fidelity-20261101
+      - review/v2041-sunset-motion-final-20261101
   workflow_dispatch:
 
 permissions:
@@ -88,19 +88,19 @@ jobs:
           # immutable business, money, auth, contracts and all older JS/CSS
           # continue to be pinned to the baseline source unchanged.
           git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py migrations/ security/ requirements.txt requirements-dev.txt
-          if [ "$GITHUB_REF_NAME" = "review/v202-reference-bento-ui-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v203-kinetic-ui-navigation-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v204-sunset-glass-fidelity-20261101" ]; then
+          if [ "$GITHUB_REF_NAME" = "review/v202-reference-bento-ui-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v203-kinetic-ui-navigation-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v2041-sunset-motion-final-20261101" ]; then
             python - <<'PY'
           import subprocess
           baseline="efc7dbab8fed5f7291bde1512da5f11566dd9e4e"
           changed=set(subprocess.check_output(["git","diff","--name-only",baseline,"HEAD","--","app/static/"],text=True).splitlines())
           allowed={"app/static/index.html","app/static/bento_v202.css","app/static/bento_v202.js"}
-          if __import__("os").environ.get("GITHUB_REF_NAME") in ("review/v203-kinetic-ui-navigation-20261101","review/v204-sunset-glass-fidelity-20261101"):
+          if __import__("os").environ.get("GITHUB_REF_NAME") in ("review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101"):
             allowed |= {"app/static/app.js","app/static/motion_v203.css","app/static/motion_v203.js"}
             from pathlib import Path
             original=subprocess.check_output(["git","show",baseline+":app/static/app.js"],text=True)
             new=Path("app/static/app.js").read_text()
             assert new.replace("if(window.JW_UI_MOTION)await window.JW_UI_MOTION.beforeNavigate(page);","").replace("window.JW_UI_MOTION?.afterNavigate(page,out);","").replace("window.JW_UI_MOTION?.navigationFailed();","")==original,"UNREVIEWED_APP_JS_CHANGE"
-          if __import__("os").environ.get("GITHUB_REF_NAME")=="review/v204-sunset-glass-fidelity-20261101":
+          if __import__("os").environ.get("GITHUB_REF_NAME")=="review/v2041-sunset-motion-final-20261101":
             allowed |= {"app/static/sunset_v204.svg","app/static/sunset_v204.css","app/static/sunset_v204.js"}
           assert changed==allowed, {"unexpected_UI_files":sorted(changed^allowed)}
           print("PASS: V202 ONLY pinned HTML, additive skin and render JS")
@@ -115,15 +115,15 @@ jobs:
             ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
           allowed = {"app/pg_connection_gate_v87.py","app/pg_delivery_evidence_gate_v147.py","app/pg_delivery_request_limit_v155.py","app/pg_delivery_review_api_v154.py","app/pg_delivery_review_console_v155.py","app/pg_delivery_review_reservation_v151.py","app/pg_dev_entry_v92.py","app/pg_dev_entry_v93.py","app/pg_invoice_preview_v145.py","app/pg_trade_lineage_v158.py","app/pg_delivery_writer_v159.py","app/pg_import_quote_v160.py","app/pg_invoice_balance_v161.py","app/import_engine.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_quote_read_v93.py","app/pg_signup_review_gate_v146.py"}
           ref=os.environ.get("GITHUB_REF_NAME","")
-          if ref in ("review/v202-reference-bento-ui-20261101","review/v203-kinetic-ui-navigation-20261101","review/v204-sunset-glass-fidelity-20261101"):
+          if ref in ("review/v202-reference-bento-ui-20261101","review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101"):
             allowed|={"app/static/index.html","app/static/bento_v202.css","app/static/bento_v202.js"}
-          if ref in ("review/v203-kinetic-ui-navigation-20261101","review/v204-sunset-glass-fidelity-20261101"):
+          if ref in ("review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101"):
             allowed|={"app/static/app.js","app/static/motion_v203.css","app/static/motion_v203.js"}
-          if ref=="review/v204-sunset-glass-fidelity-20261101":
+          if ref=="review/v2041-sunset-motion-final-20261101":
             allowed|={"app/static/sunset_v204.svg","app/static/sunset_v204.css","app/static/sunset_v204.js"}
           assert changed <= allowed, {"unreviewed_app_changes":sorted(changed-allowed)}
           assert "app/main.py" not in changed
-          assert all(not file.startswith("app/static/") for file in changed if ref not in ("review/v202-reference-bento-ui-20261101","review/v203-kinetic-ui-navigation-20261101","review/v204-sunset-glass-fidelity-20261101"))
+          assert all(not file.startswith("app/static/") for file in changed if ref not in ("review/v202-reference-bento-ui-20261101","review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101"))
           print("PASS: immutable production entry and explicit reviewed PostgreSQL-only additions")
           print("PASS: reviewed V8.7–V15.5 additions only; original production backend unchanged")
           PY
