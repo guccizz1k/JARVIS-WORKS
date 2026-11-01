@@ -65,11 +65,61 @@ def root(statement: str,args=()):
         cur=conn.execute(statement, args if args else None)
         return cur.fetchall() if statement.lstrip().upper().startswith("SELECT") else None
 
+
+def nonsuperuser_ownership_probe():
+    """Mirror Supabase's PostgreSQL17 CREATEROLE, NOSUPERUSER owner rules."""
+    with psycopg.connect(fixture.DSN) as conn:
+        conn.execute("""CREATE ROLE jw_ci_v201_migrator
+            NOLOGIN CREATEROLE NOINHERIT NOBYPASSRLS NOSUPERUSER""")
+        conn.execute("""CREATE SCHEMA jw_v201_probe
+            AUTHORIZATION jw_ci_v201_migrator""")
+        conn.execute("SET ROLE jw_ci_v201_migrator")
+        assert conn.execute("SELECT rolsuper FROM pg_roles WHERE rolname=current_user").fetchone()==(False,)
+        conn.execute("""CREATE ROLE jw_ci_v201_probe_owner
+            NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE""")
+        conn.execute("""CREATE FUNCTION jw_v201_probe.probe()
+            RETURNS integer LANGUAGE sql AS 'SELECT 1'""")
+        conn.execute("GRANT CREATE ON SCHEMA jw_v201_probe TO jw_ci_v201_probe_owner")
+        # Without SET privilege, PostgreSQL 17 forbids ALTER FUNCTION OWNER.
+        try:
+            with conn.transaction():
+                conn.execute("""ALTER FUNCTION jw_v201_probe.probe()
+                    OWNER TO jw_ci_v201_probe_owner""")
+        except psycopg.errors.InsufficientPrivilege:
+            pass
+        else:
+            raise AssertionError("NON_SUPERUSER_ROLE_HANDOFF_MUST_REQUIRE_SET")
+        conn.execute("""GRANT jw_ci_v201_probe_owner TO CURRENT_USER
+            WITH INHERIT FALSE, SET TRUE""")
+        conn.execute("""ALTER FUNCTION jw_v201_probe.probe()
+            OWNER TO jw_ci_v201_probe_owner""")
+        conn.execute("""REVOKE SET OPTION FOR jw_ci_v201_probe_owner
+            FROM CURRENT_USER""")
+        assert conn.execute("""SELECT pg_catalog.pg_has_role(
+            'jw_ci_v201_migrator','jw_ci_v201_probe_owner','SET')""").fetchone()==(False,)
+        owner=conn.execute("""SELECT pg_get_userbyid(proowner) FROM pg_proc
+           WHERE oid='jw_v201_probe.probe()'::regprocedure""").fetchone()[0]
+        assert owner=="jw_ci_v201_probe_owner",owner
+        pass_case("POSTGRES17_NON_SUPERUSER_OWNER_TRANSFER_MINIMAL_SET")
+        # The genuine non-superuser must also recover a removable owned function.
+        conn.execute("""GRANT jw_ci_v201_probe_owner TO CURRENT_USER
+            WITH INHERIT TRUE, SET TRUE""")
+        conn.execute("DROP FUNCTION jw_v201_probe.probe()")
+        conn.execute("""REVOKE INHERIT OPTION FOR jw_ci_v201_probe_owner FROM CURRENT_USER""")
+        conn.execute("""REVOKE SET OPTION FOR jw_ci_v201_probe_owner FROM CURRENT_USER""")
+        conn.execute("REVOKE CREATE ON SCHEMA jw_v201_probe FROM jw_ci_v201_probe_owner")
+        conn.execute("DROP ROLE jw_ci_v201_probe_owner")
+        conn.execute("RESET ROLE")
+        conn.execute("DROP SCHEMA jw_v201_probe")
+        conn.execute("DROP ROLE jw_ci_v201_migrator")
+        pass_case("POSTGRES17_NON_SUPERUSER_ROLLBACK_REMOVES_OWNER_ROLE")
+
 def main():
     if os.getenv("JW_ENV")!="review" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE":
         raise RuntimeError("BLOCKED_V201_ONLY_ISOLATED_REVIEW")
     fixture.disposable_root_check()
     upstream.prepare()
+    nonsuperuser_ownership_probe()
     # Reproduce the verified 12-column DEV shape on the original real PG17 fixture.
     with psycopg.connect(fixture.DSN) as conn:
         conn.execute("""CREATE ROLE jw_ci_v199_import_writer
