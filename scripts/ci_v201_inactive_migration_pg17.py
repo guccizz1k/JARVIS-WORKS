@@ -47,7 +47,11 @@ def check_as(role: str, actor: str, statement: str, args=(), accepted=False):
             (hashlib.sha256(fixture.TOKENS[actor].encode()).hexdigest()
                if actor in fixture.TOKENS else "bogus" * 12,))
         try:
-            row=conn.execute(statement,args).fetchone() if statement.lstrip().upper().startswith("SELECT") else (conn.execute(statement,args) or None)
+            if statement.lstrip().upper().startswith("SELECT"):
+                row=conn.execute(statement,args).fetchone()
+            else:
+                conn.execute(statement,args)
+                row=None
         except psycopg.Error:
             if accepted:
                 raise
