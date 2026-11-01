@@ -39,7 +39,9 @@ jobs:
           allowed={'app/static/index.html','app/static/motion_v203.js',
           'app/static/premium_v205.js','app/static/premium_v205.css',
           'scripts/ci_v205_smooth_glass_browser.py',
-          '.github/workflows/jw-v205-smooth-glass-browser.yml'}
+          '.github/workflows/jw-v205-smooth-glass-browser.yml',
+          '.github/workflows/jw-j1-j6-unified-acceptance.yml',
+          '.github/workflows/jw-v2042-full-motion-video.yml'}
           assert diff<=allowed,(diff-allowed)
           for name in ('app/main.py','app/static/app.js','app/static/sunset_v204.js'):
             original=subprocess.check_output(['git','show',base+':'+name])

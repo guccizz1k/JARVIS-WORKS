@@ -27,6 +27,7 @@ def assert_ui(page,route,viewport):
         bg:s?.backgroundImage||'',filter:s?.backdropFilter||'none',
         headerBg:h?.backgroundImage||'',headerColor:h?.color||'',
         animation:getComputedStyle(main).animationName,
+        outline:getComputedStyle(main).outlineStyle,
         overflow:document.documentElement.scrollWidth-innerWidth,
         nav:!!document.querySelector('#v204-floating-nav'),
         pageText:main.innerText.slice(0,240)
@@ -37,6 +38,7 @@ def assert_ui(page,route,viewport):
     assert props["nav"],props
     assert props["overflow"]<=1,props
     assert props["animation"] in {"jw205-page-in","none"},props
+    assert props["outline"]=="none",props
     assert props["headerBg"].startswith("linear-gradient") or route=="messenger",props
     # All main article panels share same tinted surface, never opaque white.
     if props["panels"]>0:
@@ -77,6 +79,13 @@ def walk(page,width,record=False):
               return getComputedStyle(node).backgroundImage.includes('linear-gradient')
                 && getComputedStyle(child).backgroundColor!=='rgb(255, 255, 255)';
             }"""),"white messenger background persists"
+        if route=="messenger" and width<=860:
+            shape=page.evaluate("""()=>{
+              const a=document.querySelector('.jw-partners'),b=document.querySelector('.jw-conversation');
+              const x=a.getBoundingClientRect(),y=b.getBoundingClientRect();
+              return {overlap:x.bottom-y.top,overscroll:a.scrollHeight-a.clientHeight};
+            }""")
+            assert shape["overlap"]<=1 and shape["overscroll"]<=3,shape
         if route=="customers":
             page.locator('[data-action="new-customer"]').click()
             dialog=page.locator("#modal-root .modal")

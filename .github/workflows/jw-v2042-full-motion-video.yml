@@ -1,12 +1,13 @@
-name: JW V20.4.2 real full UI video desktop and iPhone (review only)
+name: JW V20.5 smooth unified glass full UI video desktop and iPhone (review only)
 on:
   push:
     branches:
       - review/v2042-complete-motion-video-20261102
+      - review/v205-smooth-unified-glass-20261102
 permissions:
   contents: read
 concurrency:
-  group: jw-v2042-video-${{ github.ref }}
+  group: jw-v205-video-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   full-ui-chromium-capture:
