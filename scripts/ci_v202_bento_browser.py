@@ -79,13 +79,13 @@ def run():
                     page=browser.new_page(viewport={"width":width,"height":height},device_scale_factor=1)
                     errors=[]
                     page.on("pageerror",lambda e:errors.append(str(e)))
-                    page.goto(url,wait_until="load")
+                    page.goto(url,wait_until="networkidle")
                     page.evaluate("""async () => {
                       state.user={name:'검증 사용자',org_name:'검증 기업',role:'admin',csrf_token:'ci-synthetic'};
                       state.csrf='ci-synthetic'; showApp();
                       await navigate('dashboard');
                     }""")
-                    page.wait_for_selector(".jw-v202-dashboard .jw-v202-bento")
+                    assert page.locator("#app-shell").is_visible(),"App shell was rehidden after synthetic login"\n                    page.wait_for_selector(".jw-v202-dashboard .jw-v202-bento")
                     assert page.locator(".jw-v202-metric").count()==4
                     assert "25건" in page.locator(".jw-v202-metric").first.inner_text()
                     assert "12건" in page.locator(".jw-v202-chart-row").nth(1).inner_text()
@@ -115,7 +115,7 @@ def run():
                     page.close()
                 # A zero-data tenant must not inherit values from the demo.
                 page=browser.new_page(viewport={"width":1440,"height":900})
-                page.goto(url,wait_until="load")
+                page.goto(url,wait_until="networkidle")
                 page.evaluate("""() => {
                   state.user={name:'B',org_name:'Empty Tenant',role:'member'};
                   state.dashboard={customers:0,quotes:0,orders:0,invoices:0,
