@@ -43,19 +43,19 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Compile and block unexpected nonisolated source
         run: |
-          python -m py_compile scripts/ci_v199_exact_shape_browser_pg17.py
+          python -m py_compile scripts/ci_v199_exact_shape_browser_pg17.py scripts/review/pg_import_preview_v199.py
           python - <<'PY'
           from pathlib import Path
           s=Path("scripts/ci_v199_exact_shape_browser_pg17.py").read_text()
           for x in ("fixture.disposable_root_check()","ONLY_EPHEMERAL_LOCAL_DATABASE",
              "sync_playwright()","new File([bytes]","new FormData()",
              "quote-review-previews","orders/from-reviewed-draft","invoice-preview",
-             "PASS_V198_CHROMIUM_REAL_FORMDATA_PG17_SIGNED_IMPORT_QUOTE_ORDER",
-             "PASS_V198_CHROMIUM_TENANT_B_CROSS_ORG_4_ROUTE_DENIAL"):
+             "PASS_V199_40_DIRECT_SQL_INSERT_ATTACKS_FAIL_CLOSED",
+             "PASS_V199_CHROMIUM_TENANT_B_CROSS_ORG_4_ROUTE_DENIAL"):
              assert x in s,x
           for x in ("SUPABASE_DSN","JW_PG_STAGE_DSN","onrender.com","TestClient("):
              assert x not in s,x
-          print("PASS_V198_ONLY_FRESH_LOCAL_PG17_BROWSER_CODE",flush=True)
+          print("PASS_V199_ONLY_FRESH_LOCAL_PG17_BROWSER_CODE",flush=True)
           PY
       - name: Real Chromium native multipart upload, human confirmation and independent SQL assertions
         run: python -m scripts.ci_v199_exact_shape_browser_pg17
