@@ -421,3 +421,12 @@
   animation:none!important;transition:none!important;transform:none!important;filter:none!important;
  }
 }
+
+/* Close actual forms smoothly as well as V20.4 analytical inspector. */
+.app-shell:not(.hidden) ~ #modal-root .overlay.jw205-closing{
+ animation:jw205-shade-out 165ms ease-in both!important;
+ pointer-events:none!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .overlay.jw205-closing .modal{
+ animation:jw205-modal-out 165ms ease-in both!important;
+}
