@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/v199-real-shape-import-writer-20261101
+      - review/v200-dev-import-preflight-dsn-20261101
 permissions:
   contents: read
 concurrency:
@@ -57,5 +58,9 @@ jobs:
              assert x not in s,x
           print("PASS_V199_ONLY_FRESH_LOCAL_PG17_BROWSER_CODE",flush=True)
           PY
+      - name: V20.0 hostile DSN/role/key guard (no network)
+        run: |
+          python -m py_compile scripts/ci_v200_disposable_dsn_guard.py
+          python -m scripts.ci_v200_disposable_dsn_guard
       - name: Real Chromium native multipart upload, human confirmation and independent SQL assertions
         run: python -m scripts.ci_v199_exact_shape_browser_pg17
