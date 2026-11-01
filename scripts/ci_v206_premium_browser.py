@@ -25,7 +25,7 @@ def login(page,url):
 def theme(page,mode):
     page.locator('[data-jw206-theme-choice="'+mode+'"]').click()
     props=page.evaluate("""()=>{
-       const s=getComputedStyle(document.querySelector(".jw206-metric"));
+       const node=document.querySelector(".jw206-metric")||document.querySelector(".panel")||document.querySelector(".sidebar");const s=getComputedStyle(node);
        const side=getComputedStyle(document.querySelector(".sidebar"));
        return {theme:document.documentElement.dataset.jw206Theme,bg:s.backgroundColor,side:side.backgroundColor,
                sideLeft:document.querySelector(".sidebar").getBoundingClientRect().left,
