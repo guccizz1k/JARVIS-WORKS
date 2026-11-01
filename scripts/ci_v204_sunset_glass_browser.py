@@ -54,7 +54,7 @@ def check(page,url,width,height,*,snapshot=True):
     assert page.locator(".jw-v204 img").count()==0
     assert not page.evaluate("window.__v204_xss===1")
     # Actual navigation button invokes *existing* app action, not fake UI navigation.
-    page.locator('[data-v204-nav="orders"]').first.click()
+    page.locator('.jw-v204 [data-v204-nav="orders"]').first.click()  # visible dashboard trade control even when mobile top pills are hidden
     page.wait_for_function("() => state.page==='orders'")
     page.wait_for_function("""() => !document.querySelector('#main-content .jw-v204')""",timeout=12000)
     assert page.locator("#main-content .jw-v204").count()==0
