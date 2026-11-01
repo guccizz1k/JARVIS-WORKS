@@ -114,6 +114,30 @@ def nonsuperuser_ownership_probe():
         conn.execute("DROP ROLE jw_ci_v201_migrator")
         pass_case("POSTGRES17_NON_SUPERUSER_ROLLBACK_REMOVES_OWNER_ROLE")
 
+
+def setup_nonsuper_migration_owner():
+    """Own the disposable schema/table, mirror Supabase non-superuser postgres."""
+    with psycopg.connect(fixture.DSN) as conn:
+        conn.execute("""CREATE ROLE jw_ci_v201_migrator NOLOGIN CREATEROLE
+            NOINHERIT NOBYPASSRLS NOSUPERUSER""")
+        conn.execute("ALTER SCHEMA jw_dev OWNER TO jw_ci_v201_migrator")
+        conn.execute("ALTER SCHEMA extensions OWNER TO jw_ci_v201_migrator")
+        conn.execute("ALTER TABLE jw_dev.import_previews OWNER TO jw_ci_v201_migrator")
+        conn.execute("GRANT REFERENCES ON jw_dev.organizations,jw_dev.users TO jw_ci_v201_migrator")
+        conn.execute("""GRANT EXECUTE ON FUNCTION
+            jw_dev.current_org_from_session(),
+            jw_dev.current_actor_from_session_v82()
+            TO jw_ci_v201_migrator WITH GRANT OPTION""")
+        assert conn.execute("SELECT rolsuper,rolcreaterole FROM pg_roles WHERE rolname='jw_ci_v201_migrator'").fetchone()==(False,True)
+    pass_case("FULL_MIGRATION_PRINCIPAL_CREATEROLE_NOT_SUPERUSER")
+
+
+def execute_migration_as_nonsuper(sql_text: str):
+    with psycopg.connect(fixture.DSN) as conn:
+        conn.execute("SET ROLE jw_ci_v201_migrator")
+        assert conn.execute("SELECT current_user").fetchone()==("jw_ci_v201_migrator",)
+        conn.execute(sql_text)
+
 def main():
     if os.getenv("JW_ENV")!="review" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE":
         raise RuntimeError("BLOCKED_V201_ONLY_ISOLATED_REVIEW")
@@ -129,13 +153,15 @@ def main():
         # Remove it to reproduce the observed 0-INSERT-policy live catalog.
         conn.execute("DROP POLICY v199_writer_only_verified_pending ON jw_dev.import_previews")
         conn.execute("DROP POLICY v199_writer_verified_read ON jw_dev.import_previews")
+        conn.execute("DROP INDEX jw_dev.v199_import_pending_unique")
         conn.execute("CREATE SCHEMA extensions")
         conn.execute("ALTER EXTENSION pgcrypto SET SCHEMA extensions")
         # Existing synthetic import records are throwaway fixture data only.
         # Preserve customer/order/quote fixture and verify an EMPTY import table.
         conn.execute("DELETE FROM jw_dev.import_previews")
         assert conn.execute("SELECT count(*) FROM jw_dev.import_previews").fetchone()==(0,)
-    root(MIG.read_text())
+    setup_nonsuper_migration_owner()
+    execute_migration_as_nonsuper(MIG.read_text())
     roles=root("""SELECT rolname,rolcanlogin,rolsuper,rolbypassrls,rolinherit
        FROM pg_roles WHERE rolname IN (%s,%s,%s) ORDER BY rolname""",
        (WRITER,REVIEWER,OWNER))
@@ -159,12 +185,12 @@ def main():
         has_table_privilege('authenticated','jw_dev.import_previews','INSERT')""")==[(False,False,False,False)]
     pass_case("EXISTING_PROTECTED_CLIENTS_NOT_WIDENED")
     # Prove successful rollback on empty previews; no dummy credentials needed.
-    root(DOWN.read_text())
+    execute_migration_as_nonsuper(DOWN.read_text())
     assert root("""SELECT count(*) FROM pg_roles WHERE rolname IN(%s,%s,%s)""",
                 (WRITER,REVIEWER,OWNER))==[(0,)]
     assert root("SELECT to_regclass('jw_dev.v201_approval_receipts')")==[(None,)]
     pass_case("EMPTY_CANDIDATE_ROLLBACK_AND_REMOVAL")
-    root(MIG.read_text())
+    execute_migration_as_nonsuper(MIG.read_text())
     pass_case("REAPPLY_ON_CLEAN_DISPOSABLE_PG17")
     assert check_as(WRITER,"bogus",SQL_WRITE,DEFAULT) is False
     pass_case("MISSING_SESSION_DENIED")
@@ -242,7 +268,7 @@ def main():
         raise AssertionError("AUDIT_MUTATION_PERMITTED")
     pass_case("RECEIPT_IMMUTABILITY_TRIGGER")
     try:
-        root(DOWN.read_text())
+        execute_migration_as_nonsuper(DOWN.read_text())
     except psycopg.Error:
         pass
     else:
