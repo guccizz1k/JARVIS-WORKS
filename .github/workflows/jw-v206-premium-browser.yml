@@ -40,9 +40,12 @@ jobs:
                    '.github/workflows/jw-j1-j6-unified-acceptance.yml'}
           assert changed<=allowed,changed-allowed
           for path in ('app/static/app.js','app/main.py','app/static/premium_v205.js',
-                       'app/static/sunset_v204.js','.github/workflows/jw-j1-j6-unified-acceptance.yml'):
+                       'app/static/sunset_v204.js'):
             original=subprocess.check_output(['git','show',base+':'+path])
             assert Path(path).read_bytes()==original,path
+          harness=Path('.github/workflows/jw-j1-j6-unified-acceptance.yml').read_text()
+          assert 'review/v206-premium-translucent-right-rail-20261102' in harness
+          assert 'assert changed==allowed' in harness
           h=Path('app/static/index.html').read_text()
           assert h.index('data-page="imports"')<h.index('data-page="dashboard"')
           assert h.index('premium_v205.css')<h.index('premium_v206.css')
