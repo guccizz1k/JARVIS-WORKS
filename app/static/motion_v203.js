@@ -17,6 +17,8 @@
  drawerShade.setAttribute('aria-hidden','true');
  document.body.appendChild(drawerShade);
  const pause = ms => new Promise(resolve=>window.setTimeout(resolve,ms));
+ // V20.5 presentation is a single GPU-friendly reveal, not a stack of blur layers.
+ const premium205 = Boolean(document.querySelector('link[href*="premium_v205.css"]'));
  let busy = false;
  let pending = null;
  const panelSelectors='.jw-v202-metric,.jw-v202-feature,.jw-v202-gauge,.jw-v202-panel,.jw-v202-board,.panel,.card';
@@ -49,6 +51,7 @@
  });
  syncDrawer();
  function markStagger(root){
+   if(premium205)return;
    let n=0;
    root.querySelectorAll(panelSelectors).forEach(el=>{
      // Avoid nested huge delays; max seven steps.
@@ -56,7 +59,7 @@
    });
  }
  function revealVisible(root){
-   if(!('IntersectionObserver' in window)||motionOff())return;
+   if(premium205||!('IntersectionObserver' in window)||motionOff())return;
    const targets=Array.from(root.querySelectorAll('.jw-v202-board,.jw-v202-panel,.jw-v202-tail > .panel'));
    if(!targets.length)return;
    const observer=new IntersectionObserver(entries=>{
@@ -82,7 +85,7 @@
      if(hasCurrentScreen && !motionOff()){
        content.classList.remove('jw-v203-entering');
        content.classList.add('jw-v203-leaving');
-       await pause(125);
+       await pause(premium205?55:125);
      }
    },
    afterNavigate(page,root){
@@ -120,16 +123,26 @@
  },{passive:true});
  // Micro 3-D card response: pointer-only; reduced-motion/coarse pointers opt out.
  const fine=window.matchMedia('(hover:hover) and (pointer:fine)');
+ // Coalesce mouse movement into 1 transform update / animation frame.
+ // The old handler read bounding rectangles and wrote styles on every raw event.
+ let pendingTilt=null,tiltFrame=0;
  document.addEventListener('pointermove',ev=>{
    if(motionOff()||!fine.matches)return;
    const target=ev.target.closest('.jw-v202-metric,.jw-v202-gauge');
    if(!target)return;
-   const b=target.getBoundingClientRect();
-   if(!b.width||!b.height)return;
-   const x=(ev.clientX-b.left)/b.width-.5;
-   const y=(ev.clientY-b.top)/b.height-.5;
-   target.style.setProperty('--jw-tilt-x',(-y*4).toFixed(2)+'deg');
-   target.style.setProperty('--jw-tilt-y',(x*4).toFixed(2)+'deg');
+   pendingTilt={target,x:ev.clientX,y:ev.clientY};
+   if(tiltFrame)return;
+   tiltFrame=window.requestAnimationFrame(()=>{
+     tiltFrame=0;
+     const data=pendingTilt;pendingTilt=null;
+     if(!data||!data.target.isConnected)return;
+     const rect=data.target.getBoundingClientRect();
+     if(rect.width<=0||rect.height<=0)return;
+     const dx=(data.x-rect.left)/rect.width-.5;
+     const dy=(data.y-rect.top)/rect.height-.5;
+     data.target.style.setProperty('--jw-tilt-x',(-dy*4).toFixed(2)+'deg');
+     data.target.style.setProperty('--jw-tilt-y',(dx*4).toFixed(2)+'deg');
+   });
  },{passive:true});
  document.addEventListener('pointerout',ev=>{
    const node=ev.target.closest('.jw-v202-metric,.jw-v202-gauge');
