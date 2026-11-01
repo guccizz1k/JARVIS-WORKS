@@ -215,3 +215,18 @@ body{font-family:Inter,"Noto Sans KR",-apple-system,BlinkMacSystemFont,sans-seri
 @media(prefers-reduced-motion:reduce){.app-shell .v204-nav-pill,.jw-v204 .v204-glass,.jw-v204 .v204-details,
  .jw-v204 .v204-overlay,.jw-v204 .v204-chart-bar,.jw-v204 .v204-doc-art i,
  .jw-v204 .v204-trade-art i,.app-shell .main-content{animation:none!important;transition:none!important;transform:none!important;filter:none!important}}
+
+/* Header mark relocated to dedicated floating layer so it cannot cover hero/KPIs. */
+@media(min-width:761px){
+ .app-shell .sidebar .brand{display:none!important}
+ .app-shell .v204-global-brand{position:absolute;left:24px;top:9px;z-index:14;display:flex;align-items:center;gap:10px;color:#fff;white-space:nowrap}
+ .app-shell .topbar .breadcrumbs{display:none}
+}
+.app-shell .v204-brand-mark{display:grid;place-items:center;width:39px;height:39px;
+ background:linear-gradient(130deg,#fff9ed,#eacba7);border:1px solid #fff9ec;
+ border-radius:11px;box-shadow:0 5px 22px #fff3c34d;color:#463339;font-weight:900;font-size:12px}
+.app-shell .v204-brand-copy{font-weight:900;font-size:14px;letter-spacing:.9px;text-shadow:0 3px 9px #201a2a}
+.app-shell .v204-brand-copy small{font-size:8px;display:block;color:#f8e3d0;letter-spacing:1.8px;font-weight:600;margin-top:3px}
+.app-shell .v204-global-brand{pointer-events:none}
+.app-shell .v204-floating-nav svg,.app-shell .sidebar .nav-ico svg{height:17px;width:17px;vertical-align:middle;display:block;flex:none}
+@media(max-width:760px){.app-shell .v204-global-brand{display:none}}
