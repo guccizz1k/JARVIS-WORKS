@@ -19,6 +19,7 @@ from fastapi import APIRouter, FastAPI, File, HTTPException, Request, Response, 
 from pydantic import BaseModel, ConfigDict, Field
 import psycopg
 from psycopg import errors
+from psycopg.conninfo import conninfo_to_dict
 
 from app.import_engine import DocumentError, MAX_FILE_SIZE
 from app.pg_import_quote_v160 import _verified_doc
@@ -37,11 +38,15 @@ _writer_dsn = None
 
 def configure_disposable_writer(dsn:str)->None:
     global _writer_dsn
+    if type(dsn) is not str:
+        raise RuntimeError("BLOCKED_V199_WRITER_NOT_DISPOSABLE")
+    info=conninfo_to_dict(dsn)
     if (os.getenv("JW_ENV")!="test"
         or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE"
-        or type(dsn) is not str
-        or "jw_ci_v199_import_writer" not in dsn
-        or "@127.0.0.1:5432/postgres" not in dsn):
+        or info.get("user")!="jw_ci_v199_import_writer"
+        or info.get("host")!="127.0.0.1"
+        or info.get("port","5432")!="5432"
+        or info.get("dbname")!="postgres"):
         raise RuntimeError("BLOCKED_V199_WRITER_NOT_DISPOSABLE")
     _writer_dsn=dsn
 
