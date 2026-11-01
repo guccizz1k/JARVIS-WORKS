@@ -185,6 +185,10 @@ BEGIN
 END $fn$;
 REVOKE ALL ON FUNCTION jw_dev.v201_confirm_import(
  text,text,text,text,text,text,text) FROM PUBLIC,anon,authenticated,jw_app_dev;
+-- Grant reviewer before ownership handoff. Supabase postgres is not a
+-- superuser and may NOT grant or revoke routine ACLs after ALTER OWNER.
+GRANT EXECUTE ON FUNCTION jw_dev.v201_confirm_import(
+ text,text,text,text,text,text,text) TO jw_dev_import_review_executor_v201;
 -- PostgreSQL17 Supabase 'postgres' is CREATEROLE but NOT SUPERUSER.
 -- The creator initially has ADMIN, INHERIT FALSE, SET FALSE on a new role.
 -- Grant temporary SET strictly inside this single transactional migration,
@@ -195,8 +199,6 @@ ALTER FUNCTION jw_dev.v201_confirm_import(
  text,text,text,text,text,text,text) OWNER TO jw_dev_import_approval_owner_v201;
 REVOKE SET OPTION FOR jw_dev_import_approval_owner_v201 FROM CURRENT_USER;
 REVOKE CREATE ON SCHEMA jw_dev FROM jw_dev_import_approval_owner_v201;
-GRANT EXECUTE ON FUNCTION jw_dev.v201_confirm_import(
- text,text,text,text,text,text,text) TO jw_dev_import_review_executor_v201;
 -- Critical: writer, executor and owner remain NOLOGIN, have no memberships.
 -- No approval secret rows, no live API credentials or routes enabled.
 COMMIT;
