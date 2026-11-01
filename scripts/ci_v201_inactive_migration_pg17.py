@@ -118,8 +118,10 @@ def nonsuperuser_ownership_probe():
 def setup_nonsuper_migration_owner():
     """Own the disposable schema/table, mirror Supabase non-superuser postgres."""
     with psycopg.connect(fixture.DSN) as conn:
+        # Actual Supabase postgres: CREATEROLE + BYPASSRLS + NOSUPERUSER.
+        # The isolated bootstrap superuser creates this exact-role replica.
         conn.execute("""CREATE ROLE jw_ci_v201_migrator NOLOGIN CREATEROLE
-            NOINHERIT NOBYPASSRLS NOSUPERUSER""")
+            NOINHERIT BYPASSRLS NOSUPERUSER""")
         conn.execute("ALTER SCHEMA jw_dev OWNER TO jw_ci_v201_migrator")
         conn.execute("ALTER SCHEMA extensions OWNER TO jw_ci_v201_migrator")
         conn.execute("ALTER TABLE jw_dev.import_previews OWNER TO jw_ci_v201_migrator")
@@ -128,7 +130,7 @@ def setup_nonsuper_migration_owner():
             jw_dev.current_org_from_session(),
             jw_dev.current_actor_from_session_v82()
             TO jw_ci_v201_migrator WITH GRANT OPTION""")
-        assert conn.execute("SELECT rolsuper,rolcreaterole FROM pg_roles WHERE rolname='jw_ci_v201_migrator'").fetchone()==(False,True)
+        assert conn.execute("SELECT rolsuper,rolcreaterole,rolbypassrls FROM pg_roles WHERE rolname='jw_ci_v201_migrator'").fetchone()==(False,True,True)
     pass_case("FULL_MIGRATION_PRINCIPAL_CREATEROLE_NOT_SUPERUSER")
 
 
@@ -170,6 +172,23 @@ def main():
     assert root("SELECT count(*) FROM jw_dev.v201_approval_secrets")==[(0,)]
     assert root("SELECT count(*) FROM jw_dev.v201_approval_receipts")==[(0,)]
     pass_case("NO_APPROVAL_KEY_ENROLLED")
+    # An unprivileged role sees no FORCE-RLS rows and must NOT be allowed
+    # to falsely treat an occupied approval ledger as empty.
+    with psycopg.connect(fixture.DSN) as conn:
+        conn.execute("CREATE ROLE jw_ci_v201_rollback_no_rls NOLOGIN NOBYPASSRLS NOSUPERUSER")
+    try:
+        with psycopg.connect(fixture.DSN,autocommit=True) as conn:
+            conn.execute("SET ROLE jw_ci_v201_rollback_no_rls")
+            try:
+                conn.execute(DOWN.read_text())
+            except psycopg.Error as exc:
+                assert "BLOCKED_V201_ROLLBACK_REQUIRES_GLOBAL_ROW_VISIBILITY" in str(exc),str(exc)
+            else:
+                raise AssertionError("UNPRIVILEGED_EMPTY_ROLLBACK_ALLOWED")
+    finally:
+        with psycopg.connect(fixture.DSN) as conn:
+            conn.execute("DROP ROLE jw_ci_v201_rollback_no_rls")
+    pass_case("NON_BYPASSRLS_ROLLBACK_REJECTED_BEFORE_ANY_DDL")
     assert root("""SELECT count(*) FROM pg_auth_members m
        JOIN pg_roles r ON r.oid=m.member
        WHERE m.roleid IN
