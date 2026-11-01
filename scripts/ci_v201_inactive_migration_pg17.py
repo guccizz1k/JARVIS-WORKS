@@ -62,7 +62,8 @@ def check_as(role: str, actor: str, statement: str, args=(), accepted=False):
 
 def root(statement: str,args=()):
     with psycopg.connect(fixture.DSN) as conn:
-        return conn.execute(statement,args).fetchall() if statement.lstrip().upper().startswith("SELECT") else conn.execute(statement,args)
+        cur=conn.execute(statement, args if args else None)
+        return cur.fetchall() if statement.lstrip().upper().startswith("SELECT") else None
 
 def main():
     if os.getenv("JW_ENV")!="review" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE":
@@ -74,6 +75,10 @@ def main():
         conn.execute("""CREATE ROLE jw_ci_v199_import_writer
              NOLOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE""")
         conn.execute((ROOT/"scripts/review/v199_disposable_actual_shape_import_writer.sql").read_text())
+        # V19.9 has a disposable CI-only INSERT policy that real DEV lacks.
+        # Remove it to reproduce the observed 0-INSERT-policy live catalog.
+        conn.execute("DROP POLICY v199_writer_only_verified_pending ON jw_dev.import_previews")
+        conn.execute("DROP POLICY v199_writer_verified_read ON jw_dev.import_previews")
         conn.execute("CREATE SCHEMA extensions")
         conn.execute("ALTER EXTENSION pgcrypto SET SCHEMA extensions")
         # Existing synthetic import records are throwaway fixture data only.
