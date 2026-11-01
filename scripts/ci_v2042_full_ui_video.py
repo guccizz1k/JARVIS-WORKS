@@ -65,7 +65,7 @@ def stage(page,number,title,pause=330):
     print("PROOF_STEP",number,title,flush=True)
 def click_and_wait(page,selector,destination,wait=500):
     page.locator(selector).click(timeout=8500)
-    page.wait_for_function("(x) => window.state?.page===x && !document.body.classList.contains('jw-v203-loading')",destination,timeout=14000)
+    page.wait_for_function("(x) => window.state?.page===x && !document.body.classList.contains('jw-v203-loading')",arg=destination,timeout=14000)
     assert page.locator("#main-content").inner_text().strip()
     page.wait_for_timeout(wait)
 
