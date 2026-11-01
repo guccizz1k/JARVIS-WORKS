@@ -127,11 +127,11 @@ def run_page(page,url,width,height):
       }""")
       button=page.locator("#toggle-menu")
       button.click()
-      assert button.get_attribute("aria-expanded")=="true"
+      page.wait_for_function("()=>document.querySelector('#toggle-menu').getAttribute('aria-expanded')==='true' && document.querySelector('#sidebar').classList.contains('open')",timeout=3000)
       rect=page.locator(".sidebar").bounding_box()
       assert rect["x"]>width/3,rect
       page.keyboard.press("Escape")
-      assert button.get_attribute("aria-expanded")=="false"
+      page.wait_for_function("()=>document.querySelector('#toggle-menu').getAttribute('aria-expanded')==='false'",timeout=3000)
     # Security: staff never sees admin-only menu even with 'more' expanded.
     page.evaluate("""async()=>{state.user={name:'검증',org_name:'검증 기업',role:'staff',csrf_token:'test'};
      state.csrf='test';showApp();await navigate('dashboard');}""")
