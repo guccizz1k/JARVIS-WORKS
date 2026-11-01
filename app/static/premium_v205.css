@@ -451,3 +451,24 @@
 @media(max-width:760px){
  .app-shell:not(.hidden) ~ #modal-root .modal-body form>.modal-bottom{margin-top:17px}
 }
+
+/* Mobile QA: let company search and thread list determine their own height.
+   A legacy 300px max-height compressed company list into the conversation header. */
+@media(max-width:860px){
+ .app-shell:not(.hidden) .main-content .jw-messenger{display:flex;flex-direction:column}
+ .app-shell:not(.hidden) .main-content .jw-partners{
+  height:auto!important;min-height:0!important;max-height:none!important;
+  overflow:visible!important;flex:none;
+ }
+ .app-shell:not(.hidden) .main-content .jw-company-results{
+  height:auto!important;min-height:60px!important;max-height:135px!important;
+  overflow-y:auto!important;flex:none;
+ }
+ .app-shell:not(.hidden) .main-content .jw-thread-list{
+  height:auto!important;min-height:0!important;max-height:150px!important;
+  overflow-y:auto!important;flex:none;
+ }
+ .app-shell:not(.hidden) .main-content .jw-conversation{
+  margin-top:0;min-height:360px!important;overflow:hidden;
+ }
+}
