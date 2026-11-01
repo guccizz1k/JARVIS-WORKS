@@ -52,6 +52,7 @@ on:
       - review/v197-cross-cluster-signed-dr-20261101
       - review/v198-chromium-pg17-actual-upload-20261101
       - review/v199-real-shape-import-writer-20261101
+      - review/v200-dev-import-preflight-dsn-20261101
   workflow_dispatch:
 
 permissions:
