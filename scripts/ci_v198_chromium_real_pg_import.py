@@ -226,7 +226,7 @@ def run_browser():
                                 (result["pid"],)).fetchone()
                             assert row[0]=="confirmed" and row[1]==result["digest"]
                             assert len(row[2])==64
-                            assert row[3]==result["quote_id"]
+                            assert row[3] is None,"V198_PREVIEW_LINK_FIELD_IMMUTABLE_BY_DESIGN"
                             receipt=root.execute("""SELECT signature,statement
                                 FROM jw_dev.v195_approval_receipts
                                 WHERE id=%s AND preview_id=%s""",
@@ -239,7 +239,7 @@ def run_browser():
                               result["receipt_sha256"])
                             assert root.execute("""SELECT count(*) FROM jw_dev.quotes
                                 WHERE id=%s AND source_import_id=%s""",
-                                (result["quote_id"],result["pid"])).fetchone()==(1,)
+                                (result["quote_id"],"v160:"+fixture.ORG_A+":"+result["pid"])).fetchone()==(1,)
                             assert root.execute("""SELECT count(*) FROM jw_dev.orders
                                 WHERE id=%s AND quote_id=%s""",
                                 (result["order_id"],result["quote_id"])).fetchone()==(1,)
