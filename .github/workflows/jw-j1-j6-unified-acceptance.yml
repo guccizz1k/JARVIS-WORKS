@@ -46,6 +46,7 @@ on:
       - review/v191-approved-import-to-order-real-tls-20261101
       - review/v192-backup-integrity-rpo-gap-20261101
       - review/v193-actual-upload-confirm-pg17-20261101
+      - review/v194-separate-import-approver-20261101
   workflow_dispatch:
 
 permissions:
