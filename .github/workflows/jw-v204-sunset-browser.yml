@@ -1,0 +1,64 @@
+name: JW V20.4 Sunset Glass image fidelity + real interaction E2E (review)
+on:
+  push:
+    branches:
+      - review/v204-sunset-glass-fidelity-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v204-video-browser-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-browser-animation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Static, syntax and zero-write boundary
+        run: |
+          node --check app/static/app.js
+          node --check app/static/bento_v202.js
+          node --check app/static/motion_v203.js
+          node --check app/static/sunset_v204.js
+          python -m py_compile scripts/ci_v204_sunset_browser.py
+          python - <<'PY'
+          from pathlib import Path
+          h=Path('app/static/index.html').read_text()
+          css=Path('app/static/sunset_v204.css').read_text()
+          js=Path('app/static/sunset_v204.js').read_text()
+          assert '<html lang="ko">' in h
+          for asset in ('sunset_v204.css','sunset_v204.svg','sunset_v204.js'):
+            assert Path('app/static',asset).exists(),asset
+          assert h.index('data-page="imports"')<h.index('data-page="dashboard"')
+          assert h.index('motion_v203.js')<h.index('sunset_v204.js')
+          assert 'app/main.py' not in js
+          assert 'fetch(' not in js and 'XMLHttpRequest' not in js
+          assert 'dashboardPage = function v204Dashboard' in js
+          assert 'data-v204-filter' in js and 'data-v204-nav' in js and 'data-v204-inspect' in js
+          assert 'prefers-reduced-motion' in css
+          assert '.v204-floating-nav' in css
+          assert 'v204-inspector-enter' in css and 'v204-inspector-exit' in css
+          print('PASS_V204_STATIC_SCOPE_NAVIGATION_MOTION_SECURITY',flush=True)
+          PY
+      - name: Install isolated Chromium and H.264 recording tools
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+          if ! command -v ffmpeg >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y ffmpeg; fi
+      - name: Render source-exact 3 screen sizes, actual menu and open-close video
+        run: python -m scripts.ci_v204_sunset_browser
+      - name: Upload screenshots and video even if a test fails for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v204-sunset-glass-actual-browser
+          path: artifacts/v204-sunset/
+          if-no-files-found: ignore
+          retention-days: 14

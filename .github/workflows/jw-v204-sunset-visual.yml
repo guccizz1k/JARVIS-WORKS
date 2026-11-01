@@ -1,0 +1,63 @@
+name: JW V20.4 Sunset Reference Glass UI — real Chromium and security (review)
+on:
+  push:
+    branches:
+      - review/v204-sunset-glass-fidelity-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v204-visual-four-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  visual-reference-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Type/syntax, exact reviewed asset and immutable import-first guard
+        run: |
+          set -eu
+          python -m py_compile scripts/ci_v204_sunset_glass_browser.py
+          node --check app/static/sunset_v204.js
+          node --check app/static/bento_v202.js
+          node --check app/static/motion_v203.js
+          node --check app/static/app.js
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          h=Path('app/static/index.html').read_text()
+          js=Path('app/static/sunset_v204.js').read_text()
+          css=Path('app/static/sunset_v204.css').read_text()
+          ET.parse('app/static/sunset_v204.svg')
+          assert '/static/sunset_v204.css' in h and '/static/sunset_v204.js' in h
+          assert h.index('data-page="imports"')<h.index('data-page="dashboard"')
+          assert h.index('/static/bento_v202.js')<h.index('/static/sunset_v204.js')
+          assert 'dashboardPage = function v204Dashboard()' in js
+          assert 'state.dashboard||{}' in js and 'state.user||{}' in js
+          assert "fetch(" not in js and "XMLHttpRequest" not in js
+          assert "/static/sunset_v204.svg" in css
+          assert "prefers-reduced-motion" in css
+          assert 'data-v204-nav' in js and 'data-page' in js
+          print('PASS_V204_SAFE_STATIC_SVG_API_UI',flush=True)
+          PY
+      - name: Install Chromium for four responsive viewports
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Real browser screenshot and actual functional navigation E2E
+        run: python -m scripts.ci_v204_sunset_glass_browser
+      - name: Attach visual reference evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v204-sunset-real-chromium-4-viewports
+          path: artifacts/v204-glass/*.png
+          if-no-files-found: ignore
+          retention-days: 14
