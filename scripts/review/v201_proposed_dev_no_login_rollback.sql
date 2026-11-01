@@ -11,9 +11,16 @@ BEGIN
   RAISE EXCEPTION 'BLOCKED_V201_ROLLBACK_HAS_DATA';
  END IF;
 END $guard$;
+-- A non-superuser migration owner needs temporary inherited owner authority
+-- to remove the SECURITY DEFINER routine it previously reassigned.
+-- Rollback is refused above if business, audit or secret data exist.
+GRANT jw_dev_import_approval_owner_v201 TO CURRENT_USER
+ WITH INHERIT TRUE, SET TRUE;
 REVOKE EXECUTE ON FUNCTION jw_dev.v201_confirm_import(
  text,text,text,text,text,text,text) FROM jw_dev_import_review_executor_v201;
 DROP FUNCTION jw_dev.v201_confirm_import(text,text,text,text,text,text,text);
+REVOKE INHERIT OPTION FOR jw_dev_import_approval_owner_v201 FROM CURRENT_USER;
+REVOKE SET OPTION FOR jw_dev_import_approval_owner_v201 FROM CURRENT_USER;
 DROP TRIGGER v201_receipt_immutable ON jw_dev.v201_approval_receipts;
 DROP FUNCTION jw_dev.v201_reject_receipt_mutation();
 DROP TABLE jw_dev.v201_approval_receipts;
