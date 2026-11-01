@@ -50,6 +50,7 @@ on:
       - review/v195-atomic-approval-receipt-pg17-20261101
       - review/v196-approval-receipt-encrypted-dr-20261101
       - review/v197-cross-cluster-signed-dr-20261101
+      - review/v198-chromium-pg17-actual-upload-20261101
   workflow_dispatch:
 
 permissions:
