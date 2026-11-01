@@ -36,17 +36,30 @@ _reviewer_dsn = None
 _approval_key = None
 _writer_dsn = None
 
+def _ci_local_dsn(raw: str, expected_role: str) -> bool:
+    """Fail closed: exact parsed local role/host/port/database, no alternate target."""
+    if type(raw) is not str:
+        return False
+    try:
+        info = conninfo_to_dict(raw)
+    except (ValueError, psycopg.ProgrammingError):
+        return False
+    allowed = {"host", "port", "dbname", "user", "password",
+               "sslmode", "connect_timeout"}
+    return (
+        set(info).issubset(allowed)
+        and info.get("user") == expected_role
+        and info.get("host") == "127.0.0.1"
+        and info.get("port", "5432") == "5432"
+        and info.get("dbname") == "postgres"
+    )
+
+
 def configure_disposable_writer(dsn:str)->None:
     global _writer_dsn
-    if type(dsn) is not str:
-        raise RuntimeError("BLOCKED_V199_WRITER_NOT_DISPOSABLE")
-    info=conninfo_to_dict(dsn)
     if (os.getenv("JW_ENV")!="test"
         or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE"
-        or info.get("user")!="jw_ci_v199_import_writer"
-        or info.get("host")!="127.0.0.1"
-        or info.get("port","5432")!="5432"
-        or info.get("dbname")!="postgres"):
+        or not _ci_local_dsn(dsn, "jw_ci_v199_import_writer")):
         raise RuntimeError("BLOCKED_V199_WRITER_NOT_DISPOSABLE")
     _writer_dsn=dsn
 
@@ -55,13 +68,11 @@ def configure_disposable_approver(dsn: str, key: bytes) -> None:
     global _reviewer_dsn, _approval_key
     if (os.getenv("JW_ENV")!="test"
         or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE"
-        or type(dsn) is not str or "127.0.0.1" not in dsn
-        or "jw_ci_v194_approver" not in dsn
+        or not _ci_local_dsn(dsn, "jw_ci_v194_approver")
         or type(key) is not bytes or len(key)!=32):
         raise RuntimeError("BLOCKED_V194_REVIEWER_NOT_DISPOSABLE")
     _reviewer_dsn=dsn
     _approval_key=key
-
 
 class Confirm(BaseModel):
     model_config=ConfigDict(extra="forbid", strict=True)
@@ -75,7 +86,7 @@ class Confirm(BaseModel):
 def enabled():
     return (os.getenv("JW_ENV")=="test" and
       os.getenv("JW_PG_CI_ALLOW")=="ONLY_EPHEMERAL_LOCAL_DATABASE" and
-      "@127.0.0.1:5432/postgres" in os.getenv("JW_PG_CI_ROOT_DSN","") and
+      _ci_local_dsn(os.getenv("JW_PG_CI_ROOT_DSN",""), "postgres") and
       os.getenv("JW_PG_IMPORT_QUOTE_V160")=="ISOLATED_DEV_APPROVED_IMPORT_QUOTE_ONLY" and
       session.v90_enabled() and quote.enabled() and bool(os.getenv("JW_DATA_KEY")) and bool(_reviewer_dsn) and bool(_approval_key) and bool(_writer_dsn))
 
