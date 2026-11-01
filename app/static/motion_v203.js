@@ -29,7 +29,7 @@
    if(pending){pending.classList.remove('jw-v203-pending');pending=null;}
  }
  function syncDrawer(){
-   const open=Boolean(sidebar?.classList.contains('open'))&&window.matchMedia('(max-width:760px)').matches;
+   const open=Boolean(sidebar?.classList.contains('open'))&&window.matchMedia('(max-width:920px)').matches;
    document.body.classList.toggle('jw-v203-drawer-open',open);
    const toggle=document.getElementById('toggle-menu');
    if(toggle){
