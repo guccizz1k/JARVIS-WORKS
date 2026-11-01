@@ -471,3 +471,41 @@ html[data-jw206-theme="dark"] .app-shell:not(.hidden){
 .app-shell:not(.hidden) .main-content .panel strong{
  color:var(--jw206-text)!important;
 }
+
+/* Chromium defect: historical main-content styles had full-width sizing. Margins
+   alone do not reserve space when width:100% is inherited. Reserve true rail width. */
+@media(min-width:921px){
+ .app-shell .main-area #main-content.main-content{
+  box-sizing:border-box!important;
+  width:calc(100% - 288px)!important;
+  max-width:calc(100% - 288px)!important;
+  margin:0 260px 0 28px!important;
+ }
+ .app-shell.jw206-compact-rail .main-area #main-content.main-content{
+  width:calc(100% - 118px)!important;
+  max-width:calc(100% - 118px)!important;
+  margin:0 90px 0 28px!important;
+ }
+}
+@media(min-width:921px) and (max-width:1250px){
+ .app-shell .main-area #main-content.main-content{
+  width:calc(100% - 265px)!important;max-width:calc(100% - 265px)!important;
+  margin-left:18px!important;margin-right:247px!important;
+ }
+ .app-shell.jw206-compact-rail .main-area #main-content.main-content{
+  width:calc(100% - 108px)!important;max-width:calc(100% - 108px)!important;
+  margin-left:18px!important;margin-right:90px!important;
+ }
+}
+@media(max-width:920px){
+ .app-shell .main-area #main-content.main-content,
+ .app-shell.jw206-compact-rail .main-area #main-content.main-content{
+  box-sizing:border-box!important;width:calc(100% - 30px)!important;
+  max-width:calc(100% - 30px)!important;margin:0 15px!important;
+ }
+}
+.jw206-dashboard .jw206-metric-label{font-size:12px}
+.jw206-dashboard .jw206-pane-head h2{font-size:18px}
+.jw206-dashboard .jw206-greeting p{font-size:13px}
+.jw206-dashboard .jw206-row-content b{font-size:12px}
+.jw206-dashboard .jw206-row-content small{font-size:11px}
