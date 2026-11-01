@@ -509,3 +509,11 @@ html[data-jw206-theme="dark"] .app-shell:not(.hidden){
 .jw206-dashboard .jw206-greeting p{font-size:13px}
 .jw206-dashboard .jw206-row-content b{font-size:12px}
 .jw206-dashboard .jw206-row-content small{font-size:11px}
+
+.jw206-dashboard .jw206-eff-note{font-size:11px;color:var(--jw206-muted);line-height:1.6}
+.jw206-dashboard .jw206-eff-comparison{display:grid;gap:12px;margin:15px 0}
+.jw206-dashboard .jw206-eff-line{display:grid;grid-template-columns:42px minmax(0,1fr) 48px;gap:11px;align-items:center;font-size:10px;color:var(--jw206-muted)}
+.jw206-dashboard .jw206-eff-line b{text-align:right;font-size:11px;color:var(--jw206-text)}
+.jw206-dashboard .jw206-eff-meter{height:10px;background:var(--jw206-control);border-radius:8px;overflow:hidden}
+.jw206-dashboard .jw206-eff-meter i{display:block;height:100%;border-radius:8px;background:var(--jw206-green)}
+.jw206-dashboard .jw206-eff-line:first-child .jw206-eff-meter i{background:#a1a9a3}
