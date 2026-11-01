@@ -123,7 +123,8 @@ def actual_http(client):
         assert root.execute("SELECT count(*) FROM jw_dev.quotes WHERE source_import_id IS NOT NULL").fetchone()==(0,)
     first=expect(confirm(),200,"user-confirm-preview")
     assert first["confirmed"] is True and first["quote_posted"] is False
-    assert confirm().status_code==409,"Repeated approval must fail closed"
+    # RLS UPDATE USING(status=pending) may conceal a confirmed row (404) instead of 409.
+    assert confirm().status_code in (404,409),"Repeated approval must fail closed"
 
     url=HOST+"/api/pg-stage/v160/imports/"+pid+"/quote-draft"
     convert={"preview_digest":digest,"customer_id":"0"*32,"reviewed":True,
