@@ -45,7 +45,7 @@ def main() -> None:
     # Twenty malformed XLSX/PDF files, not 20 copies of the same input.
     rejected=0
     for i in range(10):
-        bad=b"PK\\x03\\x04"+bytes([i])*((i+1)*17)
+        bad=b"PK"+bytes((3,4))+bytes([i])*((i+1)*17)
         try:isolated.extract(f"invalid-{i}.xlsx",bad)
         except ValueError:rejected+=1
         else:raise AssertionError("V204_CORRUPT_XLSX_ACCEPTED")
@@ -60,7 +60,7 @@ def main() -> None:
     names=[f"../attack-{i}.xlsx" for i in range(5)]
     names += [f"sub/attack-{i}.pdf" for i in range(5)]
     names += [f"sub\\\\attack-{i}.xlsx" for i in range(5)]
-    names += [f"bad-{i}\\n.xlsx" for i in range(5)]
+    names += [f"bad-{i}{chr(10)}.xlsx" for i in range(5)]
     for name in names:
         try:isolated.extract(name,raw)
         except ValueError:pass

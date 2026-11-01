@@ -9,7 +9,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import re
 import subprocess
 
 from app.import_engine import MAX_FILE_SIZE
@@ -17,7 +16,7 @@ from app.import_engine import MAX_FILE_SIZE
 IMAGE = "jw-v204-offline-import:ci"
 ACK = "ONLY_DISPOSABLE_DOCKER_NETWORK_NONE"
 MAX_OUTPUT = 2_000_000
-SAFE = re.compile(r"^[^/\\\\\x00-\x1f\x7f]{1,116}\\.(xlsx|pdf)$", re.IGNORECASE)
+
 
 
 def _guard() -> None:
@@ -59,7 +58,10 @@ def _invoke(extra: list[str], payload: bytes, timeout: int = 25) -> dict:
 
 def extract(filename: str, raw: bytes) -> dict:
     _guard()
-    if not isinstance(filename, str) or not SAFE.fullmatch(filename):
+    if (not isinstance(filename, str) or not 5 <= len(filename) <= 120
+            or any(c in filename for c in ("/", chr(92)))
+            or any(ord(c) < 32 or ord(c) == 127 for c in filename)
+            or not filename.lower().endswith((".xlsx", ".pdf"))):
         raise ValueError("BLOCKED_V204_UNSAFE_FILENAME")
     if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_FILE_SIZE:
         raise ValueError("BLOCKED_V204_INVALID_UPLOAD_SIZE")
@@ -78,8 +80,9 @@ PROBE = r"""
 import json,os,socket
 assert os.geteuid()==65532
 status=open('/proc/self/status').read()
-assert 'CapEff:\\t0000000000000000' in status
-assert 'NoNewPrivs:\\t1' in status
+fields=dict(line.split(':',1) for line in status.splitlines() if ':' in line)
+assert fields['CapEff'].strip()=='0000000000000000'
+assert fields['NoNewPrivs'].strip()=='1'
 blocked=0
 for ip in ('1.1.1.1','8.8.8.8','9.9.9.9','208.67.222.222',
            '1.0.0.1','8.8.4.4','149.112.112.112','208.67.220.220',
