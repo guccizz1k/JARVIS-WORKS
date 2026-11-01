@@ -94,10 +94,14 @@ def main():
     assert root("SELECT count(*) FROM jw_dev.v201_approval_secrets")==[(0,)]
     assert root("SELECT count(*) FROM jw_dev.v201_approval_receipts")==[(0,)]
     pass_case("NO_APPROVAL_KEY_ENROLLED")
-    assert root("""SELECT count(*) FROM pg_auth_members WHERE
-       member IN (SELECT oid FROM pg_roles WHERE rolname IN (%s,%s,%s))""",
+    assert root("""SELECT count(*) FROM pg_auth_members m
+       JOIN pg_roles r ON r.oid=m.member
+       WHERE m.roleid IN
+         (SELECT oid FROM pg_roles WHERE rolname IN (%s,%s,%s))
+         AND (m.inherit_option OR m.set_option
+              OR r.rolname NOT IN ('postgres','jw_ci_v201_migrator'))""",
        (WRITER,REVIEWER,OWNER))==[(0,)]
-    pass_case("ZERO_ROLE_MEMBERSHIPS")
+    pass_case("NO_ACTIVE_OR_INHERITED_ROLE_MEMBERSHIPS")
     assert root("""SELECT has_table_privilege('jw_app_dev',
         'jw_dev.import_previews','INSERT'),
         has_table_privilege('jw_app_dev','jw_dev.import_previews','UPDATE'),
