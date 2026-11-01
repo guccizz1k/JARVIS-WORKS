@@ -57,6 +57,13 @@ def check_panels(page,mode,name):
     }""")
     assert ret["theme"]==mode and ret["node"],(name,ret)
     assert ret["mainOverflow"]<=1,(name,ret)
+    if viewport>=1050:
+      geom=page.evaluate("""()=>{
+        const a=document.querySelector('#main-content').getBoundingClientRect();
+        const b=document.querySelector('.sidebar').getBoundingClientRect();
+        return {right:a.right,left:b.left,intersect:Math.min(a.right,b.right)-Math.max(a.left,b.left)};
+      }""")
+      assert geom["right"] <= geom["left"]-6,(name,geom)
     assert ret["bgi"]!='none' or 'rgba' in ret["bg"] or ret["bg"].startswith('rgb('),ret
     return ret
 
