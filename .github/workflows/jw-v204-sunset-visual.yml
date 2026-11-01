@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: jw-v204-sunset-${{ github.ref }}
+  group: jw-v204-visual-four-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   visual-reference-e2e:
