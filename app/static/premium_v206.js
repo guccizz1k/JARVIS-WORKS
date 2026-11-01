@@ -106,8 +106,15 @@
    const sec=Math.round(Math.abs(delta)/1000);
    const msg=delta===0?'중위수 차이 없음':positive?'자동화 관측 시간 '+sec+'초 짧음':'자동화 관측 시간 '+sec+'초 김';
    // No invented percentage improvement. This comparison is observational.
-   return '<div class="jw206-eff-measured"><div class="jw206-eff-number">'+safe(msg)+'</div>'
-    +'<div class="jw206-eff-track" role="img" aria-label="실측 자료 비교 완료"><span></span></div>'
+   // A graph requires BOTH measured median durations. Never draw a full-width
+   // progress bar when the API only exposes the observed time difference.
+   const manual=Number(s.manual_median_ms),automatic=Number(s.automated_median_ms);
+   const hasDurations=Number.isFinite(manual)&&Number.isFinite(automatic)&&manual>0&&automatic>0;
+   const highest=hasDurations?Math.max(manual,automatic):1;
+   const graph=hasDurations?'<div class="jw206-eff-comparison" aria-label="수작업과 자동화 실측 중위수">'
+      +[['수작업',manual],['자동화',automatic]].map(([name,time])=>'<div class="jw206-eff-line"><span>'+name+'</span><div class="jw206-eff-meter"><i style="width:'+Math.round(time/highest*100)+'%"></i></div><b>'+Math.round(time/1000)+'초</b></div>').join('')
+      +'</div>':'<p class="jw206-eff-note">관측 시간 차이는 확인됐지만 양쪽 중위수 원본값이 없어 그래프를 임의 구성하지 않았습니다.</p>';
+   return '<div class="jw206-eff-measured"><div class="jw206-eff-number">'+safe(msg)+'</div>'+graph
     +'<small>수작업 '+count(s.samples.manual)+'건 · 자동화 '+count(s.samples.automated)+'건 · 관찰 비교(인과효과 아님)</small></div>';
  }
  dashboardPage=function premiumV206Dashboard(){
