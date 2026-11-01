@@ -70,10 +70,16 @@ def scenario(page,base,*,width:int,record:bool):
         page.screenshot(path=str(OUT/"motion-modal.png"),full_page=False)
     page.locator('#modal-root .close-x[data-action="close"]').click()
     assert page.locator("#modal-root [role=dialog]").count()==0
+    if width<=760:
+        page.locator("#toggle-menu").click()
+        assert page.locator("#toggle-menu").get_attribute("aria-expanded")=="true"
     page.locator('[data-page="audit"]').click()
     page.wait_for_function("""() => state.page==='audit'&&document.querySelector('#main-content h1')?.textContent==='변경 이력'""")
     if record: page.wait_for_timeout(500)
     # More than one working page transition: audit -> original dashboard.
+    if width<=760:
+        page.locator("#toggle-menu").click()
+        assert page.locator("#toggle-menu").get_attribute("aria-expanded")=="true"
     page.locator('[data-page="dashboard"]').click()
     page.wait_for_selector(".jw-v202-dashboard")
     if record:
