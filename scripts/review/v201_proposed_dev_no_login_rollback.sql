@@ -5,6 +5,15 @@ SET LOCAL lock_timeout='3s';
 SET LOCAL statement_timeout='30s';
 DO $guard$
 BEGIN
+ -- The guard must inspect *every* row, not a FORCED-RLS-filtered subset.
+ -- Supabase's postgres is NOSUPERUSER but BYPASSRLS; reject any principal
+ -- unable to see every protected preview, secret and audit row.
+ IF NOT EXISTS (
+   SELECT 1 FROM pg_roles
+   WHERE rolname = current_user AND (rolsuper OR rolbypassrls)
+ ) THEN
+   RAISE EXCEPTION 'BLOCKED_V201_ROLLBACK_REQUIRES_GLOBAL_ROW_VISIBILITY';
+ END IF;
  IF EXISTS(SELECT 1 FROM jw_dev.import_previews) OR
     EXISTS(SELECT 1 FROM jw_dev.v201_approval_receipts) OR
     EXISTS(SELECT 1 FROM jw_dev.v201_approval_secrets) THEN
