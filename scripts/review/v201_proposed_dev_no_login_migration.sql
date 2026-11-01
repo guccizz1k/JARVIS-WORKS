@@ -131,6 +131,7 @@ REVOKE ALL ON FUNCTION jw_dev.v201_reject_receipt_mutation() FROM PUBLIC;
 CREATE TRIGGER v201_receipt_immutable BEFORE UPDATE OR DELETE
  ON jw_dev.v201_approval_receipts FOR EACH ROW
  EXECUTE FUNCTION jw_dev.v201_reject_receipt_mutation();
+GRANT USAGE ON SCHEMA extensions TO jw_dev_import_approval_owner_v201;
 GRANT CREATE ON SCHEMA jw_dev TO jw_dev_import_approval_owner_v201;
 CREATE FUNCTION jw_dev.v201_confirm_import(
  p_id text,p_org text,p_actor text,p_digest text,
