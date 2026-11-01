@@ -41,7 +41,7 @@ def go(page,name):
     page.wait_for_timeout(110)
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth+1"),name
 
-def check_panels(page,mode,name):
+def check_panels(page,mode,name,width):
     ret=page.evaluate("""()=>{
       let root=document.querySelector('#main-content');
       let node=root.querySelector('.panel,.jw-messenger,.jw206-pane,.import-hero,.page-head');
@@ -57,7 +57,7 @@ def check_panels(page,mode,name):
     }""")
     assert ret["theme"]==mode and ret["node"],(name,ret)
     assert ret["mainOverflow"]<=1,(name,ret)
-    if viewport>=1050:
+    if width>=1050:
       geom=page.evaluate("""()=>{
         const a=document.querySelector('#main-content').getBoundingClientRect();
         const b=document.querySelector('.sidebar').getBoundingClientRect();
@@ -99,7 +99,7 @@ def run_page(page,url,width,height):
         page.screenshot(path=str(OUT/f"dashboard-{mode}-{width}.png"),full_page=True)
       for route in PAGES[1:]:
         go(page,route)
-        p=check_panels(page,mode,route)
+        p=check_panels(page,mode,route,width)
         if width==1440 and mode=="light" and route in ("imports","orders","messenger"):
           page.screenshot(path=str(OUT/f"screen-{route}-{mode}-{width}.png"))
       go(page,"customers")
