@@ -85,7 +85,8 @@ def run():
                       state.csrf='ci-synthetic'; showApp();
                       await navigate('dashboard');
                     }""")
-                    assert page.locator("#app-shell").is_visible(),"App shell was rehidden after synthetic login"\n                    page.wait_for_selector(".jw-v202-dashboard .jw-v202-bento")
+                    assert page.locator("#app-shell").is_visible(),"App shell was rehidden after synthetic login"
+                    page.wait_for_selector(".jw-v202-dashboard .jw-v202-bento")
                     assert page.locator(".jw-v202-metric").count()==4
                     assert "25건" in page.locator(".jw-v202-metric").first.inner_text()
                     assert "12건" in page.locator(".jw-v202-chart-row").nth(1).inner_text()
