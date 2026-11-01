@@ -56,6 +56,7 @@ def check(page,url,width,height,*,snapshot=True):
     # Actual navigation button invokes *existing* app action, not fake UI navigation.
     page.locator('[data-v204-nav="imports"]').first.click()
     page.wait_for_function("() => state.page==='imports'")
+    page.wait_for_function("""() => !document.querySelector('#main-content .jw-v204')""",timeout=12000)
     assert page.locator("#main-content .jw-v204").count()==0
     assert not js_errors,js_errors
     print("PASS_V204_CHROMIUM",width,"scene, authenticated metrics, chart tabs, XSS, real navigation, overflow",flush=True)
