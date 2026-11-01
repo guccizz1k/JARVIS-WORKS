@@ -39,7 +39,7 @@ def login(page,base):
     }""")
     page.wait_for_selector(".jw-v204 .v204-head",timeout=14000)
     assert page.locator(".jw-v204 .v204-stat").count()==4
-    assert "28건" in page.locator(".jw-v204 .v204-stat").first.inner_text()
+    assert "40건" in page.locator(".jw-v204 .v204-stat").first.inner_text()  # 25 quotes + 12 orders + 3 invoices
     assert "2,050,000" in page.locator(".jw-v204 .v204-stat").nth(2).inner_text()
     assert page.locator("#v204-floating-nav .v204-nav-pill").count()==5
     assert page.locator(".jw-v204 .v204-chart-bar-container").count()==4
