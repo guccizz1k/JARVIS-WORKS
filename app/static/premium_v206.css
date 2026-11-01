@@ -411,7 +411,7 @@ html[data-jw206-theme="dark"] .app-shell:not(.hidden){
  .jw206-dashboard .jw206-metric{min-height:119px}
  .app-shell .topbar .v204-top-tabs.v204-floating-nav{left:47%!important;max-width:360px}
 }
-@media(max-width:920px){
+@media(max-width:760px){
  .app-shell .sidebar{right:-255px!important;top:70px!important;bottom:8px!important;height:calc(100dvh - 78px)!important;transition:right 260ms cubic-bezier(.22,1,.36,1)!important}
  .app-shell .sidebar.open{right:10px!important;left:auto!important}
  .app-shell .main-content,.app-shell.jw206-compact-rail .main-content{margin:0 15px!important;padding-top:18px!important}
@@ -497,7 +497,7 @@ html[data-jw206-theme="dark"] .app-shell:not(.hidden){
   margin-left:18px!important;margin-right:90px!important;
  }
 }
-@media(max-width:920px){
+@media(max-width:760px){
  .app-shell .main-area #main-content.main-content,
  .app-shell.jw206-compact-rail .main-area #main-content.main-content{
   box-sizing:border-box!important;width:calc(100% - 30px)!important;
@@ -517,3 +517,16 @@ html[data-jw206-theme="dark"] .app-shell:not(.hidden){
 .jw206-dashboard .jw206-eff-meter{height:10px;background:var(--jw206-control);border-radius:8px;overflow:hidden}
 .jw206-dashboard .jw206-eff-meter i{display:block;height:100%;border-radius:8px;background:var(--jw206-green)}
 .jw206-dashboard .jw206-eff-line:first-child .jw206-eff-meter i{background:#a1a9a3}
+
+/* Tablet width (761-920px): keep the right rail permanently visible instead
+   of exposing a mobile hamburger controlled by the legacy <=760px breakpoint. */
+@media(min-width:761px) and (max-width:920px){
+ .app-shell .sidebar{position:fixed!important;right:10px!important;left:auto!important;
+  top:77px!important;bottom:12px!important;width:229px!important;
+  height:calc(100dvh - 89px)!important;}
+ .app-shell .main-area #main-content.main-content{width:calc(100% - 264px)!important;
+  max-width:calc(100% - 264px)!important;margin:0 244px 0 20px!important;}
+ .app-shell .topbar #toggle-menu{display:none!important;}
+ .app-shell .main-area footer{padding:0 244px 15px 20px!important;}
+ .jw206-dashboard .jw206-feature-grid{grid-template-columns:1fr!important;}
+}
