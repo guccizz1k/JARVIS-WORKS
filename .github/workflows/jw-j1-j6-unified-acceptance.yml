@@ -55,6 +55,7 @@ on:
       - review/v200-dev-import-preflight-dsn-20261101
       - review/v201-dev-import-closed-migration-20261101
       - review/v204-offline-parser-isolation-20261101
+      - review/p1-pdf-import-boundary-20261102
   workflow_dispatch:
 
 permissions:
