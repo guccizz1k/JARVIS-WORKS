@@ -16,6 +16,7 @@ UNSUPPORTED=(
 
 @pytest.mark.parametrize("source",UNSUPPORTED)
 def test_unsupported_financial_document_cannot_be_rebranded(api,source):
+    invoice_baseline=api.get("/dashboard").json()["invoices"]
     raw=xlsx(kind=source,reference="CONSENT-1")
     p=stage(api,"unrecognized.xlsx",raw)
     assert p.status_code==201,p.text
@@ -30,7 +31,7 @@ def test_unsupported_financial_document_cannot_be_rebranded(api,source):
     assert dashboard["pending_review"]==1
     assert dashboard["total_confirmed"]==0
     assert not api.get("/evidence/records").json()
-    assert api.get("/dashboard").json()["invoices"]==0
+    assert api.get("/dashboard").json()["invoices"]==invoice_baseline
 
 
 @pytest.mark.parametrize("expected,user_selected",[
