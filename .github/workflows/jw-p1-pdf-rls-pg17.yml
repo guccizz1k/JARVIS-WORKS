@@ -1,0 +1,58 @@
+name: JW P1 searchable PDF and XLSX import RLS boundary (review only)
+on:
+  push:
+    branches:
+      - review/p1-pdf-import-boundary-20261102
+permissions:
+  contents: read
+concurrency:
+  group: jw-p1-pdf-import-${{ github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  actual-pg17-filename-and-rollback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install original PostgreSQL test dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Compile and verify no external target or secret enrollment
+        run: |
+          python -m py_compile scripts/ci_p1_pdf_writer_pg17.py
+          python - <<'PY'
+          from pathlib import Path
+          for name in ('vp1_pdf_writer_policy_candidate.sql','vp1_pdf_writer_policy_rollback.sql'):
+              src=Path('scripts/review',name).read_text()
+              assert src.count('BEGIN;')==1 and src.count('COMMIT;')==1
+              for forbidden in ('CREATE ROLE','ALTER ROLE','PASSWORD ','GRANT LOGIN','DROP TABLE'):
+                  assert forbidden not in src, (name,forbidden)
+          test=Path('scripts/ci_p1_pdf_writer_pg17.py').read_text()
+          for forbidden in ('supabase.co','onrender.com','JW_PG_STAGE_DSN'):
+              assert forbidden not in test
+          print('PASS_P1_STATIC_NO_HOSTED_MUTATION')
+          PY
+      - name: Actual PostgreSQL17 20 hostile filenames, tenant and rollback proof
+        run: python -m scripts.ci_p1_pdf_writer_pg17
