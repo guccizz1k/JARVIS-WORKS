@@ -98,6 +98,7 @@ def run():
                 assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1"),route
                 # Actual business route is shown through an aperture transition.
                 if route!="dashboard":
+                    page.wait_for_function("""()=>document.querySelector('#main-content')?.classList.contains('jw211-portal-reveal')""",timeout=18000)
                     assert page.locator("#main-content.jw211-portal-reveal").count()==1,route
                     assert page.locator("#main-content").evaluate("(x)=>getComputedStyle(x).animationName")=="jw211-glass-aperture",route
                 if width==1440 and route in ("imports","orders","messenger"):
