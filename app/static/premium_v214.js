@@ -55,12 +55,13 @@
       }
     }
     // Two actual import forms work side by side on a wide desktop.
-    const forms=[...main.querySelectorAll(':scope > .import-upload-panel')];
-    if(forms.length===2){
+    const single=main.querySelector('#import-file-form')?.closest('.import-upload-panel');
+    const batch=main.querySelector('#import-batch-form')?.closest('.import-upload-panel');
+    if(single&&batch&&!single.closest('.jw214-upload-grid')&&!batch.closest('.jw214-upload-grid')){
       const grid=document.createElement('div');
       grid.className='jw214-upload-grid';
-      forms[0].before(grid);
-      grid.append(...forms);
+      single.before(grid);
+      grid.append(single,batch);
     }
   }
   new MutationObserver(sync).observe(main,{childList:true});
