@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright
 from scripts.ci_v202_bento_browser import ROOT
 
 OUT=ROOT/"artifacts/v213-real-auth"
-ROUTES=("imports","quotes","orders","invoices","automation","messenger","dashboard")
+ROUTES=("imports","quotes","orders","invoices","automation","messenger","dashboard","customers","audit","security")
 WIDTHS=(1440,390)
 
 def isolated_server(tmp):
@@ -84,6 +84,8 @@ def sign_in(page,email):
 def navigate_real(page,route):
     if route=="dashboard":
         page.locator('.jw210-brand').click()
+    elif route in ("customers","audit","security"):
+        page.locator('.jw210-rail-panel [data-jw210-page="'+route+'"]').click()
     else:
         page.locator('.jw210-business-nav [data-jw210-page="'+route+'"]').click()
     page.wait_for_function("(r)=>state.page===r",arg=route,timeout=25000)
