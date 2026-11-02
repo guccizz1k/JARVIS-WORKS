@@ -15,7 +15,7 @@ from scripts.ci_v202_bento_browser import ROOT
 OUTPUT=ROOT/"artifacts/v218-browser"
 
 
-def unsupported_xlsx():
+def unsupported_xlsx(unique_id):
     wb=Workbook()
     for record in (
         ("문서종류","정보보안동의서"),
@@ -23,6 +23,7 @@ def unsupported_xlsx():
         ("거래일","2026-11-03"),
         ("총금액",11000),
         ("문서번호","CONSENT-2026-11"),
+        ("검증파일번호",str(unique_id)),
     ):
         wb.active.append(record)
     buffer=io.BytesIO()
@@ -56,7 +57,7 @@ def run():
                         upload.locator('input[type=file]').set_input_files({
                             "name":f"unsupported-consent-{width}.xlsx",
                             "mimeType":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            "buffer":unsupported_xlsx()
+                            "buffer":unsupported_xlsx(width)
                         })
                         upload.locator('button[type=submit]').click()
                         page.get_by_text("이 문서는 지원하는 증빙 유형으로 확인되지 않았습니다.",exact=False).wait_for()
@@ -82,7 +83,7 @@ def run():
                           return await r.json();
                         }""")
                         assert summary["total_confirmed"]==0,summary
-                        assert summary["pending_review"]==width//width,summary
+                        assert summary["pending_review"]==report["surviving_pending"]+1,summary
                         assert not js,(width,js)
                         assert not server,(width,server)
                         assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
