@@ -16,7 +16,7 @@ PAYLOADS = (
     "' OR 1=1 --", '\" autofocus onfocus=\"alert(1)',
     "../etc/passwd", "%00", "&lt;script&gt;", "<script>alert(1)</script>",
     "</button><iframe>", "\u202eabc", "\u200b", "복구코드",
-    "사업자번호", "문서", "청구", "메신저", "계좌", "대량 업로드", "A"*200, "；";
+    "사업자번호", "문서", "청구", "메신저", "계좌", "대량 업로드", "A"*200, "；",
 )
 def login(page, url):
     page.goto(url, wait_until="networkidle")
