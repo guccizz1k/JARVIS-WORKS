@@ -174,3 +174,13 @@ html[data-jw206-theme=light] .jw211-transparent-crystal{
  mix-blend-mode:multiply;filter:grayscale(1) invert(.88) contrast(.86)}
 #login-view.jw211-login .jw211-login-infinity-image{display:none!important}
 .jw210-infinity-stage .jw210-infinity-photo{display:none!important}
+
+/* Feather the inherited screenshot edge instead of cutting it at x=5.5%. */
+#login-view.jw211-login .jw211-transparent-crystal,
+#app-shell:not(.hidden) .jw211-transparent-crystal{
+ clip-path:none!important;
+ -webkit-mask-image:linear-gradient(to right,
+   transparent 0%,transparent 6%,rgba(0,0,0,.30) 9%,#000 18%,#000 87%,transparent 100%)!important;
+ mask-image:linear-gradient(to right,
+   transparent 0%,transparent 6%,rgba(0,0,0,.30) 9%,#000 18%,#000 87%,transparent 100%)!important;
+}
