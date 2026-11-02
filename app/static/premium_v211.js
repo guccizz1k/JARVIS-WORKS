@@ -124,7 +124,8 @@
     const shouldPause=reduce.matches||document.hidden;
     for(const root of document.querySelectorAll(".jw211-glass-photon")){
       if(typeof root.pauseAnimations!=="function")continue;
-      if(shouldPause||root.closest(".jw211-login")?.classList.contains("hidden")
+      if(shouldPause||root.parentElement?.classList.contains("jw212-ready")
+        ||root.closest(".jw211-login")?.classList.contains("hidden")
         ||root.closest("#app-shell")?.classList.contains("hidden")){
         root.pauseAnimations();
       }else root.unpauseAnimations();

@@ -127,7 +127,7 @@ function createSculpture(host){
     ctx.globalAlpha=1;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(hx,hy,2.4,0,6.2832);ctx.fill();
     ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
   }
-  if(window.ResizeObserver)new ResizeObserver(fit).observe(wrap);
+  const ro=window.ResizeObserver?new ResizeObserver(fit):null;ro?.observe(wrap);
 
   const PERIOD=9000;
   const set=f=>{fit();draw(f)};
@@ -139,6 +139,7 @@ function createSculpture(host){
   const api={
     start(){if(running)return;fit();if(REDUCED.matches){draw(.13);return}running=true;last=0;raf=requestAnimationFrame(frame)},
     stop(){running=false;cancelAnimationFrame(raf)},
+    destroy(){this.stop();ro?.disconnect();wrap.remove()},
     boost(m){target=m},
     isLow:()=>low,
     setHQ(v){if(hq===v)return;hq=v;bw=0;fit()},
@@ -155,7 +156,7 @@ function createSculpture(host){
  let pending=false;
  function mount(key,host){
    const old=mounted[key];
-   if(old&&old.host!==host){old.fx.stop();old.fx.wrap.remove();mounted[key]=null;}
+   if(old&&old.host!==host){old.host.classList.remove('jw212-ready');old.fx.destroy();mounted[key]=null;}
    if(!host)return;
    if(mounted[key]?.host===host)return;
    const layer=document.createElement('div');
@@ -163,17 +164,35 @@ function createSculpture(host){
    layer.id='jw212-'+key;
    layer.setAttribute('aria-hidden','true');
    host.appendChild(layer);
-   const fx=createSculpture(layer);
-   mounted[key]={host,fx};
+   try {
+     const fx=createSculpture(layer);
+     host.classList.add('jw212-ready');
+     mounted[key]={host,fx};
+   } catch(err) {
+     // Fail open visually only: restore V21.1 decoration without touching auth/business.
+     layer.remove();host.classList.remove('jw212-ready');
+     mounted[key]=null;
+   }
  }
  function sync(){
    const signedIn=!shell.classList.contains('hidden')&&!shell.hidden;
    const tabVisible=!document.hidden;
-   const homeVisible=signedIn && !!mounted.home?.host.isConnected;
+   const homeVisible=signedIn && !!mounted.home?.host.isConnected &&
+     (typeof state==='undefined'||state.page==='dashboard');
    for(const [key,m] of Object.entries(mounted)){
      if(!m)continue;
-     const shouldPlay=tabVisible&&(key==='login'?!signedIn:homeVisible);
+     const shouldPlay=tabVisible&&!REDUCED.matches&&(key==='login'?!signedIn:homeVisible);
      if(shouldPlay)m.fx.start();else m.fx.stop();
+   }
+   // The inherited V21.1 animated photon must never run behind the accepted
+   // Canvas version. Resume it only if the Canvas renderer has failed.
+   for(const legacy of document.querySelectorAll('.jw211-glass-photon')){
+     if(typeof legacy.pauseAnimations!=='function')continue;
+     const parent=legacy.parentElement;
+     const hasCanvas=parent?.classList.contains('jw212-ready');
+     const hidden=parent?.closest('#login-view,#app-shell')?.classList.contains('hidden');
+     if(hasCanvas||hidden||REDUCED.matches||document.hidden)legacy.pauseAnimations();
+     else legacy.unpauseAnimations();
    }
  }
  function update(){
@@ -188,5 +207,5 @@ function createSculpture(host){
  document.addEventListener('visibilitychange',sync);
  REDUCED.addEventListener?.('change',sync);
  update();
- window.JW_PREMIUM_V212=Object.freeze({version:'21.2',renderer:'source-svg-canvas-photon',source:'user-supplied-html'});
+ window.JW_PREMIUM_V212=Object.freeze({version:'21.2',renderer:'source-svg-canvas-photon',source:'user-supplied-html',uiMode:'authenticated-workspace'});
 })();

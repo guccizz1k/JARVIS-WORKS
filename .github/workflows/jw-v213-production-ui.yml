@@ -1,0 +1,105 @@
+name: JW V21.3 production UI hardening + real FastAPI auth E2E
+on:
+  push:
+    branches:
+      - review/v213-production-ui-hardening-20261102
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v213-production-ui
+  cancel-in-progress: true
+jobs:
+  authentic-workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate 1 and 3 — original API/tenant safety and exact UI patch
+        run: |
+          set -euo pipefail
+          node --check app/static/app.js
+          node --check app/static/premium_v212.js
+          node --check app/static/premium_v213.js
+          python -m py_compile scripts/ci_v213_real_auth_ui_browser.py
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          base='5a90cc6b67ef5c3799ebdeabd6961634aa4bb3b8'
+          files=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allowed={'app/static/app.js','app/static/index.html','app/static/premium_v211.js',
+            'app/static/premium_v212.js','app/static/premium_v212.css',
+            'app/static/premium_v213.js','app/static/premium_v213.css',
+            'scripts/ci_v213_real_auth_ui_browser.py',
+            '.github/workflows/jw-v213-production-ui.yml'}
+          assert files==allowed,(files,allowed)
+          origin=subprocess.check_output(['git','show',base+':app/static/app.js'],text=True)
+          updated=Path('app/static/app.js').read_text()
+          assert origin.count("showApp();await navigate('imports')")==2
+          expected=origin.replace("showApp();await navigate('imports')",
+            "showApp();await navigate('dashboard')")
+          expected=expected.replace("async function navigate(page){try{",
+            "async function navigate(page){const priorPage=state.page;try{")
+          expected=expected.replace(
+            "}catch(err){window.JW_UI_MOTION?.navigationFailed();toast(err.message,true)}}",
+            "}catch(err){state.page=priorPage;window.JW_UI_MOTION?.navigationFailed();toast(err.message,true)}}")
+          old_logout="$('#logout').addEventListener('click',async()=>{try{await api('/logout','POST',{})}catch{}state.csrf='';state.user=null;showLogin()});"
+          new_logout="""$('#logout').addEventListener('click',async()=>{
+           const control=$('#logout');if(control.disabled)return;control.disabled=true;
+           try{await api('/logout','POST',{});state.csrf='';state.user=null;showLogin()}
+           catch(err){toast('로그아웃을 서버에서 확인하지 못했습니다. 다시 시도해 주세요: '+err.message,true)}
+           finally{control.disabled=false}
+          });"""
+          assert expected.count(old_logout)==1
+          assert updated==expected.replace(old_logout,new_logout)
+          assert 'state.page=priorPage' in updated
+          html=Path('app/static/index.html').read_text()
+          assert html.index('premium_v212.css')<html.index('premium_v213.css')
+          assert html.index('premium_v212.js')<html.index('premium_v213.js')
+          assert 'name="otp"' in html and 'name="recovery_code"' in html
+          legacy=Path('app/static/premium_v211.js').read_text()
+          assert 'root.parentElement?.classList.contains("jw212-ready")' in legacy
+          code=Path('app/static/premium_v212.js').read_text()
+          assert 'jw212-ready' in code and 'destroy(){this.stop();ro?.disconnect()' in code
+          assert 'if(shouldPlay)m.fx.start();else m.fx.stop()' in code
+          assert 'REDUCED.matches' in code
+          assert 'pauseAnimations()' in code and 'unpauseAnimations()' in code
+          assert 'catch(err)' in code and 'layer.remove()' in code
+          original_logout=Path('app/static/premium_v213.js').read_text()
+          assert "document.getElementById('logout')" in original_logout
+          assert "bar.appendChild(logout)" in original_logout
+          assert 'fetch(' not in original_logout and 'fetch(' not in code
+          assert 'innerHTML' not in original_logout
+          # Fail closed on the existing production guard; do not alter or execute live backends.
+          guard=Path('app/deployment_safety_v78.py').read_text()
+          assert 'PRODUCTION_BLOCKED' in guard
+          print('PASS: protected backend and auth state; approved V21.2 aesthetic unchanged')
+          PY
+      - name: Install local server and browser dependencies
+        run: |
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate 2 and 4 — approved source renderer and real business routes in synthetic UI fixture
+        run: python -m scripts.ci_v212_source_glass_browser
+      - name: Gate 2/3/4/5 — ACTUAL original FastAPI, cookie auth and isolation
+        run: python -m scripts.ci_v213_real_auth_ui_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v213-auth-ui-evidence
+          path: |
+            artifacts/v212-browser/
+            artifacts/v213-real-auth/
+          retention-days: 7
+          if-no-files-found: ignore
