@@ -137,3 +137,7 @@ html[data-jw206-theme=light] #login-view.jw211-login .login-card .demo-actions b
  #app-shell:not(.hidden) .jw211-portal-reveal :is(.panel,.page-head,.card,.jw-messenger,.import-hero){
  animation:none!important;will-change:auto!important}
 }
+
+/* Authentication isolation: the signed-in application must never expose
+   the decorative login page over the authenticated work surface. */
+#login-view.jw211-login.hidden{display:none!important}
