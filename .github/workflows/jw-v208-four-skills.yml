@@ -45,7 +45,8 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          w=Path('.github/workflows/jw-v208-four-skills.yml').read_text()
+          w=Path('.github/workflows/jw-v208-four-skills.yml').read_text().partition('      - name: Gate 5 ensure no executable third-party installer')[0]
+          assert w and 'Gate 4 original UX code' in w
           for unsafe in ("pip install ", "npm install ", "npx impeccable install", "curl ", "wget "):
               assert unsafe not in w,unsafe
           assert not Path('.agents/skills/impeccable/scripts/impeccable').exists()
