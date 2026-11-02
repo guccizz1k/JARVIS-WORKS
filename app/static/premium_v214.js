@@ -44,7 +44,6 @@
   function onAuthenticated(){
     entrancePending=true;
     shell.classList.remove('jw214-entry-playing');
-    sync();
   }
   function sync(){
     if(main.querySelector('.jw210-home') && !shell.classList.contains('hidden') && entrancePending){
