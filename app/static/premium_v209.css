@@ -217,3 +217,15 @@ body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw
   max-width:calc(100vw - 34px)!important;
  }
 }
+
+/* Mobile identity: undo legacy center treatment at the exact DOM boundary. */
+@media(max-width:480px){
+ #app-shell:not(.hidden) > .main-area > .topbar > .v204-global-brand{
+  position:absolute!important;inset:auto auto auto 16px!important;
+  top:16px!important;left:16px!important;right:auto!important;
+  width:max-content!important;max-width:170px!important;
+  margin:0!important;padding:0!important;
+  transform:none!important;translate:none!important;
+  justify-self:start!important;align-self:auto!important;
+ }
+}
