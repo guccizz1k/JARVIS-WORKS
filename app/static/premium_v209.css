@@ -253,3 +253,12 @@ body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw
 @media(min-width:781px){
  .app-shell:not(.hidden) #main-content{left:max(4px,calc(50vw - 708px))!important}
 }
+
+/* Viewport-specific origin correction measured on 768px and 390px layouts.
+   Keep physical 17px horizontal gutters, including the scrollable top rail. */
+@media(min-width:481px) and (max-width:780px){
+ .app-shell:not(.hidden) #main-content{left:-3px!important}
+}
+@media(max-width:480px){
+ .app-shell:not(.hidden) #main-content{left:2px!important}
+}
