@@ -109,6 +109,30 @@ jobs:
           python -m scripts.ci_rebuild_v79_overlay
           test -s ../overlay/BASE_SHA256.json
           test -s ../overlay/PAYLOAD_SHA256.json
+      - name: Diagnose synthetic OCR/PDF child-process JSON framing
+        run: |
+          python - <<'PY'
+          import sys,os,subprocess,base64,json,io
+          import fitz
+          from PIL import Image,ImageDraw
+          cases=[]
+          doc=fitz.open()
+          page=doc.new_page()
+          page.insert_text((30,70),"RECEIPT 2026-10-21 11000 DOCUMENT REFERENCE S-2026-1001")
+          cases.append(("text.pdf",doc.tobytes()))
+          doc.close()
+          img=Image.new("RGB",(700,300),"white")
+          ImageDraw.Draw(img).text((10,20),"RECEIPT TEST",fill="black")
+          out=io.BytesIO();img.save(out,format="PNG")
+          cases.append(("synthetic.png",out.getvalue()))
+          for name,raw in cases:
+              obj={"filename":name,"base64":base64.b64encode(raw).decode("ascii")}
+              result=subprocess.run([sys.executable,"-m","app.evidence_v64_worker"],
+                  input=json.dumps(obj).encode(),capture_output=True,timeout=40)
+              print("DIAG",name,"code",result.returncode,"stdout_len",len(result.stdout),
+                    "stdout_prefix",repr(result.stdout[:350]),
+                    "stderr_prefix",repr(result.stderr[:180]))
+          PY
       - name: Gate 2/3 - rerun previous 14 failed test families
         run: |
           python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v216-targeted tests/test_installer_v79.py tests/test_evidence_v64.py tests/test_import_supplement.py tests/test_quote_import.py tests/test_smart_import.py tests/test_v172_document_adversarial.py
