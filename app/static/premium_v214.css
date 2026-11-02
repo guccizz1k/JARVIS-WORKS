@@ -186,7 +186,7 @@ html,body{background:#070b12!important}
 /* V21.5: keep the primary login action above the fold on 1366x768 and
  * 1440x900 desktops, without hiding MFA, demo information, or the sculpture.
  * Preserve the existing full-size composition on tall desktop displays. */
-@media (min-width:1100px) and (max-height:920px) {
+@media (min-width:1100px) and (max-height:1000px) {
   #login-view.jw211-login{
     padding-bottom:24px!important;
   }
@@ -241,5 +241,42 @@ html,body{background:#070b12!important}
   }
   #login-view.jw211-login .jw211-login-headline{
     margin:-8px 0 5px!important;
+  }
+}
+
+
+/* V21.6: browser chrome reduces usable height versus nominal laptop resolution.
+ * Keep the established centered single-photon composition, but compress its
+ * decorative height before the mandatory sign-in action becomes unreachable. */
+@media (min-width:1100px) and (max-height:700px) {
+  #login-view.jw211-login{padding-bottom:12px!important}
+  #login-view.jw211-login .jw211-login-header{
+    min-height:38px!important;padding:0!important
+  }
+  #login-view.jw211-login .jw211-login-infinity{
+    width:min(292px,39dvh)!important
+  }
+  #login-view.jw211-login .jw211-login-headline{
+    margin:-5px 0 2px!important
+  }
+  #login-view.jw211-login .jw211-login-headline h2{
+    font-size:17px!important;margin-top:1px!important
+  }
+  #login-view.jw211-login .login-card{
+    padding:12px 21px 14px!important
+  }
+  #login-view.jw211-login .login-card h1{font-size:18px!important}
+  #login-view.jw211-login .login-card form{
+    margin-top:5px!important
+  }
+  #login-view.jw211-login .login-card form label{
+    margin-bottom:5px!important
+  }
+  #login-view.jw211-login .login-card form :is(
+    input[type=email],input[type=password],input[type=text]){
+    min-height:37px!important;padding:6px 10px!important
+  }
+  #login-view.jw211-login .login-card .jw211-extra-auth{
+    margin:5px 0!important
   }
 }
