@@ -123,13 +123,15 @@ def verify_run_provenance(
     baseline: str,
     run_url: str,
     workflow_path: str,
-    fetch: Callable[[str], dict[str, Any]] = github_json,
+    fetch: Callable[[str], dict[str, Any]] | None = None,
 ) -> list[str]:
     """Read-only proof of *one CI origin*, not business-case acceptance.
 
     This is deliberately useful for BLOCKED release reports: unlike a five-PASS
     declaration it does not manufacture fictitious gate completions.
     """
+    if fetch is None:
+        fetch = github_json  # Resolve at call time so isolated tests can inject a fetcher.
     if (not isinstance(source, str) or not HEX40.fullmatch(source)
             or not isinstance(baseline, str) or not HEX40.fullmatch(baseline)
             or not isinstance(run_url, str) or not RUN_URL.fullmatch(run_url)
