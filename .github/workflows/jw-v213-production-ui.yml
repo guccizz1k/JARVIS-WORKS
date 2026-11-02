@@ -56,11 +56,11 @@ jobs:
             "}catch(err){state.page=priorPage;window.JW_UI_MOTION?.navigationFailed();toast(err.message,true)}}")
           old_logout="$('#logout').addEventListener('click',async()=>{try{await api('/logout','POST',{})}catch{}state.csrf='';state.user=null;showLogin()});"
           new_logout="""$('#logout').addEventListener('click',async()=>{
- const control=$('#logout');if(control.disabled)return;control.disabled=true;
- try{await api('/logout','POST',{});state.csrf='';state.user=null;showLogin()}
- catch(err){toast('로그아웃을 서버에서 확인하지 못했습니다. 다시 시도해 주세요: '+err.message,true)}
- finally{control.disabled=false}
-});"""
+           const control=$('#logout');if(control.disabled)return;control.disabled=true;
+           try{await api('/logout','POST',{});state.csrf='';state.user=null;showLogin()}
+           catch(err){toast('로그아웃을 서버에서 확인하지 못했습니다. 다시 시도해 주세요: '+err.message,true)}
+           finally{control.disabled=false}
+          });"""
           assert expected.count(old_logout)==1
           assert updated==expected.replace(old_logout,new_logout)
           assert 'state.page=priorPage' in updated
