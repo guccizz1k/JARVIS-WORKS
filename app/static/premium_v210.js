@@ -81,7 +81,7 @@
  railPanel.id="jw210-rail-menu";
  railPages.forEach(([id,label,icon])=>{
    const b=el("button","jw210-rail-item");b.dataset.jw210Page=id;b.type="button";
-   b.innerHTML='<span aria-hidden="true">'+pictogram(id)+'</span><span>'+escapeHtml(label)+'</span>';
+   b.innerHTML='<span aria-hidden="true">'+pictogram(label==="홈"?"home":id)+'</span><span>'+escapeHtml(label)+'</span>';
    b.addEventListener("click",()=>{if(go(id))setRailOpen(false)});
    railPanel.append(b);
  });
@@ -206,6 +206,7 @@
      b.setAttribute("aria-current",chosen?"page":"false");
      if(b.dataset.jw210Page==="dashboard"&&current==="dashboard")chosen=true;
      b.disabled=!canGo(b.dataset.jw210Page);
+     if(b.classList.contains("jw210-nav-btn"))b.dataset.jw210HomePrimary=String(current==="dashboard"&&b.dataset.jw210Page==="imports");
    }
    for(const b of railPanel.querySelectorAll("[data-jw210-page]")){
      b.hidden=!canGo(b.dataset.jw210Page);

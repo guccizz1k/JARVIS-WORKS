@@ -98,6 +98,7 @@ def run():
                 assert pos["railRight"]<pos["titleLeft"],pos
             assert page.locator(".jw210-ai-launch").is_visible()
             assert page.locator(".jw210-home").inner_text().find("5,821")==-1
+            assert page.locator('.jw210-rail-item:first-child svg').count()==1
             for theme in ("light","dark"):
                 page.locator('[data-jw206-theme-choice="'+theme+'"]').click()
                 assert page.evaluate("document.documentElement.dataset.jw206Theme")==theme
@@ -162,10 +163,17 @@ def run():
               record_video_size={"width":1280,"height":720})
           vp=video.new_page();login(vp,url)
           vp.locator('[data-jw206-theme-choice="dark"]').click()
-          vp.wait_for_timeout(450)
+          # Show actual reverse orbital travel (7 s full round-trip),
+          # a real pointer-hover menu opening, and authentic route transitions.
+          vp.wait_for_timeout(2400)
+          rail=vp.locator(".jw210-rail")
+          rail.hover(position={"x":7,"y":75})
+          vp.wait_for_timeout(630)
+          vp.mouse.move(1250,470)
+          vp.wait_for_timeout(370)
           for route in ("imports","orders","dashboard"):
-              go(vp,route);vp.wait_for_timeout(280)
-          vp.wait_for_timeout(440)
+              go(vp,route);vp.wait_for_timeout(570)
+          vp.wait_for_timeout(7600)
           raw=vp.video
           video.close()
           if raw:

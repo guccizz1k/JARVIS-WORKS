@@ -392,3 +392,24 @@ html[data-jw206-theme=light] #app-shell:not(.hidden) .jw210-utils .jw210-search:
  #app-shell:not(.hidden) .jw210-metrics{bottom:22px!important}
  #app-shell:not(.hidden) .jw210-metric{padding:7px!important}
 }
+
+
+/* Final visual reference polish: eliminate the image crop's left-edge glyph and
+   blend its black mat into the actual workspace, without hiding the sculpture. */
+#app-shell:not(.hidden) .jw210-infinity-photo{
+ -webkit-mask-image:radial-gradient(ellipse 54% 57% at 52% 50%,
+   #000 28%,rgba(0,0,0,.94) 54%,rgba(0,0,0,.48) 77%,transparent 100%)!important;
+ mask-image:radial-gradient(ellipse 54% 57% at 52% 50%,
+   #000 28%,rgba(0,0,0,.94) 54%,rgba(0,0,0,.48) 77%,transparent 100%)!important;
+}
+#app-shell:not(.hidden) .jw210-nav-btn[data-jw210-page=dashboard][aria-current=page]{
+ background:transparent!important;border:0!important;box-shadow:none!important;
+}
+@media(max-width:570px){
+ #app-shell:not(.hidden) .jw210-infinity-photo{
+  -webkit-mask-image:radial-gradient(ellipse 57% 64% at 52% 50%,
+     #000 27%,rgba(0,0,0,.9) 54%,transparent 100%)!important;
+  mask-image:radial-gradient(ellipse 57% 64% at 52% 50%,
+     #000 27%,rgba(0,0,0,.9) 54%,transparent 100%)!important;
+ }
+}
