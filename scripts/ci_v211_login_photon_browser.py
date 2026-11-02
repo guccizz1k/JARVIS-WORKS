@@ -16,7 +16,7 @@ ROUTES=("imports","orders","invoices","messenger","quotes","automation","dashboa
 def fresh_login(page,url):
     page.goto(url,wait_until="networkidle")
     page.locator("#login-view.jw211-login").wait_for(state="visible",timeout=15000)
-    assert page.locator(".jw211-login-infinity-image").count()==1
+    assert page.locator(".jw211-login-infinity .jw211-transparent-crystal").count()==1
     assert page.locator(".jw211-login-hero .jw211-glass-photon animateMotion").count()==1
     assert page.locator(".jw211-login-hero .jw211-photon-core").count()==1
     assert page.locator(".jw211-login-hero .jw210-orbit-overlay").count()==0
@@ -39,6 +39,7 @@ def login_synthetic(page):
     page.wait_for_function("""()=>document.querySelector(".jw210-home .jw211-glass-photon animateMotion")!==null""",timeout=6000)
     assert page.locator(".jw210-home .jw211-photon-core").count()==1
     assert page.locator(".jw210-home .jw210-orbit-overlay").count()==0
+    assert page.locator(".jw210-home .jw211-transparent-crystal").count()==1
 def measured(page,width,theme):
     v=page.evaluate("""()=>{
        const r=(s)=>{const e=document.querySelector(s);const a=e.getBoundingClientRect();return {left:a.left,right:a.right,top:a.top,bottom:a.bottom,width:a.width,height:a.height}};

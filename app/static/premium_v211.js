@@ -37,6 +37,28 @@
        +'<mpath href="#'+id+'"/></animateMotion></g></g>';
     return root;
   }
+  // Convert the approved image into a transparently composited glass element:
+  // brightness controls alpha, rather than showing the screenshot's dark box.
+  function glassImage(prefix){
+    const svg=document.createElementNS(SVG_NS,"svg");
+    const id=prefix+"-isolate",fade=prefix+"-edge";
+    svg.classList.add("jw211-transparent-crystal");
+    svg.setAttribute("viewBox","0 0 800 460");
+    svg.setAttribute("role","img");
+    svg.setAttribute("aria-label","투명 유리 무한대 조형물");
+    svg.innerHTML='<defs><filter id="'+id+'" color-interpolation-filters="sRGB" x="0" y="0" width="100%" height="100%">'
+      +'<feColorMatrix in="SourceGraphic" type="luminanceToAlpha" result="lum"/>'
+      +'<feComponentTransfer in="lum" result="opacity">'
+      +'<feFuncA type="table" tableValues="0 0 0 .06 .25 .65 1 1"/></feComponentTransfer>'
+      +'<feComposite in="SourceGraphic" in2="opacity" operator="in"/>'
+      +'</filter><radialGradient id="'+fade+'" cx=".5" cy=".5" r=".72">'
+      +'<stop offset=".49" stop-color="#fff"/><stop offset=".78" stop-color="#fff" stop-opacity=".85"/>'
+      +'<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>'
+      +'<mask id="'+fade+'-mask"><rect width="800" height="460" fill="url(#'+fade+')"/></mask></defs>'
+      +'<image href="/static/jw210_orbit_dark.webp" width="800" height="460"'
+      +' preserveAspectRatio="xMidYMid meet" filter="url(#'+id+')" mask="url(#'+fade+'-mask)"/>';
+    return svg;
+  }
   const oldLoginCard=login.querySelector(".login-card");
   if(!oldLoginCard)return;
   const header=make("header","jw211-login-header");
@@ -55,10 +77,7 @@
   const hero=make("div","jw211-login-hero");
   hero.setAttribute("aria-label","JARVIS WORKS 무한대 크리스털");
   const art=make("div","jw211-login-infinity");
-  const img=make("img","jw211-login-infinity-image");
-  img.src="/static/jw210_orbit_dark.webp";img.alt="JARVIS-WORKS 중앙 유리 무한대 조형물";
-  img.decoding="async";
-  art.append(img,photonSvg("jw211-login"));
+  art.append(glassImage("jw211-login"),photonSvg("jw211-login"));
   hero.append(art);
   const headline=make("div","jw211-login-headline");
   headline.innerHTML='<span>하나의 업무 공간, 무한한 가능성</span>'
@@ -97,6 +116,7 @@
     const stage=main.querySelector(".jw210-infinity-stage");
     if(!stage || stage.querySelector(".jw211-glass-photon"))return;
     stage.querySelector(".jw210-orbit-overlay")?.remove();
+    stage.querySelector(".jw210-infinity-photo")?.replaceWith(glassImage("jw211-workspace"));
     stage.append(photonSvg("jw211-workspace"));
     syncPhoton();
   }

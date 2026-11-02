@@ -162,3 +162,15 @@ html[data-jw206-theme=light] #login-view.jw211-login .login-card .demo-actions b
 #login-view.jw211-login .login-card h1{font-size:22px!important;line-height:1.25!important}
 html[data-jw206-theme=light] #login-view.jw211-login .jw211-extra-auth{
  background:rgba(230,239,249,.7);border-color:rgba(44,61,85,.22)}
+
+
+/* Transparent raster-to-alpha integration: white and black themes retain the
+   same approved sculpture without leaking the original JPEG rectangle. */
+.jw211-transparent-crystal{display:block;position:absolute;inset:0;
+ width:100%;height:100%;overflow:visible;pointer-events:none;
+ mix-blend-mode:screen;z-index:1}
+#login-view.jw211-login .jw211-transparent-crystal{clip-path:inset(0 0 0 5.5%)}
+html[data-jw206-theme=light] .jw211-transparent-crystal{
+ mix-blend-mode:multiply;filter:grayscale(1) invert(.88) contrast(.86)}
+#login-view.jw211-login .jw211-login-infinity-image{display:none!important}
+.jw210-infinity-stage .jw210-infinity-photo{display:none!important}
