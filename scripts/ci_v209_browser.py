@@ -30,10 +30,10 @@ def main():
      assert page.locator(".jw206-metric").count()==4
      for mode in ("light","dark"):
       page.locator('[data-jw206-theme-choice="'+mode+'"]').click()
-      x=page.evaluate("""()=>{const n=document.querySelector('.jw209-top-nav').getBoundingClientRect();
+      x=page.evaluate("""()=>{const n=document.querySelector('.jw209-top-nav').getBoundingClientRect();const d=document.querySelector('.jw206-dashboard').getBoundingClientRect();const logo=document.querySelector('.v204-global-brand').getBoundingClientRect();
        const font=s=>parseFloat(getComputedStyle(document.querySelector(s)).fontSize);
        return {width:innerWidth,scroll:document.documentElement.scrollWidth,navLeft:n.left,navRight:n.right,
-        titleFont:font('.jw206-greeting h1'),labelFont:font('.jw206-metric-label'),
+        mainWidth:d.width,logoLeft:logo.left,titleFont:font('.jw206-greeting h1'),labelFont:font('.jw206-metric-label'),
         valueFont:font('.jw206-metric strong'),navFont:font('.jw209-tab'),
         theme:document.documentElement.dataset.jw206Theme,
         sidebar:getComputedStyle(document.querySelector('.sidebar')).display,
@@ -42,6 +42,8 @@ def main():
       assert x["theme"]==mode and x["sidebar"]=="none",x
       assert x["titleFont"]>=28 and x["labelFont"]>=13.5 and x["valueFont"]>=22 and x["navFont"]>=12.5,x
       assert not x["cardOverflow"],x
+      if width>=1024:assert x["mainWidth"]>=width*.88,x
+      if width<=480:assert x["logoLeft"]>=8 and x["logoLeft"]<=24,x
       results.append(x)
       if width in (1440,390):page.screenshot(path=str(OUT/f"dashboard-{width}-{mode}.png"),animations="disabled")
      page.locator('.jw209-top-nav button[data-jw209-page="orders"]').click()
