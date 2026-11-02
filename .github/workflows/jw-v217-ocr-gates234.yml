@@ -1,0 +1,108 @@
+name: JW V21.7 OCR Gate 2-4 isolated validation
+on:
+  push:
+    branches:
+      - review/v217-ocr-safe-preprocess-gates234-20261103
+permissions:
+  contents: read
+concurrency:
+  group: jw-v217-ocr-review
+  cancel-in-progress: true
+jobs:
+  gate2-3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate 1/3 - syntax, scoped diff and release guard
+        run: |
+          set -euo pipefail
+          python -m py_compile app/evidence_v64_worker.py tests/test_v217_ocr_highres.py scripts/ci_v217_ocr_browser.py
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          baseline="75944aff06f39613ea6b8302dbfae75646c2b4ab"
+          changed=set(subprocess.check_output(["git","diff","--name-only",baseline,"HEAD"],text=True).splitlines())
+          allowed={"app/evidence_v64_worker.py","tests/test_v217_ocr_highres.py",
+            "scripts/ci_v217_ocr_browser.py",
+            ".github/workflows/jw-v217-ocr-gates234.yml"}
+          assert changed==allowed,(changed,allowed)
+          assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
+          print("PASS: only OCR worker and synthetic review harness changed; main and production untouched")
+          PY
+      - name: Install OCR and full suite dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
+      - name: Reconstruct historical SHA-pinned overlay for full suite
+        run: |
+          python -m scripts.ci_rebuild_v79_overlay
+          test -s ../overlay/BASE_SHA256.json
+          test -s ../overlay/PAYLOAD_SHA256.json
+      - name: Gate 2/3 - synthetic highres and API OCR tests
+        run: |
+          python -m pytest tests/test_v217_ocr_highres.py -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v217-targeted
+      - name: Gate 2/3 - full repository regression and no skipped tests
+        run: |
+          mkdir -p artifacts/v217/
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v217-full --junitxml=artifacts/v217/full-pytest.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse("artifacts/v217/full-pytest.xml").getroot()
+          attrs=root.attrib if root.tag=="testsuite" else root.find(".//testsuite").attrib
+          numbers={k:int(attrs.get(k,0)) for k in ("tests","failures","errors","skipped")}
+          print("GATE_2_3_PYTEST",numbers)
+          assert numbers["tests"]>=1874,numbers
+          assert numbers["failures"]==0 and numbers["errors"]==0 and numbers["skipped"]==0,numbers
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v217-ocr-pytest-report
+          path: artifacts/v217/full-pytest.xml
+          retention-days: 7
+          if-no-files-found: ignore
+  gate4-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install real browser and OCR worker environment
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate 4 - preserve V21.4 real app navigation and desktop design
+        run: python -m scripts.ci_v214_desktop_dark_browser
+      - name: Gate 4 - preserve V21.6 realistic laptop login
+        run: python -m scripts.ci_v216_browser_edges
+      - name: Gate 2/4 - real OCR UI upload to pending to human confirm
+        run: python -m scripts.ci_v217_ocr_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v217-ocr-ui-synthetic-evidence
+          path: |
+            artifacts/v214-desktop/
+            artifacts/v216-browser/
+            artifacts/v217-browser/
+          retention-days: 7
+          if-no-files-found: ignore
