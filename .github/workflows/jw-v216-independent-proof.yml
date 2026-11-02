@@ -38,12 +38,12 @@ jobs:
           import subprocess
           base="b26b624f41127f0e1ba906a2a5ba5e11c2430cc2"
           got=set(subprocess.check_output(["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
-          expected={"app/static/premium_v214.css","scripts/jw_j3_origin_gate.py",
+          expected={"app/static/premium_v214.css","app/evidence_v64_worker.py","scripts/jw_j3_origin_gate.py",
                     "scripts/ci_v216_j3_provenance_tests.py","scripts/ci_v216_browser_edges.py",
                     ".github/workflows/jw-v216-independent-proof.yml"}
           assert got==expected,(got,expected)
           assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
-          print("PASS: exactly review-only UI, J3 gate and QA files changed; backend untouched")
+          print("PASS: scoped review UI, J3 and one-line worker import fix; auth/DB unchanged")
           PY
       - name: Gate 3 - original J3 adversarial tests
         run: python -m scripts.ci_v215_j3_origin_tests
@@ -132,6 +132,10 @@ jobs:
               print("DIAG",name,"code",result.returncode,"stdout_len",len(result.stdout),
                     "stdout_prefix",repr(result.stdout[:350]),
                     "stderr_prefix",repr(result.stderr[:180]))
+              assert result.returncode==0, (name,result.returncode)
+              assert result.stdout.startswith(b'{'), (name,repr(result.stdout[:160]))
+              payload=json.loads(result.stdout)
+              assert 'result' in payload and 'error' not in payload, (name,payload.get('error'))
           PY
       - name: Gate 2/3 - rerun previous 14 failed test families
         run: |
