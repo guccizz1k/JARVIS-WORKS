@@ -117,24 +117,91 @@ def verify_report(
     return errors
 
 
+
+def verify_run_provenance(
+    source: str,
+    baseline: str,
+    run_url: str,
+    workflow_path: str,
+    fetch: Callable[[str], dict[str, Any]] = github_json,
+) -> list[str]:
+    """Read-only proof of *one CI origin*, not business-case acceptance.
+
+    This is deliberately useful for BLOCKED release reports: unlike a five-PASS
+    declaration it does not manufacture fictitious gate completions.
+    """
+    if (not isinstance(source, str) or not HEX40.fullmatch(source)
+            or not isinstance(baseline, str) or not HEX40.fullmatch(baseline)
+            or not isinstance(run_url, str) or not RUN_URL.fullmatch(run_url)
+            or not isinstance(workflow_path, str)
+            or not re.fullmatch(r"\.github/workflows/[a-zA-Z0-9_.-]+\.ya?ml", workflow_path)):
+        return ["noncanonical source, baseline, run URL, or workflow path"]
+    errors: list[str] = []
+    for label, sha in (("source", source), ("baseline", baseline)):
+        try:
+            obj = fetch(f"commits/{sha}")
+            if not isinstance(obj, dict) or obj.get("sha") != sha:
+                errors.append(f"{label}: commit mismatch or absent")
+        except Exception as exc:
+            errors.append(f"{label}: lookup unavailable ({type(exc).__name__})")
+    if errors:
+        return errors
+    run_id = RUN_URL.fullmatch(run_url).group(1)
+    try:
+        run = fetch(f"actions/runs/{run_id}")
+        if not isinstance(run, dict):
+            return ["run: unexpected API result type"]
+        repo = run.get("repository")
+        expected = {
+            "id": int(run_id),
+            "head_sha": source,
+            "status": "completed",
+            "conclusion": "success",
+            "html_url": run_url,
+            "path": workflow_path,
+        }
+        if not isinstance(repo, dict) or repo.get("full_name") != REPO:
+            errors.append("run: repository mismatch")
+        for field, value in expected.items():
+            if type(run.get(field)) is not type(value) or run.get(field) != value:
+                errors.append(f"run: {field} mismatch")
+        if run.get("event") not in ("push", "pull_request"):
+            errors.append("run: event outside approved review triggers")
+    except Exception as exc:
+        errors.append(f"run: lookup unavailable ({type(exc).__name__})")
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", required=True, type=Path)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", type=Path, help="full review-candidate declaration")
+    mode.add_argument("--verify-run", help="existing GitHub CI run URL (origin only)")
+    parser.add_argument("--source", help="exact SHA for --verify-run")
+    parser.add_argument("--baseline", help="exact baseline SHA for --verify-run")
+    parser.add_argument("--workflow-path", help="expected workflow YAML for --verify-run")
     args = parser.parse_args()
-    try:
-        report = json.loads(args.check.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError) as exc:
-        print(f"BLOCKED: evidence unreadable ({type(exc).__name__})")
-        return 1
-    issues = verify_report(report)
+    if args.verify_run:
+        if not all((args.source, args.baseline, args.workflow_path)):
+            parser.error("--verify-run requires --source, --baseline, --workflow-path")
+        issues = verify_run_provenance(args.source, args.baseline, args.verify_run,
+                                       args.workflow_path)
+    else:
+        if any((args.source, args.baseline, args.workflow_path)):
+            parser.error("--source, --baseline and --workflow-path only apply to --verify-run")
+        try:
+            report = json.loads(args.check.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError) as exc:
+            print(f"BLOCKED: evidence unreadable ({type(exc).__name__})")
+            return 1
+        issues = verify_report(report)
     for issue in issues:
         print("FAIL/BLOCKED: " + issue)
     if issues:
         return 1
-    print("PASS: exact GitHub commit and CI-run provenance verified; "
-          "test assertions NOT independently reproduced; release NOT authorized")
+    print("PASS: GitHub run origin/commit/workflow verified ONLY; no business assertions "
+          "or independent reviewer verified; release NOT authorized")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
