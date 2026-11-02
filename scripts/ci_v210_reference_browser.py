@@ -85,6 +85,17 @@ def run():
             login(page,url)
             assert page.locator(".jw210-nav-btn").count()==7
             assert page.locator(".jw210-rail-item").count()==8
+            assert page.locator(".jw210-nav-ico svg").count()==7
+            assert page.locator(".jw210-rail-item svg").count()==8
+            assert page.locator(".jw210-metric-icon svg").count()==4
+            if width<=570:
+                # Collapsed rail must never cover the hero's text.
+                pos=page.evaluate("""()=>{
+                  const rail=document.querySelector(".jw210-rail-panel").getBoundingClientRect();
+                  const title=document.querySelector(".jw210-hero-title").getBoundingClientRect();
+                  return {railRight:rail.right,titleLeft:title.left};
+                }""")
+                assert pos["railRight"]<pos["titleLeft"],pos
             assert page.locator(".jw210-ai-launch").is_visible()
             assert page.locator(".jw210-home").inner_text().find("5,821")==-1
             for theme in ("light","dark"):

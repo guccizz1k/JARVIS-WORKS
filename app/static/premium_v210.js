@@ -19,6 +19,23 @@
  const railPages=[["dashboard","홈","⌂"],["imports","문서","▤"],["quotes","견적","▱"],
    ["orders","수주·발주","⬡"],["invoices","청구·입금","▣"],
    ["automation","자동화","ϟ"],["messenger","메신저","▢"],["dashboard","리포트","▥"]];
+ const iconShapes={
+ "imports":'<path d="M8 3h7l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h2z"/><path d="M15 3v5h5M9 14h6M12 11v6"/>',
+ "quotes":'<path d="m12 2 9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 17l9 5 9-5"/>',
+ "orders":'<path d="m12 2 9 5v10l-9 5-9-5V7l9-5zM3 7l9 5 9-5M12 12v10"/>',
+ "invoices":'<path d="M6 2h9l4 4v16H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM15 2v5h5M8 12h8M8 16h5"/>',
+ "automation":'<path d="m13 2-9 12h7l-1 8 10-13h-7z"/>',
+ "messenger":'<path d="M20 4H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h4l4 3 4-3h4a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM7 11h.01M12 11h.01M17 11h.01"/>',
+ "dashboard":'<path d="M4 20V10M10 20V4M16 20v-7M22 20V8M2 21h22"/>',
+ "home":'<path d="m3 10 9-7 9 7v11h-7v-7h-4v7H3z"/>',
+ "company":'<rect x="4" y="8" width="16" height="13" rx="1"/><path d="M9 21V3h6v18M7 12h.01M7 16h.01M17 12h.01M17 16h.01"/>',
+ "clock":'<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>'
+ };
+ function pictogram(key){
+   const semantic=key==="▦"?"company":key==="▤"?"imports":key==="◷"?"clock":key==="▱"?"automation":key;
+   const path=iconShapes[semantic]||iconShapes.dashboard;
+   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+path+'</svg>';
+ }
  const escapeHtml=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const num=v=>{let n=Number(v);return Number.isFinite(n)?Math.max(0,Math.trunc(n)):0};
  const canGo=id=>{const el=nav.querySelector('button[data-page="'+id+'"]');return !!el&&!el.hidden};
@@ -51,7 +68,7 @@
  pages.forEach(([id,label,icon])=>{
    const b=el("button","jw210-nav-btn");b.type="button";b.dataset.jw210Page=id;
    b.setAttribute("aria-label",label+" 열기");
-   b.innerHTML='<span class="jw210-nav-ico" aria-hidden="true">'+escapeHtml(icon)+'</span><span>'+escapeHtml(label)+'</span>';
+   b.innerHTML='<span class="jw210-nav-ico" aria-hidden="true">'+pictogram(id)+'</span><span>'+escapeHtml(label)+'</span>';
    b.addEventListener("click",()=>go(id));bar.appendChild(b);
  });
  chrome.append(row,bar);top.append(chrome);
@@ -64,7 +81,7 @@
  railPanel.id="jw210-rail-menu";
  railPages.forEach(([id,label,icon])=>{
    const b=el("button","jw210-rail-item");b.dataset.jw210Page=id;b.type="button";
-   b.innerHTML='<span aria-hidden="true">'+escapeHtml(icon)+'</span><span>'+escapeHtml(label)+'</span>';
+   b.innerHTML='<span aria-hidden="true">'+pictogram(id)+'</span><span>'+escapeHtml(label)+'</span>';
    b.addEventListener("click",()=>{if(go(id))setRailOpen(false)});
    railPanel.append(b);
  });
@@ -129,7 +146,7 @@
  });
  const originalDashboard=dashboardPage;
  function metric(icon,label,value,small,company=false){
-  return '<div class="jw210-metric"><span class="jw210-metric-icon" aria-hidden="true">'+escapeHtml(icon)+'</span>'
+  return '<div class="jw210-metric"><span class="jw210-metric-icon" aria-hidden="true">'+pictogram(icon)+'</span>'
    +'<span class="jw210-metric-copy"><span class="jw210-metric-label">'+escapeHtml(label)+'</span>'
    +'<strong class="jw210-metric-val'+(company?' company':'')+'">'+escapeHtml(value)+'</strong>'
    +(small?'<span class="jw210-metric-help">'+escapeHtml(small)+'</span>':'')+'</span></div>';

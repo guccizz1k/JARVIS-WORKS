@@ -318,3 +318,77 @@ html[data-jw206-theme=light] #app-shell:not(.hidden) .jw210-utils .jw210-search:
 @media(prefers-reduced-motion:reduce){
  .jw210-rail,.jw210-rail-panel,.jw210-rail-item span:last-child{transition:none!important}
 }
+
+
+/* V21.0 reference fidelity corrections, verified against Chromium captures.
+   Keep all navigation events and business values sourced from original app. */
+#app-shell:not(.hidden) .jw210-nav-ico svg{
+ display:block;width:26px;height:26px;stroke:currentColor;fill:none;
+ filter:drop-shadow(0 0 3px rgba(234,243,255,.2));
+}
+#app-shell:not(.hidden) .jw210-rail-item span:first-child svg{
+ display:block;width:25px;height:25px;stroke:currentColor;
+}
+#app-shell:not(.hidden) .jw210-metric-icon svg{
+ display:block;width:29px;height:29px;stroke:currentColor;fill:none;
+}
+#app-shell:not(.hidden) .jw210-hero-title{
+ top:16%!important;left:max(9.8%,calc((100vw - 1460px)/2 + 135px))!important;
+}
+#app-shell:not(.hidden) .jw210-hero-title h1{font-size:clamp(28px,2.6vw,40px)!important}
+#app-shell:not(.hidden) .jw210-nav-btn[data-jw210-home-primary=true]{
+ border:1px solid rgba(255,255,255,.77);
+ background:linear-gradient(115deg,rgba(255,255,255,.28),rgba(255,255,255,.055) 80%);
+ box-shadow:0 0 14px rgba(228,242,255,.72),inset 0 0 19px rgba(241,247,255,.18);
+}
+#app-shell:not(.hidden) .jw210-infinity-photo{
+ mix-blend-mode:screen;
+ -webkit-mask-image:radial-gradient(ellipse 67% 66% at 53% 52%,#000 36%,rgba(0,0,0,.95) 58%,transparent 96%);
+ mask-image:radial-gradient(ellipse 67% 66% at 53% 52%,#000 36%,rgba(0,0,0,.95) 58%,transparent 96%);
+}
+#app-shell:not(.hidden) .jw210-rail-item{
+ min-height:52px!important;align-items:center!important;justify-content:flex-start!important;
+}
+#app-shell:not(.hidden) .jw210-nav-btn{align-items:center!important}
+#app-shell:not(.hidden) .jw210-nav-ico{display:flex!important;align-items:center!important;justify-content:center!important}
+#app-shell:not(.hidden) .jw210-utils .jw206-theme-switch{
+ min-width:82px!important;max-width:90px!important;align-items:center!important;justify-content:center!important;
+}
+#app-shell:not(.hidden) .jw210-utils .jw206-theme-switch button{
+ width:34px!important;min-width:34px!important;max-width:34px!important;overflow:hidden!important;
+ font-size:0!important;letter-spacing:0!important;display:inline-flex!important;
+ align-items:center!important;justify-content:center!important;
+}
+#app-shell:not(.hidden) .jw210-utils .jw206-theme-switch button span{
+ font-size:20px!important;line-height:1!important;
+}
+@media(max-width:1250px){
+ #app-shell:not(.hidden) .jw210-hero-title{left:9.5%!important;top:12%!important}
+}
+@media(max-width:850px){
+ #app-shell:not(.hidden) .jw210-hero-title{left:9.5%!important;top:6%!important}
+}
+@media(max-width:570px){
+ /* Mobile has no hover: expose the 22px disclosure handle only until tapped.
+    A persistent 77px icon strip would obscure the hero text and statistics. */
+ #app-shell:not(.hidden) .jw210-rail{left:-55px!important;width:77px!important;
+   top:210px!important;height:min(400px,calc(100dvh - 245px))!important;}
+ #app-shell:not(.hidden) .jw210-rail-panel{width:77px!important;}
+ #app-shell:not(.hidden) .jw210-rail[data-open=true],
+ #app-shell:not(.hidden) .jw210-rail:focus-within{left:0!important;width:204px!important}
+ #app-shell:not(.hidden) .jw210-rail[data-open=true] .jw210-rail-panel,
+ #app-shell:not(.hidden) .jw210-rail:focus-within .jw210-rail-panel{width:204px!important}
+ #app-shell:not(.hidden) .jw210-hero-title{
+   left:9%!important;top:5%!important;width:86%!important;
+   max-width:none!important;padding-left:15px!important
+ }
+ #app-shell:not(.hidden) .jw210-hero-title h1{font-size:25px!important}
+ #app-shell:not(.hidden) .jw210-infinity-stage{top:34%!important;
+   width:100vw!important;left:50%!important;}
+ #app-shell:not(.hidden) .jw210-infinity-photo{
+   -webkit-mask-image:radial-gradient(ellipse 66% 75% at 53% 51%,#000 37%,transparent 98%);
+   mask-image:radial-gradient(ellipse 66% 75% at 53% 51%,#000 37%,transparent 98%);
+ }
+ #app-shell:not(.hidden) .jw210-metrics{bottom:22px!important}
+ #app-shell:not(.hidden) .jw210-metric{padding:7px!important}
+}
