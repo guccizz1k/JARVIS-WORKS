@@ -229,3 +229,15 @@ body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw
   justify-self:start!important;align-self:auto!important;
  }
 }
+
+/* Fix hidden left clipping after increasing the content to the full viewport width.
+   Explicitly position the centered content in viewport coordinates, never with
+   inherited auto flex margins from the deprecated right rail. */
+.app-shell:not(.hidden) #main-content{
+ align-self:flex-start!important;
+ margin-left:0!important;margin-right:0!important;
+ position:relative!important;left:max(32px,calc((100vw - 1360px)/2))!important;
+}
+@media(max-width:780px){
+ .app-shell:not(.hidden) #main-content{left:17px!important}
+}
