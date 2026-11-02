@@ -99,10 +99,14 @@ def run():
             if width>=1024:
                 rail=page.locator(".jw210-rail")
                 assert rail.get_attribute("data-open")=="false"
+                assert 70 <= rail.locator(".jw210-rail-panel").bounding_box()["width"] <= 85
+                icon=rail.locator(".jw210-rail-item span:first-child").first.bounding_box()
+                assert icon["x"] >= 8 and icon["x"]+icon["width"] <= 77,icon
                 rail.hover(position={"x":7,"y":75})
                 page.wait_for_function("""()=>document.querySelector('.jw210-rail').dataset.open==='true'""")
                 page.wait_for_function("""()=>document.querySelector(".jw210-rail-panel").getBoundingClientRect().x >= -1""",timeout=4000)
                 assert page.locator(".jw210-rail-panel").bounding_box()["x"]>=-1
+                page.wait_for_function("""()=>document.querySelector(".jw210-rail-panel").getBoundingClientRect().width >= 201""",timeout=4000)
                 page.mouse.move(width-5,500)
                 page.wait_for_function("""()=>document.querySelector('.jw210-rail').dataset.open==='false'""")
             # Keyboard and touch operation, without requiring hover.

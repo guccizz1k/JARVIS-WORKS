@@ -39,7 +39,8 @@
  search.autocomplete="off";search.setAttribute("aria-label","업무 메뉴 검색");
  const results=el("div","jw210-search-results");results.hidden=true;results.setAttribute("role","group");results.setAttribute("aria-label","업무 메뉴 검색 결과");
  searchBox.append(searchIcon,search,results);
- const alert=el("button","jw210-icon-btn","♧");alert.type="button";alert.setAttribute("aria-label","확인할 업무 열기");
+ const alert=el("button","jw210-icon-btn");alert.type="button";alert.setAttribute("aria-label","확인할 업무 열기");
+ alert.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>';
  alert.title="확인할 업무";alert.addEventListener("click",()=>go("automation"));
  const help=el("button","jw210-icon-btn","?");help.type="button";help.setAttribute("aria-expanded","false");help.setAttribute("aria-label","도움말 열기");
  const theme=top.querySelector(".jw206-theme-switch");
@@ -74,8 +75,8 @@
   railToggle.setAttribute("aria-label",on?"빠른 메뉴 접기":"빠른 메뉴 펼치기");
  }
  railToggle.addEventListener("click",()=>setRailOpen(rail.dataset.open!=="true"));
- rail.addEventListener("pointerenter",e=>{if(e.pointerType==="mouse")rail.dataset.open="true"});
- rail.addEventListener("pointerleave",e=>{if(e.pointerType==="mouse"&&!pinned)rail.dataset.open="false"});
+ rail.addEventListener("pointerenter",e=>{if(e.pointerType==="mouse"){rail.dataset.open="true";railToggle.setAttribute("aria-expanded","true")}});
+ rail.addEventListener("pointerleave",e=>{if(e.pointerType==="mouse"&&!pinned){rail.dataset.open="false";railToggle.setAttribute("aria-expanded","false")}});
  rail.addEventListener("keydown",e=>{if(e.key==="Escape"){setRailOpen(false);railToggle.focus()}});
  rail.addEventListener("focusout",e=>{if(!rail.contains(e.relatedTarget)&&!pinned)rail.dataset.open="false"});
  // The AI button is an accessible launcher to approved existing workflows; no claim

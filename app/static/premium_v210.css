@@ -288,3 +288,33 @@ html[data-jw206-theme=light] #app-shell:not(.hidden) .jw210-utils .jw210-search:
 @media(prefers-reduced-motion:reduce){
  .jw210-orbit-overlay{display:none!important}
 }
+
+
+/* Reference refinement: 3D infinity artwork stays clear of left introduction. */
+@media(min-width:1251px){
+ .jw210-infinity-stage{left:59%!important;width:min(61vw,880px)!important}
+ .jw210-hero-title{width:330px!important}
+}
+@media(min-width:851px) and (max-width:1250px){
+ .jw210-infinity-stage{left:62%!important;width:min(65vw,800px)!important}
+ .jw210-hero-title{width:275px!important}
+}
+/* Fixed 76px collapsed icon rail: hover/focus expands to full text menu. */
+.jw210-rail{width:77px!important;transition:width .22s ease}
+.jw210-rail-panel{width:77px!important;transform:none!important;overflow:hidden!important;
+ padding:24px 8px 15px 11px!important;transition:width .22s cubic-bezier(.2,.7,.3,1)!important}
+.jw210-rail-item{min-width:181px!important;gap:14px!important}
+.jw210-rail-item span:last-child{opacity:0;transition:opacity .12s ease}
+.jw210-rail[data-open=true],.jw210-rail:hover,.jw210-rail:focus-within{width:204px!important}
+.jw210-rail[data-open=true] .jw210-rail-panel,
+.jw210-rail:hover .jw210-rail-panel,
+.jw210-rail:focus-within .jw210-rail-panel{width:204px!important}
+.jw210-rail[data-open=true] .jw210-rail-item span:last-child,
+.jw210-rail:hover .jw210-rail-item span:last-child,
+.jw210-rail:focus-within .jw210-rail-item span:last-child{opacity:1}
+.jw210-rail-toggle{right:-8px!important}
+.jw210-icon-btn svg{display:block;width:22px;height:22px;stroke:currentColor;fill:none;
+ stroke-width:1.9;stroke-linejoin:round;stroke-linecap:round}
+@media(prefers-reduced-motion:reduce){
+ .jw210-rail,.jw210-rail-panel,.jw210-rail-item span:last-child{transition:none!important}
+}
