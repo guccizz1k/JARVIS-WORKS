@@ -38,7 +38,7 @@ jobs:
           from pathlib import Path
           base='5a90cc6b67ef5c3799ebdeabd6961634aa4bb3b8'
           files=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
-          allowed={'app/static/app.js','app/static/index.html',
+          allowed={'app/static/app.js','app/static/index.html','app/static/premium_v211.js',
             'app/static/premium_v212.js','app/static/premium_v212.css',
             'app/static/premium_v213.js','app/static/premium_v213.css',
             'scripts/ci_v213_real_auth_ui_browser.py',
@@ -47,12 +47,29 @@ jobs:
           origin=subprocess.check_output(['git','show',base+':app/static/app.js'],text=True)
           updated=Path('app/static/app.js').read_text()
           assert origin.count("showApp();await navigate('imports')")==2
-          assert updated==origin.replace("showApp();await navigate('imports')",
+          expected=origin.replace("showApp();await navigate('imports')",
             "showApp();await navigate('dashboard')")
+          expected=expected.replace("async function navigate(page){try{",
+            "async function navigate(page){const priorPage=state.page;try{")
+          expected=expected.replace(
+            "}catch(err){window.JW_UI_MOTION?.navigationFailed();toast(err.message,true)}}",
+            "}catch(err){state.page=priorPage;window.JW_UI_MOTION?.navigationFailed();toast(err.message,true)}}")
+          old_logout="$('#logout').addEventListener('click',async()=>{try{await api('/logout','POST',{})}catch{}state.csrf='';state.user=null;showLogin()});"
+          new_logout="""$('#logout').addEventListener('click',async()=>{
+ const control=$('#logout');if(control.disabled)return;control.disabled=true;
+ try{await api('/logout','POST',{});state.csrf='';state.user=null;showLogin()}
+ catch(err){toast('로그아웃을 서버에서 확인하지 못했습니다. 다시 시도해 주세요: '+err.message,true)}
+ finally{control.disabled=false}
+});"""
+          assert expected.count(old_logout)==1
+          assert updated==expected.replace(old_logout,new_logout)
+          assert 'state.page=priorPage' in updated
           html=Path('app/static/index.html').read_text()
           assert html.index('premium_v212.css')<html.index('premium_v213.css')
           assert html.index('premium_v212.js')<html.index('premium_v213.js')
           assert 'name="otp"' in html and 'name="recovery_code"' in html
+          legacy=Path('app/static/premium_v211.js').read_text()
+          assert 'root.parentElement?.classList.contains("jw212-ready")' in legacy
           code=Path('app/static/premium_v212.js').read_text()
           assert 'jw212-ready' in code and 'destroy(){this.stop();ro?.disconnect()' in code
           assert 'if(shouldPlay)m.fx.start();else m.fx.stop()' in code
