@@ -248,3 +248,8 @@ body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw
   left:calc(max(32px,(100vw - 1360px)/2) - 28px)!important;
  }
 }
+
+/* Equivalent dimensionally valid expression: 28px parent origin + position offset. */
+@media(min-width:781px){
+ .app-shell:not(.hidden) #main-content{left:max(4px,calc(50vw - 708px))!important}
+}
