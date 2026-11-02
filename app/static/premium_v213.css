@@ -18,3 +18,15 @@
    content:"⎋";font-size:23px;line-height:1;
  }
 }
+
+/* Original admin/customer/audit modules remain available without cluttering
+   the seven primary top-level destinations. Rail scrolls on small screens. */
+#app-shell:not(.hidden) .jw210-rail-panel{
+  overflow-x:hidden!important;overflow-y:auto!important;
+  overscroll-behavior:contain;scrollbar-width:thin;
+  scrollbar-color:rgba(210,225,255,.30) transparent;
+}
+#app-shell:not(.hidden) .jw213-additional-link{
+  flex:0 0 auto;min-height:48px!important;font-size:14px!important;
+}
+#app-shell:not(.hidden) .jw213-additional-link[hidden]{display:none!important}
