@@ -1,0 +1,77 @@
+name: JW V21.4 PC-only dark-only UI and real auth browser acceptance
+on:
+  push:
+    branches:
+      - review/v214-desktop-dark-only-20261102
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v214-desktop-dark
+  cancel-in-progress: true
+jobs:
+  desktop-auth-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate 1 and 3 - exact scope and original runtime guard
+        run: |
+          set -euo pipefail
+          node --check app/static/app.js
+          node --check app/static/premium_v214.js
+          python -m py_compile scripts/ci_v214_desktop_dark_browser.py
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base='56453d680eb5db59f071adc938cc452471706b2e'
+          updated=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          expected={'app/static/app.js','app/static/index.html',
+            'app/static/premium_v214.js','app/static/premium_v214.css',
+            'scripts/ci_v214_desktop_dark_browser.py',
+            '.github/workflows/jw-v214-desktop-dark-ui.yml'}
+          assert updated==expected,(updated,expected)
+          previous=subprocess.check_output(['git','show',base+':app/static/app.js'],text=True)
+          current=Path('app/static/app.js').read_text()
+          hook=';window.JW_DESKTOP_V214?.onAuthenticated?.()'
+          assert current.count(hook)==1
+          assert current.replace(hook,'')==previous
+          html=Path('app/static/index.html').read_text()
+          assert html.index('premium_v213.css')<html.index('premium_v214.css')
+          assert html.index('premium_v213.js')<html.index('premium_v214.js')
+          assert '<meta name="color-scheme" content="dark">' in html
+          for name in ('email','password','otp','recovery_code'):
+            assert 'name="'+name+'"' in html
+          js=Path('app/static/premium_v214.js').read_text()
+          assert 'onAuthenticated' in js and 'jw214-upload-grid' in js
+          assert "setTheme('dark')" in js
+          for prohibited in ('fetch(', 'XMLHttpRequest', 'eval(', 'innerHTML', 'document.cookie'):
+            assert prohibited not in js,prohibited
+          guard=Path('app/deployment_safety_v78.py').read_text()
+          assert 'PRODUCTION_BLOCKED' in guard
+          print('PASS: exact UI scope, no backend/DB changes, production guard intact')
+          PY
+      - name: Install isolated real-server Chromium dependencies
+        run: |
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate 2/3/4/5 - real FastAPI, dark-only PC workflow and login portal
+        run: python -m scripts.ci_v214_desktop_dark_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v214-real-desktop-evidence
+          path: artifacts/v214-desktop/
+          retention-days: 7
+          if-no-files-found: ignore
