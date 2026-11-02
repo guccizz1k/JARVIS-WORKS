@@ -1,0 +1,164 @@
+name: JW V21.6 independent proof, whole-suite and laptop browser regression
+on:
+  push:
+    branches:
+      - review/v216-independent-proof-coverage-20261102
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: jw-v216-independent-review
+  cancel-in-progress: true
+jobs:
+  ui-j3:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate 1/3 - preserve backend and exact change scope
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/jw_j3_origin_gate.py scripts/ci_v216_j3_provenance_tests.py scripts/ci_v216_browser_edges.py
+          node --check app/static/app.js
+          node --check app/static/premium_v214.js
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          base="b26b624f41127f0e1ba906a2a5ba5e11c2430cc2"
+          got=set(subprocess.check_output(["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
+          expected={"app/static/premium_v214.css","app/evidence_v64_worker.py","scripts/jw_j3_origin_gate.py",
+                    "scripts/ci_v216_j3_provenance_tests.py","scripts/ci_v216_browser_edges.py",
+                    ".github/workflows/jw-v216-independent-proof.yml"}
+          assert got==expected,(got,expected)
+          assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
+          print("PASS: scoped review UI, J3 and one-line worker import fix; auth/DB unchanged")
+          PY
+      - name: Gate 3 - original J3 adversarial tests
+        run: python -m scripts.ci_v215_j3_origin_tests
+      - name: Gate 3 - V21.6 J3 origin plus CLI adversarial tests
+        run: python -m scripts.ci_v216_j3_provenance_tests
+      - name: Gate 3 - real live GitHub CLI provenance verification (not product PASS)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python -m scripts.jw_j3_origin_gate \
+            --verify-run "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/41432122556" \
+            --source b26b624f41127f0e1ba906a2a5ba5e11c2430cc2 \
+            --baseline 7289aeb7d670dbd41161a371bcfb861c9ddbe1cb \
+            --workflow-path .github/workflows/jw-v215-ui-j3-regression.yml
+      - name: Install real FastAPI/Chromium tools
+        run: |
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate 2/3/4 - V21.4 actual authenticated business regression
+        run: python -m scripts.ci_v214_desktop_dark_browser
+      - name: Gate 2/4 - V21.5 approved login regression
+        run: python -m scripts.ci_v215_login_viewport_browser
+      - name: Gate 2/4 - V21.6 laptop window heights, MFA and real login
+        run: python -m scripts.ci_v216_browser_edges
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v216-browser-proof
+          path: |
+            artifacts/v214-desktop/
+            artifacts/v215-login/
+            artifacts/v216-browser/
+          retention-days: 7
+          if-no-files-found: ignore
+  whole-pytest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install complete Korean OCR/PDF test environment (review-only)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
+          test -s /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+          tesseract --list-langs 2>&1 | grep -q '^kor$'
+          python - <<'PY'
+          import reportlab, fitz
+          from PIL import ImageFont
+          ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", 46)
+          print("PASS: PDF and Korean OCR fixtures")
+          PY
+      - name: Reconstruct pinned V7.9 historical overlay outside checkout
+        run: |
+          python -m scripts.ci_rebuild_v79_overlay
+          test -s ../overlay/BASE_SHA256.json
+          test -s ../overlay/PAYLOAD_SHA256.json
+      - name: Diagnose synthetic OCR/PDF child-process JSON framing
+        run: |
+          python - <<'PY'
+          import sys,os,subprocess,base64,json,io
+          import fitz
+          from PIL import Image,ImageDraw
+          cases=[]
+          doc=fitz.open()
+          page=doc.new_page()
+          page.insert_text((30,70),"RECEIPT 2026-10-21 11000 DOCUMENT REFERENCE S-2026-1001")
+          cases.append(("text.pdf",doc.tobytes()))
+          doc.close()
+          img=Image.new("RGB",(700,300),"white")
+          ImageDraw.Draw(img).text((10,20),"RECEIPT TEST",fill="black")
+          out=io.BytesIO();img.save(out,format="PNG")
+          cases.append(("synthetic.png",out.getvalue()))
+          for name,raw in cases:
+              obj={"filename":name,"base64":base64.b64encode(raw).decode("ascii")}
+              result=subprocess.run([sys.executable,"-m","app.evidence_v64_worker"],
+                  input=json.dumps(obj).encode(),capture_output=True,timeout=40)
+              print("DIAG",name,"code",result.returncode,"stdout_len",len(result.stdout),
+                    "stdout_prefix",repr(result.stdout[:350]),
+                    "stderr_prefix",repr(result.stderr[:180]))
+              assert result.returncode==0, (name,result.returncode)
+              assert result.stdout.startswith(b'{'), (name,repr(result.stdout[:160]))
+              payload=json.loads(result.stdout)
+              assert 'result' in payload and 'error' not in payload, (name,payload.get('error'))
+          PY
+      - name: Gate 2/3 - rerun previous 14 failed test families
+        run: |
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v216-targeted tests/test_installer_v79.py tests/test_evidence_v64.py tests/test_import_supplement.py tests/test_quote_import.py tests/test_smart_import.py tests/test_v172_document_adversarial.py
+      - name: Gate 1/2/3/5 - run every collected pytest, no omissions
+        run: |
+          mkdir -p artifacts/v216/
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v216-pytest \
+            --junitxml=artifacts/v216/pytest-full.xml
+      - name: Gate 3 - no skipped/xfailed tests disguised as ALL PASS
+        run: |
+          python - <<'PY'
+          from xml.etree import ElementTree
+          root=ElementTree.parse("artifacts/v216/pytest-full.xml").getroot()
+          suites=[root] if root.tag=="testsuite" else root.findall(".//testsuite")
+          skipped=sum(int(x.get("skipped",0)) for x in suites if x.get("tests") is not None)
+          print("Full pytest skipped count:",skipped)
+          assert skipped==0,"BLOCKED: skipped tests cannot count as ALL PASS"
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v216-full-pytest-evidence
+          path: artifacts/v216/pytest-full.xml
+          retention-days: 7
+          if-no-files-found: ignore

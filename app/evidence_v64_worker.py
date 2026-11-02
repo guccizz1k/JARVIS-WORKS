@@ -186,7 +186,7 @@ def xlsx_line_suggestions(raw):
  finally:wb.close()
 
 def parse_pdf(raw):
- import fitz
+ import pymupdf as fitz  # Import the supported module without printing a stdout warning.
  try:
   doc=fitz.open(stream=raw,filetype='pdf')
   try:
