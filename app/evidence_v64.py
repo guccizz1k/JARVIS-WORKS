@@ -196,8 +196,11 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
     fail('24시간 검토 기한 만료. 새로 업로드하세요',409)
    if not hmac.compare_digest(row['digest'],body.preview_digest):fail('문서가 변경되었습니다. 다시 확인하세요',409)
    doc=unseal_json(row['proposed_json'])
-   # Never allow a manual confirmation to rebrand a confidently recognized source.
-   if doc['document_kind'] and doc['kind_inference']=='explicit' and doc['document_kind']!=body.document_kind:
+   # An unsupported OCR document must not be rebranded as a receipt
+   # by manually entering financial fields. Keep the preview pending.
+   if doc.get('document_kind') is None or doc.get('kind_inference') in ('ambiguous','unknown','unsupported'):
+    fail('원본의 증빙 문서 유형을 판별하지 못했습니다. 다른 유형으로 등록할 수 없습니다',409)
+   if doc['document_kind']!=body.document_kind:
     fail('원본문서 유형이 다릅니다. 잘못된 파일을 등록하지 마세요',409)
    if body.document_kind=='inventory_sheet' and body.record_type!='inventory_snapshot':fail('재고표는 재고 실사 기록으로만 등록합니다',422)
    if body.document_kind=='sales_slip' and body.record_type!='sales':fail('매출전표 유형 불일치',422)

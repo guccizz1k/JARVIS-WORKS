@@ -1,0 +1,161 @@
+name: JW V21.8 OCR evidence type integrity + full QA + isolated PostgreSQL
+on:
+  push:
+    branches:
+      - review/v218-ocr-unsupported-document-guard-20261103
+permissions:
+  contents: read
+concurrency:
+  group: jw-v218-ocr-integrity
+  cancel-in-progress: true
+jobs:
+  full-test-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Source scope and source-level security guard
+        run: |
+          set -euo pipefail
+          python -m py_compile app/evidence_v64.py app/evidence_v64_worker.py tests/test_v218_document_type_integrity.py scripts/ci_v218_unsupported_ui_browser.py
+          node --check app/static/evidence_v64.js
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          baseline="ade452897e36c4ea12ba8cdd7710e3b16aa3948f"
+          changed=set(subprocess.check_output(["git","diff","--name-only",baseline,"HEAD"],text=True).splitlines())
+          expected={
+            "app/evidence_v64.py","app/static/evidence_v64.js",
+            "tests/test_v218_document_type_integrity.py",
+            "scripts/ci_v218_unsupported_ui_browser.py",
+            ".github/workflows/jw-v218-evidence-type-integrity.yml"}
+          assert changed==expected,(changed,expected)
+          assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
+          print("PASS: only guarded document type, its UI, and synthetic QA changed")
+          PY
+      - name: Install original OCR and full pytest requirements
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
+      - name: Rebuild SHA-pinned historical overlay
+        run: |
+          python -m scripts.ci_rebuild_v79_overlay
+          test -s ../overlay/BASE_SHA256.json
+          test -s ../overlay/PAYLOAD_SHA256.json
+      - name: Gate 2/3 - specific unsupported evidence cases + source compatibility
+        run: |
+          python -m pytest tests/test_v218_document_type_integrity.py tests/test_evidence_v64.py tests/test_evidence_quality_v70.py -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v218-target
+      - name: Gate 1/2/3 - complete repository regression, no skip, no fail
+        run: |
+          mkdir -p artifacts/v218/
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v218-full --junitxml=artifacts/v218/pytest-full.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse("artifacts/v218/pytest-full.xml").getroot()
+          attrs=root.attrib if root.tag=="testsuite" else root.find(".//testsuite").attrib
+          nums={k:int(attrs.get(k,0)) for k in ("tests","failures","errors","skipped")}
+          assert nums["tests"]>=1935,nums
+          assert nums["failures"]==0 and nums["errors"]==0 and nums["skipped"]==0,nums
+          print("PASS_V218_FULL_REGRESSION",nums)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v218-full-regression
+          path: artifacts/v218/pytest-full.xml
+          retention-days: 7
+          if-no-files-found: ignore
+  browser-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser + synthetic OCR environment
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2'
+          python -m playwright install --with-deps chromium
+      - name: Existing browser login and 40 real business-route regression
+        run: python -m scripts.ci_v214_desktop_dark_browser
+      - name: Existing 10 laptop viewport login regression
+        run: python -m scripts.ci_v216_browser_edges
+      - name: Existing 3 photo OCR upload and manual approval regression
+        run: python -m scripts.ci_v217_ocr_browser
+      - name: New 3 authenticated browsers reject unsupported document relabeling
+        run: python -m scripts.ci_v218_unsupported_ui_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v218-browser-proofs
+          path: |
+            artifacts/v214-desktop/
+            artifacts/v216-browser/
+            artifacts/v217-browser/
+            artifacts/v218-browser/
+          retention-days: 7
+          if-no-files-found: ignore
+  isolated-pg-tls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 13
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned PG/TLS test requirements
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Enforce disposable PG17 origin and compile real code
+        run: |
+          python -m py_compile scripts/ci_v188_real_tls_pg_load.py scripts/ci_v184_actual_https_pg_order.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v188_real_tls_pg_load.py").read_text()
+          for v in ("ONLY_EPHEMERAL_LOCAL_DATABASE","disposable_root_check()","N_READS_PER_ACTOR=24","N_CONCURRENT_REPLAYS=16","verify=str(cert)","trust_env=False"):
+            assert v in s,v
+          assert "TestClient(" not in s
+          print("PASS_ISOLATED_TLS_POSTGRES_GUARD")
+          PY
+      - name: Gate 2/3/5 isolated restricted PG17 HTTPS login approval isolation and load
+        run: python -m scripts.ci_v188_real_tls_pg_load
