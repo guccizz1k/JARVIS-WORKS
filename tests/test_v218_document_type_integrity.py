@@ -61,6 +61,7 @@ def test_extract_retains_unknown_source_without_guessed_record_type(source,expec
 
 
 def test_recognized_receipt_can_still_be_reviewed_and_confirmed(api):
+    prior=api.get("/dashboard").json()["invoices"]
     p=stage(api,"supported.xlsx",xlsx()).json()
     assert p["document"]["document_kind"]=="receipt"
     assert approve(api,p).status_code==201
