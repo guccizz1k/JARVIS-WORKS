@@ -33,7 +33,7 @@ jobs:
           original='bc4029e231765c24669757aad3ece774b40c6f16'
           changed=set(subprocess.check_output(['git','diff','--name-only',original,'HEAD'],text=True).splitlines())
           allowed={'app/static/index.html','app/static/premium_v210.css',
-                   'app/static/premium_v210.js','app/static/jw210_infinity.svg',
+                   'app/static/premium_v210.js','app/static/jw210_infinity.svg','app/static/jw210_orbit_dark.webp',
                    'scripts/ci_v210_reference_browser.py','.github/workflows/jw-v210-infinity-ui.yml'}
           assert changed==allowed,(changed-allowed,allowed-changed)
           assert not any(p.startswith(("db/","migrations/")) or p.startswith("app/") and not p.startswith("app/static/") for p in changed)
