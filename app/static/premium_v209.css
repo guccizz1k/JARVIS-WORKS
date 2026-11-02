@@ -186,3 +186,19 @@ body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw
  .app-shell:not(.hidden) .main-content.jw-v203-entering{animation:none!important}
  .jw209-top-nav *,.jw206-dashboard *{animation:none!important;transition:none!important}
 }
+
+/* Visual regression fix: the previous right rail reserved dead space at desktop widths.
+   Force the full-width main flex item after the hidden rail has been removed. */
+.app-shell:not(.hidden) .main-area{flex:1 1 100vw!important;width:100vw!important}
+.app-shell:not(.hidden) #main-content{flex:0 0 auto!important;align-self:center!important;
+ width:min(1360px,calc(100% - 64px))!important;max-width:1360px!important;
+ margin-left:auto!important;margin-right:auto!important}
+.jw206-dashboard{width:100%!important;max-width:none!important}
+@media(max-width:780px){
+ .app-shell:not(.hidden) #main-content{width:calc(100% - 34px)!important}
+}
+@media(max-width:480px){
+ .app-shell .topbar .v204-global-brand{
+  transform:none!important;left:16px!important;top:16px!important;right:auto!important
+ }
+}
