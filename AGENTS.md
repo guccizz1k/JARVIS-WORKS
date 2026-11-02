@@ -12,3 +12,6 @@
 
 **Live release remains BLOCKED** until actual authorized Supabase PostgreSQL + verified TLS + full HTTPS product E2E + tested restore/cutover satisfy existing controls.
 8. Read `docs/product/JW_CUSTOMER_FIRST_NORTH_STAR_20261030.md` as the approved product direction and ordered acceptance backlog. Features in it are targets, not completed work; preserve all existing security, budget and release gates.
+
+## V20.8 external skills, advisory only
+Before work consult `docs/agents/JW_V208_FOUR_SKILLS.md` and the pinned `.agents/skills/security-audit`, `.agents/skills/ponytail`, `.agents/skills/change-impact`, and `.agents/skills/impeccable` texts as appropriate. J1–J6 remains authoritative. No third-party installer, automatic hook, downloaded engine, network request, UI implementation, database change, privileged action or release is authorized merely by loading a skill. Recorded read-only skill source acceptance is not equivalent to independent live agent evaluation.

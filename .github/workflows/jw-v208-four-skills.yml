@@ -1,0 +1,54 @@
+name: JW V20.8 four source-pinned advisory skills - review
+on:
+  push:
+    branches:
+      - review/v208-four-advisory-skills-20261102
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v208-four-advisory-skills
+  cancel-in-progress: true
+jobs:
+  four-pins-and-offline-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      JW_ENV: review
+      NO_EXTERNAL_INSTALLER: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate 1-3 original source integrity, scope and 30+ adversarial cases
+        run: |
+          python -m py_compile scripts/ci_v208_four_skills.py tests/test_v208_four_skills.py
+          python -m unittest discover -s tests -p 'test_v208_four_skills.py' -v
+          python scripts/ci_v208_four_skills.py --repo .
+      - name: Gate 3 execute original Cloudflare offline validator tests
+        run: |
+          node --test .agents/skills/security-audit/validate-findings.test.cjs .agents/skills/security-audit/validate-coverage-ledger.test.cjs
+      - name: Gate 4 original UX code unchanged with JS syntax check
+        run: |
+          node --check app/static/app.js
+          node --check app/static/premium_v206.js
+          node --check app/static/motion_v203.js
+          test -f .agents/skills/impeccable/reference/audit.md
+      - name: Gate 5 ensure no executable third-party installer
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          w=Path('.github/workflows/jw-v208-four-skills.yml').read_text().partition('      - name: Gate 5 ensure no executable third-party installer')[0]
+          assert w and 'Gate 4 original UX code' in w
+          for unsafe in ("pip install ", "npm install ", "npx impeccable install", "curl ", "wget "):
+              assert unsafe not in w,unsafe
+          assert not Path('.agents/skills/impeccable/scripts/impeccable').exists()
+          print("PASS: skill source-only review; no third-party auto-install")
+          PY
