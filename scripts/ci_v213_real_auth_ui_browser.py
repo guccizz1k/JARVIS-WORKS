@@ -146,6 +146,14 @@ def run():
                         for route in ROUTES:
                             navigate_real(page,route)
                             report["real_routes"]+=1
+                        # Failed network logout must NEVER pretend the server revoked
+                        # an authenticated cookie; original flawed path was silently swallowed.
+                        page.route("**/api/logout",lambda route:route.abort("failed"))
+                        page.locator(".jw213-logout").click()
+                        page.locator("#toast.error.visible").wait_for(timeout=10000)
+                        assert page.locator("#login-view").is_hidden()
+                        assert page.evaluate("state.user!==null")
+                        page.unroute("**/api/logout")
                         # Original backend logout POST, not a UI-only sign-out.
                         page.locator(".jw213-logout").click()
                         page.locator("#login-view").wait_for(state="visible")
@@ -171,9 +179,9 @@ def run():
                     # Missing Canvas context must retain the V21.1 accessible SVG,
                     # not leave a blank hero or crash authentication.
                     ctx=browser.new_context(viewport={"width":1024,"height":800})
-                    ctx.add_init_script("""() => {
+                    ctx.add_init_script("""(() => {
                        HTMLCanvasElement.prototype.getContext=function(){return null};
-                    }""")
+                    })();""")
                     page=ctx.new_page();errors=[]
                     page.on("pageerror",lambda e:errors.append(str(e)))
                     page.goto(url+"/")
