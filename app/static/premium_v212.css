@@ -1,0 +1,11 @@
+/* V21.2: exact user-provided procedural sculpture inside the EXISTING authenticated UI. */
+.jw211-login-infinity,.jw210-infinity-stage{isolation:isolate}
+.jw211-login-infinity>.jw212-sculpt,.jw210-infinity-stage>.jw212-sculpt{
+  position:absolute;inset:0;width:100%;height:100%;display:block;pointer-events:none;z-index:3;
+}
+.jw211-login-infinity:has(>.jw212-sculpt)>:not(.jw212-sculpt),
+.jw210-infinity-stage:has(>.jw212-sculpt)>:not(.jw212-sculpt){visibility:hidden!important}
+.jw212-sculpt .sculpture{width:100%;height:100%;display:block;position:relative;overflow:visible}
+.jw212-sculpt .scv{position:absolute;inset:0;width:100%;height:100%;display:block;overflow:visible}
+.jw212-sculpt .scv-c{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+@media(prefers-reduced-motion:reduce){.jw212-sculpt{animation:none!important;transition:none!important}}
