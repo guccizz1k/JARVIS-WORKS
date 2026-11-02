@@ -241,3 +241,10 @@ body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw
 @media(max-width:780px){
  .app-shell:not(.hidden) #main-content{left:17px!important}
 }
+
+/* Exact desktop coordinate correction: legacy main-area starts 28px to the right. */
+@media(min-width:781px){
+ .app-shell:not(.hidden) #main-content{
+  left:calc(max(32px,(100vw - 1360px)/2) - 28px)!important;
+ }
+}
