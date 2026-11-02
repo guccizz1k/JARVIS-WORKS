@@ -202,3 +202,18 @@ body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw
   transform:none!important;left:16px!important;top:16px!important;right:auto!important
  }
 }
+
+/* Final override: parent flex layout retained historical 224px right-rail space.
+   Use viewport geometry, not its legacy 80%-width container, for the UI-only shell. */
+.app-shell:not(.hidden) #main-content{
+ width:min(1360px,calc(100vw - 64px))!important;
+ min-width:min(1360px,calc(100vw - 64px))!important;
+ max-width:1360px!important;
+}
+@media(max-width:780px){
+ .app-shell:not(.hidden) #main-content{
+  width:calc(100vw - 34px)!important;
+  min-width:calc(100vw - 34px)!important;
+  max-width:calc(100vw - 34px)!important;
+ }
+}
