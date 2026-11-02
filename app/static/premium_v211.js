@@ -66,6 +66,24 @@
   hero.append(headline);
   login.prepend(header,hero);
   login.classList.add("jw211-login");
+  // Compact sign-in without weakening MFA: optional fields remain editable
+  // and keep the original input names required by the authentication handler.
+  const heading=oldLoginCard.querySelector("h1");
+  if(heading)heading.textContent="워크스페이스 로그인";
+  const intro=oldLoginCard.querySelector(":scope > p");
+  if(intro)intro.textContent="승인된 기업 계정으로 안전하게 로그인하세요.";
+  const form=oldLoginCard.querySelector("form");
+  if(form && !form.querySelector(".jw211-extra-auth")){
+    const authLabels=[...form.querySelectorAll("label")].filter(label=>
+      label.querySelector('input[name="otp"],input[name="recovery_code"]'));
+    const submit=form.querySelector('button[type="submit"]');
+    if(authLabels.length===2 && submit){
+      const details=make("details","jw211-extra-auth");
+      const summary=make("summary","","추가 인증 · MFA / 복구코드");
+      details.append(summary,...authLabels);
+      form.insertBefore(details,submit);
+    }
+  }
   const loginWatch=new MutationObserver(()=>{
     const theme=document.documentElement.getAttribute("data-jw206-theme");
     for(const b of mode.querySelectorAll("button"))b.setAttribute("aria-pressed",String(b.dataset.jw211Theme===theme));

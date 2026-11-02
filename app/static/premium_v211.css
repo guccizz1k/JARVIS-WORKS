@@ -141,3 +141,24 @@ html[data-jw206-theme=light] #login-view.jw211-login .login-card .demo-actions b
 /* Authentication isolation: the signed-in application must never expose
    the decorative login page over the authenticated work surface. */
 #login-view.jw211-login.hidden{display:none!important}
+
+
+/* Final reference alignment: trim a stray letter captured on the cropped art,
+   and make optional MFA discoverable without occupying the first screen. */
+#login-view.jw211-login .jw211-login-infinity-image{clip-path:inset(0 0 0 5.5%)}
+#login-view.jw211-login .login-card .jw211-extra-auth{
+ display:block;border:1px solid rgba(232,244,255,.28);border-radius:12px;
+ background:rgba(128,155,196,.075);margin:12px 0 15px;
+ color:var(--jw211-text);overflow:clip;
+}
+#login-view.jw211-login .jw211-extra-auth summary{list-style:revert;cursor:pointer;
+ padding:11px 16px;font-size:13px;line-height:1.45;font-weight:700;min-height:42px;
+ color:var(--jw211-text)}
+#login-view.jw211-login .jw211-extra-auth summary:focus-visible{
+ outline:2px solid currentColor;outline-offset:-3px}
+#login-view.jw211-login .jw211-extra-auth[open]{padding-bottom:12px}
+#login-view.jw211-login .jw211-extra-auth[open] label{
+ display:block;padding:4px 14px;margin:8px 0!important}
+#login-view.jw211-login .login-card h1{font-size:22px!important;line-height:1.25!important}
+html[data-jw206-theme=light] #login-view.jw211-login .jw211-extra-auth{
+ background:rgba(230,239,249,.7);border-color:rgba(44,61,85,.22)}

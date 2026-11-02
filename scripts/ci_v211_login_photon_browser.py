@@ -22,6 +22,13 @@ def fresh_login(page,url):
     assert page.locator(".jw211-login-hero .jw210-orbit-overlay").count()==0
     assert page.locator('input[name="password"]').get_attribute("type")=="password"
     assert page.locator('input[name="otp"]').get_attribute("pattern")=="[0-9]{6}"
+    assert page.locator(".jw211-extra-auth").count()==1
+    assert page.locator(".jw211-extra-auth").evaluate("(el)=>!el.open")
+    page.locator(".jw211-extra-auth summary").click()
+    assert page.locator('input[name="otp"]').is_visible()
+    assert page.locator('input[name="recovery_code"]').is_visible()
+    page.locator(".jw211-extra-auth summary").click()
+    assert page.locator(".jw211-extra-auth").evaluate("(el)=>!el.open")
     assert page.locator('input[name="recovery_code"]').get_attribute("type")=="password"
 def login_synthetic(page):
     page.evaluate("""async()=>{state.user={name:'실제 UI 검증',org_name:'검증 기업',
