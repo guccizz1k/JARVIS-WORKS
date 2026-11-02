@@ -181,3 +181,65 @@ html,body{background:#070b12!important}
  body:has(.jw214-desktop-notice) #app-shell,
  body:has(.jw214-desktop-notice) #login-view{visibility:hidden!important}
 }
+
+
+/* V21.5: keep the primary login action above the fold on 1366x768 and
+ * 1440x900 desktops, without hiding MFA, demo information, or the sculpture.
+ * Preserve the existing full-size composition on tall desktop displays. */
+@media (min-width:1100px) and (max-height:920px) {
+  #login-view.jw211-login{
+    padding-bottom:24px!important;
+  }
+  #login-view.jw211-login .jw211-login-header{
+    min-height:54px!important;padding:3px 0!important;
+  }
+  #login-view.jw211-login .jw211-login-hero{
+    width:min(780px,100%)!important;
+  }
+  #login-view.jw211-login .jw211-login-infinity{
+    width:min(460px,56dvh)!important;
+  }
+  #login-view.jw211-login .jw211-login-headline{
+    margin:-12px 0 8px!important;
+  }
+  #login-view.jw211-login .jw211-login-headline h2{
+    font-size:19px!important;margin-top:3px!important;
+  }
+  #login-view.jw211-login .login-card{
+    padding:16px 23px 19px!important;
+  }
+  #login-view.jw211-login .login-card h1{
+    font-size:20px!important;margin-bottom:4px!important;
+  }
+  #login-view.jw211-login .login-card>p{
+    margin:2px 0 6px!important;
+  }
+  #login-view.jw211-login .login-card form{
+    margin-top:8px!important;
+  }
+  #login-view.jw211-login .login-card form label{
+    margin-bottom:7px!important;
+  }
+  #login-view.jw211-login .login-card form :is(
+    input[type=email],input[type=password],input[type=text]){
+    min-height:40px!important;padding:7px 12px!important;margin-top:3px!important;
+  }
+  #login-view.jw211-login .login-card .jw211-extra-auth{
+    margin:7px 0!important;
+  }
+  #login-view.jw211-login .jw211-extra-auth summary{
+    min-height:36px!important;padding:7px 12px!important;
+  }
+  #login-view.jw211-login .login-card .btn.primary{
+    min-height:43px!important;
+  }
+}
+@media (min-width:1100px) and (max-height:790px) {
+  #login-view.jw211-login .jw211-login-header{min-height:49px!important}
+  #login-view.jw211-login .jw211-login-infinity{
+    width:min(400px,51dvh)!important;
+  }
+  #login-view.jw211-login .jw211-login-headline{
+    margin:-8px 0 5px!important;
+  }
+}
