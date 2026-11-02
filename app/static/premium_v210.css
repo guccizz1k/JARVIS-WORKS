@@ -244,3 +244,47 @@ html[data-jw206-theme=light] .jw210-ai-launch{background:linear-gradient(150deg,
  .jw210-rail-panel,.jw210-ai-launch,.jw210-nav-btn{transition:none!important}
  .jw210-infinity-stage{animation:none!important}
 }
+
+
+/* Reference image composite: no screenshot UI text is used. Only the approved
+   center artwork is rasterized; menus, states and tenant metrics remain native. */
+.jw210-infinity-stage{top:2%!important;left:55.5%!important;
+ width:min(67vw,975px)!important;height:auto!important;
+ aspect-ratio:800 / 460;max-height:none!important}
+.jw210-infinity-photo{display:block;width:100%;height:100%;
+ object-fit:contain;border:0;position:absolute;inset:0;
+ -webkit-mask-image:radial-gradient(ellipse 65% 70% at 51% 51%,#000 56%,transparent 100%);
+ mask-image:radial-gradient(ellipse 65% 70% at 51% 51%,#000 56%,transparent 100%);
+ filter:drop-shadow(0 0 12px rgba(237,246,255,.28))}
+.jw210-orbit-overlay{position:absolute;inset:0;display:block;width:100%;height:100%;
+ overflow:visible;pointer-events:none;filter:drop-shadow(0 0 12px rgba(230,240,255,.35))}
+html[data-jw206-theme=light] .jw210-infinity-photo{
+ filter:grayscale(1) invert(.93) contrast(1.23);opacity:.93}
+html[data-jw206-theme=light] .jw210-orbit-overlay{filter:grayscale(1) invert(.85)}
+/* Prevent legacy topbar theme-input rules from whitening the search field. */
+#app-shell:not(.hidden) .jw210-utils .jw210-search{
+ background:rgba(17,23,36,.72)!important;
+ color:#f6f8ff!important;
+ border:1px solid rgba(225,237,255,.3)!important;
+ box-shadow:inset 0 1px 9px rgba(255,255,255,.035)!important;
+}
+#app-shell:not(.hidden) .jw210-utils .jw210-search::placeholder{
+ color:#c1c7d3!important;opacity:.89!important}
+html[data-jw206-theme=light] #app-shell:not(.hidden) .jw210-utils .jw210-search{
+ background:rgba(255,255,255,.8)!important;color:#121a29!important;
+ border-color:rgba(25,37,61,.24)!important}
+html[data-jw206-theme=light] #app-shell:not(.hidden) .jw210-utils .jw210-search::placeholder{
+ color:#586477!important}
+@media(max-width:850px){.jw210-infinity-stage{top:26%!important;left:50%!important;
+ width:min(96vw,820px)!important}}
+@media(max-width:570px){
+ .jw210-home{min-height:770px!important}
+ .jw210-infinity-stage{top:32%!important;left:50%!important;width:112vw!important}
+ .jw210-metrics{bottom:33px!important}
+ .jw210-metric{min-height:76px!important}
+ .jw210-metric-val{line-height:1.4!important}
+ .jw210-metric-help{overflow-wrap:anywhere}
+}
+@media(prefers-reduced-motion:reduce){
+ .jw210-orbit-overlay{display:none!important}
+}

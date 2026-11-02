@@ -151,7 +151,14 @@
     +'<div class="jw210-hero-title"><span class="jw210-kicker">기업 업무의 모든 흐름을 하나로</span>'
     +'<h1>JARVIS-WORKS</h1><p>문서부터 거래·정산까지,<br>반복 업무는 AI가 더 빠르고 정확하게.</p></div>'
     +'<div class="jw210-infinity-stage">'
-    +'<object class="jw210-infinity-art" type="image/svg+xml" data="/static/jw210_infinity.svg" title="무한대 조형물과 왕복하는 빛"><span>무한대 유리 조형물</span></object>'
+    +'<img class="jw210-infinity-photo" src="/static/jw210_orbit_dark.webp" alt="중앙 유리 무한대 조형물" loading="eager" decoding="async">'
+    +'<svg class="jw210-orbit-overlay" viewBox="0 0 1100 570" role="img" aria-label="조형물 주변을 양방향으로 왕복하는 빛">'
+    +'<defs><path id="jw210-light-track" d="M115 316 C183 172 435 104 688 147 S971 252 976 314 S785 425 554 406 S147 403 115 316Z"/>'
+    +'<path id="jw210-light-back" d="M210 236 C280 121 514 74 758 149 S979 301 864 357 S390 409 210 236Z"/>'
+    +'<radialGradient id="jw210-luminance"><stop stop-color="#fff" offset="0"/><stop stop-color="#eaf3ff" stop-opacity=".8" offset=".3"/><stop stop-color="#fff" stop-opacity="0" offset="1"/></radialGradient></defs>'
+    +'<circle r="31" fill="url(#jw210-luminance)"><animateMotion dur="7s" repeatCount="indefinite" calcMode="linear" keyPoints="0;1;0" keyTimes="0;.5;1"><mpath href="#jw210-light-track"/></animateMotion></circle>'
+    +'<circle r="6" fill="#fff"><animateMotion dur="7s" repeatCount="indefinite" calcMode="linear" keyPoints="0;1;0" keyTimes="0;.5;1"><mpath href="#jw210-light-track"/></animateMotion></circle>'
+    +'<circle r="14" fill="url(#jw210-luminance)"><animateMotion dur="10s" repeatCount="indefinite" calcMode="linear" keyPoints="1;0;1" keyTimes="0;.5;1"><mpath href="#jw210-light-back"/></animateMotion></circle></svg>'
     +'</div><div class="jw210-metrics" aria-label="기업별 실제 업무 지표">'
     +metric("▦",company,"기업 운영 워크스페이스","",true)
     +metric("▤","등록된 문서",docs.toLocaleString("ko-KR")+"건","견적·발주·청구")
@@ -164,14 +171,12 @@
   }
  };
  function pauseOrbit(){
-   const obj=main.querySelector(".jw210-infinity-art");
-   const doc=obj?.contentDocument;const svg=doc?.documentElement;
+   const svg=main.querySelector(".jw210-orbit-overlay");
    if(!svg||typeof svg.pauseAnimations!=="function")return;
    const reduce=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
    if(reduce||document.hidden)svg.pauseAnimations();
    else svg.unpauseAnimations();
  }
- main.addEventListener("load",e=>{if(e.target?.matches?.(".jw210-infinity-art"))pauseOrbit()},true);
  document.addEventListener("visibilitychange",pauseOrbit);
  window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener?.("change",pauseOrbit);
  function syncRoute(){

@@ -23,7 +23,7 @@ def login(page, url):
     page.evaluate("""async()=>{state.user={name:'검증 직원',org_name:'검증 기업',role:'admin',csrf_token:'synthetic'};
       state.csrf='synthetic';showApp();await navigate('dashboard');}""")
     page.wait_for_selector(".jw210-home", timeout=16000)
-    page.wait_for_selector(".jw210-infinity-art", timeout=12000)
+    page.wait_for_selector(".jw210-infinity-photo", timeout=12000)
 def diagnostics(page, width, mode):
     return page.evaluate("""() => {
       const rect=q=>{const r=document.querySelector(q).getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};
@@ -55,7 +55,7 @@ def check_source():
     assert all(a.get("repeatCount")=="indefinite" for a in animations)
     assert any(a.get("keyPoints")=="0;1;0" for a in animations)
     assert any(a.get("keyPoints")=="1;0;1" for a in animations)
-    for path in ("app/static/premium_v210.css","app/static/premium_v210.js","app/static/jw210_infinity.svg"):
+    for path in ("app/static/premium_v210.css","app/static/premium_v210.js","app/static/jw210_infinity.svg","app/static/jw210_orbit_dark.webp"):
         assert (ROOT/path).stat().st_size>1000
 def go(page,route):
     if route=="dashboard":
@@ -130,9 +130,9 @@ def run():
              state.csrf='synthetic';showApp();await navigate('dashboard')}""")
             assert page.locator("#nav [data-page='security']").is_hidden()
             # SVG source must load and expose the actual motion elements.
-            graphic=page.locator(".jw210-infinity-art")
+            graphic=page.locator(".jw210-infinity-photo")
             graphic.wait_for(state="visible")
-            page.wait_for_function("""()=>document.querySelector('.jw210-infinity-art')?.contentDocument?.querySelector('animateMotion')!=null""",timeout=7000)
+            page.wait_for_function("""()=>document.querySelector('.jw210-orbit-overlay')?.querySelectorAll('animateMotion').length===3""",timeout=7000)
             if width==1440:
                 page.screenshot(path=str(OUT/"dashboard-final-dark.png"),animations="disabled")
             assert not errors,(width,errors)
@@ -140,7 +140,7 @@ def run():
           # Reduced motion must pause the native SVG animation.
           reduced=browser.new_context(viewport={"width":1100,"height":800},reduced_motion="reduce")
           rp=reduced.new_page();login(rp,url)
-          rp.wait_for_function("""()=>document.querySelector('.jw210-infinity-art')?.contentDocument?.documentElement?.animationsPaused?.()===true""",timeout=10000)
+          rp.wait_for_function("""()=>document.querySelector('.jw210-orbit-overlay')?.animationsPaused?.()===true""",timeout=10000)
           reduced.close()
           # Actual Chromium navigation recording rather than synthetic slideshow.
           video=browser.new_context(viewport={"width":1280,"height":720},record_video_dir=str(OUT),
