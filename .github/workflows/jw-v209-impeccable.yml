@@ -1,0 +1,78 @@
+name: JW V20.9 premium UI Impeccable review
+on:
+  push:
+    branches:
+      - review/v209-impeccable-premium-ui-20261102
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v209-premium-ui
+  cancel-in-progress: true
+jobs:
+  ui-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Review-only scope and syntax
+        run: |
+          node --check app/static/premium_v209.js
+          python -m py_compile scripts/ci_v209_browser.py
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          a=set(subprocess.check_output(['git','diff','--name-only','a3043cffe8564ed6ab57159777578a48ebd51211','HEAD'],text=True).splitlines())
+          allowed={'app/static/index.html','app/static/premium_v209.css','app/static/premium_v209.js','scripts/ci_v209_browser.py','.github/workflows/jw-v209-impeccable.yml'}
+          assert a==allowed,(a-allowed,allowed-a)
+          h=Path('app/static/index.html').read_text()
+          assert h.index('premium_v206.css')<h.index('premium_v209.css')
+          assert h.index('premium_v206.js')<h.index('premium_v209.js')
+          assert h.index('data-page="imports"')<h.index('data-page="dashboard"')
+          print('PASS exact protected scope')
+          PY
+      - name: Chromium dependencies
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate 4 measured screen and controls
+        run: python -m scripts.ci_v209_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v209-browser-screens
+          path: artifacts/v209-review/
+          retention-days: 7
+          if-no-files-found: ignore
+  impeccable-detector:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DO_NOT_TRACK: '1'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Activate pinned Impeccable 4.8.0 source detector without hooks
+        run: |
+          npx --yes impeccable@4.8.0 detect --json app/static/premium_v209.css app/static/premium_v209.js > impeccable-report.json
+          test -s impeccable-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v209-impeccable-report
+          path: impeccable-report.json
+          retention-days: 7
+          if-no-files-found: ignore
