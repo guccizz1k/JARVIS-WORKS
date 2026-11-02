@@ -101,6 +101,7 @@ def run():
                 assert rail.get_attribute("data-open")=="false"
                 rail.hover(position={"x":7,"y":75})
                 page.wait_for_function("""()=>document.querySelector('.jw210-rail').dataset.open==='true'""")
+                page.wait_for_function("""()=>document.querySelector(".jw210-rail-panel").getBoundingClientRect().x >= -1""",timeout=4000)
                 assert page.locator(".jw210-rail-panel").bounding_box()["x"]>=-1
                 page.mouse.move(width-5,500)
                 page.wait_for_function("""()=>document.querySelector('.jw210-rail').dataset.open==='false'""")
