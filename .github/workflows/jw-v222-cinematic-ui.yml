@@ -1,0 +1,121 @@
+name: JW V22.2 reference-led cinematic UI and functional regression
+on:
+  push:
+    branches:
+      - review/v222-cinematic-scroll-ui-20261103
+permissions:
+  contents: read
+concurrency:
+  group: jw-v222-cinematic-ux
+  cancel-in-progress: true
+jobs:
+  source-and-full-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate 1 - exact diff, JS syntax and immutable business paths
+        run: |
+          set -euo pipefail
+          node --check app/static/cinematic_v222.js
+          python -m py_compile scripts/ci_v222_cinematic_browser.py
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess,json
+          baseline="768950956ff3f899661130e88bc993d84f9afe01"
+          changed=set(subprocess.check_output(["git","diff","--name-only",baseline,"HEAD"],text=True).splitlines())
+          expected={
+            "docs/design/V222_CINEMATIC_BRAND_TOKENS_20261103.json",
+            "docs/design/JW_CINEMATIC_UX_QUALITY_RULES.md",
+            "app/static/cinematic_v222.js","app/static/cinematic_v222.css",
+            "app/static/index.html","scripts/ci_v222_cinematic_browser.py",
+            ".github/workflows/jw-v222-cinematic-ui.yml"}
+          assert changed==expected,(changed,expected)
+          html=Path("app/static/index.html").read_text()
+          assert html.count('href="/static/cinematic_v222.css"')==1
+          assert html.count('src="/static/cinematic_v222.js"')==1
+          assert html.index('src="/static/premium_v214.js"')<html.index('src="/static/cinematic_v222.js"')
+          js=Path("app/static/cinematic_v222.js").read_text()
+          assert all(k not in js for k in ("fetch(", "XMLHttpRequest", "localStorage.setItem", "sessionStorage", "new WebSocket", "iframe"))
+          assert "JW_PREMIUM_V210?.goto(page)" in js
+          assert "JW_PREMIUM_V212" in js
+          assert "prefers-reduced-motion: reduce" in js
+          assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
+          assert all(src not in Path("app/static/cinematic_v222.css").read_text() for src in ("@import","url(http","url('http"))
+          payload=json.loads(Path("docs/design/V222_CINEMATIC_BRAND_TOKENS_20261103.json").read_text())
+          assert payload["colors"]["abyss"]=="#07090D"
+          print("PASS_V222_SOURCE_ONLY_AND_SECURITY_CONTRACT")
+          PY
+      - name: Install Korean OCR and all regression dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
+      - name: Historical SHA-pinned overlay
+        run: |
+          python -m scripts.ci_rebuild_v79_overlay
+          test -s ../overlay/BASE_SHA256.json
+          test -s ../overlay/PAYLOAD_SHA256.json
+      - name: Gate 1/2/3 - whole repository no skip and no fail
+        run: |
+          mkdir -p artifacts/v222-cinematic/
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v222-full --junitxml=artifacts/v222-cinematic/full.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse("artifacts/v222-cinematic/full.xml").getroot()
+          stats=root.attrib if root.tag=="testsuite" else root.find(".//testsuite").attrib
+          n={x:int(stats.get(x,0)) for x in ("tests","failures","errors","skipped")}
+          assert n["tests"]>=1985 and n["failures"]==0 and n["errors"]==0 and n["skipped"]==0,n
+          print("PASS_V222_ALL_EXISTING_FUNCTIONAL_REGRESSIONS",n)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-full-pytest
+          path: artifacts/v222-cinematic/full.xml
+          if-no-files-found: ignore
+          retention-days: 7
+  cinematic-chromium:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 26
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install real browser and safe demo OCR
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate 4 - reference-inspired scroll + existing protected routes
+        run: python -m scripts.ci_v222_cinematic_browser
+      - name: Gate 4 - preserve existing laptop and desktop real-auth layouts
+        run: python -m scripts.ci_v216_browser_edges
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-cinematic-screenshots
+          path: |
+            artifacts/v222-cinematic/
+            artifacts/v216-browser/
+          if-no-files-found: ignore
+          retention-days: 7
