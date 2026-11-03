@@ -80,6 +80,14 @@ export class PostPipeline {
     renderer.toneMappingExposure = 1.2;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer = renderer;
+    // Headless/VM SwiftShader is genuine WebGL, but Bokeh+transmission can
+    // freeze screenshots and block the UI. Force adaptive safe quality.
+    const gl = renderer.getContext();
+    const debug = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpuName = debug
+      ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) || '')
+      : String(gl.getParameter(gl.RENDERER) || '');
+    this.isSoftware = /swiftshader|llvmpipe|softpipe|software/i.test(gpuName);
 
     this.composer = new EffectComposer(renderer);
     this.renderPass = new RenderPass(scene, camera);
@@ -101,7 +109,7 @@ export class PostPipeline {
     this.width = 1;
     this.height = 1;
     this.resize();
-    this.setQuality(0);
+    this.setQuality(this.isSoftware ? 2 : 0);
   }
 
   setReducedMotion(value) {
