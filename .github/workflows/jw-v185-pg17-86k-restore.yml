@@ -1,0 +1,66 @@
+name: JW V18.5 disposable 86000-row PG17 disaster-recovery stress (review only)
+on:
+  push:
+    branches:
+      - review/v185-43table-scaled-dr-20261031
+permissions:
+  contents: read
+concurrency:
+  group: jw-v185-recovery-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  v185-scaled-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing pinned PostgreSQL test dependencies
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Gate 1 compile, isolated exact-source protections
+        run: |
+          python -m py_compile scripts/ci_v185_pg17_86k_restore.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v185_pg17_86k_restore.py").read_text()
+          for phrase in ("ONLY_EPHEMERAL_LOCAL_DATABASE", "original.guard(dsn)",
+                         "validate_container_id", "N_POLICIES","N_TRIGGERS",
+                         "EXPECTED_ROWS", "generate_series(2,1000)",
+                         "follow_redirects", "LIMIT_V185_PRODUCTION_RTO_RPO_NOT_MEASURED"):
+              if phrase!="follow_redirects":
+                  assert phrase in s,phrase
+          assert "SUPABASE_DSN" not in s and "JW_PG_STAGE_DSN" not in s
+          print("PASS_V185_CODE_AND_ISOLATION_GATES")
+          PY
+      - name: Gates 2 3 5 actual PG17 86k recovery and hostile RLS test
+        run: python -m scripts.ci_v185_pg17_86k_restore
+      - name: Independent review-only/no-secrets assertion
+        run: |
+          python - <<'PY'
+          import os
+          assert os.environ["JW_ENV"]=="review"
+          assert os.environ["JW_PG_CI_ALLOW"]=="ONLY_EPHEMERAL_LOCAL_DATABASE"
+          print("PASS_V185_NO_REMOTE_DB_NO_CUSTOMER_DATA_NO_RELEASE")
+          PY

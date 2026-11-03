@@ -1,0 +1,238 @@
+{
+  "schema": "JW_FOUR_SKILLS_PINNED_V1",
+  "baseline_sha": "9e2b29e7a043b7f1968b6148c640709287bb66fe",
+  "review_branch": "review/v208-four-advisory-skills-20261102",
+  "review_only": true,
+  "auto_run_external_tools": false,
+  "operational_release": "BLOCKED",
+  "third_party_files": {
+    ".agents/skills/change-impact/SKILL.md": {
+      "repo": "affaan-m/ECC",
+      "commit": "b38be6a7f6350964d59328b52f0624e1d1d552d1",
+      "source_path": "skills/change-impact/SKILL.md",
+      "git_blob": "b220205a5cb783df3acd5bddba46624ada473637"
+    },
+    ".agents/skills/impeccable/SKILL.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/SKILL.md",
+      "git_blob": "c0dd2530c9968963b1f63bf50b227c4a33996e3b"
+    },
+    ".agents/skills/impeccable/reference/audit.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/audit.md",
+      "git_blob": "13bf0d7c71802a48af4863c08ee3ed898f72c4b2"
+    },
+    ".agents/skills/impeccable/reference/clarify.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/clarify.md",
+      "git_blob": "4506a31c95e02b2ad918367a0ef4461643d51532"
+    },
+    ".agents/skills/impeccable/reference/craft-floor.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/craft-floor.md",
+      "git_blob": "fd7280103f7ef4b009b38ce58f594c44c0f04caa"
+    },
+    ".agents/skills/impeccable/reference/critique.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/critique.md",
+      "git_blob": "07ae4a854ede894de3320f42e50743c1ab4681fb"
+    },
+    ".agents/skills/impeccable/reference/harden.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/harden.md",
+      "git_blob": "894f06127525ae2d802e4d73c345031e6076a68f"
+    },
+    ".agents/skills/impeccable/reference/layout.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/layout.md",
+      "git_blob": "aa547c742fc373bc459bdbb7977683441aa48ec0"
+    },
+    ".agents/skills/impeccable/reference/mode-operate.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/mode-operate.md",
+      "git_blob": "833775ba85f03bf65a4c1b23e39192f7653414e6"
+    },
+    ".agents/skills/impeccable/reference/operate.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/operate.md",
+      "git_blob": "524f2c3ae9fa497284e9699f3ca5320cce5d05cf"
+    },
+    ".agents/skills/impeccable/reference/optimize.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/optimize.md",
+      "git_blob": "a4e55099ff738571c1fc46c66f27b015dc05339e"
+    },
+    ".agents/skills/impeccable/reference/region-map.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/region-map.md",
+      "git_blob": "7b7685cf59a7ee8fa9361d4f0b986ec0ba5b48ad"
+    },
+    ".agents/skills/impeccable/reference/routing.md": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": ".agents/skills/impeccable/reference/routing.md",
+      "git_blob": "21c12a626e7ef084fa6ed5d03b93b91e3eb122ce"
+    },
+    ".agents/skills/ponytail/SKILL.md": {
+      "repo": "DietrichGebert/ponytail",
+      "commit": "96608e078b2d5ea607c5c3b8b5a54d1c1fba6846",
+      "source_path": "skills/ponytail/SKILL.md",
+      "git_blob": "d64edd32265ba21cbf5270158f04e97d96925f27"
+    },
+    ".agents/skills/security-audit/AI-AND-LLM.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/AI-AND-LLM.md",
+      "git_blob": "02ba9039eca4cec811fefc77bce0d7349b379aae"
+    },
+    ".agents/skills/security-audit/ATTACK-CLASSES.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/ATTACK-CLASSES.md",
+      "git_blob": "18a2beb4dbb554fb52b0a0293b8bd9108207f8fa"
+    },
+    ".agents/skills/security-audit/CLIENT-SIDE.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/CLIENT-SIDE.md",
+      "git_blob": "8ba673e9e7e3d02f5518aa0219bcbeec7957531b"
+    },
+    ".agents/skills/security-audit/CLOUD-AND-DEPLOYMENT.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/CLOUD-AND-DEPLOYMENT.md",
+      "git_blob": "5569f76c7740744aa3f60aaa89eaefe275f2e6c9"
+    },
+    ".agents/skills/security-audit/DATA-ISOLATION-AND-LIFECYCLE.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/DATA-ISOLATION-AND-LIFECYCLE.md",
+      "git_blob": "0cba1fa463b62c9b0caba710a201e29c1eecd0ec"
+    },
+    ".agents/skills/security-audit/DESKTOP-MOBILE-AND-LOCAL-IPC.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/DESKTOP-MOBILE-AND-LOCAL-IPC.md",
+      "git_blob": "d6230098651bff6348d3868c11f566bfb1306e7f"
+    },
+    ".agents/skills/security-audit/HUNTING.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/HUNTING.md",
+      "git_blob": "377d4dcfbe88a049379448cd7892717185401597"
+    },
+    ".agents/skills/security-audit/MEMORY-SAFETY-AND-BINARY.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/MEMORY-SAFETY-AND-BINARY.md",
+      "git_blob": "86ff4920752661fc4a31a35ca4f962ace5dd5f48"
+    },
+    ".agents/skills/security-audit/PROTOCOLS-RPC-AND-MESSAGING.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/PROTOCOLS-RPC-AND-MESSAGING.md",
+      "git_blob": "b04ab88f852224838fdc9683d9fcccd858b0778a"
+    },
+    ".agents/skills/security-audit/RECONNAISSANCE.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/RECONNAISSANCE.md",
+      "git_blob": "1a170a93ab76b93dc5ac268a5b690beb423a8aa9"
+    },
+    ".agents/skills/security-audit/RESOURCE-EXHAUSTION-AND-AVAILABILITY.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/RESOURCE-EXHAUSTION-AND-AVAILABILITY.md",
+      "git_blob": "6cbbd1e2cfa482068c8279c2f7da9db43d3f54b8"
+    },
+    ".agents/skills/security-audit/SKILL.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/SKILL.md",
+      "git_blob": "92178dad304d3f63e37582a297026a7874e12c62"
+    },
+    ".agents/skills/security-audit/SUPPLY-CHAIN-AND-RELEASE.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/SUPPLY-CHAIN-AND-RELEASE.md",
+      "git_blob": "bf96aed0803bc07471483ab129dea86759c3e305"
+    },
+    ".agents/skills/security-audit/VALIDATION-AND-REPORTING.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/VALIDATION-AND-REPORTING.md",
+      "git_blob": "5e200d7387e665e53e0e4190fa4a5814c334c507"
+    },
+    ".agents/skills/security-audit/WEB-PROTOCOL-AND-AUTH.md": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/WEB-PROTOCOL-AND-AUTH.md",
+      "git_blob": "1a099fa575cf52a61e9a627f91b61015120fa517"
+    },
+    ".agents/skills/security-audit/report-schema.json": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/report-schema.json",
+      "git_blob": "55815a3687a45fff63d8ebf20068611bd6ad6d9a"
+    },
+    ".agents/skills/security-audit/validate-coverage-ledger.cjs": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/validate-coverage-ledger.cjs",
+      "git_blob": "0ef58657bef18b26a92321df6c8e3d31bc8e6659"
+    },
+    ".agents/skills/security-audit/validate-coverage-ledger.test.cjs": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/validate-coverage-ledger.test.cjs",
+      "git_blob": "b1444f57e1b021a61175733b8c356171861c8701"
+    },
+    ".agents/skills/security-audit/validate-findings.cjs": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/validate-findings.cjs",
+      "git_blob": "2843feceddb7e30bf10d6e4f7bbe6640e4c57799"
+    },
+    ".agents/skills/security-audit/validate-findings.test.cjs": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "skills/security-audit/validate-findings.test.cjs",
+      "git_blob": "8d245b226bbe2fdf28b46b3203b99c2824039d2d"
+    },
+    "docs/third_party/licenses/DietrichGebert--ponytail.LICENSE": {
+      "repo": "DietrichGebert/ponytail",
+      "commit": "96608e078b2d5ea607c5c3b8b5a54d1c1fba6846",
+      "source_path": "LICENSE",
+      "git_blob": "715d483338cea4365f0d91a27799cf61226d6bcf"
+    },
+    "docs/third_party/licenses/affaan-m--ECC.LICENSE": {
+      "repo": "affaan-m/ECC",
+      "commit": "b38be6a7f6350964d59328b52f0624e1d1d552d1",
+      "source_path": "LICENSE",
+      "git_blob": "b832b6f642312312367c07688dc7426db40a82ed"
+    },
+    "docs/third_party/licenses/cloudflare--security-audit-skill.LICENSE": {
+      "repo": "cloudflare/security-audit-skill",
+      "commit": "c1c8a8c1471069fb0e188eeaff69b8e8db6564a8",
+      "source_path": "LICENSE",
+      "git_blob": "6dbc9ecb3a5b9080e95b962869e8c7ab16cfdc20"
+    },
+    "docs/third_party/licenses/pbakaus--impeccable.LICENSE": {
+      "repo": "pbakaus/impeccable",
+      "commit": "e89e3ada3e875a89ac2c5d33d11e65ebef6fe285",
+      "source_path": "LICENSE",
+      "git_blob": "bb3f6d23b1f8025514a62a12b51b47d73e3c9aa9"
+    }
+  }
+}

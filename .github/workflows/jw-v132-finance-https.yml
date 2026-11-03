@@ -1,0 +1,89 @@
+name: JW V13.2 disposable PG17 HTTPS authenticated finance review
+
+on:
+  push:
+    branches:
+      - review/v131-abc-finance-rollback-20261030
+    paths:
+      - .github/workflows/jw-v132-finance-https.yml
+      - scripts/ci_v93_https_pg_browser.py
+      - scripts/ci_v132_finance_https_router.py
+      - scripts/ci_v132_finance_ephemeral.sql
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v132-private-review
+  cancel-in-progress: true
+
+jobs:
+  finance-v132-real-https:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_V93_TRUST_LOCAL_CA: EPHEMERAL_RUNNER_ONLY
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pinned existing PostgreSQL and real Chromium prerequisites
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pip install 'websockets==17.2'
+          npm install -g @playwright/cli@0.1.22
+          playwright-cli install
+          sudo apt-get update -qq
+          sudo apt-get install -y libnss3-tools
+      - name: Validate isolated finance source and manifest
+        run: |
+          python -m py_compile scripts/ci_v93_https_pg_browser.py scripts/ci_v132_finance_https_router.py
+          python - <<'PY'
+          from pathlib import Path
+          sql=Path('scripts/ci_v132_finance_ephemeral.sql').read_text()
+          code=Path('scripts/ci_v93_https_pg_browser.py').read_text()
+          assert 'NEVER migrate' not in sql or 'never' in sql.lower()
+          assert 'CREATE TABLE jw_dev.payments' in sql
+          assert 'FORCE ROW LEVEL SECURITY' in sql
+          assert 'JW_V132_REAL_HTTPS_PG17_AUTHENTICATED_FINANCE_A_B_C_PASS' in code
+          assert 'ci_v132_finance_https_router' in code
+          assert 'security/jw_dev_v83_payment_rpc.sql' in code
+          PY
+      - name: Real Chrome HTTPS, distinct PG17 auth and trade, original payment RPC and tenant adversaries
+        run: python -m scripts.ci_v93_https_pg_browser
+      - name: Preserve fail-closed launch boundary
+        run: |
+          python - <<'PY'
+          import json,os
+          print(json.dumps({"sha":os.environ["GITHUB_SHA"],
+            "scope":"ISOLATED_DISPOSABLE_PG17_HTTPS_REAL_AUTH_FINANCE",
+            "real_supabase_http":"NOT_RUN",
+            "external_render_https_business":"NOT_RUN",
+            "full_j1_j6":"NOT_RUN",
+            "release":"BLOCKED"},sort_keys=True))
+          PY

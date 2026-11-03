@@ -1,0 +1,264 @@
+/* V20.9: top-first premium WORKS workspace. Source-only UI overlay; J1-J6 owns business logic. */
+html[data-jw206-theme="light"]{
+ --jw209-bg:#f1f2ef;--jw209-paper:#ffffff;--jw209-ink:#202522;--jw209-muted:#58615c;
+ --jw209-line:#dfe4df;--jw209-soft:#eef1ed;--jw209-strong:#202522;--jw209-inverse:#fff;
+ --jw209-shadow:0 10px 34px rgba(16,25,18,.045);
+ color-scheme:light;
+}
+html[data-jw206-theme="dark"]{
+ --jw209-bg:#151819;--jw209-paper:#232728;--jw209-ink:#f4f5f1;--jw209-muted:#c0c8c1;
+ --jw209-line:#434949;--jw209-soft:#303637;--jw209-strong:#f4f5f1;--jw209-inverse:#1b2020;
+ --jw209-shadow:0 12px 34px rgba(0,0,0,.15);
+ color-scheme:dark;
+}
+html{scrollbar-color:var(--jw209-line) var(--jw209-bg)}
+body,.app-shell:not(.hidden){background:var(--jw209-bg)!important;color:var(--jw209-ink)!important}
+.app-shell:not(.hidden){--jw206-bg:var(--jw209-bg);--jw206-surface:var(--jw209-paper);
+ --jw206-surface-strong:var(--jw209-paper);--jw206-text:var(--jw209-ink);
+ --jw206-muted:var(--jw209-muted);--jw206-border:var(--jw209-line);
+ --jw206-rule:var(--jw209-line);--jw206-control:var(--jw209-soft);
+ --jw206-accent:var(--jw209-strong);--jw206-accent-contrast:var(--jw209-inverse);
+ --jw206-selected:var(--jw209-strong);--jw206-shade:var(--jw209-shadow);
+ --jw205-ink:var(--jw209-ink);--jw205-muted:var(--jw209-muted);
+ --jw205-surface:var(--jw209-paper);--jw205-surface-strong:var(--jw209-paper);
+ --jw205-line:var(--jw209-line);
+ background:var(--jw209-bg)!important;
+}
+.app-shell:not(.hidden),.app-shell:not(.hidden) .main-area{min-height:100dvh!important;background:var(--jw209-bg)!important}
+.app-shell:not(.hidden)::before,.app-shell:not(.hidden)::after{display:none!important}
+.app-shell:not(.hidden) .sidebar{display:none!important}
+.app-shell:not(.hidden) .main-area{margin:0!important;max-width:none!important;width:100%!important;min-width:0!important;overflow-x:clip}
+.app-shell:not(.hidden) .main-content,
+.app-shell.jw206-compact-rail .main-content{
+ width:min(1360px,calc(100% - 64px))!important;max-width:1360px!important;
+ margin:0 auto!important;padding:31px 0 42px!important;min-height:calc(100dvh - 160px);
+ background:transparent!important;color:var(--jw209-ink)!important;
+}
+.app-shell:not(.hidden) .main-area footer,
+.app-shell.jw206-compact-rail .main-area footer{
+ max-width:1360px;width:calc(100% - 64px);padding:0 0 20px!important;margin:auto!important;
+ font-size:12px!important;color:var(--jw209-muted)!important;line-height:1.6;
+}
+.app-shell:not(.hidden) .topbar{
+ height:86px!important;min-height:86px!important;position:relative!important;
+ padding:0 28px!important;background:var(--jw209-bg)!important;border:0!important;
+ box-shadow:none!important;isolation:isolate;z-index:70!important;
+}
+.app-shell .topbar .breadcrumbs,.app-shell .topbar .v204-top-tabs.v204-floating-nav,
+.app-shell .topbar #toggle-menu{display:none!important}
+.app-shell .topbar .v204-global-brand{left:30px!important;top:19px!important;display:flex!important;align-items:center!important}
+.app-shell .topbar .v204-brand-mark{width:42px!important;height:42px!important;border-radius:12px!important}
+.app-shell .topbar .v204-brand-copy{font-size:14px!important;line-height:1.25!important;font-weight:800!important;letter-spacing:-.025em!important}
+.app-shell .topbar .v204-brand-copy small{font-size:11px!important;letter-spacing:.01em!important;line-height:1.35!important}
+.app-shell .topbar .top-right{right:26px!important;top:19px!important;display:flex!important;align-items:center!important;gap:10px!important}
+.app-shell .topbar .topdate{display:none!important}
+.app-shell .topbar .user-circle{width:42px!important;height:42px!important;font-size:13px!important}
+.app-shell .jw206-theme-switch{padding:4px!important;min-height:42px!important;background:var(--jw209-paper)!important;
+ border:1px solid var(--jw209-line)!important;box-shadow:none!important}
+.app-shell .jw206-theme-switch .jw206-theme-option{font-size:12.5px!important;min-height:34px!important;
+ padding:7px 12px!important;line-height:1.25!important;border-radius:22px!important;gap:5px!important}
+.app-shell .jw206-theme-switch .jw206-theme-option[aria-pressed="true"]{
+ background:var(--jw209-strong)!important;color:var(--jw209-inverse)!important
+}
+.jw209-top-nav{display:flex;align-items:center;gap:3px;padding:5px;background:var(--jw209-paper);
+ border:1px solid var(--jw209-line);border-radius:28px;box-shadow:var(--jw209-shadow);
+ position:absolute;left:50%;top:18px;transform:translateX(-50%);width:max-content;
+ max-width:calc(100% - 435px);overflow-x:auto;scrollbar-width:none;white-space:nowrap;
+ -webkit-overflow-scrolling:touch;z-index:3;
+}
+.jw209-top-nav::-webkit-scrollbar{display:none}
+.jw209-tab,.jw209-more-trigger{display:inline-flex;align-items:center;justify-content:center;
+ flex:0 0 auto;min-height:40px;padding:9px 12px;border:0;border-radius:22px;
+ background:transparent;color:var(--jw209-muted);font-family:inherit;font-size:13px;
+ font-weight:680;letter-spacing:-.02em;line-height:1.35;white-space:nowrap;cursor:pointer;
+ transition:background-color 160ms ease,color 160ms ease,transform 160ms ease;
+}
+.jw209-tab:hover,.jw209-more-trigger:hover{background:var(--jw209-soft);color:var(--jw209-ink)}
+.jw209-tab[aria-current="page"]{background:var(--jw209-strong)!important;color:var(--jw209-inverse)!important}
+.jw209-more-menu{position:fixed;z-index:120;display:grid;min-width:176px;
+ padding:7px;background:var(--jw209-paper);color:var(--jw209-ink);border:1px solid var(--jw209-line);
+ border-radius:15px;box-shadow:0 16px 36px rgba(0,0,0,.16);gap:2px;
+}
+.jw209-more-menu[hidden]{display:none!important}
+.jw209-more-menu button{display:block;text-align:left;background:transparent;color:inherit;
+ min-height:44px;padding:10px 14px;border:0;border-radius:9px;font-size:14px;cursor:pointer}
+.jw209-more-menu button:hover{background:var(--jw209-soft)}
+.jw209-more-menu button[hidden]{display:none}
+.app-shell:not(.hidden) .main-content :is(input,select,textarea){font-size:15px!important;line-height:1.5!important;min-height:42px}
+.app-shell:not(.hidden) .main-content button:not(.jw206-metric){font-family:inherit}
+.app-shell:not(.hidden) .main-content :is(p,td,th,label){line-height:1.55}
+.app-shell:not(.hidden) .main-content .table{font-size:14px!important}
+.app-shell:not(.hidden) .main-content .table :is(th,td){padding:12px!important}
+.app-shell:not(.hidden) .main-content .btn{font-size:14px!important;min-height:40px}
+.app-shell:not(.hidden) .main-content .panel,
+.app-shell:not(.hidden) .main-content .card,
+.app-shell:not(.hidden) .main-content .jw-messenger,
+.app-shell:not(.hidden) .main-content .import-hero,
+.app-shell:not(.hidden) .main-content .page-head{
+ background:var(--jw209-paper)!important;color:var(--jw209-ink)!important;
+ border:1px solid var(--jw209-line)!important;border-radius:16px!important;
+ box-shadow:var(--jw209-shadow)!important;backdrop-filter:none!important
+}
+/* Workspace dashboard: visual hierarchy led by actionable data, not decorative microtext. */
+.jw206-dashboard .jw206-greeting{align-items:center;gap:24px;margin:12px 0 30px}
+.jw206-dashboard .jw206-eyebrow{display:none!important}
+.jw206-dashboard .jw206-greeting h1{font-size:clamp(28px,2.5vw,36px)!important;line-height:1.3!important;
+ letter-spacing:-.025em!important;font-weight:790!important;margin:0 0 8px!important}
+.jw206-dashboard .jw206-greeting p{font-size:15px!important;line-height:1.7!important}
+.jw206-dashboard .jw206-new-document{font-size:14px!important;min-height:46px!important;
+ padding:12px 19px!important;border-radius:12px!important}
+.jw206-dashboard .jw206-metrics{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:15px!important;margin-bottom:18px!important}
+.jw206-dashboard .jw206-metric{min-height:164px!important;gap:10px!important;padding:24px!important;
+ border-radius:16px!important;box-shadow:var(--jw209-shadow)!important;min-width:0}
+.jw206-dashboard .jw206-metric-label{font-size:14px!important;line-height:1.35!important}
+.jw206-dashboard .jw206-metric strong{font-size:clamp(25px,2.6vw,36px)!important;
+ line-height:1.25!important;font-variant-numeric:tabular-nums;letter-spacing:-.025em!important;
+ overflow-wrap:anywhere}
+.jw206-dashboard .jw206-metric small{font-size:13px!important;line-height:1.55!important}
+.jw206-dashboard .jw206-feature-grid{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)!important;gap:17px!important;margin-bottom:17px!important}
+.jw206-dashboard .jw206-pane{min-height:270px!important;border-radius:16px!important;padding:26px!important;
+ background:var(--jw209-paper)!important;border-color:var(--jw209-line)!important;
+ box-shadow:var(--jw209-shadow)!important}
+.jw206-dashboard .jw206-pane-head{align-items:center!important;margin-bottom:20px!important;gap:16px!important}
+.jw206-dashboard .jw206-pane-head h2{font-size:20px!important;line-height:1.4!important;
+ margin:0!important;letter-spacing:-.025em!important}
+.jw206-dashboard .jw206-pane-head button{font-size:13px!important;padding:8px!important;min-height:40px}
+.jw206-dashboard .jw206-work-row{min-height:66px!important;gap:12px!important;padding:12px 8px!important}
+.jw206-dashboard .jw206-row-sign{width:36px!important;height:36px!important;flex-shrink:0!important}
+.jw206-dashboard .jw206-row-content b{font-size:14px!important;line-height:1.45!important}
+.jw206-dashboard .jw206-row-content small{font-size:13px!important;line-height:1.5!important}
+.jw206-dashboard .jw206-row-tag{font-size:12px!important;padding:6px 10px!important}
+.jw206-dashboard .jw206-empty{font-size:14px!important;line-height:1.6!important}
+.jw206-dashboard .jw206-eff-empty{padding:22px!important;gap:18px!important}
+.jw206-dashboard .jw206-eff-empty strong{font-size:15px!important;line-height:1.5!important}
+.jw206-dashboard .jw206-eff-empty p,.jw206-dashboard .jw206-evidence,
+.jw206-dashboard .jw206-source-note{font-size:13px!important;line-height:1.75!important}
+.jw206-dashboard .jw206-eff-number{font-size:19px!important;line-height:1.5!important}
+.jw206-dashboard .jw206-eff-line{display:grid;grid-template-columns:55px minmax(0,1fr) 65px;
+ align-items:center;gap:12px;margin:12px 0;font-size:14px}
+.jw206-dashboard .jw206-eff-meter{height:10px;background:var(--jw209-soft);border-radius:15px;overflow:hidden}
+.jw206-dashboard .jw206-eff-meter i{display:block;height:100%;background:var(--jw209-strong);border-radius:15px}
+.jw206-dashboard .jw206-eff-measured small{font-size:13px!important;line-height:1.5!important}
+.jw206-dashboard .jw206-shortcuts{gap:12px!important}
+.jw206-dashboard .jw206-shortcuts button{min-height:48px!important;font-size:14px!important;
+ padding:12px 15px!important;border-radius:12px!important}
+.jw206-dashboard :is(button,a):focus-visible,
+.jw209-top-nav button:focus-visible,.jw209-more-menu button:focus-visible,
+.app-shell .jw206-theme-option:focus-visible{
+ outline:3px solid #477ad3!important;outline-offset:3px!important}
+.jw206-dashboard button:active,.jw209-top-nav button:active{transform:scale(.985)}
+.app-shell:not(.hidden) .main-content.jw-v203-entering{animation:jw209-enter 230ms cubic-bezier(.22,1,.36,1) both!important}
+@keyframes jw209-enter{from{opacity:.73;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media(max-width:1330px){
+ .app-shell:not(.hidden) .topbar{height:130px!important;min-height:130px!important}
+ .jw209-top-nav{top:78px;left:28px;transform:none;max-width:calc(100% - 56px);width:calc(100% - 56px)}
+ .app-shell .topbar .top-right{top:18px!important}
+ .jw206-dashboard .jw206-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+@media(max-width:780px){
+ .app-shell:not(.hidden) .main-content,
+ .app-shell.jw206-compact-rail .main-content{width:calc(100% - 34px)!important;padding:22px 0 36px!important}
+ .app-shell:not(.hidden) .main-area footer{width:calc(100% - 34px)!important}
+ .jw206-dashboard .jw206-feature-grid{grid-template-columns:1fr!important;gap:14px!important}
+ .jw206-dashboard .jw206-greeting{align-items:flex-start;flex-direction:column;gap:18px}
+ .jw206-dashboard .jw206-pane{padding:22px!important;min-height:auto!important}
+}
+@media(max-width:480px){
+ .app-shell .topbar .v204-global-brand{left:16px!important;top:18px!important}
+ .app-shell .topbar .v204-brand-mark{width:35px!important;height:35px!important}
+ .app-shell .topbar .v204-brand-copy{font-size:12px!important}
+ .app-shell .topbar .v204-brand-copy small{display:none!important}
+ .app-shell .topbar .top-right{right:14px!important;top:17px!important;gap:4px!important}
+ .app-shell .topbar .user-circle{display:none!important}
+ .app-shell .jw206-theme-switch .jw206-theme-option{font-size:12px!important;padding:6px 9px!important}
+ .jw209-top-nav{left:12px;top:76px;width:calc(100% - 24px);max-width:calc(100% - 24px)}
+ .jw206-dashboard .jw206-metrics{gap:10px!important}
+ .jw206-dashboard .jw206-metric{min-height:150px!important;padding:17px!important}
+ .jw206-dashboard .jw206-metric strong{font-size:clamp(22px,5vw,28px)!important}
+ .jw206-dashboard .jw206-metric small{font-size:12px!important}
+ .jw206-dashboard .jw206-pane{padding:17px!important}
+ .jw206-dashboard .jw206-pane-head h2{font-size:18px!important}
+ .jw206-dashboard .jw206-work-row{gap:8px!important}
+ .jw206-dashboard .jw206-row-content b{font-size:13px!important}
+ .jw206-dashboard .jw206-row-content small{font-size:12px!important}
+}
+@media(prefers-reduced-motion:reduce){
+ .app-shell:not(.hidden) .main-content.jw-v203-entering{animation:none!important}
+ .jw209-top-nav *,.jw206-dashboard *{animation:none!important;transition:none!important}
+}
+
+/* Visual regression fix: the previous right rail reserved dead space at desktop widths.
+   Force the full-width main flex item after the hidden rail has been removed. */
+.app-shell:not(.hidden) .main-area{flex:1 1 100vw!important;width:100vw!important}
+.app-shell:not(.hidden) #main-content{flex:0 0 auto!important;align-self:center!important;
+ width:min(1360px,calc(100% - 64px))!important;max-width:1360px!important;
+ margin-left:auto!important;margin-right:auto!important}
+.jw206-dashboard{width:100%!important;max-width:none!important}
+@media(max-width:780px){
+ .app-shell:not(.hidden) #main-content{width:calc(100% - 34px)!important}
+}
+@media(max-width:480px){
+ .app-shell .topbar .v204-global-brand{
+  transform:none!important;left:16px!important;top:16px!important;right:auto!important
+ }
+}
+
+/* Final override: parent flex layout retained historical 224px right-rail space.
+   Use viewport geometry, not its legacy 80%-width container, for the UI-only shell. */
+.app-shell:not(.hidden) #main-content{
+ width:min(1360px,calc(100vw - 64px))!important;
+ min-width:min(1360px,calc(100vw - 64px))!important;
+ max-width:1360px!important;
+}
+@media(max-width:780px){
+ .app-shell:not(.hidden) #main-content{
+  width:calc(100vw - 34px)!important;
+  min-width:calc(100vw - 34px)!important;
+  max-width:calc(100vw - 34px)!important;
+ }
+}
+
+/* Mobile identity: undo legacy center treatment at the exact DOM boundary. */
+@media(max-width:480px){
+ #app-shell:not(.hidden) > .main-area > .topbar > .v204-global-brand{
+  position:absolute!important;inset:auto auto auto 16px!important;
+  top:16px!important;left:16px!important;right:auto!important;
+  width:max-content!important;max-width:170px!important;
+  margin:0!important;padding:0!important;
+  transform:none!important;translate:none!important;
+  justify-self:start!important;align-self:auto!important;
+ }
+}
+
+/* Fix hidden left clipping after increasing the content to the full viewport width.
+   Explicitly position the centered content in viewport coordinates, never with
+   inherited auto flex margins from the deprecated right rail. */
+.app-shell:not(.hidden) #main-content{
+ align-self:flex-start!important;
+ margin-left:0!important;margin-right:0!important;
+ position:relative!important;left:max(32px,calc((100vw - 1360px)/2))!important;
+}
+@media(max-width:780px){
+ .app-shell:not(.hidden) #main-content{left:17px!important}
+}
+
+/* Exact desktop coordinate correction: legacy main-area starts 28px to the right. */
+@media(min-width:781px){
+ .app-shell:not(.hidden) #main-content{
+  left:calc(max(32px,(100vw - 1360px)/2) - 28px)!important;
+ }
+}
+
+/* Equivalent dimensionally valid expression: 28px parent origin + position offset. */
+@media(min-width:781px){
+ .app-shell:not(.hidden) #main-content{left:max(4px,calc(50vw - 708px))!important}
+}
+
+/* Viewport-specific origin correction measured on 768px and 390px layouts.
+   Keep physical 17px horizontal gutters, including the scrollable top rail. */
+@media(min-width:481px) and (max-width:780px){
+ .app-shell:not(.hidden) #main-content{left:-3px!important}
+}
+@media(max-width:480px){
+ .app-shell:not(.hidden) #main-content{left:2px!important}
+}

@@ -1,0 +1,474 @@
+/* JARVIS-WORKS V20.5 — Premium Motion & Unified Glass.
+   UI-only override on top of V20.4.2; no business logic, no auth bypass.
+   Performance: eliminate full-page blur and per-card backdrop-filter. Animate
+   ONLY compositor-friendly opacity/transform. Keep glass through tint/edge.
+*/
+.app-shell:not(.hidden){
+ --jw205-surface:linear-gradient(135deg,rgba(55,47,60,.84),rgba(65,53,64,.75));
+ --jw205-surface-strong:linear-gradient(135deg,rgba(51,44,58,.93),rgba(55,43,57,.87));
+ --jw205-surface-inner:rgba(255,246,236,.055);
+ --jw205-edge:rgba(255,244,233,.31);
+ --jw205-line:rgba(255,240,229,.22);
+ --jw205-ink:#fff8f2;
+ --jw205-muted:#e8d5cf;
+ --jw205-accent:#f8d9b9;
+ --jw205-shadow:0 13px 30px rgba(18,15,25,.22),inset 0 1px rgba(255,250,240,.24);
+ --jw205-ease:cubic-bezier(.22,1,.36,1);
+}
+.app-shell:not(.hidden) .main-content{color:var(--jw205-ink);will-change:auto}
+.app-shell:not(.hidden) .main-content.jw-v203-leaving{
+ opacity:.76!important;filter:none!important;
+ transform:translate3d(0,-5px,0)!important;
+ transition:opacity 55ms ease-out,transform 55ms ease-out!important;
+ pointer-events:none;
+}
+.app-shell:not(.hidden) .main-content.jw-v203-entering{
+ animation:jw205-page-in 290ms var(--jw205-ease) both!important;
+ filter:none!important;
+}
+@keyframes jw205-page-in{
+ from{opacity:.48;transform:translate3d(0,11px,0)}
+ to{opacity:1;transform:translate3d(0,0,0)}
+}
+/* Disable compounded V202/V203/V204 page and child animations.
+   Each formerly stacked blur/rise animated the whole subtree again. */
+.app-shell:not(.hidden) .main-content.jw-v203-entering .page-head,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .panel,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .card,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .jw-v202-metric,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .jw-v202-panel,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .jw-v202-board,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .jw-v202-feature,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .jw-v202-gauge,
+.app-shell:not(.hidden) .main-content.jw-v203-entering .v204-glass,
+.app-shell:not(.hidden) .main-content .jw-v204 .v204-head>*{
+ animation:none!important;filter:none!important;
+}
+.app-shell:not(.hidden) .main-content .panel,
+.app-shell:not(.hidden) .main-content .card,
+.app-shell:not(.hidden) .main-content .jw-v202-panel,
+.app-shell:not(.hidden) .main-content .v204-glass{
+ -webkit-backdrop-filter:none!important;backdrop-filter:none!important;
+ background:var(--jw205-surface)!important;
+ color:var(--jw205-ink)!important;
+ border:1px solid var(--jw205-edge)!important;
+ box-shadow:var(--jw205-shadow)!important;
+}
+.app-shell:not(.hidden) .main-content .panel,
+.app-shell:not(.hidden) .main-content .card{
+ border-radius:22px;
+}
+.app-shell:not(.hidden) .main-content .card,
+.app-shell:not(.hidden) .main-content .panel{
+ transition:border-color 190ms ease,background-color 190ms ease,box-shadow 200ms ease!important;
+}
+@media (hover:hover) and (pointer:fine){
+ .app-shell:not(.hidden) .main-content .panel:hover,
+ .app-shell:not(.hidden) .main-content .card:hover{
+  border-color:rgba(255,243,229,.49)!important;
+  box-shadow:0 18px 32px rgba(18,15,25,.25),inset 0 1px rgba(255,250,240,.3)!important;
+ }
+}
+.app-shell:not(.hidden) .main-content .v204-hero{
+ background:linear-gradient(115deg,rgba(116,88,91,.58),rgba(59,51,65,.74))!important;
+}
+.app-shell:not(.hidden) .main-content .v204-stat:hover{
+ transform:translate3d(0,-4px,0);background:linear-gradient(120deg,rgba(84,68,80,.9),rgba(71,61,77,.82))!important;
+}
+.app-shell:not(.hidden) .main-content .v204-chart-bar{
+ animation:none!important;
+ transition:transform 180ms ease,filter 180ms ease!important;
+}
+.app-shell:not(.hidden) .main-content .v204-stat .v204-mini-curve{filter:none!important}
+/* Secondary app pages: same materials, radius, light edge, text as dashboard. */
+.app-shell:not(.hidden) .main-content>.page-head,
+.app-shell:not(.hidden) .main-content>.jw-simple-header,
+.app-shell:not(.hidden) .main-content>.import-hero{
+ background:var(--jw205-surface-strong)!important;
+ border:1px solid var(--jw205-edge)!important;
+ border-radius:24px!important;
+ box-shadow:var(--jw205-shadow)!important;
+ padding:23px 26px!important;
+ margin:0 0 16px!important;
+ min-height:108px;
+ -webkit-backdrop-filter:none!important;backdrop-filter:none!important;
+ color:var(--jw205-ink)!important;
+}
+.app-shell:not(.hidden) .main-content :is(.page-head,.jw-simple-header,.import-hero) h1,
+.app-shell:not(.hidden) .main-content :is(.page-head,.jw-simple-header,.import-hero) h2{
+ color:#fff9f2!important;letter-spacing:-.65px;font-weight:790;
+}
+.app-shell:not(.hidden) .main-content :is(.page-head,.jw-simple-header,.import-hero) p,
+.app-shell:not(.hidden) .main-content .muted,
+.app-shell:not(.hidden) .main-content .panel small,
+.app-shell:not(.hidden) .main-content .card-sub,
+.app-shell:not(.hidden) .main-content .card-title,
+.app-shell:not(.hidden) .main-content .jw-hint{
+ color:var(--jw205-muted)!important;
+}
+.app-shell:not(.hidden) .main-content .panel-header{
+ background:var(--jw205-surface-inner)!important;
+ border-bottom:1px solid var(--jw205-line)!important;
+ color:#fff9f2!important;
+ padding:17px 22px;
+}
+.app-shell:not(.hidden) .main-content .panel-header h2,
+.app-shell:not(.hidden) .main-content .panel-header strong,
+.app-shell:not(.hidden) .main-content .card .number,
+.app-shell:not(.hidden) .main-content .panel b{
+ color:#fff9f2;
+}
+.app-shell:not(.hidden) .main-content .panel-body{color:var(--jw205-ink)}
+.app-shell:not(.hidden) .main-content .empty{color:var(--jw205-muted)!important}
+.app-shell:not(.hidden) .main-content .empty b{color:#fff5e8!important}
+.app-shell:not(.hidden) .main-content .list-tools{
+ background:rgba(255,249,240,.055)!important;
+ border-bottom:1px solid var(--jw205-line)!important;
+}
+.app-shell:not(.hidden) .main-content .table{
+ color:var(--jw205-ink)!important;
+ border-color:var(--jw205-line)!important;
+}
+.app-shell:not(.hidden) .main-content .table th{
+ color:#ffe5cd!important;
+ background:rgba(255,243,224,.09)!important;
+ border-bottom:1px solid var(--jw205-line)!important;
+}
+.app-shell:not(.hidden) .main-content .table td{
+ color:#fff5ee!important;
+ border-bottom:1px solid rgba(255,245,235,.15)!important;
+ background:transparent!important;
+}
+.app-shell:not(.hidden) .main-content .table tbody tr:hover td{
+ background:rgba(255,239,211,.11)!important;
+}
+.app-shell:not(.hidden) .main-content .table .muted{color:var(--jw205-muted)!important}
+.app-shell:not(.hidden) .main-content .table-scroll{scrollbar-color:#bd978e88 transparent}
+.app-shell:not(.hidden) .main-content .notice,
+.app-shell:not(.hidden) .main-content .import-confirm,
+.app-shell:not(.hidden) .main-content .flow-step,
+.app-shell:not(.hidden) .main-content .import-stats-details,
+.app-shell:not(.hidden) .main-content .jw-auto-order,
+.app-shell:not(.hidden) .main-content .jw-v62-select,
+.app-shell:not(.hidden) .main-content .diff{
+ background:rgba(255,238,214,.10)!important;
+ border:1px solid var(--jw205-line)!important;
+ border-radius:14px!important;color:#fff1e5!important;
+}
+.app-shell:not(.hidden) .main-content .notice.warning{
+ background:rgba(255,211,153,.17)!important;
+ border-color:rgba(255,211,153,.47)!important;
+ color:#ffe2bf!important;
+}
+.app-shell:not(.hidden) .main-content .flow-step b,
+.app-shell:not(.hidden) .main-content .card-icon{
+ background:rgba(255,224,183,.19)!important;
+ color:#ffe3c2!important;
+}
+.app-shell:not(.hidden) .main-content .issue,
+.app-shell:not(.hidden) .main-content .detail-row,
+.app-shell:not(.hidden) .main-content .jw-v62-result{
+ border-color:var(--jw205-line)!important;
+}
+.app-shell:not(.hidden) .main-content :is(.issue h3,.detail-row,.issue small,.diff strong,.diff span,.import-stats-details summary){color:#fff3e6!important}
+.app-shell:not(.hidden) .main-content :is(.list-search-label,.status-filter-label){
+ color:#ffebd9!important;border-color:var(--jw205-line)!important;
+ background:rgba(255,255,255,.085)!important;
+}
+.app-shell:not(.hidden) .main-content :is(input,select,textarea){
+ border:1px solid rgba(96,71,83,.22);
+ background:#fff9f1!important;
+ color:#302b32!important;
+ border-radius:11px;
+}
+.app-shell:not(.hidden) .main-content :is(input,select,textarea)::placeholder{color:#736c72}
+.app-shell:not(.hidden) .main-content :is(input,select,textarea):focus-visible{
+ outline:2px solid #ffdbb1!important;outline-offset:2px;
+}
+.app-shell:not(.hidden) .main-content .list-search-label input{
+ background:transparent!important;color:#fff8ed!important;
+}
+.app-shell:not(.hidden) .main-content .list-search-label input::placeholder{color:#e6d5c8}
+.app-shell:not(.hidden) .main-content .status-filter-label select{background:#fff8ed!important;color:#332c36!important}
+.app-shell:not(.hidden) .main-content .btn.ghost{
+ background:rgba(255,241,224,.14)!important;
+ color:#fff6e9!important;
+ border:1px solid rgba(255,240,219,.36)!important;
+}
+.app-shell:not(.hidden) .main-content .btn.primary,
+.app-shell:not(.hidden) .main-content .jw-send{
+ background:linear-gradient(120deg,#ffecd5,#e6b992)!important;
+ border:1px solid #fff7e9!important;
+ color:#3a2a31!important;
+}
+.app-shell:not(.hidden) .main-content .btn:hover:not(:disabled){transform:translate3d(0,-2px,0)}
+.app-shell:not(.hidden) .main-content .badge{border:1px solid rgba(255,239,216,.15)}
+/* Messenger full-screen consistency, avoiding nested white canvases */
+.app-shell:not(.hidden) .main-content .jw-messenger{
+ display:grid;grid-template-columns:minmax(230px,285px) minmax(0,1fr);
+ gap:0;background:var(--jw205-surface-strong)!important;
+ border:1px solid var(--jw205-edge)!important;
+ border-radius:24px!important;overflow:hidden;
+ box-shadow:var(--jw205-shadow);
+}
+.app-shell:not(.hidden) .main-content .jw-partners,
+.app-shell:not(.hidden) .main-content .jw-conversation{
+ background:transparent!important;
+ color:var(--jw205-ink)!important;
+ border:0!important;border-radius:0!important;
+ box-shadow:none!important;
+}
+.app-shell:not(.hidden) .main-content .jw-partners{
+ border-right:1px solid var(--jw205-line)!important;
+}
+.app-shell:not(.hidden) .main-content .jw-company-search,
+.app-shell:not(.hidden) .main-content .jw-connections-head,
+.app-shell:not(.hidden) .main-content .jw-chat-head,
+.app-shell:not(.hidden) .main-content .jw-compose-wrap{
+ background:rgba(255,240,223,.065)!important;
+ border-color:var(--jw205-line)!important;color:#fff6ed!important;
+}
+.app-shell:not(.hidden) .main-content .jw-company-search label,
+.app-shell:not(.hidden) .main-content .jw-connections-head,
+.app-shell:not(.hidden) .main-content .jw-chat-head h2,
+.app-shell:not(.hidden) .main-content .jw-thread{
+ color:#fff9f2!important;
+}
+.app-shell:not(.hidden) .main-content .jw-company-option,
+.app-shell:not(.hidden) .main-content .jw-thread{
+ background:rgba(255,245,230,.055)!important;color:#fff8ee!important;
+ border:1px solid transparent!important;border-radius:12px!important;
+ transition:background-color 140ms ease;
+}
+.app-shell:not(.hidden) .main-content .jw-company-option:hover,
+.app-shell:not(.hidden) .main-content .jw-thread:hover,
+.app-shell:not(.hidden) .main-content .jw-thread.chosen{
+ background:rgba(255,231,201,.21)!important;border-color:var(--jw205-line)!important;
+}
+.app-shell:not(.hidden) .main-content .jw-company-avatar,
+.app-shell:not(.hidden) .main-content .jw-chat-avatar{
+ background:rgba(255,229,204,.19)!important;color:#ffe9d6!important;
+}
+.app-shell:not(.hidden) .main-content .jw-message-list{
+ background:rgba(37,31,43,.15)!important;color:#fff5ee!important;
+}
+.app-shell:not(.hidden) .main-content .jw-msg{
+ background:rgba(255,241,220,.18)!important;border-color:rgba(255,236,215,.29)!important;
+ color:#fff8ef!important;
+}
+.app-shell:not(.hidden) .main-content .jw-msg-mine{
+ background:linear-gradient(120deg,#ffe5c7,#f4c49a)!important;
+ color:#3a2c33!important;
+ border-color:#ffe7c8!important;
+}
+.app-shell:not(.hidden) .main-content .jw-msg-mine :is(small,p,strong,span){color:#3a2c33!important}
+.app-shell:not(.hidden) .main-content .jw-plus-menu{
+ background:rgba(51,40,52,.98)!important;
+ border:1px solid var(--jw205-edge)!important;
+ border-radius:14px!important;
+ box-shadow:0 15px 40px rgba(18,12,25,.34)!important;
+}
+.app-shell:not(.hidden) .main-content .jw-plus-menu button{
+ background:transparent!important;color:#fff1e5!important;
+}
+.app-shell:not(.hidden) .main-content .jw-plus-menu button:hover{
+ background:rgba(255,231,206,.17)!important;
+}
+.app-shell:not(.hidden) .main-content .jw-plus{
+ background:rgba(255,232,209,.18)!important;color:#fff0de!important;
+}
+.app-shell:not(.hidden) .main-content .jw-msg-actions button,
+.app-shell:not(.hidden) .main-content .jw-older-bar .btn{
+ color:#fff0e1!important;border-color:var(--jw205-line)!important;
+ background:rgba(255,242,230,.11)!important;
+}
+.app-shell:not(.hidden) .main-content .jw-message-policy,
+.app-shell:not(.hidden) .main-content .jw-chat-head small{color:#f1dccc!important}
+.app-shell:not(.hidden) .main-content .jw-document,
+.app-shell:not(.hidden) .main-content .jw-attachment{
+ background:rgba(255,243,229,.09)!important;color:#fff1e6!important;
+ border-color:var(--jw205-line)!important;
+}
+/* Actual add/edit/detail dialog (outside app-shell) MUST match dashboard. */
+.app-shell:not(.hidden) ~ #modal-root .overlay{
+ background:rgba(23,19,31,.59)!important;
+ -webkit-backdrop-filter:blur(7px)!important;backdrop-filter:blur(7px)!important;
+ animation:jw205-shade-in 170ms ease-out both!important;
+ z-index:80!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .overlay .modal{
+ width:min(95vw,750px)!important;
+ background:linear-gradient(133deg,rgba(72,58,71,.97),rgba(49,41,56,.97))!important;
+ border:1px solid rgba(255,239,222,.54)!important;
+ color:#fff8ef!important;
+ border-radius:24px!important;
+ box-shadow:0 30px 80px rgba(13,12,22,.68),inset 0 1px rgba(255,252,243,.29)!important;
+ -webkit-backdrop-filter:none!important;backdrop-filter:none!important;
+ animation:jw205-modal-in 260ms cubic-bezier(.22,1,.36,1) both!important;
+ overscroll-behavior:contain;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-top,
+.app-shell:not(.hidden) ~ #modal-root .modal-bottom{
+ border-color:rgba(255,236,218,.24)!important;
+ background:rgba(255,241,225,.055)!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-top h2,
+.app-shell:not(.hidden) ~ #modal-root .modal-body h3,
+.app-shell:not(.hidden) ~ #modal-root .modal-body label,
+.app-shell:not(.hidden) ~ #modal-root .modal-body strong{
+ color:#fff7ec!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-top p,
+.app-shell:not(.hidden) ~ #modal-root .modal-body .muted,
+.app-shell:not(.hidden) ~ #modal-root .modal-body small{
+ color:#ead7c8!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body{
+ color:#fff6ec!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body :is(input,select,textarea){
+ background:#fff8ed!important;color:#302b32!important;
+ border:1px solid rgba(255,240,226,.66)!important;
+ border-radius:10px!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body :is(input,select,textarea):focus-visible{
+ outline:2px solid #ffe0bd!important;outline-offset:2px!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body .table th{
+ background:rgba(255,244,228,.11)!important;color:#ffeddc!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body .table td{
+ color:#fff1e5!important;border-color:rgba(255,240,225,.2)!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body :is(.notice,.diff,.detail-row,.jw-document){
+ background:rgba(255,238,210,.11)!important;
+ color:#fff2e5!important;
+ border-color:rgba(255,239,220,.24)!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body .notice.warning{
+ background:rgba(250,202,137,.17)!important;color:#ffebce!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body .btn.ghost,
+.app-shell:not(.hidden) ~ #modal-root .modal-bottom .btn.ghost{
+ background:rgba(255,246,230,.12)!important;color:#fff4e6!important;
+ border-color:rgba(255,239,222,.32)!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body .btn.primary,
+.app-shell:not(.hidden) ~ #modal-root .modal-bottom .btn.primary{
+ background:linear-gradient(125deg,#ffebd1,#e8b78e)!important;
+ color:#3b2b30!important;border-color:#fff4e1!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .close-x{
+ color:#fff5eb!important;background:rgba(255,240,223,.16)!important;
+ border:1px solid rgba(255,241,224,.34)!important;border-radius:50%!important;
+ min-width:35px;min-height:35px;transition:background 160ms,transform 160ms;
+}
+.app-shell:not(.hidden) ~ #modal-root .close-x:hover{
+ background:rgba(255,241,225,.31)!important;transform:rotate(90deg);
+}
+@keyframes jw205-shade-in{from{opacity:0}to{opacity:1}}
+@keyframes jw205-modal-in{
+ from{opacity:0;transform:translate3d(0,17px,0) scale(.982)}
+ to{opacity:1;transform:translate3d(0,0,0) scale(1)}
+}
+.app-shell:not(.hidden) ~ #toast.visible{
+ background:rgba(57,45,59,.94)!important;border:1px solid rgba(255,237,221,.3);
+ color:#fff5ec!important;box-shadow:0 13px 30px #16122177;
+}
+/* Existing V20.4 chart drilldowns share this lighter, unified motion. */
+.jw-v204 .v204-overlay{
+ backdrop-filter:blur(5px)!important;
+ -webkit-backdrop-filter:blur(5px)!important;
+ animation:jw205-shade-in 160ms ease-out both!important;
+}
+.jw-v204 .v204-details{
+ animation:jw205-modal-in 260ms cubic-bezier(.22,1,.36,1) both!important;
+}
+.jw-v204 .v204-overlay.v204-closing{
+ animation:jw205-shade-out 170ms ease-in both!important;
+}
+.jw-v204 .v204-overlay.v204-closing .v204-details{
+ animation:jw205-modal-out 170ms ease-in both!important;
+}
+@keyframes jw205-shade-out{to{opacity:0}}
+@keyframes jw205-modal-out{to{opacity:0;transform:translate3d(0,8px,0) scale(.984)}}
+/* Build site layout responsiveness; never cover the mobile hamburger. */
+@media(max-width:860px){
+ .app-shell:not(.hidden) .main-content .jw-messenger{grid-template-columns:1fr}
+ .app-shell:not(.hidden) .main-content .jw-partners{
+  border-right:0!important;border-bottom:1px solid var(--jw205-line)!important;
+  min-height:auto;max-height:300px;
+ }
+}
+@media(max-width:760px){
+ .app-shell:not(.hidden) .main-content>.page-head,
+ .app-shell:not(.hidden) .main-content>.jw-simple-header{
+  padding:18px 16px!important;border-radius:19px!important;min-height:0;
+ }
+ .app-shell:not(.hidden) .main-content .panel-header{padding:15px 17px}
+ .app-shell:not(.hidden) ~ #modal-root .overlay{padding:9px}
+ .app-shell:not(.hidden) ~ #modal-root .modal{
+  border-radius:18px!important;max-height:calc(100dvh - 20px)!important;
+ }
+ .app-shell:not(.hidden) .main-content .jw-messenger{border-radius:18px!important}
+}
+@media(prefers-reduced-motion:reduce){
+ .app-shell:not(.hidden) .main-content,
+ .app-shell:not(.hidden) .main-content *,
+ .app-shell:not(.hidden) ~ #modal-root *,
+ .app-shell:not(.hidden) ~ #modal-root .overlay,
+ .jw-v204 .v204-overlay,.jw-v204 .v204-details{
+  animation:none!important;transition:none!important;transform:none!important;filter:none!important;
+ }
+}
+
+/* Close actual forms smoothly as well as V20.4 analytical inspector. */
+.app-shell:not(.hidden) ~ #modal-root .overlay.jw205-closing{
+ animation:jw205-shade-out 165ms ease-in both!important;
+ pointer-events:none!important;
+}
+.app-shell:not(.hidden) ~ #modal-root .overlay.jw205-closing .modal{
+ animation:jw205-modal-out 165ms ease-in both!important;
+}
+
+/* Chromium visual review: programmatic navigation focus drew a bright cyan
+   rectangle around the entire page. Keep focus indicators on actionable controls,
+   but avoid painting a giant outline around the main landmark after every route. */
+.app-shell:not(.hidden) #main-content:focus,
+.app-shell:not(.hidden) #main-content:focus-visible{
+ outline:none!important;
+}
+.app-shell:not(.hidden) #main-content :is(button,a,input,select,textarea):focus-visible{
+ outline:2px solid #ffe0b9!important;outline-offset:3px!important;
+}
+/* Modal form footer needs its own breathing space on both touch and desktop. */
+.app-shell:not(.hidden) ~ #modal-root .modal-body form>.modal-bottom{
+ margin-top:22px;gap:10px;
+}
+.app-shell:not(.hidden) ~ #modal-root .modal-body .form-grid{
+ row-gap:17px;
+}
+@media(max-width:760px){
+ .app-shell:not(.hidden) ~ #modal-root .modal-body form>.modal-bottom{margin-top:17px}
+}
+
+/* Mobile QA: let company search and thread list determine their own height.
+   A legacy 300px max-height compressed company list into the conversation header. */
+@media(max-width:860px){
+ .app-shell:not(.hidden) .main-content .jw-messenger{display:flex;flex-direction:column}
+ .app-shell:not(.hidden) .main-content .jw-partners{
+  height:auto!important;min-height:0!important;max-height:none!important;
+  overflow:visible!important;flex:none;
+ }
+ .app-shell:not(.hidden) .main-content .jw-company-results{
+  height:auto!important;min-height:60px!important;max-height:135px!important;
+  overflow-y:auto!important;flex:none;
+ }
+ .app-shell:not(.hidden) .main-content .jw-thread-list{
+  height:auto!important;min-height:0!important;max-height:150px!important;
+  overflow-y:auto!important;flex:none;
+ }
+ .app-shell:not(.hidden) .main-content .jw-conversation{
+  margin-top:0;min-height:360px!important;overflow:hidden;
+ }
+}

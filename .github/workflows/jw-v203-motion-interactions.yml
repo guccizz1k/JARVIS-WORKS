@@ -1,0 +1,70 @@
+name: JW V20.3 kinetic UI actual interaction video and accessibility (review only)
+on:
+  push:
+    branches:
+      - review/v203-kinetic-ui-navigation-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v203-motion-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  chromium-real-interactions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile, JS syntax and authorized motion contract
+        run: |
+          python -m py_compile scripts/ci_v203_motion_browser.py
+          node --check app/static/app.js
+          node --check app/static/motion_v203.js
+          node --check app/static/bento_v202.js
+          python - <<'PY'
+          from pathlib import Path
+          h=Path("app/static/index.html").read_text()
+          css=Path("app/static/motion_v203.css").read_text()
+          js=Path("app/static/motion_v203.js").read_text()
+          app=Path("app/static/app.js").read_text()
+          assert "/static/motion_v203.css" in h and "/static/motion_v203.js" in h
+          assert h.index("/static/bento_v202.js")<h.index("/static/motion_v203.js")
+          assert "await window.JW_UI_MOTION.beforeNavigate(page)" in app
+          assert "window.JW_UI_MOTION?.afterNavigate(page,out)" in app
+          assert "window.JW_UI_MOTION?.navigationFailed()" in app
+          assert h.index('data-page="imports"')<h.index('data-page="dashboard"')
+          for feature in ("jw-v203-leaving","jw-v203-entering","jw-v203-ripple",
+            "jw-v203-modal-pop","jw-v203-chart","jw-v203-toast",
+            "jw-v203-theme-flash","prefers-reduced-motion"):
+            assert feature in css,feature
+          assert "fetch(" not in js and "XMLHttpRequest" not in js
+          assert "data-page" in js and "matchMedia" in js
+          print("PASS_V203_STATIC_NO_BUSINESS_ENDPOINTS_AND_MOTION_CONTRACT",flush=True)
+          PY
+      - name: Install Chromium for actual independent interactions
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+      - name: Record real user interactions, 4 viewports and reduced-motion
+        run: python -m scripts.ci_v203_motion_browser
+      - name: Publish replay video and four real screenshots as review artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v203-real-motion-video-and-screens
+          path: |
+            artifacts/v203-motion/*.mp4
+            artifacts/v203-motion/*.webm
+            artifacts/v203-motion/*.png
+          if-no-files-found: warn
+          retention-days: 14

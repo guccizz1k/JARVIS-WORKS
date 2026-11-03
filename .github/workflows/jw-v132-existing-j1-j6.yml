@@ -1,0 +1,77 @@
+name: JW V13.2 direct full-Python product regression (single job)
+
+on:
+  push:
+    branches:
+      - review/v131-abc-finance-rollback-20261030
+    paths:
+      - .github/workflows/jw-v132-existing-j1-j6.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v132-direct-product-review
+  cancel-in-progress: true
+
+jobs:
+  full-python-product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      JW_ENV: review
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: J1 original history and immutable product baseline
+        run: |
+          git merge-base --is-ancestor 4fe542b9c5676ae3ee5237504426a938e422cd42 HEAD
+          git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
+          git merge-base --is-ancestor efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD
+          test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt requirements-dev.txt
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql' ':!db/review/v99_live_tenant_row_read_rollback.sql' ':!db/review/v99_live_customer_withcheck_rollback.sql' ':!db/review/v108_source_schema_fingerprints.json'
+          python - <<'PY'
+          import subprocess
+          changed=set(subprocess.check_output(
+            ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
+          assert changed <= {"app/pg_connection_gate_v87.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_dev_entry_v92.py","app/pg_quote_read_v93.py","app/pg_dev_entry_v93.py"},changed
+          print("PASS: only explicitly reviewed V8.7/V8.8 gate changes, original product backend unchanged")
+          PY
+      - name: Install frozen full-product test dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pip install 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor
+      - name: Full source, security, finance and J1-J6 Python regressions (NOT full seven-job acceptance)
+        run: |
+          python scripts/ci_rebuild_v79_overlay.py
+          python -m pytest -q tests -ra --junitxml=v132-full-python.xml
+          python -m scripts.jw_integrated_acceptance --junit v132-full-python.xml
+      - name: Status boundary
+        run: |
+          python - <<'PY'
+          import json,os
+          print(json.dumps({"sha":os.environ["GITHUB_SHA"],
+          "scope":"FULL_PYTHON_PRODUCT_REGRESSIONS_SINGLE_RUNNER",
+          "original_7_job_j1_j6":"NOT_RUN",
+          "independent_core_first":"BLOCKED",
+          "public_https_business":"NOT_RUN",
+          "release":"BLOCKED"},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v132-full-python-junit
+          path: v132-full-python.xml
+          retention-days: 3
+          if-no-files-found: ignore

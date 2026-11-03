@@ -1,0 +1,61 @@
+name: JW V15.9 real PG17 review-ledger privilege bypass regression
+on:
+  push:
+    branches:
+      - review/v159-delivery-writer-privilege-boundary-20261031
+permissions:
+  contents: read
+concurrency:
+  group: jw-v159-review-db-boundary
+  cancel-in-progress: true
+jobs:
+  pg17-exploit-and-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 4s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      JW_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify protected product source paths and candidate only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
+          git diff --exit-code febbd0e0ceed05d621798b54ce7cf02639963fa5 HEAD -- app/main.py app/static/ requirements.txt security/ migrations/
+          python - <<'PY'
+          from pathlib import Path
+          src=Path("scripts/review/v159_dedicated_delivery_writer_candidate.sql").read_text()
+          assert "REVOKE INSERT ON" in src
+          assert "jw_app_dev" in src and "jw_delivery_writer_v159" in src
+          assert "GRANT UPDATE ON jw_dev.orders" not in src
+          assert "GRANT ALL" not in src
+          print("PASS_V159_RESTRICTED_CANDIDATE_SOURCE",flush=True)
+          PY
+      - name: Install stage-only PostgreSQL dependencies
+        run: |
+          python -m pip install -r requirements-pg-stage.txt -r requirements-dev.txt
+      - name: Static compile
+        run: python -m compileall -q app scripts
+      - name: Reproduce legacy bypass then prove restricted writer isolation
+        run: python -m scripts.ci_v159_review_writer_attack

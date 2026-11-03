@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from psycopg.conninfo import conninfo_to_dict
 
 from app import pg_api_v84, pg_auth_v85, pg_v90_integrated_entry
-from app import pg_quote_api_v92, pg_quote_read_v93
+from app import pg_quote_api_v92, pg_quote_read_v93, pg_invoice_preview_v145, pg_delivery_review_api_v154, pg_trade_lineage_v158, pg_import_quote_v160, pg_invoice_balance_v161
 
 ACK = "PRIVATE_HTTPS_PG_ONLY"
 REQUIRED_MODES = {
@@ -32,7 +32,7 @@ def _safe_dsn(raw: str, principal: str) -> bool:
     try:
         d = conninfo_to_dict(raw)
         keys = frozenset({"host", "port", "dbname", "user", "password",
-                          "sslmode", "connect_timeout"})
+                          "sslmode", "connect_timeout", "sslrootcert"})
         if set(d) - keys:
             return False
         host = os.getenv("JW_STAGE_EXPECTED_DB_HOST", "")
@@ -40,8 +40,26 @@ def _safe_dsn(raw: str, principal: str) -> bool:
         if not host or not dbname:
             return False
         timeout = int(d.get("connect_timeout", "5"))
+        pooler = os.getenv("JW_STAGE1_SUPAVISOR_ACK") == "V134_REVIEW_POOLER_ONLY"
+        if pooler:
+            # Only pre-approved, revocable test logins. No existing V90 role
+            # password rotation or privileged Supabase credentials permitted.
+            stage_role = {
+                "jw_trade_gateway_v90": "jw_stage1_trade_20261030",
+                "jw_auth_gateway_v90": "jw_stage1_auth_20261030",
+            }.get(principal)
+            expected_ref = "rvymwwzclagvljnofyss"
+            expected_user = stage_role + "." + expected_ref if stage_role else ""
+            if host != "aws-0-ap-northeast-2.pooler.supabase.com" or (
+                d.get("sslrootcert") != "system"
+            ):
+                return False
+        else:
+            expected_user = principal
+            if d.get("sslrootcert") not in (None, "system"):
+                return False
         return (
-            d.get("user") == principal
+            d.get("user") == expected_user
             and d.get("host") == host
             and d.get("dbname") == dbname
             and len(d.get("password", "")) >= 16
@@ -102,9 +120,28 @@ def create_app() -> FastAPI:
         pg_v90_integrated_entry.register_v90_messenger(app),
         pg_quote_api_v92.register_v92_quote_api(app),
         pg_quote_read_v93.register_v93_quote_reader(app),
+        pg_invoice_preview_v145.register_v145_invoice_preview(app),
     ):
         if not registered:
             raise RuntimeError("BLOCKED: an isolated PostgreSQL router is disabled")
+
+    # Optional V15.4 route is OFF by default; if explicitly requested, it
+    # must pass issuer-key / non-production gates or block startup.
+    pg_delivery_review_api_v154.register_v154_delivery_review(app)
+    # V15.8 only shows already-verified tenant-scoped record links; OFF by default.
+    pg_trade_lineage_v158.register_v158_trade_lineage(app)
+    # Requires separately confirmed import evidence + encrypted source key.
+    pg_import_quote_v160.register_v160_pg_import_quote(app)
+    # Read-only existing invoice/payment balance; cannot post or reconcile.
+    pg_invoice_balance_v161.register_v161_invoice_balance(app)
+    # V17.4 is disabled by default and registers no routes without an explicit
+    # non-production opt-in. Never calls a bank or posts legal invoices.
+    from scripts.review import pg_order_activation_v174
+    pg_order_activation_v174.register_v174_internal_order(app)
+    # V18.0 is disabled by default; records INTERNAL unreconciled entries
+    # only via restricted V83 RPC. Never claims actual bank settlement.
+    from scripts.review import pg_manual_ledger_v180
+    pg_manual_ledger_v180.register_v180_ledger(app)
 
     @app.get("/healthz", include_in_schema=False)
     def health():

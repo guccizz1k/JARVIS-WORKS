@@ -1,0 +1,74 @@
+name: JW V18.4 REAL HTTPS restricted PG17 quote-to-internal-order (review only)
+on:
+  push:
+    branches:
+      - review/v184-disposable-real-https-pg-order-20261031
+permissions:
+  contents: read
+concurrency:
+  group: jw-v184-real-pg-https-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-https-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing PostgreSQL and real HTTP dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Gate 1 compile and strict isolated source checks
+        run: |
+          python -m py_compile scripts/ci_v184_actual_https_pg_order.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v184_actual_https_pg_order.py").read_text()
+          for required in (
+            "ONLY_EPHEMERAL_LOCAL_DATABASE",
+            "fixture.DSN",
+            "verify=str(cert)",
+            "trust_env=False",
+            "follow_redirects=False",
+            'quote_items',
+            "source_document_verified",
+            "bank",
+            "20 separate foreign quote IDs",
+            'PASS_V184_REAL_TLS_PG17_QUOTE_REVIEW_DRAFT_INTERNAL_ORDER',
+            "LIMIT_V184_NO_LEGAL_INVOICE_BANK_SETTLEMENT_MESSENGER_WRITE",
+          ):
+            assert required in s, required
+          assert "TestClient(" not in s
+          print("PASS_V184_SOURCE_GUARD_ACTUAL_HTTP_POSTGRES_NO_MOCK")
+          PY
+      - name: Gates 2-5 actual trusted TLS transport, PostgreSQL17 rights and 20 adversarial requests
+        run: python -m scripts.ci_v184_actual_https_pg_order
+      - name: Prove release remains unapproved
+        run: |
+          python - <<'PY'
+          import os
+          assert os.getenv("JW_ENV") == "review"
+          assert os.getenv("JW_PG_CI_ALLOW") == "ONLY_EPHEMERAL_LOCAL_DATABASE"
+          print("PASS_V184_REVIEW_ONLY_NO_DEPLOY_AND_NO_CUSTOMER_DATA")
+          PY

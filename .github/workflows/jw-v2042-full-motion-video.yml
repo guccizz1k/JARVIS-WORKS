@@ -1,0 +1,59 @@
+name: JW V20.5 smooth unified glass full UI video desktop and iPhone (review only)
+on:
+  push:
+    branches:
+      - review/v2042-complete-motion-video-20261102
+      - review/v205-smooth-unified-glass-20261102
+permissions:
+  contents: read
+concurrency:
+  group: jw-v205-video-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  full-ui-chromium-capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Confirm exact source, static security, and Python syntax
+        run: |
+          python -m py_compile scripts/ci_v2042_full_ui_video.py
+          node --check app/static/sunset_v204.js
+          node --check app/static/motion_v203.js
+          node --check app/static/app.js
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v2042_full_ui_video.py").read_text()
+          assert "class WalkthroughHandler(SunsetHandler)" in s
+          assert "assert all(method==\"GET\" for method,_ in Handler.requests)" in s
+          assert "record_video_dir" in s and "libx264" in s and "faststart" in s
+          assert "for i in range(4)" in s
+          assert "27," in s and "29," in s
+          h=Path("app/static/index.html").read_text()
+          assert h.index('data-page="imports"')<h.index('data-page="dashboard"')
+          print("PASS_VIDEO_ISOLATION_NO_WRITES_SOURCE_NAV",flush=True)
+          PY
+      - name: Chromium browser and iOS-compatible video encoder
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+          if ! command -v ffmpeg >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y ffmpeg; fi
+      - name: Click and film 29 UI action chapters on desktop and iPhone
+        run: python -m scripts.ci_v2042_full_ui_video
+      - name: Publish actual mp4 and verified screenshot artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v2042-all-actual-clicks-desktop-mobile
+          path: |
+            artifacts/v2042-complete-tour/*.mp4
+            artifacts/v2042-complete-tour/*.png
+          if-no-files-found: warn
+          retention-days: 14

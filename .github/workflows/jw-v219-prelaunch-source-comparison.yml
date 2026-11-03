@@ -1,0 +1,121 @@
+name: JW V21.9 source-grounded review prelaunch acceptance
+on:
+  push:
+    branches:
+      - review/v219-release-source-comparison-20261103
+permissions:
+  contents: read
+concurrency:
+  group: jw-v219-prelaunch
+  cancel-in-progress: true
+jobs:
+  full-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate 1/3 - exact file scope and source integrity
+        run: |
+          set -euo pipefail
+          python -m py_compile app/evidence_v64.py tests/test_v219_local_source_integrity.py scripts/ci_v219_source_compare_browser.py
+          node --check app/static/app.js
+          node --check app/static/evidence_v64.js
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          baseline="025cc2568ce73d5e6550ca0fa787cec1563f0c74"
+          files=set(subprocess.check_output(["git","diff","--name-only",baseline,"HEAD"],text=True).splitlines())
+          expected={"app/evidence_v64.py","app/static/evidence_v64.js","app/static/app.js","app/static/style.css",
+                    "tests/test_v219_local_source_integrity.py","scripts/ci_v219_source_compare_browser.py",
+                    ".github/workflows/jw-v219-prelaunch-source-comparison.yml"}
+          assert files==expected,(files,expected)
+          assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
+          assert "img-src 'self' data:" in Path("app/main.py").read_text()
+          print("PASS_V219_MINIMAL_DIFF_NO_RELEASE_BYPASS")
+          PY
+      - name: Install existing Korean OCR and full QA environment
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
+      - name: Preserve historical source overlay
+        run: |
+          python -m scripts.ci_rebuild_v79_overlay
+          test -s ../overlay/BASE_SHA256.json
+          test -s ../overlay/PAYLOAD_SHA256.json
+      - name: Gate 2/3 - source SHA tenant guards and approval integration
+        run: |
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw219-focused tests/test_v219_local_source_integrity.py tests/test_evidence_v64.py tests/test_v218_document_type_integrity.py
+      - name: Gate 1/2/3 - all source-exact repository regression
+        run: |
+          mkdir -p artifacts/v219/
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw219-full --junitxml=artifacts/v219/full.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse("artifacts/v219/full.xml").getroot()
+          attrs=root.attrib if root.tag=="testsuite" else root.find(".//testsuite").attrib
+          n={k:int(attrs.get(k,0)) for k in ("tests","failures","errors","skipped")}
+          assert n["tests"]>=1947,n
+          assert n["failures"]==0 and n["errors"]==0 and n["skipped"]==0,n
+          print("PASS_V219_FULL_PYTEST_ZERO_FAIL_ZERO_SKIP",n)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v219-full-pytest
+          path: artifacts/v219/full.xml
+          retention-days: 7
+          if-no-files-found: ignore
+  real-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install actual Chromium/Korean OCR
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate 4 - unchanged premium UI, animation and route regression
+        run: python -m scripts.ci_v214_desktop_dark_browser
+      - name: Gate 4 - laptop auth and viewport regression
+        run: python -m scripts.ci_v216_browser_edges
+      - name: Gate 2/4 - existing supported OCR original path
+        run: python -m scripts.ci_v217_ocr_browser
+      - name: Gate 2/4 - existing unsupported OCR document approval denial
+        run: python -m scripts.ci_v218_unsupported_ui_browser
+      - name: Gate 2/4 - local source side by side and SHA-256 reattach
+        run: python -m scripts.ci_v219_source_compare_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v219-browser-evidence
+          path: |
+            artifacts/v214-desktop/
+            artifacts/v216-browser/
+            artifacts/v217-browser/
+            artifacts/v218-browser/
+            artifacts/v219-source-compare/
+          retention-days: 7
+          if-no-files-found: ignore

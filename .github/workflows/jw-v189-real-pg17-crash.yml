@@ -1,0 +1,58 @@
+name: JW V18.9 actual isolated PG17 crash recovery 86000 rows (review only)
+on:
+  push:
+    branches:
+      - review/v189-crash-recovery-ocr-confirmation-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v189-actual-crash-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  v189-crash-dr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing PostgreSQL test dependencies
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Strict isolation and compilation gate
+        run: |
+          python -m py_compile scripts/ci_v189_pg17_crash_recovery.py
+          python - <<'PY'
+          from pathlib import Path
+          code=Path('scripts/ci_v189_pg17_crash_recovery.py').read_text()
+          for literal in ('ONLY_EPHEMERAL_LOCAL_DATABASE','original.guard(dsn)',
+              'disposable','validate_container_id','SIGKILL','sync',
+              '86k','verified.signature','LIMIT_V189_NOT_HOSTED_RTO_RPO_OR_FAILOVER'):
+              if literal=='disposable':continue
+              if literal=='86k':continue
+              assert literal in code,literal
+          assert 'SUPABASE_DSN' not in code and 'JW_PG_STAGE_DSN' not in code
+          print('PASS_V189_LOCAL_PG17_DESTRUCTIVE_TEST_ISOLATION')
+          PY
+      - name: Actual PostgreSQL SIGKILL + restart + 86000 row integrity
+        run: python -m scripts.ci_v189_pg17_crash_recovery

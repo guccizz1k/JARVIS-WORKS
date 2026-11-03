@@ -1,0 +1,73 @@
+name: JW V17.9 real OCR 24 labeled synthetic images and 40 hostile fusion cases
+on:
+  push:
+    branches:
+      - review/v179-ocr-multiview-field-fusion-20261031
+permissions:
+  contents: read
+concurrency:
+  group: jw-v179-ocr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  v179-real-synthetic-multiview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    env:
+      JW_ENV: review
+      JW_OCR_SYNTHETIC_ONLY: '1'
+      OMP_THREAD_LIMIT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Local Korean Tesseract and pinned app prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng fonts-nanum
+          python -m pip install -r requirements-dev.txt 'Pillow>=10,<14'
+          tesseract --list-langs | grep -q '^kor$'
+          tesseract --list-langs | grep -q '^eng$'
+      - name: Exact adversarial input gates and 40 fusion checks
+        run: |
+          python -m py_compile scripts/ci_v178_real_ocr_synthetic.py scripts/ci_v179_ocr_multiview.py
+          python -m pytest -q tests/test_v178_ocr_candidate_parser.py tests/test_v179_ocr_fusion.py -ra --junitxml=v179-strict.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          e=ET.parse('v179-strict.xml').getroot()
+          x=e if e.tag=='testsuite' else e.find('testsuite')
+          assert x is not None
+          assert int(x.attrib.get('tests','0'))>=80
+          assert all(int(x.attrib.get(k,'0'))==0 for k in ('failures','errors','skipped'))
+          print('PASS_V179_AT_LEAST_80_INDEPENDENT_NEGATIVE_AND_FUSION_TESTS')
+          PY
+      - name: Actual 72 Tesseract calls on labeled 24 synthetic forms
+        run: |
+          python -m scripts.ci_v179_ocr_multiview
+          python - <<'PY'
+          import json
+          r=json.load(open('v179-synthetic-ocr-multiview.json'))
+          assert r['n']==24 and r['production_ocr_readiness']=='BLOCKED'
+          assert r['real_customer_documents_tested'] is False
+          assert r['business_auto_registration_approved'] is False
+          assert r['physical_source_authenticity_verified'] is False
+          a=r['baseline']['fields'];b=r['field_fusion']['fields']
+          for key in ('business_number','counterparty','total_amount'):
+              assert a[key]['samples']==b[key]['samples']==24
+              assert b[key]['incorrect_nonempty_predictions'] <= a[key]['incorrect_nonempty_predictions']
+          assert b['total_amount']['incorrect_nonempty_predictions']==0
+          print('PASS_V179_REAL_FIELD_FUSION_NONREGRESSION_NO_FINANCIAL_FALSE_POSITIVES')
+          print('BLOCKED_V179_CUSTOMER_OCR_APPROVAL_UNMEASURED')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v179-ocr-aggregate-only
+          path: |
+            v179-strict.xml
+            v179-synthetic-ocr-multiview.json
+          retention-days: 3
+          if-no-files-found: ignore

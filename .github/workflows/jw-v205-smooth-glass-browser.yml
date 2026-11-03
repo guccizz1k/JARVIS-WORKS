@@ -1,0 +1,77 @@
+name: JW V20.5 smooth transitions + premium glass parity (review only)
+on:
+  push:
+    branches:
+      - review/v205-smooth-unified-glass-20261102
+permissions:
+  contents: read
+concurrency:
+  group: jw-v205-motion-glass-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  real-chromium-visual-and-motion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate1-3 exact source, syntax, protection, no auth/DB edits
+        run: |
+          set -eu
+          python -m py_compile scripts/ci_v205_smooth_glass_browser.py
+          node --check app/static/app.js
+          node --check app/static/motion_v203.js
+          node --check app/static/premium_v205.js
+          node --check app/static/sunset_v204.js
+          python -m pip -q install 'tinycss2>=1.2,<2'
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, subprocess, tinycss2
+          base='b25d8cd2a3a707a3b9fab81ac40b32549864a8bf'
+          diff=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          allowed={'app/static/index.html','app/static/motion_v203.js',
+          'app/static/premium_v205.js','app/static/premium_v205.css',
+          'scripts/ci_v205_smooth_glass_browser.py',
+          '.github/workflows/jw-v205-smooth-glass-browser.yml',
+          '.github/workflows/jw-j1-j6-unified-acceptance.yml',
+          '.github/workflows/jw-v2042-full-motion-video.yml'}
+          assert diff<=allowed,(diff-allowed)
+          for name in ('app/main.py','app/static/app.js','app/static/sunset_v204.js'):
+            original=subprocess.check_output(['git','show',base+':'+name])
+            assert original==Path(name).read_bytes(),name
+          h=Path('app/static/index.html').read_text()
+          assert h.index('data-page="imports"')<h.index('data-page="dashboard"')
+          assert '/static/premium_v205.css' in h and '/static/premium_v205.js' in h
+          assert h.index('sunset_v204.css')<h.index('premium_v205.css')
+          css=Path('app/static/premium_v205.css').read_text()
+          nodes=tinycss2.parse_stylesheet(css,skip_comments=True,skip_whitespace=True)
+          errors=[n for n in nodes if n.type=='error']
+          assert not errors,errors
+          for s in ('.jw-messenger','.modal','.page-head','.table th','.main-content.jw-v203-leaving','prefers-reduced-motion'):
+            assert s in css,s
+          js=Path('app/static/premium_v205.js').read_text()
+          assert 'fetch(' not in js and 'XMLHttpRequest' not in js
+          assert 'if(root.contains(overlay))overlay.remove()' in js
+          print('PASS_V205_G1_G2_G3_CODE_BASELINE_NO_WRITES',len(nodes),flush=True)
+          PY
+      - name: Install actual Chromium
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+      - name: Gate4-5 actual desktop, tablet, phone E2E, consistency, performance evidence
+        run: python -m scripts.ci_v205_smooth_glass_browser
+      - name: Store screenshots and timing report for user review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v205-real-chromium-premium-glass
+          path: artifacts/v205-smooth-glass/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -165,7 +165,7 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
        VALUES(?,?,?,?,?,?,?,?,?)''',
        (eid,user['org_id'],user['id'],sha,filename,sealed_json(doc),digest,'pending',now()))
    audit(c,user,'document_evidence',eid,'evidence_preview',{'method':doc['method'],'kind':doc['document_kind']})
-  return {'id':eid,'digest':digest,'status':'pending','document':doc,'original_file_stored':False,'confirmation_required':True}
+  return {'id':eid,'digest':digest,'status':'pending','document':doc,'source_file_sha256':sha,'original_file_stored':False,'confirmation_required':True}
 
  @app.get('/api/evidence/queue')
  def queue(user=Depends(current_user)):
@@ -184,7 +184,8 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
    row=get_row(c,'evidence_previews_v64',eid,user['org_id'])
    if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로더 또는 관리자만 조회할 수 있습니다',403)
    return {'id':eid,'digest':row['digest'],'status':row['status'],
-           'document':unseal_json(row['proposed_json']),'record_id':row['record_id']}
+           'document':unseal_json(row['proposed_json']),'record_id':row['record_id'],
+           'source_file_sha256':row['file_sha256'],'original_file_stored':False}
 
  @app.post('/api/evidence/preview/{eid}/confirm',status_code=201)
  def confirm(eid:str,body:Approval,user=Depends(current_user)):
@@ -196,12 +197,21 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
     fail('24시간 검토 기한 만료. 새로 업로드하세요',409)
    if not hmac.compare_digest(row['digest'],body.preview_digest):fail('문서가 변경되었습니다. 다시 확인하세요',409)
    doc=unseal_json(row['proposed_json'])
-   # Never allow a manual confirmation to rebrand a confidently recognized source.
-   if doc['document_kind'] and doc['kind_inference']=='explicit' and doc['document_kind']!=body.document_kind:
+   # An unsupported OCR document must not be rebranded as a receipt
+   # by manually entering financial fields. Keep the preview pending.
+   if doc.get('document_kind') is None or doc.get('kind_inference') in ('ambiguous','unknown','unsupported'):
+    fail('원본의 증빙 문서 유형을 판별하지 못했습니다. 다른 유형으로 등록할 수 없습니다',409)
+   if doc['document_kind']!=body.document_kind:
     fail('원본문서 유형이 다릅니다. 잘못된 파일을 등록하지 마세요',409)
-   if body.document_kind=='inventory_sheet' and body.record_type!='inventory_snapshot':fail('재고표는 재고 실사 기록으로만 등록합니다',422)
-   if body.document_kind=='sales_slip' and body.record_type!='sales':fail('매출전표 유형 불일치',422)
-   if body.document_kind=='purchase_slip' and body.record_type!='purchase':fail('매입전표 유형 불일치',422)
+   allowed={
+    'receipt':('sales','purchase','expense'),
+    'sales_slip':('sales',),
+    'purchase_slip':('purchase',),
+    'trade_statement':('sales','purchase'),
+    'inventory_sheet':('inventory_snapshot',),
+   }
+   if body.record_type not in allowed[body.document_kind]:
+    fail('원본문서 종류에 맞지 않는 업무 기록입니다. 원본을 다시 확인하세요',422)
    if body.record_type=='inventory_snapshot':
     if body.document_kind!='inventory_sheet' or not body.sku or not body.quantity:
      fail('재고 실사에는 품목코드와 재고수량이 필요합니다',422)

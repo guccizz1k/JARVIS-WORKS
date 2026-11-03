@@ -13,13 +13,60 @@ on:
       - review/v97-restricted-supavisor-login-20261025
       - review/v98-supavisor-hop-aware-ssl-20261025
       - review/v99-v110-eight-stage-acceptance-20261025
+      - review/v131-abc-finance-rollback-20261030
+      - review/v156-j1j6-baseline-ci-fix-20261030
+      - review/v157-real-pg17-delivery-http-concurrency-20261030
+      - review/v158-trade-lineage-20261030
+      - review/v159-delivery-writer-privilege-boundary-20261031
+      - review/v160-approved-import-to-pg-quote-20261031
+      - review/v162-confirmed-import-lineage-20261031
+      - review/v164-stage-real-pg-catalog-40-20261031
+      - review/v161-invoice-payment-balance-preview-20261031
+      - review/v167-lineage-invoice-source-consistency-20261031
+      - review/v168-rls-parent-tenant-hardening-20261031
+      - review/v169-cross-domain-full-lifecycle-20261031
+      - review/v170-dev-approval-draft-schema-20261031
+      - review/v172-strict-document-fidelity-20261031
+      - review/v173-dev-review-index-fk-20261031
+      - review/v174-approved-internal-order-pg-20261031
+      - review/v175-original-quote-proof-and-invoice-preflight-20261031
+      - review/v176-restricted-order-concurrency-20261031
+      - review/v179-ocr-multiview-field-fusion-20261031
+      - review/v180-restricted-manual-ledger-http-20261031
+      - review/v181-43table-rls-recovery-scale-20261031
+      - review/v182-real-dev-signup-readiness-43-rls-20261031
+      - review/v183-external-https-boundary-20261031
+      - review/v184-disposable-real-https-pg-order-20261031
+      - review/v185-43table-scaled-dr-20261031
+      - review/v186-public-korean-ocr-pilot-20261031
+      - review/v187-kftc-bank-page-contract-20261031
+      - review/v188-real-tls-pg-load-ocr50-20261101
+      - review/v189-crash-recovery-ocr-confirmation-20261101
+      - review/v190-real-tls-pg-messenger-attachments-20261101
+      - review/v191-approved-import-to-order-real-tls-20261101
+      - review/v192-backup-integrity-rpo-gap-20261101
+      - review/v193-actual-upload-confirm-pg17-20261101
+      - review/v194-separate-import-approver-20261101
+      - review/v195-atomic-approval-receipt-pg17-20261101
+      - review/v196-approval-receipt-encrypted-dr-20261101
+      - review/v197-cross-cluster-signed-dr-20261101
+      - review/v198-chromium-pg17-actual-upload-20261101
+      - review/v199-real-shape-import-writer-20261101
+      - review/v200-dev-import-preflight-dsn-20261101
+      - review/v201-dev-import-closed-migration-20261101
+      - review/v202-reference-bento-ui-20261101
+      - review/v203-kinetic-ui-navigation-20261101
+      - review/v2041-sunset-motion-final-20261101
+      - review/v205-smooth-unified-glass-20261102
+      - review/v206-premium-translucent-right-rail-20261102
+      - review/v208-four-advisory-skills-20261102
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: jw-j1-j6-unified-20261024
+  group: jw-j1-j6-unified-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -40,14 +87,56 @@ jobs:
           git merge-base --is-ancestor a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338 HEAD
           git merge-base --is-ancestor efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD
           test "$(git rev-parse HEAD:app/main.py)" = "0ede250ddbcf98b19f7747c8781ca4c8aa95e738"
-          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py app/static/ migrations/ security/ requirements.txt requirements-dev.txt
+          # V20.2 authorizes ONLY an isolated static UI skin + index links;
+          # immutable business, money, auth, contracts and all older JS/CSS
+          # continue to be pinned to the baseline source unchanged.
+          git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/main.py migrations/ security/ requirements.txt requirements-dev.txt
+          if [ "$GITHUB_REF_NAME" = "review/v202-reference-bento-ui-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v203-kinetic-ui-navigation-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v2041-sunset-motion-final-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v205-smooth-unified-glass-20261102" ] || [ "$GITHUB_REF_NAME" = "review/v206-premium-translucent-right-rail-20261102" ] || [ "$GITHUB_REF_NAME" = "review/v208-four-advisory-skills-20261102" ]; then
+            python - <<'PY'
+          import subprocess
+          baseline="efc7dbab8fed5f7291bde1512da5f11566dd9e4e"
+          changed=set(subprocess.check_output(["git","diff","--name-only",baseline,"HEAD","--","app/static/"],text=True).splitlines())
+          allowed={"app/static/index.html","app/static/bento_v202.css","app/static/bento_v202.js"}
+          if __import__("os").environ.get("GITHUB_REF_NAME") in ("review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101","review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed |= {"app/static/app.js","app/static/motion_v203.css","app/static/motion_v203.js"}
+            from pathlib import Path
+            original=subprocess.check_output(["git","show",baseline+":app/static/app.js"],text=True)
+            new=Path("app/static/app.js").read_text()
+            assert new.replace("if(window.JW_UI_MOTION)await window.JW_UI_MOTION.beforeNavigate(page);","").replace("window.JW_UI_MOTION?.afterNavigate(page,out);","").replace("window.JW_UI_MOTION?.navigationFailed();","")==original,"UNREVIEWED_APP_JS_CHANGE"
+          if __import__("os").environ.get("GITHUB_REF_NAME") in ("review/v2041-sunset-motion-final-20261101","review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed |= {"app/static/sunset_v204.svg","app/static/sunset_v204.css","app/static/sunset_v204.js"}
+          if __import__("os").environ.get("GITHUB_REF_NAME") in ("review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed |= {"app/static/premium_v205.css","app/static/premium_v205.js"}
+          if __import__("os").environ.get("GITHUB_REF_NAME") in ("review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed |= {"app/static/premium_v206.css","app/static/premium_v206.js","app/static/motion_v203.js"}
+          assert changed==allowed, {"unexpected_UI_files":sorted(changed^allowed)}
+          print("PASS: V202 ONLY pinned HTML, additive skin and render JS")
+          PY
+          else
+            git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- app/static/
+          fi
           git diff --exit-code efc7dbab8fed5f7291bde1512da5f11566dd9e4e HEAD -- db/ ':!db/review/ci_v92_quote_ephemeral.sql' ':!db/review/v99_live_tenant_row_read_rollback.sql' ':!db/review/v99_live_customer_withcheck_rollback.sql' ':!db/review/v108_source_schema_fingerprints.json'
           python - <<'PY'
-          import subprocess
+          import subprocess,os
           changed=set(subprocess.check_output(
             ["git","diff","--name-only","c29a955dc2afd28d4d283838bddef617b3487bc7","HEAD","--","app/"],text=True).splitlines())
-          assert changed <= {"app/pg_connection_gate_v87.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_dev_entry_v92.py","app/pg_quote_read_v93.py","app/pg_dev_entry_v93.py"},changed
-          print("PASS: only explicitly reviewed V8.7/V8.8 gate changes, original product backend unchanged")
+          allowed = {"app/pg_connection_gate_v87.py","app/pg_delivery_evidence_gate_v147.py","app/pg_delivery_request_limit_v155.py","app/pg_delivery_review_api_v154.py","app/pg_delivery_review_console_v155.py","app/pg_delivery_review_reservation_v151.py","app/pg_dev_entry_v92.py","app/pg_dev_entry_v93.py","app/pg_invoice_preview_v145.py","app/pg_trade_lineage_v158.py","app/pg_delivery_writer_v159.py","app/pg_import_quote_v160.py","app/pg_invoice_balance_v161.py","app/import_engine.py","app/pg_live_dryrun_v88.py","app/pg_quote_api_v92.py","app/pg_quote_read_v93.py","app/pg_signup_review_gate_v146.py"}
+          ref=os.environ.get("GITHUB_REF_NAME","")
+          if ref in ("review/v202-reference-bento-ui-20261101","review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101","review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed|={"app/static/index.html","app/static/bento_v202.css","app/static/bento_v202.js"}
+          if ref in ("review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101","review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed|={"app/static/app.js","app/static/motion_v203.css","app/static/motion_v203.js"}
+          if ref in ("review/v2041-sunset-motion-final-20261101","review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed|={"app/static/sunset_v204.svg","app/static/sunset_v204.css","app/static/sunset_v204.js"}
+          if ref in ("review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed|={"app/static/premium_v205.css","app/static/premium_v205.js"}
+          if ref in ("review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"):
+            allowed |= {"app/static/premium_v206.css","app/static/premium_v206.js"}
+          assert changed <= allowed, {"unreviewed_app_changes":sorted(changed-allowed)}
+          assert "app/main.py" not in changed
+          assert all(not file.startswith("app/static/") for file in changed if ref not in ("review/v202-reference-bento-ui-20261101","review/v203-kinetic-ui-navigation-20261101","review/v2041-sunset-motion-final-20261101","review/v205-smooth-unified-glass-20261102","review/v206-premium-translucent-right-rail-20261102","review/v208-four-advisory-skills-20261102"))
+          print("PASS: immutable production entry and explicit reviewed PostgreSQL-only additions")
+          print("PASS: reviewed V8.7–V15.5 additions only; original production backend unchanged")
           PY
       - name: Install product regression prerequisites
         run: |
@@ -116,6 +205,10 @@ jobs:
           python -m scripts.ci_playwright_cli_smoke
           python -m scripts.ci_playwright_cli_document_e2e
           python -m scripts.ci_playwright_cli_quote_form_e2e
+          if [ "$GITHUB_REF_NAME" = "review/v169-cross-domain-full-lifecycle-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v170-dev-approval-draft-schema-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v172-strict-document-fidelity-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v173-dev-review-index-fk-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v174-approved-internal-order-pg-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v175-original-quote-proof-and-invoice-preflight-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v176-restricted-order-concurrency-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v179-ocr-multiview-field-fusion-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v180-restricted-manual-ledger-http-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v181-43table-rls-recovery-scale-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v182-real-dev-signup-readiness-43-rls-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v183-external-https-boundary-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v184-disposable-real-https-pg-order-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v185-43table-scaled-dr-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v186-public-korean-ocr-pilot-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v187-kftc-bank-page-contract-20261031" ] || [ "$GITHUB_REF_NAME" = "review/v188-real-tls-pg-load-ocr50-20261101" ] || [ "$GITHUB_REF_NAME" = "review/v189-crash-recovery-ocr-confirmation-20261101" ]; then
+            python -m py_compile scripts/ci_playwright_cli_v169_full_e2e.py
+            python -m scripts.ci_playwright_cli_v169_full_e2e
+          fi
       - name: Record real Chromium evidence
         run: |
           python - <<'PY'
@@ -351,8 +444,112 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+  pg17-v168-adversarial-rls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned PG17 client dependencies
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Reject ungated policies and verify real A/B restricted roles
+        run: |
+          python -m py_compile scripts/ci_v168_real_pg_rls.py
+          python -m scripts.ci_v168_real_pg_rls
+
+  pg17-v174-internal-order:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install full original PG API prerequisites
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: J3 J5 real isolated restricted-role approved internal order E2E
+        run: |
+          python -m py_compile scripts/review/pg_order_activation_v174.py scripts/ci_v174_real_pg_internal_order.py
+          python -m scripts.ci_v174_real_pg_internal_order
+
+  pg17-v181-scaled-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: J5 J3 actual isolated PostgreSQL17 43 table 62 policy scaled backup and restore
+        run: |
+          python -m pip install -r requirements-postgres-check.txt
+          python -m py_compile scripts/ci_v181_pg17_scaled_restore.py
+          python -m scripts.ci_v181_pg17_scaled_restore
+
   j1-j6-independent-aggregate:
-    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, pg17-v92-quote, pg17-v93-https-restore, security-methodology]
+    needs: [full-product, chromium-financial-ui, pg17-concurrency-recovery, pg17-v92-quote, pg17-v93-https-restore, security-methodology, pg17-v168-adversarial-rls, pg17-v174-internal-order, pg17-v181-scaled-restore]
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:

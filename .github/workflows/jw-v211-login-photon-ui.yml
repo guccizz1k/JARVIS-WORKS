@@ -1,0 +1,66 @@
+name: JW V21.1 unified glass login single-photon and portal E2E
+on:
+  push:
+    branches:
+      - review/v211-login-photon-morph-20261102
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v211-login-glass
+  cancel-in-progress: true
+jobs:
+  browser-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate 1 and Gate 3 - add-only auth/DB protection and static
+        run: |
+          set -euo pipefail
+          node --check app/static/premium_v211.js
+          python -m py_compile scripts/ci_v211_login_photon_browser.py
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          files=set(subprocess.check_output(['git','diff','--name-only',
+             '9fb1cd7ac2f8123f757600b1d3448b2ceaea621f','HEAD'],text=True).splitlines())
+          allowed={'app/static/premium_v211.js','app/static/premium_v211.css',
+             'app/static/index.html','scripts/ci_v211_login_photon_browser.py',
+             '.github/workflows/jw-v211-login-photon-ui.yml'}
+          assert files==allowed,(files,allowed)
+          source=Path('app/static/index.html').read_text()
+          assert source.index('premium_v210.css')<source.index('premium_v211.css')
+          assert source.index('premium_v210.js')<source.index('premium_v211.js')
+          assert 'name="password"' in source and 'name="otp"' in source
+          css=Path('app/static/premium_v211.css').read_text()
+          assert '#login-view.jw211-login.hidden{display:none!important}' in css
+          code=Path('app/static/premium_v211.js').read_text()
+          assert 'fetch(' not in code and 'XMLHttpRequest' not in code
+          print('PASS: original auth, tenant API, business code, DB intact')
+          PY
+      - name: Chromium plus CPU-safe test deps
+        run: |
+          python -m pip install 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium
+          sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - name: Gate 2/4/5 - actual Chromium login and tools
+        run: python -m scripts.ci_v211_login_photon_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v211-real-browser-login-photon
+          path: artifacts/v211-browser/
+          retention-days: 7
+          if-no-files-found: ignore

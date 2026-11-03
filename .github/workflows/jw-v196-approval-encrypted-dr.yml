@@ -1,0 +1,60 @@
+name: JW V19.6 encrypted signed approval DR real PostgreSQL17 (review only)
+on:
+  push:
+    branches:
+      - review/v196-approval-receipt-encrypted-dr-20261101
+permissions:
+  contents: read
+concurrency:
+  group: jw-v196-approval-dr-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  signed-approval-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing app and guarded PG17 dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Source isolation and syntax validation
+        run: |
+          python -m py_compile scripts/ci_v196_pg17_approval_encrypted_dr.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v196_pg17_approval_encrypted_dr.py").read_text()
+          for x in ("isolated.guard(dsn)","ONLY_EPHEMERAL_LOCAL_DATABASE",
+                    "case.main()", "Fernet.generate_key()", "InvalidToken",
+                    "pg_restore","--no-owner","v195_confirm_import",
+                    "PASS_V196_RESTORE_SUPERUSER_OWNER_DRIFT_DETECTED",
+                    "PASS_V196_TWENTY_POST_RESTORE_FORGED_APPROVALS_DENIED",
+                    "PASS_V196_POST_BACKUP_COMMIT_MISSING_SNAPSHOT_RPO_NOT_ZERO"):
+            assert x in s,x
+          for x in ("JW_PG_STAGE_DSN","SUPABASE_DSN","onrender.com"):
+            assert x not in s
+          print("PASS_V196_SOURCE_DISPOSABLE_ONLY_GATE",flush=True)
+          PY
+      - name: Actual TLS XLSX signed receipt, encrypted backup and restored DB adversarial proof
+        run: python -m scripts.ci_v196_pg17_approval_encrypted_dr
