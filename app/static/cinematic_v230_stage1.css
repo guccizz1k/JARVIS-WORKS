@@ -241,3 +241,32 @@ body.jw300-transitioning .jw300-auth-transition {
 @keyframes jw300-reduced-fade {
   from{opacity:.15}to{opacity:1}
 }
+
+/* First-paint protection: never reveal the retired white/light login before
+ * defer-loaded dark-only controllers and Three.js finish starting.  Covers
+ * failed/slow WebGL too, without changing any authentication or app logic. */
+html{color-scheme:dark}
+html body #login-view.login-screen:not(.hidden){
+ background:radial-gradient(ellipse 44% 35% at 50% 30%,rgba(172,190,214,.08),transparent 75%),
+ linear-gradient(155deg,#05070d 9%,#0a0d16 57%,#05070d 100%)!important;
+ color:#eaf0f7!important;
+}
+html body #login-view.login-screen:not(.hidden) .login-side{display:none!important}
+html body #login-view.login-screen:not(.hidden) .login-card{
+ color:#eaf0f7!important;
+ background:linear-gradient(145deg,rgba(24,33,47,.82),rgba(7,11,18,.93))!important;
+ border:1px solid rgba(216,232,252,.28)!important;
+ box-shadow:0 20px 68px rgba(0,0,0,.42)!important;
+}
+html body #login-view.login-screen:not(.hidden) :is(h1,h2,label,.eyebrow,.login-logo,.mini-label){color:#eaf0f7!important}
+html body #login-view.login-screen:not(.hidden) .login-card :is(input[type=email],input[type=text],input[type=password]){
+ background:#0a101a!important;color:#f5f8ff!important;
+ border:1px solid rgba(226,235,250,.38)!important;
+}
+html body #login-view.login-screen:not(.hidden) .login-card .btn.primary{
+ color:#141b25!important;background:#f1f5fb!important;
+ border-color:rgba(242,246,252,.65)!important;
+}
+html body #login-view.login-screen:not(.hidden) .login-card :is(p,small,.muted,.fineprint,.demo-box span){
+ color:#b8c5d6!important;
+}
