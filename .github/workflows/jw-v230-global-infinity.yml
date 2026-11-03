@@ -105,6 +105,25 @@ jobs:
           ffprobe -v error -show_entries format=duration,size \
             -show_entries stream=codec_name,pix_fmt,width,height \
             -of json "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_IPHONE.mp4" > "$D/H264_VALIDATION.json"
+          # The screenshot itself, not DOM classes, must be dark from first paint.
+          ffmpeg -hide_banner -loglevel error -nostdin -y -ss 0.5 \
+            -i "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_IPHONE.mp4" \
+            -frames:v 1 "$D/FIRST_PAINT_050.png"
+          ffmpeg -hide_banner -loglevel error -nostdin -y -ss 1.5 \
+            -i "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_IPHONE.mp4" \
+            -frames:v 1 "$D/FIRST_PAINT_150.png"
+          python - <<'PY'
+          from PIL import Image
+          from pathlib import Path
+          d=Path("artifacts/v230-stage1-live-video")
+          for t in ("050","150"):
+            im=Image.open(d/("FIRST_PAINT_"+t+".png")).convert("RGB")
+            samples=[im.getpixel((64,280)),im.getpixel((120,440)),
+                     im.getpixel((1140,440))]
+            max_bright=max(max(p) for p in samples)
+            assert max_bright<110,(t,samples,"UNWANTED_WHITE_LOGIN_FLASH")
+          print("PASS_V230_FIRST_FRAME_DARK_NO_WHITE_LOGIN_FLASH")
+          PY
           python - <<'PY'
           import json
           from pathlib import Path
