@@ -1,0 +1,13 @@
+{
+  "name": "jarvis-works-cinematic-stage1",
+  "version": "23.0.0",
+  "private": true,
+  "description": "Build-time only Three.js source bundling for existing FastAPI/Javascript web; no external browser CDN",
+  "scripts": {
+    "build:cinematic": "esbuild frontend/cinematic/stage1.js --bundle --format=iife --platform=browser --target=es2022 --minify --legal-comments=inline --outfile=app/static/cinematic_v230_stage1.bundle.js"
+  },
+  "devDependencies": {
+    "three": "0.187.0",
+    "esbuild": "0.28.2"
+  }
+}
