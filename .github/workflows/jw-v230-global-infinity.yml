@@ -1,0 +1,116 @@
+name: JW V23.0 Stage1 Three.js Global Infinity Login
+on:
+  push:
+    branches:
+      - review/v230-global-infinity-login-cinema-20261103
+permissions:
+  contents: write
+concurrency:
+  group: jw-v230-stage1
+  cancel-in-progress: true
+jobs:
+  build-test-pin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate 1 check allowed diff only, retain original app and security
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          base="888cd71f34b6fc021b5da6182d81acf25f7b2893"
+          changed=set(subprocess.check_output(["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
+          allowed={"frontend/cinematic/InfinityMark.js","frontend/cinematic/PostPipeline.js",
+          "frontend/cinematic/stage1.js","app/static/cinematic_v230_stage1.css",
+          "app/static/cinematic_v230_stage1.bundle.js","app/static/index.html",
+          "app/static/premium_v212.js","package.json","package-lock.json",
+          "scripts/ci_v230_stage1_browser.py","tests/test_v230_visual_only_contract.py",
+          ".github/workflows/jw-v230-global-infinity.yml"}
+          assert changed.issubset(allowed),(changed-allowed)
+          assert {"app/static/index.html","frontend/cinematic/stage1.js"}.issubset(changed)
+          assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
+          print("PASS_ONLY_PRESENTATION_FILES",len(changed))
+          PY
+      - name: Build pinned selfhosted Three.js, no runtime CDN
+        run: |
+          set -euo pipefail
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
+          npm run build:cinematic
+          node --check frontend/cinematic/stage1.js
+          node --check frontend/cinematic/InfinityMark.js
+          node --check frontend/cinematic/PostPipeline.js
+          node --check app/static/cinematic_v230_stage1.bundle.js
+          test -s app/static/cinematic_v230_stage1.bundle.js
+      - name: Install real browser and original backend requirements
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'playwright>=1.50,<2' 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
+          python -m playwright install --with-deps chromium
+      - name: Gate 1/2/3 stage1 source and business immutability
+        run: python -m pytest -q -ra -p no:cacheprovider tests/test_v230_visual_only_contract.py
+      - name: Gate 2/3/4/5 actual WebGL login transition, route, logout, reduced-motion
+        run: python -m scripts.ci_v230_stage1_browser
+      - name: Preserve original historical overlay provenance
+        run: |
+          python -m scripts.ci_rebuild_v79_overlay
+          test -s ../overlay/BASE_SHA256.json
+          test -s ../overlay/PAYLOAD_SHA256.json
+      - name: Gate 1/2/3 entire repo with zero FAIL ERROR SKIP
+        run: |
+          mkdir -p artifacts/v230-regression
+          python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-v230 --junitxml=artifacts/v230-regression/results.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as E
+          a=E.parse("artifacts/v230-regression/results.xml").getroot()
+          d=a.attrib if a.tag=="testsuite" else a.find(".//testsuite").attrib
+          n={k:int(d.get(k,0)) for k in ("tests","errors","failures","skipped")}
+          assert n["tests"]>=2028 and n["errors"]==n["failures"]==n["skipped"]==0,n
+          print("PASS_V230_FULL_REPO_NO_SKIPS",n)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v230-stage1-all-source-and-visual-proofs
+          path: |
+            frontend/cinematic/
+            app/static/cinematic_v230_stage1.css
+            app/static/cinematic_v230_stage1.bundle.js
+            package.json
+            package-lock.json
+            scripts/ci_v230_stage1_browser.py
+            tests/test_v230_visual_only_contract.py
+            artifacts/v230-stage1-cinema/
+            artifacts/v230-regression/results.xml
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Pin exact TESTED vendor into review branch only
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/review/v230-global-infinity-login-cinema-20261103"
+          test -s package-lock.json
+          test -s app/static/cinematic_v230_stage1.bundle.js
+          git config user.name "JARVIS-WORKS QA"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json app/static/cinematic_v230_stage1.bundle.js
+          if git diff --cached --quiet; then
+            echo PASS_ALREADY_PINNED
+          else
+            git commit -m "build(stage1): tested offline Three.js web bundle"
+            git push origin HEAD:refs/heads/review/v230-global-infinity-login-cinema-20261103
+          fi
