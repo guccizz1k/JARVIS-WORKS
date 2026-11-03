@@ -8,6 +8,14 @@
  const main=document.getElementById('main-content');
  const shell=document.getElementById('app-shell');
  if(!main||!shell||typeof dashboardPage!=='function'||!window.JW_PREMIUM_V212)return;
+ // Existing visual chrome stays functional; localize its visible
+ // English subtitle without changing the original branding or route labels.
+ for(const selector of ['.jw211-login-brand small','.jw210-brand-sub']){
+   const subtitle=document.querySelector(selector);
+   if(subtitle)subtitle.textContent='기업 업무 자동화 플랫폼';
+ }
+ const oldHelp=document.querySelector('.jw210-help p');
+ if(oldHelp)oldHelp.textContent='상단 메뉴에서 업무를 선택하거나 좌측 가장자리에 마우스를 올려 빠른 메뉴를 열 수 있습니다. 모든 기능은 기존 권한과 승인 절차를 따릅니다.';
  const reduced=matchMedia('(prefers-reduced-motion: reduce)');
  const fine=matchMedia('(hover:hover) and (pointer:fine)');
  const art=(kind,label)=>'<span class="jw222-art-mark jw222-art-mark--'+kind+'" aria-hidden="true">'+label+'</span>';
