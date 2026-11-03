@@ -203,9 +203,15 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
     fail('원본의 증빙 문서 유형을 판별하지 못했습니다. 다른 유형으로 등록할 수 없습니다',409)
    if doc['document_kind']!=body.document_kind:
     fail('원본문서 유형이 다릅니다. 잘못된 파일을 등록하지 마세요',409)
-   if body.document_kind=='inventory_sheet' and body.record_type!='inventory_snapshot':fail('재고표는 재고 실사 기록으로만 등록합니다',422)
-   if body.document_kind=='sales_slip' and body.record_type!='sales':fail('매출전표 유형 불일치',422)
-   if body.document_kind=='purchase_slip' and body.record_type!='purchase':fail('매입전표 유형 불일치',422)
+   allowed={
+    'receipt':('sales','purchase','expense'),
+    'sales_slip':('sales',),
+    'purchase_slip':('purchase',),
+    'trade_statement':('sales','purchase'),
+    'inventory_sheet':('inventory_snapshot',),
+   }
+   if body.record_type not in allowed[body.document_kind]:
+    fail('원본문서 종류에 맞지 않는 업무 기록입니다. 원본을 다시 확인하세요',422)
    if body.record_type=='inventory_snapshot':
     if body.document_kind!='inventory_sheet' or not body.sku or not body.quantity:
      fail('재고 실사에는 품목코드와 재고수량이 필요합니다',422)
