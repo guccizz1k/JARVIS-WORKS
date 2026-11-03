@@ -59,6 +59,28 @@ def run():
                         assert story.locator("img,video,iframe,canvas").count()==0
                         assert page.locator(".jw222-scene h2").count()==3
                         assert page.locator(".jw222-scene h2").first.inner_text().startswith("문서 한 장이")
+                        # V21.4 entrance aperture starts black. Wait until the
+                        # real animation completes before capturing acceptance.
+                        page.wait_for_function("""() => {
+                           const shell=document.querySelector('#app-shell');
+                           const stage=document.querySelector('.jw210-infinity-stage');
+                           const canvas=stage?.querySelector('.jw212-sculpt canvas');
+                           if(!shell||!stage||!canvas)return false;
+                           const s=stage.getBoundingClientRect(),c=canvas.getBoundingClientRect();
+                           return !shell.classList.contains('jw214-entry-playing')
+                             && s.width>250 && s.height>120 && c.width>150
+                             && getComputedStyle(stage).visibility==='visible';
+                        }""",timeout=12000)
+                        if width==1440:
+                            from PIL import Image
+                            import io
+                            raw=page.screenshot(animations="disabled")
+                            im=Image.open(io.BytesIO(raw)).convert("RGB")
+                            # Reject visually empty hero instead of counting DOM
+                            # nodes as evidence of successful rendering.
+                            crop=im.crop((460,200,1160,690)).resize((100,70))
+                            pixels=list(crop.getdata())
+                            assert sum(max(v)>45 for v in pixels)>140, "BLANK_INFINITY_HERO_SCREENSHOT"
                         counts["honest_stats"]+=1
                         counts["infinity_single_photon"]+=1
                         counts["cinematic_sections"]+=3
