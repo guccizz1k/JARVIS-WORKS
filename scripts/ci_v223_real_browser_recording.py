@@ -141,7 +141,7 @@ def run():
                       return shell && stage && !shell.classList.contains('jw214-entry-playing')
                         && stage.getBoundingClientRect().width>250;
                     }""",timeout=15000)
-                    assert page.evaluate("window.state && state.page==='dashboard'")
+                    assert page.evaluate("typeof state !== 'undefined' && state.page==='dashboard'")
                     assert page.locator(".jw210-infinity-stage .jw212-sculpt canvas").count()==1
                     tick("real-authenticated-login-cookie-dashboard")
                     page.mouse.move(890,395,steps=12)
@@ -166,7 +166,7 @@ def run():
                     # Click the ACTUAL new scene CTA into the protected import view.
                     source_cta=page.locator('#jw222-story-source [data-jw222-go="imports"]')
                     hover_click(page,source_cta)
-                    page.wait_for_function("() => window.state && state.page==='imports'",timeout=20000)
+                    page.wait_for_function("() => typeof state !== 'undefined' && state.page==='imports'",timeout=20000)
                     assert page.locator("#import-file-form").is_visible()
                     tick("actual-cinematic-CTA-click-to-document-imports")
                     pause(page,1850)
@@ -186,7 +186,7 @@ def run():
                     hover_click(page,upload.locator('button[type=submit]'))
                     preview=page.locator("#evidence-v64-confirm")
                     preview.wait_for(state="visible",timeout=18000)
-                    assert page.evaluate("window.state && state.evidencePreview.status==='pending'")
+                    assert page.evaluate("typeof state !== 'undefined' && state.evidencePreview.status==='pending'")
                     assert page.evaluate("state.evidencePreview.confirmation_required===true")
                     tick("real-synthetic-file-upload-and-pending-review")
                     pause(page,2300)
