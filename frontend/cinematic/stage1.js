@@ -198,7 +198,7 @@ import { PostPipeline } from './PostPipeline.js';
     }
   };
 
-  // This is a VISUAL listener only. The original delegated /api/login remains
+  // This is a VISUAL listener only. The original delegated authentication remains
   // the sole authority; no password, MFA value or cookie is intercepted.
   document.addEventListener('submit', event => {
     if (event.target?.id !== 'login-form') return;
