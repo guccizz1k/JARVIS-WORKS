@@ -104,3 +104,14 @@ html.jw231-active body #login-view.login-screen.jw211-login:not(.hidden){
 html.jw231-active body #app-shell.app-shell:not(.hidden) .jw210-home{
   background:transparent!important;
 }
+/* Home composition: retain the real metrics' original absolute positioning;
+   allow the artwork behind the authenticated workspace, not behind an opaque shell. */
+html.jw231-active #app-shell.app-shell:not(.hidden):has(.jw210-home),
+html.jw231-active #app-shell.app-shell:not(.hidden):has(.jw210-home) > .main-area,
+html.jw231-active #app-shell.app-shell:not(.hidden) #main-content:has(.jw210-home){
+  background:transparent!important;
+}
+html.jw231-active #app-shell:not(.hidden) .jw210-home .jw210-metrics{
+  position:absolute!important;
+  z-index:25!important;
+}
