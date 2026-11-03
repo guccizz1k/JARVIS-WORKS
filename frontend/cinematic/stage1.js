@@ -353,6 +353,25 @@ import { PostPipeline } from './PostPipeline.js';
     states: Object.freeze(['login', 'transition', 'main', 'mini']),
     state: () => state.mode,
     singleCanvas: () => document.querySelectorAll('#jw300-global-canvas').length === 1,
+    sculptureScreenRect: () => {
+      // Read-only projected bounds for visual overlap regression.
+      camera.updateMatrixWorld();
+      mark.group.updateWorldMatrix(true, true);
+      const b = new THREE.Box3().setFromObject(mark.ribbon);
+      const projected = [];
+      for (const x of [b.min.x,b.max.x])
+        for (const y of [b.min.y,b.max.y])
+          for (const z of [b.min.z,b.max.z]) {
+            const v = new THREE.Vector3(x,y,z).project(camera);
+            projected.push({x:(v.x+1)*innerWidth/2,
+                            y:(1-v.y)*innerHeight/2});
+          }
+      const left=Math.min(...projected.map(p=>p.x));
+      const right=Math.max(...projected.map(p=>p.x));
+      const top=Math.min(...projected.map(p=>p.y));
+      const bottom=Math.max(...projected.map(p=>p.y));
+      return {left,right,top,bottom};
+    },
     qualityTier: () => state.tier,
     bloomEnabled: () => renderer.bloom.enabled,
     focusEnabled: () => renderer.bokeh.enabled,
