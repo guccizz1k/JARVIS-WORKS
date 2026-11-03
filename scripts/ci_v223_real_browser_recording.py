@@ -167,7 +167,7 @@ def run():
                     source_cta=page.locator('#jw222-story-source [data-jw222-go="imports"]')
                     hover_click(page,source_cta)
                     page.wait_for_function("() => typeof state !== 'undefined' && state.page==='imports'",timeout=20000)
-                    assert page.locator("#import-file-form").is_visible()
+                    page.locator("#import-file-form").wait_for(state="visible",timeout=15000)
                     tick("actual-cinematic-CTA-click-to-document-imports")
                     pause(page,1850)
 
