@@ -1,0 +1,101 @@
+name: JW V22.3 actual live browser walkthrough video MP4
+on:
+  push:
+    branches:
+      - review/v223-real-ui-live-recording-20261103
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-actual-screen-capture
+  cancel-in-progress: true
+jobs:
+  record-real-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Gate 1 / 5 - exact read-only UI demo scope
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/ci_v223_real_browser_recording.py
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          original="888cd71f34b6fc021b5da6182d81acf25f7b2893"
+          changed=set(subprocess.check_output(["git","diff","--name-only",original,"HEAD"],text=True).splitlines())
+          assert changed=={"scripts/ci_v223_real_browser_recording.py",".github/workflows/jw-v223-real-browser-video.yml"},changed
+          assert "PRODUCTION_BLOCKED" in Path("app/deployment_safety_v78.py").read_text()
+          print("PASS: no product business code, secrets, service, database, production, or release branch changed")
+          PY
+      - name: Install real Chromium, Korean fonts and recording encoder
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' reportlab
+          python -m playwright install --with-deps chromium
+      - name: Gates 2/3/4 - ACTUAL FastAPI / mouse / wheel / live business interaction video
+        run: python -m scripts.ci_v223_real_browser_recording
+      - name: iPhone H.264 / YUV420p / faststart MP4 and small fallback
+        run: |
+          set -euo pipefail
+          D=artifacts/v223-real-ui-video
+          test -s "$D/JARVIS_WORKS_V222_REAL_BROWSER_RAW.webm"
+          ffmpeg -hide_banner -loglevel error -nostdin -y \
+            -i "$D/JARVIS_WORKS_V222_REAL_BROWSER_RAW.webm" \
+            -vf "fps=24,scale=1280:720:flags=lanczos" \
+            -c:v libx264 -preset fast -crf 24 -pix_fmt yuv420p \
+            -profile:v high -level 4.0 -movflags +faststart -an \
+            "$D/JARVIS_WORKS_REAL_LIVE_DEMO_IPHONE.mp4"
+          ffmpeg -hide_banner -loglevel error -nostdin -y \
+            -i "$D/JARVIS_WORKS_V222_REAL_BROWSER_RAW.webm" \
+            -vf "fps=24,scale=854:480:flags=lanczos" \
+            -c:v libx264 -preset fast -crf 29 -pix_fmt yuv420p \
+            -profile:v main -level 3.1 -movflags +faststart -an \
+            "$D/JARVIS_WORKS_REAL_LIVE_DEMO_LIGHT.mp4"
+          ffprobe -v error -show_entries format=duration,size \
+            -show_entries stream=codec_name,pix_fmt,width,height \
+            -of json "$D/JARVIS_WORKS_REAL_LIVE_DEMO_IPHONE.mp4" > "$D/MP4_CODEC_VALIDATION.json"
+          python - <<'PY'
+          import json,subprocess
+          from pathlib import Path
+          d=Path('artifacts/v223-real-ui-video')
+          info=json.loads((d/'MP4_CODEC_VALIDATION.json').read_text())
+          v=info['streams'][0]
+          assert v['codec_name']=='h264' and v['pix_fmt']=='yuv420p',v
+          assert (v['width'],v['height'])==(1280,720),v
+          assert 35<float(info['format']['duration'])<210,info
+          assert int(info['format']['size'])>150000,info
+          report=json.loads((d/'REAL_INTERACTION_PROOF.json').read_text())
+          assert report['source']=='CONTINUOUS_REAL_CHROMIUM_PLAYWRIGHT_VIDEO_NOT_STILL_SLIDES'
+          assert report['actual_business_route_clicks']==9
+          assert report['wheel_3d_scenes']==3 and report['actual_logout']
+          assert report['api_preview_pending'] and not report['page_errors'] and not report['http_5xx']
+          print('PASS_V223_IPHONE_H264_LIVE_DEMO',v,info['format'])
+          PY
+      - name: Gate 5 - full decode both deliverables
+        run: |
+          set -euo pipefail
+          D=artifacts/v223-real-ui-video
+          ffmpeg -hide_banner -loglevel error -nostdin -i "$D/JARVIS_WORKS_REAL_LIVE_DEMO_IPHONE.mp4" -f null -
+          ffmpeg -hide_banner -loglevel error -nostdin -i "$D/JARVIS_WORKS_REAL_LIVE_DEMO_LIGHT.mp4" -f null -
+          echo PASS_V223_BOTH_MP4_FULL_DECODING
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v223-real-live-playable-iphone-mp4
+          path: |
+            artifacts/v223-real-ui-video/JARVIS_WORKS_REAL_LIVE_DEMO_IPHONE.mp4
+            artifacts/v223-real-ui-video/JARVIS_WORKS_REAL_LIVE_DEMO_LIGHT.mp4
+            artifacts/v223-real-ui-video/REAL_INTERACTION_PROOF.json
+            artifacts/v223-real-ui-video/MP4_CODEC_VALIDATION.json
+          retention-days: 7
+          if-no-files-found: error
