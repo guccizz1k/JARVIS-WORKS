@@ -177,6 +177,15 @@ import { PostPipeline } from './PostPipeline.js';
     transition.setAttribute('aria-hidden', 'false');
     mark.setReveal(1);
     status.setAttribute('aria-live', 'polite');
+    if (reducedQuery.matches) {
+      // Zero-flash accessibility path: CSS performs a 400 ms fade; no GPU
+      // animation is required to release the authenticated workspace.
+      window.setTimeout(() => {
+        if (state.mode !== 'transition' || destroyed) return;
+        closeTransition();
+        if (!state.raf) state.raf = requestAnimationFrame(frame);
+      }, 400);
+    }
   }
 
   function closeTransition() {
@@ -196,6 +205,7 @@ import { PostPipeline } from './PostPipeline.js';
       state.pendingAuthentication = false;
       closeTransition();
       root.dataset.state = 'login';
+      if (reducedQuery.matches && !state.raf) state.raf = requestAnimationFrame(frame);
       return;
     }
     if (state.pendingAuthentication && state.mode === 'login') {
@@ -205,6 +215,7 @@ import { PostPipeline } from './PostPipeline.js';
     if (state.mode !== 'transition') {
       state.mode = targetMode();
       root.dataset.state = state.mode;
+      if (reducedQuery.matches && !state.raf) state.raf = requestAnimationFrame(frame);
     }
   };
 
