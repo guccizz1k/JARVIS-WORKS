@@ -177,6 +177,12 @@ html.jw300-three-ready #app-shell:not(.hidden) .jw210-home .jw222-scroll-cue {
   background:rgba(220,239,255,.16);
   box-shadow:0 0 18px rgba(213,231,255,.22);
 }
+/* Suppress stale pre-login error toast visually only after real success;
+ * original toast state, timer and server authentication remain untouched. */
+body.jw300-transitioning #toast.error.visible{
+  opacity:0!important;
+  pointer-events:none!important;
+}
 body.jw300-transitioning #login-view.jw211-login .login-card {
   opacity:.05;
   filter:blur(14px);
