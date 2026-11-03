@@ -37,7 +37,7 @@ jobs:
           "frontend/cinematic/stage1.js","app/static/cinematic_v230_stage1.css",
           "app/static/cinematic_v230_stage1.bundle.js","app/static/index.html",
           "app/static/premium_v212.js","package.json","package-lock.json",
-          "scripts/ci_v230_stage1_browser.py","tests/test_v230_visual_only_contract.py",
+          "scripts/ci_v230_stage1_browser.py","scripts/ci_v230_stage1_record_video.py","tests/test_v230_visual_only_contract.py",
           ".github/workflows/jw-v230-global-infinity.yml"}
           assert changed.issubset(allowed),(changed-allowed)
           assert {"app/static/index.html","frontend/cinematic/stage1.js"}.issubset(changed)
@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          sudo apt-get install -y ffmpeg fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
           python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'playwright>=1.50,<2' 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
           python -m playwright install --with-deps chromium
       - name: Gate 1/2/3 stage1 source and business immutability
@@ -83,19 +83,67 @@ jobs:
           assert n["tests"]>=2028 and n["errors"]==n["failures"]==n["skipped"]==0,n
           print("PASS_V230_FULL_REPO_NO_SKIPS",n)
           PY
+      - name: Gate 4 - continuous real browser login, 3D transition and user tool clicks
+        run: python -m scripts.ci_v230_stage1_record_video
+      - name: Gate 5 - convert real Chromium capture into two verified iPhone MP4 videos
+        run: |
+          set -euo pipefail
+          D=artifacts/v230-stage1-live-video
+          test -s "$D/JARVIS_WORKS_V230_ACTUAL_BROWSER_RAW.webm"
+          ffmpeg -hide_banner -loglevel error -nostdin -y \
+            -i "$D/JARVIS_WORKS_V230_ACTUAL_BROWSER_RAW.webm" \
+            -vf "fps=24,scale=1280:800:flags=lanczos" \
+            -c:v libx264 -preset fast -crf 24 -pix_fmt yuv420p \
+            -profile:v high -level 4.0 -movflags +faststart -an \
+            "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_IPHONE.mp4"
+          ffmpeg -hide_banner -loglevel error -nostdin -y \
+            -i "$D/JARVIS_WORKS_V230_ACTUAL_BROWSER_RAW.webm" \
+            -vf "fps=24,scale=960:600:flags=lanczos" \
+            -c:v libx264 -preset fast -crf 29 -pix_fmt yuv420p \
+            -profile:v main -level 3.1 -movflags +faststart -an \
+            "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_LIGHT.mp4"
+          ffprobe -v error -show_entries format=duration,size \
+            -show_entries stream=codec_name,pix_fmt,width,height \
+            -of json "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_IPHONE.mp4" > "$D/H264_VALIDATION.json"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=Path("artifacts/v230-stage1-live-video")
+          info=json.loads((d/"H264_VALIDATION.json").read_text())
+          v=info["streams"][0]
+          assert v["codec_name"]=="h264" and v["pix_fmt"]=="yuv420p",v
+          assert (v["width"],v["height"])==(1280,800),v
+          assert 25<float(info["format"]["duration"])<220,info
+          assert int(info["format"]["size"])>150000,info
+          proof=json.loads((d/"ACTUAL_VIDEO_INTERACTION_PROOF.json").read_text())
+          assert proof["source"]=="ONE_CONTINUOUS_ACTUAL_CHROMIUM_RECORDING"
+          assert proof["real_login"] and proof["real_logout"] and proof["three_js_global_single_canvas"]
+          assert proof["real_business_tool_clicks"]==10 and proof["scroll_scenes"]==3
+          assert not proof["browser_errors"] and not proof["http_5xx"]
+          print("PASS_V230_IPHONE_MP4_METADATA",info)
+          PY
+          ffmpeg -hide_banner -loglevel error -nostdin \
+            -i "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_IPHONE.mp4" -f null -
+          ffmpeg -hide_banner -loglevel error -nostdin \
+            -i "$D/JARVIS_WORKS_V230_REAL_LOGIN_AND_TOOLS_LIGHT.mp4" -f null -
+          echo PASS_V230_FULL_VIDEO_DECODE_BOTH_IPHONE_FILES
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: jw-v230-stage1-all-source-and-visual-proofs
           path: |
             frontend/cinematic/
+            app/static/index.html
+            app/static/premium_v212.js
             app/static/cinematic_v230_stage1.css
             app/static/cinematic_v230_stage1.bundle.js
             package.json
             package-lock.json
             scripts/ci_v230_stage1_browser.py
+            scripts/ci_v230_stage1_record_video.py
             tests/test_v230_visual_only_contract.py
             artifacts/v230-stage1-cinema/
+            artifacts/v230-stage1-live-video/
             artifacts/v230-regression/results.xml
           retention-days: 7
           if-no-files-found: ignore
