@@ -55,13 +55,14 @@ def run():
                         page.goto(url+"/",wait_until="domcontentloaded")
                         sign_in(page,"demo@hanbit.example")
                         navigate_real(page,"imports")
+                        baseline=dashboard(page)["total_confirmed"]
                         source=sample(1300,700,size)
                         upload(page,f"synthetic-source-{size}.jpg",source,"image/jpeg")
                         picture=page.locator(".jw219-source .jw219-original")
                         picture.wait_for(state="visible")
                         assert picture.evaluate("(img)=>img.complete && img.naturalWidth>0")
                         assert page.locator("#evidence-v64-confirm").is_visible()
-                        assert dashboard(page)["total_confirmed"]==0
+                        assert dashboard(page)["total_confirmed"]==baseline
                         assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1")
                         if size==1440:
                             page.screenshot(path=str(OUT/"source-next-to-recognized-fields.png"),animations="disabled")
@@ -72,7 +73,7 @@ def run():
                         reattach.wait_for(state="visible")
                         assert page.locator("#evidence-v64-confirm").count()==0
                         assert page.locator(".jw219-original").count()==0
-                        assert dashboard(page)["total_confirmed"]==0
+                        assert dashboard(page)["total_confirmed"]==baseline
                         report["reopen_denied"]+=1
                         wrong=sample(1300,700,size+111)
                         reattach.set_input_files({
@@ -81,7 +82,7 @@ def run():
                         })
                         page.locator("#toast.error.visible").wait_for(timeout=10000)
                         assert page.locator("#evidence-v64-confirm").count()==0
-                        assert dashboard(page)["total_confirmed"]==0
+                        assert dashboard(page)["total_confirmed"]==baseline
                         report["tampered_local_files_denied"]+=1
                         reattach.set_input_files({
                           "name":f"synthetic-source-{size}.jpg",
@@ -90,7 +91,7 @@ def run():
                         page.locator("#evidence-v64-confirm").wait_for(state="visible",timeout=10000)
                         assert page.locator(".jw219-original").evaluate("(img)=>img.complete&&img.naturalWidth>0")
                         report["genuine_reattach_accepted"]+=1
-                        assert dashboard(page)["total_confirmed"]==0
+                        assert dashboard(page)["total_confirmed"]==baseline
                         form=page.locator("#evidence-v64-confirm")
                         form.locator('[name=document_kind]').select_option("receipt")
                         form.locator('[name=record_type]').select_option("expense")
@@ -101,7 +102,7 @@ def run():
                         form.locator('[name=original_checked]').check()
                         form.locator('button[type=submit]').click()
                         form.wait_for(state="detached",timeout=15000)
-                        assert dashboard(page)["total_confirmed"]==report["human_approval"]+1
+                        assert dashboard(page)["total_confirmed"]==baseline+1
                         report["human_approval"]+=1
                         assert page.locator(".jw219-original").count()==0
                         assert not errors,(size,errors)
@@ -120,6 +121,15 @@ def run():
                     assert page.locator("#evidence-v64-confirm").is_visible()
                     assert dashboard(page)["total_confirmed"]==2
                     report["pdf_excel_source_button"]+=1
+                    # No previous file or document may survive logout to a new tenant.
+                    page.locator(".jw213-logout").click()
+                    page.locator("#login-view").wait_for(state="visible",timeout=10000)
+                    assert page.evaluate("state.evidenceOriginalFile===null && state.evidencePreview===null")
+                    sign_in(page,"demo@bada.example")
+                    navigate_real(page,"imports")
+                    assert page.locator(".jw219-original").count()==0
+                    assert page.locator("#evidence-v64-confirm").count()==0
+                    assert dashboard(page)["total_confirmed"]==0
                     ctx.close()
                 finally:browser.close()
         finally:
