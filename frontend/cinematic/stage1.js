@@ -85,7 +85,17 @@ import { PostPipeline } from './PostPipeline.js';
     mark = new InfinityMark(scene);
     renderer = new PostPipeline(scene, camera, canvas, { mobile });
     renderer.setReducedMotion(reducedQuery.matches);
+    if (renderer.isSoftware) {
+      // Same physically modelled ribbon; disable costly per-fragment
+      // refraction only on software GPUs (CI, VMs or GPU fallback).
+      mark.ribbon.material.transmission = 0;
+      mark.ribbon.material.roughness = 0.21;
+      mark.ribbon.material.needsUpdate = true;
+    }
+    state.tier = renderer.tier;
     document.documentElement.classList.add('jw300-three-ready');
+    // Tell the previous decorative Canvas renderer to suspend its own RAF.
+    document.dispatchEvent(new Event('visibilitychange'));
   } catch (error) {
     // Presentation fail-open: original V21.2 SVG+Canvas remains functional.
     console.warn('JARVIS-WORKS: 3D decorative layer unavailable; original infinity retained.');
@@ -292,11 +302,11 @@ import { PostPipeline } from './PostPipeline.js';
     if (!reduced && state.mode !== 'transition') {
       if (fps < 45) { state.slowFrames++; state.fastFrames = 0; }
       else if (fps > 54) { state.fastFrames++; state.slowFrames = 0; }
-      if (state.slowFrames > 90 && state.tier < 3) {
+      if (state.slowFrames > 12 && state.tier < 3) {
         state.tier++; state.slowFrames = 0;
         renderer.setQuality(state.tier);
       }
-      if (state.fastFrames > 280 && state.tier > 0) {
+      if (state.fastFrames > 480 && state.tier > (renderer.isSoftware ? 2 : 0)) {
         state.tier--; state.fastFrames = 0;
         renderer.setQuality(state.tier);
       }
