@@ -82,7 +82,7 @@ def route_click(page, route):
     else:
         button=page.locator(f'.jw210-business-nav [data-jw210-page="{route}"]')
     hover_click(page,button)
-    page.wait_for_function("(r)=>window.state&&state.page===r",arg=route,timeout=23000)
+    page.wait_for_function("(r)=>typeof state !== 'undefined' && state.page===r",arg=route,timeout=23000)
     assert page.locator("#main-content").inner_text().strip()
     assert not page.locator("#toast.error.visible").count()
     pause(page,1550)
