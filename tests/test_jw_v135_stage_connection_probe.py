@@ -10,8 +10,9 @@ import pytest
 
 
 class FakeCursor:
-    def __init__(self, login, member, *, superuser=False, forced=43,
+    def __init__(self, login, member, *, superuser=False, forced=45,
                  review_forced=5, approval_forced=3, approval_policies=6,
+                 v201_forced=2, v201_roles_safe=3,
                  writer_can_login=False, direct_insert=False, new_table_write=False):
         self.login = login
         self.member = member
@@ -20,6 +21,8 @@ class FakeCursor:
         self.review_forced = review_forced
         self.approval_forced = approval_forced
         self.approval_policies = approval_policies
+        self.v201_forced = v201_forced
+        self.v201_roles_safe = v201_roles_safe
         self.new_table_write = new_table_write
         self.writer_can_login = writer_can_login
         self.direct_insert = direct_insert
@@ -41,6 +44,8 @@ class FakeCursor:
         sql = self.sqls[-1]
         if "rolcanlogin, rolbypassrls" in sql:
             return (self.writer_can_login,False)
+        if "jw_dev_import_writer_v201" in sql:
+            return (3, self.v201_roles_safe)
         if "pg_catalog.pg_roles" in sql:
             return (self.login, "postgres", 170006, self.superuser,
                     False, False, False, self.member[0], self.member[1])
@@ -49,11 +54,13 @@ class FakeCursor:
         if "pg_catalog.pg_policies" in sql:
             return (self.approval_policies,)
         if "pg_catalog.pg_class" in sql:
+            if "v201_approval_secrets" in sql:
+                return (2, self.v201_forced)
             if "order_drafts_v127" in sql:
                 return (3, self.approval_forced)
             if "review_signup_requests_v151" in sql:
                 return (5, self.review_forced)
-            return (43, self.forced)
+            return (45, self.forced)
         if "has_table_privilege" in sql:
             if "jw_dev.order_drafts_v127" in sql:
                 return (self.new_table_write, False, False, False, False, False)
@@ -73,10 +80,12 @@ class FakeConnection:
 
 
 def _load(monkeypatch, *, trade_member=(True, False), auth_member=(False, True),
-          trade_superuser=False, trade_rls=43, auth_rls=43, break_connect=False,
+          trade_superuser=False, trade_rls=45, auth_rls=45, break_connect=False,
           trade_review_rls=5, auth_review_rls=5,
           trade_approval_rls=3, auth_approval_rls=3,
           trade_approval_policies=6, auth_approval_policies=6,
+          trade_v201_forced=2, auth_v201_forced=2,
+          v201_roles_safe=3,
           writer_can_login=False, direct_insert=False,new_table_write=False):
     m_app = types.ModuleType("app")
     m_trade = types.ModuleType("app.pg_api_v84")
@@ -86,12 +95,14 @@ def _load(monkeypatch, *, trade_member=(True, False), auth_member=(False, True),
                     review_forced=trade_review_rls,
                     approval_forced=trade_approval_rls,
                     approval_policies=trade_approval_policies,
+                    v201_forced=trade_v201_forced,v201_roles_safe=v201_roles_safe,
                     writer_can_login=writer_can_login,direct_insert=direct_insert,
                     new_table_write=new_table_write)
     ac = FakeCursor("jw_stage1_auth_20261030", auth_member,
                     forced=auth_rls,review_forced=auth_review_rls,
                     approval_forced=auth_approval_rls,
                     approval_policies=auth_approval_policies,
+                    v201_forced=auth_v201_forced,v201_roles_safe=v201_roles_safe,
                     writer_can_login=writer_can_login,
                     direct_insert=direct_insert,new_table_write=new_table_write)
     def fail():
@@ -126,7 +137,13 @@ def test_probes_separate_real_principals_and_forced_rls(monkeypatch):
     ({"trade_rls":34},"TRADE_FORCED_RLS_CATALOG"),
     ({"trade_rls":35},"TRADE_FORCED_RLS_CATALOG"),
     ({"trade_rls":40},"TRADE_FORCED_RLS_CATALOG"),
+    ({"trade_rls":43},"TRADE_FORCED_RLS_CATALOG"),
     ({"trade_rls":44},"TRADE_FORCED_RLS_CATALOG"),
+    ({"trade_rls":46},"TRADE_FORCED_RLS_CATALOG"),
+    ({"auth_rls":43},"AUTH_FORCED_RLS_CATALOG"),
+    ({"trade_v201_forced":1},"TRADE_V201_RECEIPTS_SECRET_FORCED_RLS"),
+    ({"auth_v201_forced":1},"AUTH_V201_RECEIPTS_SECRET_FORCED_RLS"),
+    ({"v201_roles_safe":2},"TRADE_V201_ROLE_SAFETY"),
     ({"auth_rls":40},"AUTH_FORCED_RLS_CATALOG"),
     ({"trade_approval_rls":2},"TRADE_V170_APPROVAL_FORCED_RLS"),
     ({"auth_approval_rls":2},"AUTH_V170_APPROVAL_FORCED_RLS"),
