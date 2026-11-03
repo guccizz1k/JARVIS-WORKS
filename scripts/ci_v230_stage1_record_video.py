@@ -86,9 +86,10 @@ def action(page, route):
             "ROUTE_PAGE_EMPTY_"+route)
     require(page.locator("#jw300-global-canvas").count()==1,
             "GLOBAL_CANVAS_LOST_"+route)
+    expected_mode = "main" if route == "dashboard" else "mini"
     page.wait_for_function(
-        "() => JW_CINEMATIC_STAGE1.state()==='mini'",
-        timeout=10000)
+        "(expected) => JW_CINEMATIC_STAGE1.state()===expected",
+        arg=expected_mode, timeout=10000)
     require(page.locator("#toast.error.visible").count()==0,
             "ROUTE_TOAST_ERROR_"+route)
     hold(page, 1120)
