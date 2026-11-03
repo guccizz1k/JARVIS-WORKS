@@ -1,0 +1,237 @@
+/*
+ * JARVIS-WORKS Stage 1 cinematic skin.
+ * The business UI's DOM, input names, event listeners and navigation remain
+ * exactly as before. All rules below are scoped to stage1 visual elements.
+ */
+:root {
+  --jw300-abyss:#05070d;
+  --jw300-graphite:#0a0d16;
+  --jw300-frost:#eaf0f7;
+  --jw300-silver:#c9d6e6;
+  --jw300-ice:#adc7e2;
+}
+.jw300-cinema-root {
+  position:fixed;
+  inset:0;
+  width:100%;
+  height:100%;
+  z-index:10;
+  pointer-events:none;
+  isolation:isolate;
+  overflow:hidden;
+  mix-blend-mode:screen;
+  contain:layout style paint;
+  transition:filter 1.2s cubic-bezier(.18,.8,.24,1),
+             opacity 1.2s cubic-bezier(.18,.8,.24,1);
+  filter:brightness(1);
+}
+#jw300-global-canvas {
+  position:absolute;
+  inset:0;
+  display:block;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+}
+.jw300-cinema-root[data-state=mini]{
+  filter:brightness(.18);
+  opacity:.84;
+}
+.jw300-cinema-root[data-state=main]{
+  filter:brightness(.91);
+}
+.jw300-cinema-root[data-state=transition]{
+  z-index:150;
+  filter:brightness(1.35);
+}
+/* Disable only the OLD visual duplicates once the new GPU renderer is ready.
+ * Keep original node geometry, fallback rendering and accessibility intact. */
+html.jw300-three-ready .jw211-login-infinity > .jw211-transparent-crystal,
+html.jw300-three-ready .jw211-login-infinity > .jw211-glass-photon,
+html.jw300-three-ready .jw211-login-infinity > .jw212-sculpt,
+html.jw300-three-ready .jw210-infinity-stage > .jw211-transparent-crystal,
+html.jw300-three-ready .jw210-infinity-stage > .jw211-glass-photon,
+html.jw300-three-ready .jw210-infinity-stage > .jw212-sculpt,
+html.jw300-three-ready .jw210-infinity-stage > .jw210-infinity-photo {
+  visibility:hidden!important;
+}
+/* Login: preserve original MFA/password/API and readable input controls. */
+html.jw300-three-ready #login-view.jw211-login {
+  background:
+    radial-gradient(ellipse 32% 24% at 50% 31%,rgba(210,228,250,.075),transparent 78%),
+    linear-gradient(155deg,#05070d 8%,#090c13 57%,#060911 100%)!important;
+}
+html.jw300-three-ready #login-view.jw211-login .jw211-login-header,
+html.jw300-three-ready #login-view.jw211-login .jw211-login-headline,
+html.jw300-three-ready #login-view.jw211-login .login-card {
+  position:relative;
+  z-index:20!important;
+}
+html.jw300-three-ready #login-view.jw211-login .jw211-login-headline h2 {
+  color:var(--jw300-frost)!important;
+  font-weight:550!important;
+  letter-spacing:-.045em!important;
+}
+html.jw300-three-ready #login-view.jw211-login .login-card {
+  color:var(--jw300-frost)!important;
+  background:
+    linear-gradient(135deg,rgba(26,36,51,.83),rgba(8,12,20,.89))!important;
+  border:1px solid rgba(222,234,250,.25)!important;
+  box-shadow:0 24px 74px rgba(0,0,0,.45),
+    inset 0 1px rgba(255,255,255,.12)!important;
+  backdrop-filter:blur(18px)!important;
+  -webkit-backdrop-filter:blur(18px)!important;
+}
+html.jw300-three-ready #login-view.jw211-login .login-card :is(input,button,summary) {
+  position:relative;
+  z-index:22;
+}
+html.jw300-three-ready #login-view.jw211-login .login-card :is(input,button,summary):focus-visible {
+  outline:3px solid var(--jw300-ice)!important;
+  outline-offset:3px!important;
+}
+html.jw300-three-ready #login-view.jw211-login .login-card .demo-box,
+html.jw300-three-ready #login-view.jw211-login .login-card .fineprint {
+  font-size:13px!important;
+  line-height:1.5!important;
+}
+/* Authenticated home: sculpture floats behind the existing ORIGINAL data,
+ * tool clicks and labels. None of the values are duplicated or fabricated. */
+html.jw300-three-ready #app-shell:not(.hidden) .jw210-home {
+  background:
+    radial-gradient(ellipse 40% 37% at 50% 43%,rgba(202,219,241,.07),transparent 81%),
+    linear-gradient(155deg,#05070d,#0a0d16 55%,#05070d)!important;
+}
+html.jw300-three-ready #app-shell:not(.hidden) .jw210-home .jw210-hero-title,
+html.jw300-three-ready #app-shell:not(.hidden) .jw210-home .jw210-metrics,
+html.jw300-three-ready #app-shell:not(.hidden) .jw210-home .jw222-scroll-cue {
+  position:relative;
+  z-index:25!important;
+}
+.jw300-auth-transition {
+  position:fixed;
+  inset:0;
+  z-index:180;
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  background:radial-gradient(ellipse 50% 38% at 50% 43%,
+            rgba(205,224,247,.03),rgba(5,7,13,.35) 82%);
+}
+.jw300-auth-transition.jw300-auth-visible{
+  visibility:visible;
+  opacity:1;
+  pointer-events:auto;
+}
+.jw300-auth-streak {
+  position:absolute;
+  left:8%;
+  width:84%;
+  height:2px;
+  top:44%;
+  background:linear-gradient(90deg,
+    transparent,rgba(211,229,252,.2) 20%,
+    rgba(255,255,255,.85) 50%,rgba(211,229,252,.2) 80%,transparent);
+  box-shadow:0 0 12px 3px rgba(220,235,254,.50),
+             0 0 44px 10px rgba(187,212,246,.19);
+  transform:scaleX(.02);
+  transform-origin:center;
+  opacity:0;
+}
+.jw300-auth-message {
+  position:absolute;
+  bottom:max(5.5%,32px);
+  left:50%;
+  transform:translate(-50%,16px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  white-space:normal;
+  max-width:calc(100% - 40px);
+  color:#f3f8ff;
+  font-family:Pretendard,"Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;
+  font-size:17px;
+  font-weight:650;
+  letter-spacing:-.028em;
+  line-height:1.55;
+  opacity:0;
+  text-align:left;
+  text-shadow:0 4px 20px rgba(2,4,8,.75);
+}
+.jw300-auth-message small {
+  display:block;
+  font-size:13px;
+  font-weight:450;
+  color:#cad7e9;
+}
+.jw300-auth-check {
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+  width:34px;
+  height:34px;
+  border:1px solid rgba(231,242,255,.75);
+  border-radius:50%;
+  font-size:19px;
+  background:rgba(220,239,255,.16);
+  box-shadow:0 0 18px rgba(213,231,255,.22);
+}
+body.jw300-transitioning #login-view.jw211-login .login-card {
+  opacity:.05;
+  filter:blur(14px);
+  transform:translateY(8px) scale(.982);
+  transition:opacity 1s ease,filter 1s ease,transform 1s ease!important;
+}
+body.jw300-transitioning .jw300-auth-message {
+  animation:jw300-show-status 1.1s cubic-bezier(.22,.74,.15,1) .12s both;
+}
+body.jw300-transitioning .jw300-auth-streak {
+  animation:jw300-flare-peak .38s ease-in-out 1s both;
+}
+body.jw300-transitioning .jw300-auth-transition {
+  animation:jw300-black-dip 2.6s linear both;
+}
+@keyframes jw300-show-status{
+  from{opacity:0;transform:translate(-50%,16px);filter:blur(8px)}
+  to{opacity:1;transform:translate(-50%,0);filter:blur(0)}
+}
+@keyframes jw300-flare-peak{
+  0%{opacity:0;transform:scaleX(.06)}
+  42%{opacity:.85;transform:scaleX(.9)}
+  100%{opacity:0;transform:scaleX(1.2)}
+}
+@keyframes jw300-black-dip{
+  0%{background-color:rgba(1,3,8,.08)}
+  42%{background-color:rgba(1,3,8,.63)}
+  65%{background-color:rgba(1,3,8,.46)}
+  100%{background-color:rgba(1,3,8,0)}
+}
+@media (max-width:1099px) {
+  .jw300-cinema-root {filter:brightness(.67)}
+  .jw300-auth-message {font-size:15px}
+  /* The existing V21.4 PC-only rule remains in force in stage 1.
+     Mobile business form layout belongs to the separately approved stage 4. */
+}
+@media (prefers-reduced-motion:reduce) {
+  .jw300-cinema-root,.jw300-auth-streak,
+  .jw300-auth-message,.jw300-auth-transition {
+    animation:none!important;
+    transition:none!important;
+  }
+  body.jw300-transitioning .jw300-auth-transition {
+    animation:jw300-reduced-fade .4s linear both!important;
+  }
+  body.jw300-transitioning .jw300-auth-message {
+    opacity:1;
+    filter:none;
+    transform:translate(-50%,0);
+  }
+  body.jw300-transitioning .jw300-auth-streak {display:none!important}
+  body.jw300-transitioning #login-view.jw211-login .login-card {
+    filter:none!important;transform:none!important;
+  }
+}
+@keyframes jw300-reduced-fade {
+  from{opacity:.15}to{opacity:1}
+}
