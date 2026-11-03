@@ -73,10 +73,10 @@ import { PostPipeline } from './PostPipeline.js';
     scene.add(key, rim);
 
     const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(2.65, 96),
+      new THREE.CircleGeometry(2.30, 96),
       new THREE.MeshPhysicalMaterial({
-        color: '#a5b7c9', metalness: 0.65, roughness: 0.22,
-        transparent: true, opacity: 0.075, depthWrite: false, side: THREE.DoubleSide
+        color: '#63788f', metalness: 0.60, roughness: 0.24,
+        transparent: true, opacity: 0.014, depthWrite: false, side: THREE.DoubleSide
       })
     );
     ground.rotation.x = -Math.PI / 2;
@@ -89,7 +89,12 @@ import { PostPipeline } from './PostPipeline.js';
       // Same physically modelled ribbon; disable costly per-fragment
       // refraction only on software GPUs (CI, VMs or GPU fallback).
       mark.ribbon.material.transmission = 0;
-      mark.ribbon.material.roughness = 0.21;
+      mark.ribbon.material.color.set('#8495ab');
+      mark.ribbon.material.roughness = 0.22;
+      mark.ribbon.material.metalness = 0.38;
+      mark.ribbon.material.transparent = true;
+      mark.ribbon.material.opacity = 0.73;
+      mark.ribbon.material.depthWrite = false;
       mark.ribbon.material.needsUpdate = true;
     }
     state.tier = renderer.tier;
@@ -137,13 +142,16 @@ import { PostPipeline } from './PostPipeline.js';
     const measured = current === 'transition'
       ? frozenLoginRect || stageRect('login') : stageRect(current);
     const cx = measured.left + measured.width * .5;
-    const cy = measured.top + measured.height * .5;
+    // The main dashboard's true statistics must NEVER be occluded by the
+    // decorative sculpture; reserve clearance below the real metric chips.
+    const cy = measured.top + measured.height * .5 +
+      (current === 'main' ? Math.min(118, innerHeight * .13) : 0);
     const pxPerWorld = innerHeight /
       (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * (9.2 / zoom));
     const objectWidth = 6.2;
     const desired = current === 'mini'
       ? Math.min(measured.width * 0.9, 46)
-      : Math.min(measured.width * .96, current === 'login' ? 690 : 770);
+      : Math.min(measured.width * .96, current === 'login' ? 690 : 650);
     const baseScale = clamp(desired / (objectWidth * pxPerWorld) * zoom,
       current === 'mini' ? .035 : .55,
       current === 'mini' ? .17 : 1.45);
