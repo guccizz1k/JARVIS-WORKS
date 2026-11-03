@@ -40,11 +40,13 @@ def run():
                                 if r.status>=500 else None)
                         page.goto(url+"/",wait_until="domcontentloaded")
                         assert page.locator("#login-view.jw211-login").is_visible()
+                        assert page.locator(".jw211-login-brand small").inner_text()=="기업 업무 자동화 플랫폼"
                         assert page.locator("#login-view .jw212-sculpt canvas").count()==1
                         assert page.locator("link[href='/static/cinematic_v222.css']").count()==1
                         assert page.evaluate("typeof JW_CINEMATIC_V222")=="object"
                         assert page.evaluate("JW_CINEMATIC_V222.usesExistingSinglePhoton") is True
                         sign_in(page,"demo@hanbit.example")
+                        assert page.locator(".jw210-brand-sub").inner_text()=="기업 업무 자동화 플랫폼"
                         counts["real_login"]+=1
                         story=page.locator(".jw222-scroll-story")
                         story.wait_for(state="visible",timeout=15000)
