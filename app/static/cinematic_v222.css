@@ -271,3 +271,11 @@ html[data-jw206-theme=dark]{
  .jw222-motion-ready:not(.jw222-inview) .jw222-final-content{opacity:1!important;transform:none!important}
  #app-shell:not(.hidden) #main-content.jw211-portal-reveal::after{animation:none!important;display:none}
 }
+/* Independent screenshot audit: fixed left-hover rail overlays the first
+ * 77px of the viewport. Keep scene copy safely inside the rail boundary.
+ * This must be applied AFTER narrower desktop media overrides above. */
+@media(min-width:1100px){
+ #app-shell:not(.hidden) .jw222-scene{
+  padding-left:clamp(126px,9.25vw,168px);
+ }
+}
