@@ -1,0 +1,29 @@
+{
+  "version": "JARVIS-WORKS CINEMATIC BRAND / 22.2",
+  "reference": "User-supplied 31.4 s mobile capture of COSMOS-style scroll website (2026-11-03); inspiration only; no reference image assets copied",
+  "creative_direction": "Dark, calm gallery; restrained silver-glass surfaces; asymmetrical cinematic depth; single continuously orbiting photon along infinity",
+  "font_stack": "Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, system-ui, sans-serif",
+  "colors": {
+    "abyss": "#07090D",
+    "graphite": "#111722",
+    "surface": "#19212D",
+    "glass": "rgba(28,36,49,0.58)",
+    "frost": "#EAF0F7",
+    "silver": "#C9D6E6",
+    "ice": "#ADC7E2",
+    "quiet": "#A6B2C2",
+    "line": "rgba(216,231,250,0.22)",
+    "champagne": "#D7C9BA",
+    "alert": "#F1B667"
+  },
+  "accessibility": {
+    "min_text_contrast": "4.5:1 on designated body surfaces",
+    "reduced_motion": "all cosmetic scroll/tilt disabled",
+    "no_external_media": true
+  },
+  "production_scope": "UI-only preview. No finance values, business APIs, auth, database, policies, privacy settings or production deploy changed",
+  "external_generation": {
+    "higgsfield": "Brand can be created after account connector is installed; this JSON is the approved token specification.",
+    "seedance_2": "No connected Seedance 2.0 action; realtime infinite loop implemented in existing SVG+Canvas photon renderer instead."
+  }
+}
