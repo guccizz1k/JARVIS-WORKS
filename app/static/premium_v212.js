@@ -181,7 +181,7 @@ function createSculpture(host){
      (typeof state==='undefined'||state.page==='dashboard');
    for(const [key,m] of Object.entries(mounted)){
      if(!m)continue;
-     const shouldPlay=tabVisible&&!REDUCED.matches&&(key==='login'?!signedIn:homeVisible);
+     const shouldPlay=tabVisible&&!REDUCED.matches&&!document.documentElement.classList.contains('jw300-three-ready')&&(key==='login'?!signedIn:homeVisible);
      if(shouldPlay)m.fx.start();else m.fx.stop();
    }
    // The inherited V21.1 animated photon must never run behind the accepted
