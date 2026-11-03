@@ -45,7 +45,7 @@ PARAMS=[
  ("camera drift 20 sec", "main", "Math.sin(time * Math.PI / 10)"),
  ("no hardcoded fake statistics", "main", "scene = new THREE.Scene()"),
  ("exact CSS loaded", "index", "/static/cinematic_v230_stage1.css"),
- ("offline JS asset loaded", "index", "/static/cinematic_v230_stage1.bundle.js"),
+ ("replacement fixed cinema bridge loaded", "index", "/static/cinematic_v231_fixed_bridge.js"),
  ("existing app.js still present", "index", "/static/app.js"),
  ("existing V22.2 still present", "index", "/static/cinematic_v222.js"),
  ("form still present", "index", 'id="login-form"'),
@@ -72,7 +72,12 @@ def test_csp_same_origin_vendor_without_external_fetch():
     assert "unpkg.com" not in html
     assert "cdn.jsdelivr.net" not in html
     assert "https://" not in CONTENT["main"]
-    assert "<script src=\"/static/cinematic_v230_stage1.bundle.js\" defer></script>" in html
+    # V23.1 intentionally supersedes the V23.0 renderer to prevent two GPU
+    # canvases competing for the frame budget. The old version remains on disk
+    # and in source for rollback; the replacement is the active UI script.
+    assert (ROOT/"app/static/cinematic_v230_stage1.bundle.js").exists()
+    assert '<script src="/static/jw231_fixed/cine_live.js" defer></script>' in html
+    assert '<script src="/static/cinematic_v230_stage1.bundle.js" defer></script>' not in html
 
 def test_browser_visual_scope_does_not_replace_original_business_events():
     source=CONTENT["main"]

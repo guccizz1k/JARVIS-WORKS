@@ -1,0 +1,106 @@
+/* V23.1 fixed NEXUS styling bridged onto the *real* JARVIS-WORKS UI.
+   Source of optical scene: user's JARVIS_NEXUS_V3_FIXED_code.zip.
+   No API/forms/data scripts replaced. */
+:root{--jw231-abyss:#040509;--jw231-silver:#e8e9eb;--jw231-mist:#bac6d2;--jw231-amber:#d5b69b}
+html.jw231-active{color-scheme:dark;background:#040509}
+html.jw231-active body{background:#040509!important;color:#f3f4f6}
+html.jw231-active .jw300-cinema-root,html.jw231-active #jw300-auth-transition{
+  visibility:hidden!important;pointer-events:none!important;opacity:0!important
+}
+html.jw231-active #jw-back,
+html.jw231-active #jw-front{position:fixed!important;inset:0!important;pointer-events:none!important;z-index:5!important}
+html.jw231-active #jw-front{z-index:6!important}
+html.jw231-active #login-view.jw211-login,
+html.jw231-active #app-shell:not(.hidden){position:relative;z-index:7!important}
+html.jw231-active #login-view.jw211-login{
+  background:transparent!important;overflow:hidden;min-height:100svh!important;
+  padding:0 clamp(20px,4.2vw,70px) 32px!important;justify-content:flex-start;
+}
+html.jw231-active #login-view.jw211-login:before,
+html.jw231-active #login-view.jw211-login:after{display:none!important}
+html.jw231-active #login-view.jw211-login .jw211-login-header{width:100%;max-width:1450px!important;min-height:86px!important}
+html.jw231-active #login-view.jw211-login .jw211-login-brand-symbol{font-size:46px;color:#f7f4ed}
+html.jw231-active #login-view.jw211-login .jw211-login-brand strong{font-size:15px;letter-spacing:.1em}
+html.jw231-active #login-view.jw211-login .jw211-login-brand small{font-size:11px;color:#b4bfce}
+html.jw231-active #login-view.jw211-login .jw211-login-modes{background:rgba(15,19,27,.74);border:1px solid #48515f}
+html.jw231-active #login-view.jw211-login .jw211-login-hero{
+ width:min(1140px,100%);flex:0 0 auto;min-height:clamp(260px,39vh,430px);justify-content:flex-end;
+ z-index:10!important;
+}
+html.jw231-active #login-view.jw211-login .jw211-login-infinity{width:min(890px,100%);aspect-ratio:800/390}
+html.jw231-active #login-view.jw211-login .jw211-login-infinity > *{visibility:hidden!important}
+html.jw231-active #login-view.jw211-login .jw211-login-headline{
+ position:relative;z-index:20!important;margin:-21px 0 15px;
+ text-align:center;pointer-events:none;
+}
+html.jw231-active #login-view.jw211-login .jw211-login-headline span{
+ color:var(--jw231-amber);font-size:clamp(11px,.78vw,14px)!important;
+ letter-spacing:.16em;font-weight:600
+}
+html.jw231-active #login-view.jw211-login .jw211-login-headline h2{
+ color:#f1f2f5!important;font-size:clamp(24px,2.8vw,44px)!important;
+ letter-spacing:-.035em!important;font-weight:570!important;line-height:1.23!important;
+ text-shadow:0 5px 19px rgba(0,0,0,.55)
+}
+html.jw231-active #login-view.jw211-login .login-card{
+ position:relative;z-index:20!important;max-width:535px!important;width:min(535px,100%)!important;
+ border-radius:7px!important;background:rgba(6,10,17,.92)!important;
+ border:1px solid rgba(221,234,243,.24)!important;
+ box-shadow:0 25px 70px rgba(0,0,0,.44)!important;
+ padding:22px 28px 20px!important;
+ backdrop-filter:none!important;-webkit-backdrop-filter:none!important;
+}
+html.jw231-active #login-view.jw211-login .login-card h1{
+ color:#f2f5f8!important;font-size:clamp(20px,1.4vw,25px)!important;font-weight:600!important;
+ letter-spacing:-.025em!important
+}
+html.jw231-active #login-view.jw211-login .login-card form label{font-size:13px!important;color:#dce4eb!important}
+html.jw231-active #login-view.jw211-login .login-card form :is(input[type=email],input[type=password],input[type=text]){
+ background:#0a1018!important;border:1px solid #4d6274!important;color:#fff!important;border-radius:4px!important;
+ min-height:43px!important
+}
+html.jw231-active #login-view.jw211-login .login-card .btn.primary{
+ border-radius:30px!important;background:#e5edf2!important;color:#111820!important
+}
+html.jw231-active #login-view.jw211-login .login-card :is(input,button,summary):focus-visible{
+ outline:2px solid #d2ecff!important;outline-offset:3px!important
+}
+html.jw231-active #login-view.jw211-login .demo-box{border-radius:5px!important;background:rgba(17,25,36,.7)!important}
+html.jw231-active #app-shell:not(.hidden) .jw210-home{
+ background:linear-gradient(145deg,#060a10 0,#0b141e 56%,#040509 100%)!important;
+ color:#f4f5f7!important;
+}
+html.jw231-active #app-shell:not(.hidden) .jw210-infinity-stage>*{visibility:hidden!important}
+html.jw231-active #app-shell:not(.hidden) .jw210-infinity-stage{pointer-events:none}
+html.jw231-active #app-shell:not(.hidden) .jw210-home .jw210-hero-title,
+html.jw231-active #app-shell:not(.hidden) .jw210-home .jw210-metrics,
+html.jw231-active #app-shell:not(.hidden) .jw210-home .jw222-scroll-cue{
+ z-index:25!important;position:relative
+}
+/* Existing actions and business sections keep original pointer events and contents. */
+html.jw231-active #app-shell:not(.hidden) .jw210-nav-btn,
+html.jw231-active #app-shell:not(.hidden) button,
+html.jw231-active #app-shell:not(.hidden) a{position:relative;z-index:27}
+html.jw231-active #app-shell:not(.hidden) .jw210-home{
+ --jw210-muted:#aebdcb;--jw210-accent:#c9dbe7;
+}
+html.jw231-active .jw222-scene{background-color:#070c13}
+/* Stop heavy blur / blend work on interactive form surfaces. */
+html.jw231-active .jw211-login .login-card,
+html.jw231-active .jw210-home .jw210-metrics{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+@media(max-width:1099px){
+ html.jw231-active #login-view.jw211-login .jw211-login-hero{min-height:240px}
+ html.jw231-active #login-view.jw211-login .login-card{padding:18px 20px!important}
+}
+@media(prefers-reduced-motion:reduce){
+ html.jw231-active #jw-back,html.jw231-active #jw-front{display:none}
+ html.jw231-active #login-view.jw211-login{background:#070b12 url('/static/jw210_orbit_dark.webp') center 25%/auto 40% no-repeat!important}
+}
+/* Specificity-safe override of V23.0 first-paint guard. The older login
+   background was opaque and hid the freshly integrated fixed sculpture. */
+html.jw231-active body #login-view.login-screen.jw211-login:not(.hidden){
+  background:transparent!important;
+}
+html.jw231-active body #app-shell.app-shell:not(.hidden) .jw210-home{
+  background:transparent!important;
+}
