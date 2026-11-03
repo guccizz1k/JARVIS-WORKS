@@ -78,11 +78,33 @@ def verify() -> tuple[bool, str]:
                           FROM pg_catalog.pg_class c
                           JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
                           WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')""")
-                    # V17.0 promoted exactly three extra human-review/draft
-                    # tables: a stale 40-table gate would seal live staging on
-                    # every cold start, even though all 43 are FORCE RLS.
-                    if cur.fetchone() != (43, 43):
+                    # V20.1 installed two additional dedicated approval
+                    # tables atop the 43 protected business tables. Every one
+                    # of the 45 must remain FORCE RLS; fail closed on drift.
+                    if cur.fetchone() != (45, 45):
                         return False, label + "_FORCED_RLS_CATALOG"
+                    cur.execute("""SELECT count(*), count(*) FILTER
+                          (WHERE c.relrowsecurity AND c.relforcerowsecurity)
+                        FROM pg_catalog.pg_class c
+                        JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+                        WHERE n.nspname='jw_dev' AND c.relkind='r'
+                        AND c.relname IN (
+                          'v201_approval_secrets',
+                          'v201_approval_receipts'
+                        )""")
+                    if cur.fetchone() != (2, 2):
+                        return False, label + "_V201_RECEIPTS_SECRET_FORCED_RLS"
+                    cur.execute("""SELECT count(*), count(*) FILTER
+                        (WHERE NOT rolcanlogin AND NOT rolsuper
+                               AND NOT rolbypassrls)
+                        FROM pg_catalog.pg_roles
+                        WHERE rolname IN (
+                          'jw_dev_import_writer_v201',
+                          'jw_dev_import_review_executor_v201',
+                          'jw_dev_import_approval_owner_v201'
+                        )""")
+                    if cur.fetchone() != (3, 3):
+                        return False, label + "_V201_ROLE_SAFETY"
                     cur.execute("""SELECT count(*), count(*) FILTER
                             (WHERE c.relrowsecurity AND c.relforcerowsecurity)
                           FROM pg_catalog.pg_class c
