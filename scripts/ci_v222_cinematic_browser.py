@@ -97,7 +97,7 @@ def run():
                         navigate_real(page,"dashboard")
                         page.locator("#jw222-story-source").wait_for(state="attached")
                         page.locator("#jw222-story-continuity [data-jw222-go='automation']").click()
-                        page.wait_for_function("typeof state !== 'undefined' && state.page==='automation'",timeout=15000)
+                        page.wait_for_function("() => typeof state !== 'undefined' && state.page==='automation'",timeout=15000)
                         counts["action_routes"]+=1
                         for route in ROUTES:
                             navigate_real(page,route)
@@ -121,7 +121,7 @@ def run():
                         "(x)=>getComputedStyle(x).animationName")=="none"
                     assert page.locator(".jw222-scene h2").count()==3
                     page.locator("#jw222-story-continuity [data-jw222-go='automation']").click()
-                    page.wait_for_function("state.page==='automation'",timeout=12000)
+                    page.wait_for_function("() => typeof state !== 'undefined' && state.page==='automation'",timeout=12000)
                     assert not err,err
                     counts["reduced_motion"]+=1
                     ctx.close()
