@@ -103,6 +103,11 @@ def run():
                                            timeout=7000)
                     assert page.locator("#jw300-global-canvas").count()==1
                     assert page.locator(".jw210-home").is_visible()
+                    metrics=page.locator(".jw210-metrics").bounding_box()
+                    bounds=page.evaluate("JW_CINEMATIC_STAGE1.sculptureScreenRect()")
+                    assert metrics and bounds["top"] >= metrics["y"]+metrics["height"]-8, {
+                        "failure":"INFINITY_OVERLAPS_REAL_STATISTICS",
+                        "stats":metrics,"sculpture":bounds}
                     report["real_login"]+=1
                     page.screenshot(path=str(OUTPUT/"actual-main-after-login.png"),animations="disabled")
 
