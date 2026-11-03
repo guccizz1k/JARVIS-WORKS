@@ -165,7 +165,7 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
        VALUES(?,?,?,?,?,?,?,?,?)''',
        (eid,user['org_id'],user['id'],sha,filename,sealed_json(doc),digest,'pending',now()))
    audit(c,user,'document_evidence',eid,'evidence_preview',{'method':doc['method'],'kind':doc['document_kind']})
-  return {'id':eid,'digest':digest,'status':'pending','document':doc,'original_file_stored':False,'confirmation_required':True}
+  return {'id':eid,'digest':digest,'status':'pending','document':doc,'source_file_sha256':sha,'original_file_stored':False,'confirmation_required':True}
 
  @app.get('/api/evidence/queue')
  def queue(user=Depends(current_user)):
@@ -184,7 +184,8 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
    row=get_row(c,'evidence_previews_v64',eid,user['org_id'])
    if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로더 또는 관리자만 조회할 수 있습니다',403)
    return {'id':eid,'digest':row['digest'],'status':row['status'],
-           'document':unseal_json(row['proposed_json']),'record_id':row['record_id']}
+           'document':unseal_json(row['proposed_json']),'record_id':row['record_id'],
+           'source_file_sha256':row['file_sha256'],'original_file_stored':False}
 
  @app.post('/api/evidence/preview/{eid}/confirm',status_code=201)
  def confirm(eid:str,body:Approval,user=Depends(current_user)):
