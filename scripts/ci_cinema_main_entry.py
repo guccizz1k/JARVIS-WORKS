@@ -210,6 +210,31 @@ def run():
                     # Upload previews must NOT silently create an approved accounting transaction.
                     assert page.evaluate("async()=> (await (await fetch('/api/evidence/records')).json()).length")==0
                     print('PASS physical CINEMA file picker -> server OCR preview; requires manual approval',flush=True)
+                    # Server evidence must open through the original CINEMA
+                    # drawer without any missing local-parser fields throwing.
+                    page.evaluate("location.hash='#/files'")
+                    page.wait_for_function(
+                        "()=>document.title==='파일·첨부 — JARVIS WORKS'",
+                        timeout=16000)
+                    item_row=page.locator('#vw table.tbl tbody tr').filter(
+                        has_text='cinema-synthetic-receipt.xlsx').first
+                    item_row.wait_for(state='visible',timeout=12000)
+                    click_visible_area(page,item_row,'server-backed evidence detail')
+                    drawer=page.locator('.drawer[role="dialog"]')
+                    drawer.wait_for(state='visible',timeout=12000)
+                    detail=drawer.inner_text()
+                    assert '서버 OCR 분류가 접수되었습니다' in detail,detail
+                    assert 'NaN' not in detail and 'undefined' not in detail,detail
+                    assert not failures,failures
+                    drawer.locator('button.ibtn').first.click()
+                    # Local demo automation defaults must NOT appear as
+                    # running business automation in a server-backed session.
+                    page.evaluate("location.hash='#/automation'")
+                    page.wait_for_function(
+                        "()=>document.title==='업무 자동화 — JARVIS WORKS'",
+                        timeout=16000)
+                    assert '0 / 5' in page.locator('#vw .kpi').last.inner_text()
+                    print('PASS original file drawer safe server OCR state and truthful zero automation rules',flush=True)
                     # Negative proof: a resolved false predicate MUST time out,
                     # rather than passing because a Promise object is truthy.
                     poll_false=0

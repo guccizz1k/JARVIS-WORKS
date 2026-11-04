@@ -58,13 +58,22 @@ _jwFetchSnapshot=async function(){
     email:p.email||'',phone:p.phone||'',type:'both',serverBacked:true}));
   const safeAudit=auditRows.map((a,i)=>({i,uid:a.actor_id,user:a.actor_name||'',action:a.action,
     target:a.entity_id||'',detail:a.detail_json||'',at:_jwV2AsDate(a.created_at),serverBacked:true}));
+  // The source file is NOT stored, and the OCR engine supplies NO calibrated
+  // confidence percentage. The immutable CINEMA drawer expects confidence,
+  // line items and arrays from its old local-only parser. Never fabricate
+  // those fields or render a bogus confidence percentage for server previews.
   const files=queue.items.map(x=>({id:x.id,no:x.id,name:x.filename,addedAt:_jwV2AsDate(x.created_at),
-    status:x.status==='pending'?'review':x.status==='confirmed'?'approved':'rejected',analysis:x.document_kind?{ok:true,kind:x.document_kind}:null,
+    size:0,originalStored:false,
+    status:x.status==='pending'?'review':x.status==='confirmed'?'approved':'rejected',
+    analysis:{ok:false,kind:x.document_kind||null,reason:'서버 OCR 분류가 접수되었습니다. 원본은 서버에 저장되지 않으며 현재 CINEMA에는 검증된 신뢰도 수치·원본 대조 화면이 연결되지 않았습니다. 승인과 회계 반영은 이루어지지 않았습니다.'},
     by:_jwServerUser?.id||null,serverBacked:true}));
   return {partners:safePartners,deals,audit:safeAudit,dashboard,files};
 };
 _jwSeedReadOnly=function(){
   DB=defaultDB();
+  // Local CINEMA rule defaults are demonstrations, NOT server automations.
+  // Report no active rules until an audited server setting actually exists.
+  DB.rules=Object.fromEntries(Object.keys(DB.rules).map(k=>[k,false]));
   DB.company={id:_jwServerUser?.org_id||'',name:_jwServerUser?.org_name||'JARVIS WORKS'};
   DB.users=_jwServerUser?[{id:_jwServerUser.id,email:_jwServerUser.email,name:_jwServerUser.name,
     role:_jwServerUser.role==='admin'?'admin':_jwServerUser.role==='member'?'staff':'viewer',active:true,mfa:{on:false}}]:[];
