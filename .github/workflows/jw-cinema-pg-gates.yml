@@ -203,3 +203,47 @@ jobs:
               raise SystemExit('REPAIR_DELTA_INVALID')
           print('PASS_DIFFERENTIAL_REPAIRED_11_REAL_LEGACY_TESTS; no tests deleted/skipped',flush=True)
           PY
+
+  s4-atomic-two-writers-pg17:
+    name: "S4 atomic ledger claims: PG17 SQL + real concurrent writers"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-ephemeral-test-password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reject shared DBs; test both-ways duplicate claims with real PG17 transactions
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_s4_atomic_gate.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-cinema-s4-atomic-pg17
+          path: jw-cinema-s4-atomic-pg17.json
+          retention-days: 3
