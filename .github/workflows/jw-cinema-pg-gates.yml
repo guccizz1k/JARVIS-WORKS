@@ -57,6 +57,17 @@ jobs:
               raise SystemExit('BLOCKED_HISTORY_SCAN_REPORT_INVALID')
           # Never print secret values, file paths, matches, or unredacted logs.
           print('FULL_GIT_HISTORY_SCAN',{'exit':code,'findings':len(records)})
+          def path_ref(path):
+              h=2166136261
+              for unit in str(path).encode('utf-8'):
+                  h=((h^unit)*16777619)&0xffffffff
+              return format(h,'08x')
+          # Metadata alone; never print a secret match, repo path, or context.
+          if records:
+              for row in records:
+                  print('PRIVATE_REVIEW_REQUIRED',{'rule':row.get('RuleID','unknown'),
+                        'commit':row.get('Commit',''), 'path_ref':path_ref(row.get('File','')),
+                        'line':row.get('StartLine',0)})
           if code!=0 or records:
               raise SystemExit('BLOCKED_SECRET_SCAN_REQUIRES_PRIVATE_REVIEW')
           PY
