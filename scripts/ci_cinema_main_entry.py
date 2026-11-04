@@ -51,6 +51,64 @@ def run():
                     assert page.evaluate("async()=>{const r=await fetch('/api/me');return r.status}")==200
                     assert page.locator('canvas#gl').count()==1
                     assert page.locator('#app').is_visible()
+                    # Verify real CINEMA buttons, not direct fixture API shortcuts.
+                    # All mutations target disposable SQLite demo tenants only.
+                    page.evaluate("location.hash='#/partners'")
+                    page.get_by_role('button',name='＋ 거래처 등록').first.click(timeout=15000)
+                    partner_form=page.locator('.mback').last
+                    partner_form.locator('form.form input[name="name"]').fill('CINEMA 실브라우저 검증 거래처')
+                    partner_form.locator('form.form input[name="contact"]').fill('검증담당')
+                    partner_form.locator('button[type="submit"]').click()
+                    page.wait_for_function("""async()=>{
+                      const r=await fetch('/api/customers');
+                      return r.ok&&(await r.json()).some(p=>p.name==='CINEMA 실브라우저 검증 거래처');
+                    }""",timeout=18000)
+                    partners=page.evaluate("async()=>await (await fetch('/api/customers')).json()")
+                    partner=next(p for p in partners if p['name']=='CINEMA 실브라우저 검증 거래처')
+                    assert partner['contact_name']=='검증담당',partner
+                    page.evaluate("location.hash='#/deals'")
+                    page.get_by_role('button',name='＋ 견적서',exact=True).first.click(timeout=16000)
+                    quote_form=page.locator('.mback').last
+                    quote_form.locator('form.form input[maxlength="80"]').fill('CINEMA 실제 견적 API 검증')
+                    quote_form.locator('form.form select').first.select_option(partner['id'])
+                    quote_form.locator('form.form input[aria-label="품명"]').first.fill('검증 부품')
+                    quote_form.locator('form.form input[aria-label="수량"]').first.fill('2')
+                    quote_form.locator('form.form input[aria-label="단가"]').first.fill('1250')
+                    quote_form.locator('.mfoot button.primary').click()
+                    page.wait_for_function("""async()=>{
+                      const r=await fetch('/api/quotes');
+                      return r.ok&&(await r.json()).some(q=>q.title==='CINEMA 실제 견적 API 검증');
+                    }""",timeout=18000)
+                    quotes=page.evaluate("async()=>await(await fetch('/api/quotes')).json()")
+                    quote=next(q for q in quotes if q['title']=='CINEMA 실제 견적 API 검증')
+                    assert quote['customer_id']==partner['id'],quote
+                    assert quote['money']['total']==2750,quote
+                    page.evaluate("location.hash='#/deals/'+"+repr(quote['id'])+")")
+                    page.get_by_role('button',name='견적서 발송 처리').click(timeout=20000)
+                    page.wait_for_function("""async(qid)=>{
+                      const r=await fetch('/api/quotes/'+encodeURIComponent(qid));
+                      return r.ok&&(await r.json()).status==='sent';
+                    }""",arg=quote['id'],timeout=18000)
+                    # A second real company must NEVER see the first company's data.
+                    other_context=browser.new_context(viewport={'width':1366,'height':768})
+                    try:
+                        other=other_context.new_page()
+                        other.goto(url+'/',wait_until='domcontentloaded')
+                        other.locator('#login input[type=email]').fill('demo@bada.example')
+                        other.locator('#login input[type=password]').fill('Demo!2026secure')
+                        other.locator('#login button[type=submit]').click()
+                        other.locator('#app.on').wait_for(state='visible',timeout=35000)
+                        assert other.evaluate("""async()=>{
+                           const r=await fetch('/api/customers');
+                           return r.ok&&!(await r.json()).some(p=>p.name==='CINEMA 실브라우저 검증 거래처')
+                        }""")
+                        assert other.evaluate("""async(qid)=>{
+                           const r=await fetch('/api/quotes/'+encodeURIComponent(qid));
+                           return r.status===404;
+                        }""",quote['id'])
+                    finally:
+                        other_context.close()
+                    print('PASS CINEMA real buttons: customer POST, quote POST, status POST, tenant isolation')
                     assert not failures,failures
                     print('PASS: original visuals, real server login, no local auth bypass, real API, CSRF, CINEMA shell')
                     ctx.close()
