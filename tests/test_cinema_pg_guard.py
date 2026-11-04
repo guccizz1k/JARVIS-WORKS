@@ -68,3 +68,22 @@ def test_skip_marker_regex_catches_common_forms():
 def test_protected_hashes_are_forty_hex():
     for value in list(guard.PROTECTED_BLOBS.values()) + list(guard.PROTECTED_TREES.values()) + [guard.BASELINE]:
         assert re.fullmatch(r"[0-9a-f]{40}", value)
+
+
+def test_historic_fixup_files_must_remain_immutable():
+    # Exact files and exact blob IDs: repair historical fixture provenance,
+    # not permission to tamper with past installer/security assertions.
+    import subprocess
+    root=Path(__file__).resolve().parents[1]
+    assert set(guard.APPROVED_LEGACY_TEST_BLOBS)=={
+        "tests/test_installer_v75.py",
+        "tests/test_installer_v79.py",
+        "tests/test_pg_auth_v85.py",
+    }
+    for path, expected in guard.APPROVED_LEGACY_TEST_BLOBS.items():
+        assert guard.classify_path(path, "M")[0]
+        assert not guard.classify_path(path, "A")[0]
+        assert not guard.classify_path(path, "D")[0]
+        assert not guard.classify_path(path, "R")[0]
+        actual=subprocess.check_output(["git", "hash-object", "--", path], cwd=root,text=True).strip()
+        assert actual==expected, (path,expected,actual)
