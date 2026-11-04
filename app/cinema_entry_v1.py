@@ -19,7 +19,7 @@ def cinema_main_response():
         raise RuntimeError('CINEMA adapter insertion point rejected')
     html = original.replace(needle, bridge + '\ncinemaBoot();\n})();')
     match = re.search(r'<script>(.*?)</script>', html, re.S)
-    if not match or len(re.findall(r'<script(?:\\s|>)', html)) != 1:
+    if not match or html.count('<script>') != 1:
         raise RuntimeError('Unexpected CINEMA inline script layout')
     digest = base64.b64encode(hashlib.sha256(match.group(1).encode('utf-8')).digest()).decode('ascii')
     csp = ("default-src 'self'; script-src 'self' 'sha256-" + digest + "'; "
