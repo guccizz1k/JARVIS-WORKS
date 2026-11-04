@@ -46,6 +46,22 @@ class ValidatedWriterGateway:
             cur.execute("SELECT pg_catalog.pg_has_role(session_user, %s, 'MEMBER')", (OWNER_ROLE,))
             if cur.fetchone() != (False,):
                 raise HTTPException(503, "Trade login role is not separated from the owner role")
+            # S4: do not open a second transaction ledger for a tenant that
+            # already has any historical v92 quote-to-cash rows. Check through
+            # the validated tenant session BEFORE changing into the CINEMA role.
+            # A separate deployed v92 writer could still race this check;
+            # full global exclusivity requires a DB-level migration policy.
+            org = _identity[2]
+            cur.execute(
+                "SELECT EXISTS(SELECT 1 FROM jw_dev.quotes WHERE org_id=%s) "
+                "OR EXISTS(SELECT 1 FROM jw_dev.orders WHERE org_id=%s) "
+                "OR EXISTS(SELECT 1 FROM jw_dev.invoices WHERE org_id=%s) "
+                "OR EXISTS(SELECT 1 FROM jw_dev.payments WHERE org_id=%s)",
+                (org, org, org, org),
+            )
+            legacy = cur.fetchone()
+            if legacy != (False,):
+                raise HTTPException(409, "Existing legacy trades require verified reconciliation")
             cur.execute(f"SET LOCAL ROLE {WRITER_ROLE}")  # fails closed (42501) until membership is granted
             cur.execute(sql, params)
             columns = [col.name for col in cur.description] if cur.description else []
