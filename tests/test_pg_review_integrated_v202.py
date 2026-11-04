@@ -75,6 +75,7 @@ def secure_stage(monkeypatch):
     ("JW_PG_DELIVERY_REVIEW_V154", "ISOLATED_DEV_SIGNED_RECEIPT_REVIEW_ONLY"),
     ("JW_PG_IMPORT_QUOTE_V160", "ISOLATED_DEV_APPROVED_IMPORT_QUOTE_ONLY"),
     ("JW_PG_INVOICE_BALANCE_V161", "MISCONFIGURED"),
+    ("JW_PG_TRADE_LINEAGE_V158", "WRONG_MODE"),
 ])
 def test_unsafe_stage_configuration_never_mounts_endpoints(secure_stage, monkeypatch, key, bad):
     monkeypatch.setenv(key, bad)
@@ -146,3 +147,14 @@ def test_real_stage_opt_in_uses_only_pg_namespaced_api(secure_stage):
         assert client.post("/api/pg-stage/v92/quotes", json={}).status_code in (401, 422)
         assert client.get("/api/pg-stage/v92/quotes").status_code == 401
         assert client.get("/api/pg-stage/v84/customers").status_code in (401, 404)
+
+
+def test_read_only_trade_lineage_is_explicit_and_tenant_authenticated(secure_stage, monkeypatch):
+    monkeypatch.setenv("JW_PG_TRADE_LINEAGE_V158", "ISOLATED_DEV_TRADE_LINEAGE_READ_ONLY")
+    with TestClient(stage.create_app()) as client:
+        unauthenticated = client.get("/api/pg-stage/v158/quotes/" + "a" * 32 + "/lineage")
+        assert unauthenticated.status_code == 401
+        assert client.post("/api/pg-stage/v158/quotes/" + "a" * 32 + "/lineage").status_code == 405
+    monkeypatch.setenv("JW_PG_TRADE_LINEAGE_V158", "OFF")
+    with pytest.raises(RuntimeError, match="BLOCKED"):
+        stage.create_app()
