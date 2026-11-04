@@ -147,6 +147,10 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
    except RuntimeError:fail('파일 보안 검증 실패: 업로드를 차단했습니다',503)
   finally:
    ocr_slots.release()
+  # Size is integrity-bound inside the existing *encrypted* proposed document.
+  # No schema drift, no raw source retention, and no invented 0-byte values.
+  doc=dict(doc)
+  doc['source_size_bytes']=len(raw)
   digest=digest_doc(doc)
   with transaction() as c:
    if c.execute("SELECT 1 FROM evidence_previews_v64 WHERE org_id=? AND file_sha256=?",(user['org_id'],sha)).fetchone():
@@ -165,7 +169,7 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
        VALUES(?,?,?,?,?,?,?,?,?)''',
        (eid,user['org_id'],user['id'],sha,filename,sealed_json(doc),digest,'pending',now()))
    audit(c,user,'document_evidence',eid,'evidence_preview',{'method':doc['method'],'kind':doc['document_kind']})
-  return {'id':eid,'digest':digest,'status':'pending','document':doc,'source_file_sha256':sha,'original_file_stored':False,'confirmation_required':True}
+  return {'id':eid,'digest':digest,'status':'pending','document':doc,'source_file_sha256':sha,'original_file_stored':False,'source_size_bytes':len(raw),'confirmation_required':True}
 
  @app.get('/api/evidence/queue')
  def queue(user=Depends(current_user)):
@@ -176,7 +180,7 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
        FROM evidence_previews_v64 WHERE org_id=?'''+clause+' ORDER BY created_at DESC,rowid DESC LIMIT 100',params).fetchall()
    return {'items':[{'id':x['id'],'filename':x['filename'],'created_at':x['created_at'],
      'status':x['status'],'document_kind':unseal_json(x['proposed_json'])['document_kind'],
-     'record_id':x['record_id']} for x in rows]}
+     'record_id':x['record_id'],'source_size_bytes':unseal_json(x['proposed_json']).get('source_size_bytes')} for x in rows]}
 
  @app.get('/api/evidence/preview/{eid}')
  def read_preview(eid:str,user=Depends(current_user)):
@@ -185,7 +189,7 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
    if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로더 또는 관리자만 조회할 수 있습니다',403)
    return {'id':eid,'digest':row['digest'],'status':row['status'],
            'document':unseal_json(row['proposed_json']),'record_id':row['record_id'],
-           'source_file_sha256':row['file_sha256'],'original_file_stored':False}
+           'source_file_sha256':row['file_sha256'],'original_file_stored':False,'source_size_bytes':unseal_json(row['proposed_json']).get('source_size_bytes')}
 
  @app.post('/api/evidence/preview/{eid}/confirm',status_code=201)
  def confirm(eid:str,body:Approval,user=Depends(current_user)):

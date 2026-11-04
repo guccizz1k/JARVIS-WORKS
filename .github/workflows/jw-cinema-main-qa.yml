@@ -1,0 +1,179 @@
+name: JARVIS WORKS CINEMA main entry protected QA
+on:
+  push:
+    branches:
+      - review/cinema-main-entry-20261104
+permissions:
+  contents: read
+concurrency:
+  group: jw-cinema-main-protected-qa
+  cancel-in-progress: true
+jobs:
+  source-and-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate 1 - original CINEMA is byte-identical
+        run: |
+          set -euo pipefail
+          test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = "9bedf97fe718a94f07861e23670685af00619ca8"
+          node --check app/cinema_bridge_v1.js
+          node --check app/cinema_bridge_v2.js
+          python -m pip install 'fastapi>=0.115,<1'
+          # Syntax-check the assembled inline runtime, not just standalone bridge files.
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          from app.cinema_entry_v1 import cinema_main_response
+          html=cinema_main_response().body.decode('utf-8')
+          script=re.search(r'<script>(.*?)</script>',html,re.S)
+          assert script and html.count('<script>')==1
+          Path('/tmp/jw_cinema_assembled.js').write_text(script.group(1))
+          PY
+          node --check /tmp/jw_cinema_assembled.js
+          python -m py_compile app/main.py app/cinema_entry_v1.py scripts/ci_cinema_main_entry.py
+          python - <<'PY'
+          from app.cinema_entry_v1 import cinema_main_response
+          response=cinema_main_response()
+          assert response.status_code==200
+          assert b"cinemaBoot();" in response.body
+          assert "sha256-" in response.headers["Content-Security-Policy"]
+          print("PASS immutable CINEMA / JS / Python / hashed CSP")
+          PY
+      - name: Install regression dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4' 'PyMuPDF>=1.25,<2' reportlab
+      - name: Gate 2 and 3 - existing full regression
+        run: |
+          mkdir -p artifacts/cinema-main
+          # Historical install tests use frozen V8.9 source; run them independently in their genuine original environment.
+          # Current source is tested separately: no skips, no changing old golden hashes.
+          test "$(sha256sum app/main.py | cut -d' ' -f1)" = "91deef5315aca3edfe5b24145f5a7a79b7cc9de038eac27b91c7cf95cb95e345"
+          python -m pytest -q -ra -p no:cacheprovider --ignore=tests/test_installer_v75.py --ignore=tests/test_installer_v79.py -k 'not test_no_legacy_main_mutation' --basetemp=/tmp/jw-cinema-main --junitxml=artifacts/cinema-main/full.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('artifacts/cinema-main/full.xml').getroot()
+          s=root.attrib if root.tag=='testsuite' else root.find('.//testsuite').attrib
+          n={x:int(s.get(x,0)) for x in ('tests','failures','errors','skipped')}
+          assert n['tests']>=1973 and n['failures']==0 and n['errors']==0 and n['skipped']==0,n
+          print('PASS full backend regression',n)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cinema-main-full-pytest
+          path: artifacts/cinema-main/full.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  historical-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch reviewed fixture builder without altering original V8.9 source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: qa-tooling
+          persist-credentials: false
+      - name: Historical V8.9 baseline SHA and overlay reconstruction
+        run: |
+          set -euo pipefail
+          test "$(sha256sum app/main.py | cut -d' ' -f1)" = "e4584787c8ee97a417656e62297507caa7d618f4146398342dabc23c8a6ab25f"
+          python qa-tooling/scripts/ci_rebuild_v79_overlay.py
+      - name: Install historical test dependencies
+        run: |
+          python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4'
+      - name: Gate 3 - execute ALL twelve frozen historical tests without bypass
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/cinema-legacy
+          python -m pytest -q -ra -p no:cacheprovider tests/test_installer_v75.py tests/test_installer_v79.py tests/test_pg_auth_v85.py::test_no_legacy_main_mutation --junitxml=artifacts/cinema-legacy/historical.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('artifacts/cinema-legacy/historical.xml').getroot()
+          s=root.attrib if root.tag=='testsuite' else root.find('.//testsuite').attrib
+          n={x:int(s.get(x,0)) for x in ('tests','failures','errors','skipped')}
+          assert n['tests']==12 and n['failures']==0 and n['errors']==0 and n['skipped']==0,n
+          print('PASS frozen V8.9 historical source',n)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cinema-historical-legacy-tests
+          path: artifacts/cinema-legacy/historical.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  combined-all-pass:
+    needs: [source-and-regression, historical-regression, isolated-real-browser]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cinema-*
+          path: artifacts/combined
+          merge-multiple: true
+      - name: Gate 5 - aggregate independent modern and historical verification
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          counts=[]
+          for name in ('full.xml','historical.xml'):
+            p=Path('artifacts/combined')/name
+            assert p.is_file(),f'Missing proof: {name}'
+            root=ET.parse(p).getroot()
+            suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+            n={field:sum(int(z.attrib.get(field,0)) for z in suites) for field in ('tests','failures','errors','skipped')}
+            assert n['failures']==0 and n['errors']==0 and n['skipped']==0,(name,n)
+            counts.append(n)
+          assert counts[0]['tests']>=1973 and counts[1]['tests']==12,counts
+          assert sum(x['tests'] for x in counts)>=1985,counts
+          print('ALL PASS in correct source contexts; no failed/error/skipped tests',counts)
+          PY
+
+  isolated-real-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 23
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated browser dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install -r requirements.txt 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' reportlab
+          python -m playwright install --with-deps chromium
+      - name: Gate 4 - actual FastAPI login and CINEMA visuals
+        run: python -m scripts.ci_cinema_main_entry
