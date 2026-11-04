@@ -13,7 +13,11 @@ ROOT = Path(__file__).resolve().parent
 
 def cinema_main_response():
     original = (ROOT / 'static' / 'cinema' / 'JARVIS_WORKS_CINEMA.html').read_text(encoding='utf-8')
-    bridge = (ROOT / 'cinema_bridge_v1.js').read_text(encoding='utf-8') + '\n' + (ROOT / 'cinema_bridge_v2.js').read_text(encoding='utf-8')
+    # Capture the unmodified source handlers BEFORE v1 installs fail-closed stubs.
+    # V2 wraps these original form builders; otherwise its UI buttons are inert.
+    preserved = ("const _jwOriginalCINEMAPartnerForm=partnerForm;"
+                 "const _jwOriginalCINEMADealForm=dealForm;\\n")
+    bridge = preserved + (ROOT / 'cinema_bridge_v1.js').read_text(encoding='utf-8') + '\n' + (ROOT / 'cinema_bridge_v2.js').read_text(encoding='utf-8')
     needle = 'boot();\n})();'
     if original.count(needle) != 1 or '</script>' in bridge.lower():
         raise RuntimeError('CINEMA adapter insertion point rejected')

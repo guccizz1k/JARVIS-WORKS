@@ -86,7 +86,7 @@ def run():
                     # Verify real CINEMA buttons, not direct fixture API shortcuts.
                     # All mutations target disposable SQLite demo tenants only.
                     page.evaluate("location.hash='#/partners'")
-                    click_visible_area(page,page.get_by_role('button',name='＋ 거래처 등록').first,'partner new')
+                    click_visible_area(page,page.locator('#vw .ph .acts').get_by_role('button',name='＋ 거래처 등록'),'partner new')
                     partner_form=page.locator('.mback').last
                     partner_form.locator('form.form input[name="name"]').fill('CINEMA 실브라우저 검증 거래처')
                     partner_form.locator('form.form input[name="contact"]').fill('검증담당')
@@ -99,7 +99,7 @@ def run():
                     partner=next(p for p in partners if p['name']=='CINEMA 실브라우저 검증 거래처')
                     assert partner['contact_name']=='검증담당',partner
                     page.evaluate("location.hash='#/deals'")
-                    click_visible_area(page,page.get_by_role('button',name='＋ 견적서',exact=True).first,'quote new')
+                    click_visible_area(page,page.locator('#vw .ph .acts').get_by_role('button',name='＋ 견적서',exact=True),'quote new')
                     quote_form=page.locator('.mback').last
                     quote_form.locator('form.form input[maxlength="80"]').fill('CINEMA 실제 견적 API 검증')
                     quote_form.locator('form.form select').first.select_option(partner['id'])

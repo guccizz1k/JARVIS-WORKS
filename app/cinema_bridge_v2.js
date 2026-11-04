@@ -93,7 +93,7 @@ registerFile=async function(file){
     kind:data.document.document_kind||'미분류',serverAnalyzed:true},status:'review',serverBacked:true};
 };
 analyzeFile=async function(record){if(!record?.serverBacked)throw new Error('서버에 등록되지 않은 파일입니다.');return record};
-const _jwV2OriginalPartnerForm=partnerForm;
+const _jwV2OriginalPartnerForm=_jwOriginalCINEMAPartnerForm;
 partnerForm=function(p,after){
   const result=_jwV2OriginalPartnerForm(p,after);
   const m=modalStack[modalStack.length-1];const form=m?.box?.querySelector('form.form');
@@ -111,7 +111,7 @@ partnerForm=function(p,after){
   },true);
   return result;
 };
-const _jwV2OriginalDealForm=dealForm;
+const _jwV2OriginalDealForm=_jwOriginalCINEMADealForm;
 dealForm=function(kind,startAs,preset={},after){
   const m=_jwV2OriginalDealForm(kind,startAs,preset,after);
   if(!m?.box)return m;
