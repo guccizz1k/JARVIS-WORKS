@@ -1,15 +1,13 @@
-"""CINEMA OCR queue source-byte provenance and additive SQLite migration.
+"""CINEMA evidence source size is integrity-bound without schema changes.
 
-Synthetic data only. Old rows must not have an invented upload size.
+Tests synthetic metadata only. A legacy preview remains unchanged.
 """
 from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
 
-import pytest
-
-from app.evidence_v64 import install_schema
+from app.evidence_v64 import install_schema, digest_doc
 
 
 @contextmanager
@@ -23,20 +21,18 @@ def open_db(db_path):
         connection.close()
 
 
-def test_new_evidence_schema_tracks_bytes_with_valid_range(tmp_path):
+def test_fresh_evidence_schema_has_no_unreviewed_column(tmp_path):
     db = tmp_path / 'evidence-new.db'
     install_schema(lambda: open_db(db))
     with open_db(db) as con:
         cols = {r['name'] for r in con.execute('PRAGMA table_info(evidence_previews_v64)')}
-        assert 'source_size_bytes' in cols
-        definition = con.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='evidence_previews_v64'"
-        ).fetchone()['sql']
-        assert 'source_size_bytes INTEGER CHECK' in definition
-        assert 'source_size_bytes BETWEEN 1 AND 5242880' in definition
+        assert cols == {
+            'id', 'org_id', 'uploaded_by', 'file_sha256', 'filename', 'proposed_json',
+            'digest', 'status', 'created_at', 'confirmed_at', 'record_id'
+        }
 
 
-def test_legacy_evidence_rows_preserve_unknown_size_and_upgrade_twice(tmp_path):
+def test_legacy_evidence_rows_unchanged_across_reinstalls(tmp_path):
     db = tmp_path / 'evidence-old.db'
     with open_db(db) as con:
         con.execute('''CREATE TABLE evidence_previews_v64 (
@@ -55,10 +51,17 @@ def test_legacy_evidence_rows_preserve_unknown_size_and_upgrade_twice(tmp_path):
     install_schema(lambda: open_db(db))
     with open_db(db) as con:
         row = con.execute(
-            'SELECT filename, source_size_bytes FROM evidence_previews_v64 WHERE id=?',
+            'SELECT filename, proposed_json FROM evidence_previews_v64 WHERE id=?',
             ('legacy',)
         ).fetchone()
         assert row['filename'] == 'archived.xlsx'
-        assert row['source_size_bytes'] is None
-        cols = [r['name'] for r in con.execute('PRAGMA table_info(evidence_previews_v64)')]
-        assert cols.count('source_size_bytes') == 1
+        assert row['proposed_json'] == '{"document_kind":null}'
+        cols = {r['name'] for r in con.execute('PRAGMA table_info(evidence_previews_v64)')}
+        assert 'source_size_bytes' not in cols
+
+
+def test_source_byte_count_is_integrity_bound_to_document():
+    before = {'document_kind':None,'fields':{}}
+    sized = {**before,'source_size_bytes':527}
+    assert digest_doc(before) != digest_doc(sized)
+    assert digest_doc(sized) != digest_doc({**before,'source_size_bytes':528})
