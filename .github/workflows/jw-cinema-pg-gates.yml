@@ -110,7 +110,11 @@ jobs:
       - name: Install only declared test dependencies
         run: |
           set -euo pipefail
-          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2'
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tesseract-ocr tesseract-ocr-kor fonts-nanum
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+          tesseract --list-langs | grep -Eq '(^|[[:space:]])kor($|[[:space:]])'
       - name: Gate 2-5 - whole current test suite (no skips accepted)
         run: |
           set -euo pipefail
@@ -131,3 +135,62 @@ jobs:
           name: jw-cinema-pg-full-pytest
           path: artifacts/cinema-pg-full/all-tests.xml
           retention-days: 3
+
+  baseline-vs-candidate-legacy:
+    name: "Differential audit: 11 legacy test failures at pinned baseline"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install only existing test dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Baseline and candidate must have identical legacy test outcomes
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/jw-original-baseline" 08ea29867e962d4ac5be0e942fc1488528494428
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          root=Path.cwd()
+          baseline=Path(os.environ['RUNNER_TEMP'])/'jw-original-baseline'
+          cases=[
+              'tests/test_installer_v75.py',
+              'tests/test_installer_v79.py',
+              'tests/test_pg_auth_v85.py::test_no_legacy_main_mutation',
+          ]
+          outcomes={}
+          for name,folder in (('baseline',baseline),('candidate',root)):
+              xml=Path(os.environ['RUNNER_TEMP'])/(name+'-legacy.xml')
+              cmd=['python3','-m','pytest','-q','-p','no:cacheprovider',f'--junitxml={xml}',*cases]
+              p=subprocess.run(cmd,cwd=folder,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=240)
+              if not xml.is_file():
+                  raise SystemExit('BLOCKED_'+name.upper()+'_XML_MISSING')
+              tree=ET.parse(xml)
+              testnodes=tree.findall('.//testcase')
+              entries={}
+              for t in testnodes:
+                  key=t.attrib.get('classname','')+'::'+t.attrib.get('name','')
+                  entries[key]='ERROR' if t.find('error') is not None else 'FAIL' if t.find('failure') is not None else 'SKIP' if t.find('skipped') is not None else 'PASS'
+              outcomes[name]=entries
+              print(name,{'exit':p.returncode,'total':len(entries),'fails':sum(v=='FAIL' for v in entries.values()),'errors':sum(v=='ERROR' for v in entries.values()),'skips':sum(v=='SKIP' for v in entries.values())},flush=True)
+              print('tail:',p.stdout[-1200:],flush=True)
+          if outcomes['baseline']!=outcomes['candidate']:
+              changed={key:{'baseline':outcomes['baseline'].get(key),'candidate':outcomes['candidate'].get(key)} for key in set(outcomes['baseline'])|set(outcomes['candidate']) if outcomes['baseline'].get(key)!=outcomes['candidate'].get(key)}
+              raise SystemExit('NEW_OR_CHANGED_REGRESSION '+str(changed))
+          fails={k:v for k,v in outcomes['baseline'].items() if v!='PASS'}
+          if len(fails)!=11 or any(v!='FAIL' for v in fails.values()):
+              raise SystemExit('UNEXPECTED_LEGACY_BASELINE '+str(fails))
+          print('PASS_BASELINE_DIFFERENTIAL_11_PRE_EXISTING_FAILURES; WHOLE_SUITE_REMAINS_FAIL',flush=True)
+          PY
