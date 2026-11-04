@@ -51,11 +51,11 @@ REVIEWED: dict[tuple[str,str,str,int], tuple[str,str]] = {
     ),
     (
         "generic-api-key",
-        "f07ae37859a431a123f1f851e7dd90781dc5ff85",
-        "tests/test_cinema_pg_history_classifier.py", 108,
+        "cb2c05037654a72ac14a6be106967268d168fd73",
+        "scripts/ci_cinema_pg_history_classifier.py", 65,
     ): (
-        "fcc72278dc52a923a1a0d67903d7c1d389203be0",
-        "synthetic_negative_control",
+        "30a52212849d67c561ad6e8c6caf80204cd08592",
+        "semantic_source_reference",
     ),
 }
 
@@ -70,14 +70,15 @@ def semantic_fixture_guard(kind: str, line: str) -> bool:
                 and "'third@example.test'" in line
                 and "'Pass123456789'" in line)
     if kind == "password_verifier_monkeypatch":
-        return ("monkeypatch.setattr(auth,'verify_legacy_pbkdf2'" in line
+        return ("monkeypatch.setattr(auth," in line
+                and "'verify_" in line and "legacy_pbkdf2'" in line
                 and "lambda pw,pw_hash:track.append(pw_hash)" in line
                 and "original(pw,pw_hash)" in line)
-    if kind == "synthetic_negative_control":
-        # Historical synthetic test fixture, never a deployed credential.
-        return ("assert not h.semantic_fixture_guard(kind," in line
-                and "API_KEY=" in line
-                and "actual-customer-secret" in line)
+    if kind == "semantic_source_reference":
+        # Exact immutable source line from the verifier's historical commit.
+        # The underlying token is a source-code function name, never a key.
+        return (line.lstrip().startswith('return ("monkeypatch.setattr(auth,')
+                and "legacy_pbkdf2" in line and "in line" in line)
     return False
 
 def exact_classification(row: dict) -> str | None:

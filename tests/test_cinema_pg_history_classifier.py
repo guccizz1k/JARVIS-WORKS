@@ -22,7 +22,7 @@ def test_review_registry_contains_exactly_four_individually_pinned_findings():
         "git_blob_sha_constant",
         "synthetic_invalid_test_account",
         "password_verifier_monkeypatch",
-        "synthetic_negative_control",
+        "semantic_source_reference",
     }
     assert all(len(blob)==40 for blob,_ in h.REVIEWED.values())
 
