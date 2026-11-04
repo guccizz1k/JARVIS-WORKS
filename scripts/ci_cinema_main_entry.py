@@ -281,6 +281,33 @@ def run():
                     assert not failures,failures
                     print('PASS 17 CINEMA route render/error sweep; guarded routes:',
                           ','.join(guarded) or 'none',flush=True)
+                    # Messenger attachment is NOT the OCR evidence endpoint:
+                    # an attempted UI click must neither open a file chooser
+                    # nor silently fabricate browser-only outbound messages.
+                    page.evaluate("location.hash='#/messenger'")
+                    page.wait_for_function(
+                        "()=>document.title==='거래 메신저 — JARVIS WORKS'",
+                        timeout=15000)
+                    chooser_events=[]
+                    page.on('filechooser',lambda chooser:chooser_events.append(chooser))
+                    before=page.evaluate("""async()=>{
+                      const [q,t]=await Promise.all([
+                        fetch('/api/evidence/queue'),fetch('/api/messenger/threads')]);
+                      return {queue:(await q.json()).items.length,
+                              threads:(await t.json()).length};
+                    }""")
+                    attach_button=page.locator('#vw button[aria-label="파일 첨부"]')
+                    click_visible_area(page,attach_button,'messenger attachment deny')
+                    page.wait_for_timeout(400)
+                    after=page.evaluate("""async()=>{
+                      const [q,t]=await Promise.all([
+                        fetch('/api/evidence/queue'),fetch('/api/messenger/threads')]);
+                      return {queue:(await q.json()).items.length,
+                              threads:(await t.json()).length};
+                    }""")
+                    assert not chooser_events and before==after,(before,after,len(chooser_events))
+                    assert '서버 연결 전까지' in page.locator('#flash').inner_text(), 'Missing explicit fail-closed user feedback'
+                    print('PASS original messenger attachment button fail-closed, no fake transfer',flush=True)
                     print('PASS CINEMA real buttons: customer POST, quote POST, status POST, tenant isolation')
                     if CLICK_BLOCKERS:raise AssertionError('Original CINEMA UI pointer hit-test BLOCKED despite passing server API: '+str(CLICK_BLOCKERS))
                     assert not failures,failures
