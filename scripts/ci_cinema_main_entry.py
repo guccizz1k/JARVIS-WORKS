@@ -181,12 +181,13 @@ def run():
                     from tests.test_evidence_v64 import xlsx
                     page.evaluate("location.hash='#/docs'")
                     page.locator('#vw .drop').wait_for(state='visible', timeout=20000)
+                    generated_xlsx=xlsx(reference='CINEMA-QA-20261104')
                     with page.expect_file_chooser(timeout=15000) as chooser_info:
                         click_visible_area(page,page.locator('#vw .drop button').first,'document file')
                     chooser_info.value.set_files([{
                         'name':'cinema-synthetic-receipt.xlsx',
                         'mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        'buffer':xlsx(reference='CINEMA-QA-20261104')
+                        'buffer':generated_xlsx
                     }])
                     # Playwright wait_for_function must not be given an async predicate:
                     # it treats the Promise itself as truthy before its false result.
@@ -203,8 +204,11 @@ def run():
                         if receipt:break
                         page.wait_for_timeout(250)
                     assert receipt and receipt['id'],{
-                        'queue':queue_result, 'toast':page.locator('#flash').inner_text(timeout=2500),
+                        'status':queue_result.get('status'), 'items_count':len(queue_result.get('data',{}).get('items',[])),
                         'page_errors':failures
+                    }
+                    assert receipt['source_size_bytes']==len(generated_xlsx), {
+                        'expected_size_bytes':len(generated_xlsx),'actual_size_bytes':receipt.get('source_size_bytes')
                     }
                     evidence=page.evaluate("""async(eid)=>{
                       const r=await fetch('/api/evidence/preview/'+encodeURIComponent(eid));

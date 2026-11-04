@@ -46,7 +46,7 @@ def install_schema(conn):
    CREATE TABLE IF NOT EXISTS evidence_previews_v64(
     id TEXT PRIMARY KEY,org_id TEXT NOT NULL REFERENCES organizations(id),
     uploaded_by TEXT NOT NULL REFERENCES users(id),file_sha256 TEXT NOT NULL,
-    filename TEXT NOT NULL, proposed_json TEXT NOT NULL,digest TEXT NOT NULL,
+    filename TEXT NOT NULL, source_size_bytes INTEGER CHECK(source_size_bytes IS NULL OR source_size_bytes BETWEEN 1 AND 5242880), proposed_json TEXT NOT NULL,digest TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('pending','confirmed')),
     created_at TEXT NOT NULL,confirmed_at TEXT,
     record_id TEXT UNIQUE);
@@ -82,6 +82,11 @@ def install_schema(conn):
       OR (SELECT org_id FROM users WHERE id=NEW.reviewed_by) IS NOT NEW.org_id
     BEGIN SELECT RAISE(ABORT,'evidence record organization mismatch'); END;
   ''')
+  # v64 was deployed before source length metadata existed. Add a single,
+  # nullable field; old rows remain unknown rather than fabricating 0 bytes.
+  cols={r['name'] for r in c.execute('PRAGMA table_info(evidence_previews_v64)')}
+  if 'source_size_bytes' not in cols:
+   c.execute('ALTER TABLE evidence_previews_v64 ADD COLUMN source_size_bytes INTEGER CHECK(source_size_bytes IS NULL OR source_size_bytes BETWEEN 1 AND 5242880)')
 
 def protected_parse(filename,raw):
  if not 0<len(raw)<=MAX_BYTES:raise ValueError('파일 크기는 5MB 이하이어야 합니다')
@@ -161,22 +166,22 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
      fail('이미 확인된 동일 거래처·문서번호 증빙입니다',409)
    eid=ident()
    c.execute('''INSERT INTO evidence_previews_v64
-       (id,org_id,uploaded_by,file_sha256,filename,proposed_json,digest,status,created_at)
-       VALUES(?,?,?,?,?,?,?,?,?)''',
-       (eid,user['org_id'],user['id'],sha,filename,sealed_json(doc),digest,'pending',now()))
+       (id,org_id,uploaded_by,file_sha256,filename,source_size_bytes,proposed_json,digest,status,created_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?)''',
+       (eid,user['org_id'],user['id'],sha,filename,len(raw),sealed_json(doc),digest,'pending',now()))
    audit(c,user,'document_evidence',eid,'evidence_preview',{'method':doc['method'],'kind':doc['document_kind']})
-  return {'id':eid,'digest':digest,'status':'pending','document':doc,'source_file_sha256':sha,'original_file_stored':False,'confirmation_required':True}
+  return {'id':eid,'digest':digest,'status':'pending','document':doc,'source_file_sha256':sha,'original_file_stored':False,'source_size_bytes':len(raw),'confirmation_required':True}
 
  @app.get('/api/evidence/queue')
  def queue(user=Depends(current_user)):
   with conn() as c:
    params=(user['org_id'],) if user['role']=='admin' else (user['org_id'],user['id'])
    clause='' if user['role']=='admin' else ' AND uploaded_by=?'
-   rows=c.execute('''SELECT id,filename,created_at,status,proposed_json,digest,record_id
+   rows=c.execute('''SELECT id,filename,created_at,status,proposed_json,digest,record_id,source_size_bytes
        FROM evidence_previews_v64 WHERE org_id=?'''+clause+' ORDER BY created_at DESC,rowid DESC LIMIT 100',params).fetchall()
    return {'items':[{'id':x['id'],'filename':x['filename'],'created_at':x['created_at'],
      'status':x['status'],'document_kind':unseal_json(x['proposed_json'])['document_kind'],
-     'record_id':x['record_id']} for x in rows]}
+     'record_id':x['record_id'],'source_size_bytes':x['source_size_bytes']} for x in rows]}
 
  @app.get('/api/evidence/preview/{eid}')
  def read_preview(eid:str,user=Depends(current_user)):
@@ -185,7 +190,7 @@ def register_routes(app,*,conn,transaction,current_user,get_row,ident,now,audit,
    if row['uploaded_by']!=user['id'] and user['role']!='admin':fail('업로더 또는 관리자만 조회할 수 있습니다',403)
    return {'id':eid,'digest':row['digest'],'status':row['status'],
            'document':unseal_json(row['proposed_json']),'record_id':row['record_id'],
-           'source_file_sha256':row['file_sha256'],'original_file_stored':False}
+           'source_file_sha256':row['file_sha256'],'original_file_stored':False,'source_size_bytes':row['source_size_bytes']}
 
  @app.post('/api/evidence/preview/{eid}/confirm',status_code=201)
  def confirm(eid:str,body:Approval,user=Depends(current_user)):

@@ -63,7 +63,10 @@ _jwFetchSnapshot=async function(){
   // line items and arrays from its old local-only parser. Never fabricate
   // those fields or render a bogus confidence percentage for server previews.
   const files=queue.items.map(x=>({id:x.id,no:x.id,name:x.filename,addedAt:_jwV2AsDate(x.created_at),
-    size:0,originalStored:false,
+    // New uploads carry authenticated original byte size; legacy rows have NULL.
+    size:Number.isSafeInteger(x.source_size_bytes)&&x.source_size_bytes>0?x.source_size_bytes:0,
+    size_known:Number.isSafeInteger(x.source_size_bytes)&&x.source_size_bytes>0,
+    originalStored:false,
     status:x.status==='pending'?'review':x.status==='confirmed'?'approved':'rejected',
     analysis:{ok:false,kind:x.document_kind||null,reason:'서버 OCR 분류가 접수되었습니다. 원본은 서버에 저장되지 않으며 현재 CINEMA에는 검증된 신뢰도 수치·원본 대조 화면이 연결되지 않았습니다. 승인과 회계 반영은 이루어지지 않았습니다.'},
     by:_jwServerUser?.id||null,serverBacked:true}));
