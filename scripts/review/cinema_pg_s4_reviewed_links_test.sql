@@ -133,7 +133,7 @@ UPDATE jw_dev.cinema_pg_quotes SET status='approved',version=3,
 SET ROLE jw_cinema_writer;
 SELECT set_config('jw.session_hash','hash_a_admin1',false);
 SELECT jw_s4_link_test.deny('S4L.17_unmapped_second_quote_blocks_sum',
- $SELECT jw_dev.cinema_pg_s4_single_source_total()$,'23514');
+ $$SELECT jw_dev.cinema_pg_s4_single_source_total()$$,'23514');
 ROLLBACK;
 
 -- The old v92 quote_items can still change in this disposable fixture. Never
