@@ -150,6 +150,32 @@ def run():
                     }""",order['id'])
                     assert invalid==403,invalid
                     print('PASS real CINEMA buttons: customer, quote, approval, order; CSRF denial')
+                    # Real CINEMA document-picker -> authenticated evidence OCR preview;
+                    # a generated XLSX is used, never customer or licensed documents.
+                    from tests.test_evidence_v64 import xlsx
+                    page.evaluate("location.hash='#/docs'")
+                    page.locator('#vw .drop').wait_for(state='visible', timeout=20000)
+                    with page.expect_file_chooser(timeout=15000) as chooser_info:
+                        click_visible_area(page,page.locator('#vw .drop button').first,'document file')
+                    chooser_info.value.set_files([{
+                        'name':'cinema-synthetic-receipt.xlsx',
+                        'mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        'buffer':xlsx(reference='CINEMA-QA-20261104')
+                    }])
+                    page.wait_for_function("""async()=>{
+                      const r=await fetch('/api/evidence/queue');
+                      return r.ok&&(await r.json()).items.some(f=>f.filename==='cinema-synthetic-receipt.xlsx');
+                    }""",timeout=20000)
+                    evidence_items=page.evaluate("async()=>await(await fetch('/api/evidence/queue')).json()")
+                    receipt=next(x for x in evidence_items['items'] if x['filename']=='cinema-synthetic-receipt.xlsx')
+                    evidence=page.evaluate("""async(eid)=>{
+                      const r=await fetch('/api/evidence/preview/'+encodeURIComponent(eid));
+                      return r.ok?await r.json():null;
+                    }""",receipt['id'])
+                    assert evidence and evidence['status']=='pending' and evidence['document']['document_kind']=='receipt',evidence
+                    # Upload previews must NOT silently create an approved accounting transaction.
+                    assert page.evaluate("async()=> (await (await fetch('/api/evidence/records')).json()).length")==0
+                    print('PASS physical CINEMA file picker -> server OCR preview; requires manual approval',flush=True)
                     # A second real company must NEVER see the first company's data.
                     other_context=browser.new_context(viewport={'width':1366,'height':768})
                     try:
