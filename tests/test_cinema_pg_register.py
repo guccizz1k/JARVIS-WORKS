@@ -25,13 +25,18 @@ class _HTTPException(Exception):
 
 
 class _Cursor:
-    def __init__(self, owner_member):
+    def __init__(self, owner_member, legacy_rows=False, legacy_error=False):
         self.log, self.owner_member, self.description, self._rows = [], owner_member, None, []
+        self.legacy_rows, self.legacy_error = legacy_rows, legacy_error
 
     def execute(self, sql, params=()):
         self.log.append((" ".join(str(sql).split()), tuple(params)))
         if "pg_has_role" in sql:
             self.description, self._rows = None, [(self.owner_member,)]
+        elif "EXISTS(SELECT 1 FROM jw_dev.quotes" in sql:
+            if self.legacy_error:
+                raise RuntimeError("synthetic privilege failure")
+            self.description, self._rows = None, [(self.legacy_rows,)]
         elif sql.startswith("SELECT 1"):
             col = types.SimpleNamespace(name="result")
             self.description, self._rows = [col], [(7,)]
@@ -47,7 +52,8 @@ class _Cursor:
 
 @pytest.fixture
 def reg(monkeypatch):
-    state = types.SimpleNamespace(v90_enabled=False, owner_member=False, cursors=[], routers=[], authorize_calls=0)
+    state = types.SimpleNamespace(v90_enabled=False, owner_member=False, legacy_rows=False,
+                                  legacy_error=False, cursors=[], routers=[], authorize_calls=0)
 
     fast = types.ModuleType("fastapi")
     fast.HTTPException, fast.Request = _HTTPException, object
@@ -59,7 +65,7 @@ def reg(monkeypatch):
 
     @contextmanager
     def validated(session_hash):
-        cur = _Cursor(state.owner_member)
+        cur = _Cursor(state.owner_member, state.legacy_rows, state.legacy_error)
         state.cursors.append((session_hash, cur))
         yield cur, ("jw_app_dev", "actor", "org", "admin", "csrf", "Org")
 
@@ -134,8 +140,12 @@ def test_gateway_checks_owner_separation_before_dropping_to_writer_then_runs_sql
     assert session_hash == "s" * 64
     statements = [s for s, _ in cur.log]
     assert "pg_has_role" in statements[0] and cur.log[0][1] == ("jw_cinema_owner",)
-    assert statements[1] == "SET LOCAL ROLE jw_cinema_writer"
-    assert statements[2] == "SELECT 1 AS result" and cur.log[2][1] == ("p",)
+    assert "EXISTS(SELECT 1 FROM jw_dev.quotes" in statements[1]
+    assert all(name in statements[1] for name in ("jw_dev.quotes", "jw_dev.orders",
+                                                   "jw_dev.invoices", "jw_dev.payments"))
+    assert cur.log[1][1] == ("org",) * 4
+    assert statements[2] == "SET LOCAL ROLE jw_cinema_writer"
+    assert statements[3] == "SELECT 1 AS result" and cur.log[3][1] == ("p",)
 
 
 def test_login_role_that_can_become_the_owner_is_refused_before_any_role_switch_or_sql(reg):
@@ -166,3 +176,29 @@ def test_v202_registers_it_only_as_optional_after_all_required_and_preflights_th
     # the new flag must NOT be part of the set of REQUIRED capabilities (default stays off)
     required_dict = next(n for n in ast.walk(tree) if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "_REQUIRED")
     assert "JW_PG_CINEMA_TRADE_V1" not in ast.dump(required_dict)
+
+
+def test_existing_v92_trade_records_block_cinema_writer_for_same_tenant(reg):
+    reg.state.legacy_rows = True
+    with pytest.raises(_HTTPException) as err:
+        reg.module.ValidatedWriterGateway().query("s" * 64, "SELECT 1 AS result", ())
+    assert err.value.status_code == 409
+    statements = [sql for sql, _ in reg.state.cursors[0][1].log]
+    assert len(statements) == 2
+    assert "pg_has_role" in statements[0]
+    assert "jw_dev.quotes" in statements[1]
+    assert not any("SET LOCAL ROLE" in sql or sql == "SELECT 1 AS result" for sql in statements)
+
+
+def test_legacy_read_permission_failure_fails_closed_before_cinema_writer(reg):
+    reg.state.legacy_error = True
+    with pytest.raises(RuntimeError, match="synthetic privilege failure"):
+        reg.module.ValidatedWriterGateway().query("s" * 64, "SELECT 1 AS result", ())
+    statements = [sql for sql, _ in reg.state.cursors[0][1].log]
+    assert len(statements) == 2 and "SET LOCAL ROLE" not in " ".join(statements)
+
+
+def test_s4_tenant_scoped_legacy_check_never_uses_browser_supplied_org(reg):
+    reg.module.ValidatedWriterGateway().query("s" * 64, "SELECT 1 AS result", ())
+    _sql, args = reg.state.cursors[0][1].log[1]
+    assert args == ("org", "org", "org", "org")
