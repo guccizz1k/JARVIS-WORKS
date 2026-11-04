@@ -108,6 +108,7 @@ class AuditResult:
     findings: tuple[Finding, ...]
     unlinked_legacy: tuple[str, ...]
     unlinked_cinema: tuple[str, ...]
+    consistent_for_manual_review: bool
     publishable: bool
 
 
@@ -201,16 +202,29 @@ def audit_links(legacy: tuple[Quote, ...], cinema: tuple[Quote, ...],
     old_unlinked = sorted(f"{a}:{b}" for (a,b) in old_by_key if (a,b) not in accounted_old)
     new_unlinked = sorted(f"{a}:{b}" for (a,b) in new_by_key if (a,b) not in accounted_new)
     # No auto-link and no inferred mixed-ledger totals if any missing mapping.
-    publishable = (bool(accepted) and not findings and not old_unlinked
-                   and not new_unlinked)
+    consistent = (bool(accepted) and not findings and not old_unlinked
+                  and not new_unlinked and all(
+                      old_by_key[(link.org_id, link.legacy_quote_id)].status
+                      in ('approved','ordered','confirmed')
+                      and new_by_key[(link.org_id, link.cinema_quote_id)].status
+                      in ('approved','ordered','confirmed')
+                      for link in accepted))
+    # No standalone caller-provided reviewer text is an authenticated approval.
+    # Server-side access control, immutable evidence and recorded sign-off are
+    # not integrated yet, so this module MUST NOT publish financial totals.
     return AuditResult(tuple(accepted), tuple(findings), tuple(old_unlinked),
-                       tuple(new_unlinked), publishable)
+                       tuple(new_unlinked), consistent, False)
 
 
-def approved_unique_subtotal(result: AuditResult, cinema: tuple[Quote, ...]) -> int:
-    """Unique linked subtotal only; zero links or unresolved items => BLOCKED."""
-    if not result.publishable:
-        raise ValueError("BLOCKED: double-ledger totals require all verified links")
+def provisional_unique_subtotal(result: AuditResult, cinema: tuple[Quote, ...]) -> int:
+    """Read-only forensic subtotal, NEVER valid as a live accounting report."""
+    if not result.consistent_for_manual_review:
+        raise ValueError("BLOCKED: missing/ambiguous historical linkage or unsafe status")
     lookup = {(q.org_id, q.quote_id): q for q in cinema}
     return sum(lookup[(x.org_id, x.cinema_quote_id)].canonical()["subtotal_krw"]
                for x in result.accepted)
+
+
+def approved_unique_subtotal(result: AuditResult, cinema: tuple[Quote, ...]) -> int:
+    """Fail closed until authenticated review and server-side link storage exist."""
+    raise ValueError("BLOCKED: authenticated server-side reconciliation not installed")
