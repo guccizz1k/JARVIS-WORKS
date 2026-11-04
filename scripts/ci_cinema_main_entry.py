@@ -407,7 +407,11 @@ def run():
                         mp.locator('#login input[type=email]').fill(member_email)
                         mp.locator('#login input[type=password]').fill('Demo!2026secure')
                         mp.locator('#login button[type=submit]').click()
-                        mp.locator('#login [role=alert]').wait_for(state='visible',timeout=15000)
+                        mp.wait_for_function("""()=>{
+                          const otp=document.querySelector('#login input[autocomplete="one-time-code"]');
+                          const alert=document.querySelector('#login [role=alert]');
+                          return otp && !otp.closest('label').hidden && alert?.textContent?.trim().length>0;
+                        }""",timeout=15000)
                         assert mp.locator('#app.on').count()==0,'Password-only MFA bypass'
                         otp_input=mp.locator('#login input[autocomplete="one-time-code"]')
                         assert otp_input.is_visible(),'CINEMA did not reveal the MFA field'
