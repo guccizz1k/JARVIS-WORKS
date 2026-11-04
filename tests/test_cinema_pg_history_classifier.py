@@ -67,7 +67,7 @@ def test_safe_exact_four_findings_can_be_classified_without_leaking_data(tmp_pat
     report.write_text(json.dumps([fixture_row(k) for k in h.REVIEWED]))
     ok,summary=h.classify_report(report,1)
     assert ok
-    assert summary["reviewed_exact_historical_false_positives"]==4
+    assert summary["reviewed_exact_historical_false_positives"]==len(h.REVIEWED)
     assert summary["unreviewed_findings"]==0
     assert "Secret" not in json.dumps(summary)
 
