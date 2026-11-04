@@ -26,7 +26,10 @@ SELECT jw_s4.ok('G5.S4A.03_writer_cannot_access_claims',
  AND NOT has_table_privilege('jw_cinema_writer','jw_dev.cinema_pg_ledger_claims','INSERT')
  AND NOT has_table_privilege('jw_app_dev','jw_dev.cinema_pg_ledger_claims','SELECT'));
 SELECT jw_s4.ok('G5.S4A.04_no_admin_owner_membership',
- NOT pg_has_role(session_user,'jw_cinema_owner','MEMBER'));
+ (SELECT count(*) FROM pg_catalog.pg_auth_members m
+   JOIN pg_catalog.pg_roles granted ON granted.oid=m.roleid
+   JOIN pg_catalog.pg_roles member ON member.oid=m.member
+   WHERE granted.rolname='jw_cinema_owner' AND member.rolname=session_user)=0);
 SELECT jw_s4.ok('G5.S4A.05_claims_initially_empty',
  (SELECT count(*) FROM jw_dev.cinema_pg_ledger_claims)=0);
 
