@@ -10,6 +10,32 @@ from scripts.ci_v213_real_auth_ui_browser import isolated_server
 from scripts.ci_v202_bento_browser import ROOT
 
 
+
+def click_visible_area(page, locator, label):
+    """Physical click on an unobstructed pixel; never force a click through UI overlays."""
+    locator.wait_for(state='visible',timeout=20000)
+    page.wait_for_timeout(650)  # allow immutable .view entrance transition to finish
+    locator.scroll_into_view_if_needed(timeout=10000)
+    for attempt in range(3):
+        position=locator.evaluate("""el=>{
+          const r=el.getBoundingClientRect();
+          const points=[];
+          for(const yy of [.5,.25,.75,.12,.88]) for(const xx of [.5,.25,.75,.12,.88]){
+            const x=r.left+r.width*xx,y=r.top+r.height*yy;
+            const top=document.elementFromPoint(x,y);
+            if(top&&(top===el||el.contains(top)))points.push({x:r.width*xx,y:r.height*yy});
+          }
+          return {points,rect:{left:r.left,top:r.top,width:r.width,height:r.height},
+            topAtCenter:document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.outerHTML.slice(0,160)};
+        }""")
+        if position['points']:
+            point=position['points'][0]
+            locator.click(position=point,timeout=5000)
+            print('PASS physical click',label,'position',point,flush=True)
+            return
+        page.wait_for_timeout(350)
+    raise AssertionError(f'Original CINEMA button has no clickable point: {label}: {position}')
+
 def run():
     assert os.environ.get('JW_ENV') == 'review'
     original = (ROOT / 'app/static/cinema/JARVIS_WORKS_CINEMA.html').read_text()
@@ -54,7 +80,7 @@ def run():
                     # Verify real CINEMA buttons, not direct fixture API shortcuts.
                     # All mutations target disposable SQLite demo tenants only.
                     page.evaluate("location.hash='#/partners'")
-                    page.get_by_role('button',name='＋ 거래처 등록').first.click(timeout=15000)
+                    click_visible_area(page,page.get_by_role('button',name='＋ 거래처 등록').first,'partner new')
                     partner_form=page.locator('.mback').last
                     partner_form.locator('form.form input[name="name"]').fill('CINEMA 실브라우저 검증 거래처')
                     partner_form.locator('form.form input[name="contact"]').fill('검증담당')
@@ -67,7 +93,7 @@ def run():
                     partner=next(p for p in partners if p['name']=='CINEMA 실브라우저 검증 거래처')
                     assert partner['contact_name']=='검증담당',partner
                     page.evaluate("location.hash='#/deals'")
-                    page.get_by_role('button',name='＋ 견적서',exact=True).first.click(timeout=16000)
+                    click_visible_area(page,page.get_by_role('button',name='＋ 견적서',exact=True).first,'quote new')
                     quote_form=page.locator('.mback').last
                     quote_form.locator('form.form input[maxlength="80"]').fill('CINEMA 실제 견적 API 검증')
                     quote_form.locator('form.form select').first.select_option(partner['id'])
@@ -84,7 +110,7 @@ def run():
                     assert quote['customer_id']==partner['id'],quote
                     assert quote['money']['total']==2750,quote
                     page.evaluate("location.hash='#/deals/'+"+repr(quote['id'])+")")
-                    page.get_by_role('button',name='견적서 발송 처리').click(timeout=20000)
+                    click_visible_area(page,page.get_by_role('button',name='견적서 발송 처리').first,'quote send')
                     page.wait_for_function("""async(qid)=>{
                       const r=await fetch('/api/quotes/'+encodeURIComponent(qid));
                       return r.ok&&(await r.json()).status==='sent';
