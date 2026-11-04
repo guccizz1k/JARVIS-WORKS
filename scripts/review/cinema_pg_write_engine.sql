@@ -57,8 +57,8 @@ END $roles$;
 GRANT USAGE ON SCHEMA jw_dev TO jw_cinema_owner, jw_cinema_writer;
 GRANT EXECUTE ON FUNCTION jw_dev.stage_identity_v84(), jw_dev.current_org_from_session()
   TO jw_cinema_owner, jw_cinema_writer;
--- Supabase managed Postgres is CREATEROLE but not SUPERUSER: it cannot SET
--- ROLE to a newly created owner without an explicit SET membership. Grant it
+-- Managed PostgreSQL requires explicit membership before switching into
+-- a newly created NOLOGIN owner role during transactional schema creation. Grant it
 -- only inside this single migration transaction; remove it before COMMIT.
 GRANT jw_cinema_owner TO CURRENT_USER WITH SET TRUE, INHERIT FALSE;
 -- Temporary schema CREATE privilege is also revoked before COMMIT.
