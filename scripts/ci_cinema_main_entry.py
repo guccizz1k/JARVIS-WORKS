@@ -253,6 +253,34 @@ def run():
                         print('PASS real member auth: staff-only CINEMA create form, no admin rights',flush=True)
                     finally:
                         member_context.close()
+                    # Traverse every immutable CINEMA route under server login.
+                    # This is a render/error smoke, not a claim that every write
+                    # button (which may intentionally be fail-closed) is integrated.
+                    titles={
+                        'home':'홈','docs':'문서 센터','files':'파일·첨부',
+                        'partners':'거래처','messenger':'거래 메신저',
+                        'automation':'업무 자동화','deals':'거래 보드',
+                        'papers':'거래 문서','money':'입금·미수금',
+                        'stats':'통계·현황','export':'정산 내보내기',
+                        'inbox':'승인·알림함','activity':'작업·감사 이력',
+                        'team':'직원·권한','security':'보안',
+                        'settings':'설정','account':'내 계정·회사'
+                    }
+                    guarded=[]
+                    for route,title in titles.items():
+                        page.evaluate("(r)=>{location.hash='#/'+r}",route)
+                        page.wait_for_function(
+                            "(name)=>document.title===name+' — JARVIS WORKS'",
+                            arg=title,timeout=15000)
+                        view=page.locator('#vw .view')
+                        view.wait_for(state='visible',timeout=12000)
+                        body=view.inner_text(timeout=8000)
+                        assert body.strip(),route
+                        assert '화면을 불러오지 못했습니다' not in body,route
+                        if '접근 권한이 없습니다' in body:guarded.append(route)
+                    assert not failures,failures
+                    print('PASS 17 CINEMA route render/error sweep; guarded routes:',
+                          ','.join(guarded) or 'none',flush=True)
                     print('PASS CINEMA real buttons: customer POST, quote POST, status POST, tenant isolation')
                     if CLICK_BLOCKERS:raise AssertionError('Original CINEMA UI pointer hit-test BLOCKED despite passing server API: '+str(CLICK_BLOCKERS))
                     assert not failures,failures
