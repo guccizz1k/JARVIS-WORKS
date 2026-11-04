@@ -121,6 +121,35 @@ def run():
                       const r=await fetch('/api/quotes/'+encodeURIComponent(qid));
                       return r.ok&&(await r.json()).status==='sent';
                     }""",arg=quote['id'],timeout=18000)
+                    # Exercise the actual CINEMA approval and quote-to-order buttons.
+                    page.get_by_role('button',name='고객 승인 처리',exact=True).click(timeout=20000)
+                    page.wait_for_function("""async(qid)=>{
+                      const r=await fetch('/api/quotes/'+encodeURIComponent(qid));
+                      return r.ok&&(await r.json()).status==='accepted';
+                    }""",arg=quote['id'],timeout=18000)
+                    page.get_by_role('button',name='수주 등록',exact=True).click(timeout=20000)
+                    order_form=page.locator('.mback').last
+                    from datetime import datetime,timedelta
+                    from zoneinfo import ZoneInfo
+                    due=(datetime.now(ZoneInfo('Asia/Seoul')).date()+timedelta(days=14)).isoformat()
+                    order_form.locator('input[name="due_date"]').fill(due)
+                    order_form.locator('button[type="submit"]').click()
+                    page.wait_for_function("""async(qid)=>{
+                      const r=await fetch('/api/orders');
+                      return r.ok&&(await r.json()).some(o=>o.quote_id===qid);
+                    }""",arg=quote['id'],timeout=18000)
+                    orders=page.evaluate("async()=>await(await fetch('/api/orders')).json()")
+                    order=next(o for o in orders if o['quote_id']==quote['id'])
+                    assert order['status']=='received' and order['money']['total']==2750,order
+                    # Refuse invoice issuance until delivery was actually confirmed.
+                    invalid=page.evaluate("""async oid=>{
+                      const r=await fetch('/api/invoices/from-order',{method:'POST',
+                        credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':window._unknown||''},
+                        body:JSON.stringify({order_id:oid,due_date:'2099-01-01'})});
+                      return r.status;
+                    }""",order['id'])
+                    assert invalid==403,invalid
+                    print('PASS real CINEMA buttons: customer, quote, approval, order; CSRF denial')
                     # A second real company must NEVER see the first company's data.
                     other_context=browser.new_context(viewport={'width':1366,'height':768})
                     try:
