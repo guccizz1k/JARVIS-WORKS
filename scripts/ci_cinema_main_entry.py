@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import re
+import time
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -12,6 +13,27 @@ from scripts.ci_v202_bento_browser import ROOT
 
 
 CLICK_BLOCKERS=[]
+
+def wait_for_api_condition(page, awaited_js, *, arg=None, timeout=18000, poll_ms=225):
+    """Wait for a *resolved* fetch result, never for a truthy Promise object.
+
+    Playwright wait_for_function(async ()=>...) can be accidentally satisfied by
+    a Promise before it resolves to false. This helper evaluates/awaits each
+    response, checks exact True, and fails closed on a deadline.
+    """
+    deadline=time.monotonic()+timeout/1000.0
+    last=None
+    while time.monotonic()<deadline:
+        try:
+            result=page.evaluate(awaited_js,arg)
+            if result is True:
+                return
+            last=result
+        except Exception as exc:
+            last=str(exc)
+        page.wait_for_timeout(poll_ms)
+    raise AssertionError('Awaited backend state not observed: '+str(last))
+
 
 def click_visible_area(page, locator, label):
     """Physical click on an unobstructed pixel; never force a click through UI overlays."""
@@ -91,10 +113,10 @@ def run():
                     partner_form.locator('form.form input[name="name"]').fill('CINEMA 실브라우저 검증 거래처')
                     partner_form.locator('form.form input[name="contact"]').fill('검증담당')
                     partner_form.locator('button[type="submit"]').click()
-                    page.wait_for_function("""async()=>{
-                      const r=await fetch('/api/customers');
+                    wait_for_api_condition(page,"""async()=>{
+                      const r=await fetch('/api/customers',{cache:'no-store'});
                       return r.ok&&(await r.json()).some(p=>p.name==='CINEMA 실브라우저 검증 거래처');
-                    }""",timeout=18000)
+                    }""")
                     partners=page.evaluate("async()=>await (await fetch('/api/customers')).json()")
                     partner=next(p for p in partners if p['name']=='CINEMA 실브라우저 검증 거래처')
                     assert partner['contact_name']=='검증담당',partner
@@ -107,26 +129,26 @@ def run():
                     quote_form.locator('form.form input[aria-label="수량"]').first.fill('2')
                     quote_form.locator('form.form input[aria-label="단가"]').first.fill('1250')
                     quote_form.locator('.mfoot button.primary').click()
-                    page.wait_for_function("""async()=>{
-                      const r=await fetch('/api/quotes');
+                    wait_for_api_condition(page,"""async()=>{
+                      const r=await fetch('/api/quotes',{cache:'no-store'});
                       return r.ok&&(await r.json()).some(q=>q.title==='CINEMA 실제 견적 API 검증');
-                    }""",timeout=18000)
+                    }""")
                     quotes=page.evaluate("async()=>await(await fetch('/api/quotes')).json()")
                     quote=next(q for q in quotes if q['title']=='CINEMA 실제 견적 API 검증')
                     assert quote['customer_id']==partner['id'],quote
                     assert quote['money']['total']==2750,quote
                     page.evaluate("(id)=>{location.hash='#/deals/'+id}",quote['id'])
                     click_visible_area(page,page.get_by_role('button',name='견적서 발송 처리').first,'quote send')
-                    page.wait_for_function("""async(qid)=>{
-                      const r=await fetch('/api/quotes/'+encodeURIComponent(qid));
+                    wait_for_api_condition(page,"""async(qid)=>{
+                      const r=await fetch('/api/quotes/'+encodeURIComponent(qid),{cache:'no-store'});
                       return r.ok&&(await r.json()).status==='sent';
-                    }""",arg=quote['id'],timeout=18000)
+                    }""",arg=quote['id'])
                     # Exercise the actual CINEMA approval and quote-to-order buttons.
                     page.get_by_role('button',name='고객 승인 처리',exact=True).click(timeout=20000)
-                    page.wait_for_function("""async(qid)=>{
-                      const r=await fetch('/api/quotes/'+encodeURIComponent(qid));
+                    wait_for_api_condition(page,"""async(qid)=>{
+                      const r=await fetch('/api/quotes/'+encodeURIComponent(qid),{cache:'no-store'});
                       return r.ok&&(await r.json()).status==='accepted';
-                    }""",arg=quote['id'],timeout=18000)
+                    }""",arg=quote['id'])
                     page.get_by_role('button',name='수주 등록',exact=True).click(timeout=20000)
                     order_form=page.locator('.mback').last
                     from datetime import datetime,timedelta
@@ -134,10 +156,10 @@ def run():
                     due=(datetime.now(ZoneInfo('Asia/Seoul')).date()+timedelta(days=14)).isoformat()
                     order_form.locator('input[name="due_date"]').fill(due)
                     order_form.locator('button[type="submit"]').click()
-                    page.wait_for_function("""async(qid)=>{
-                      const r=await fetch('/api/orders');
+                    wait_for_api_condition(page,"""async(qid)=>{
+                      const r=await fetch('/api/orders',{cache:'no-store'});
                       return r.ok&&(await r.json()).some(o=>o.quote_id===qid);
-                    }""",arg=quote['id'],timeout=18000)
+                    }""",arg=quote['id'])
                     orders=page.evaluate("async()=>await(await fetch('/api/orders')).json()")
                     order=next(o for o in orders if o['quote_id']==quote['id'])
                     assert order['status']=='received' and order['money']['total']==2750,order
@@ -188,6 +210,14 @@ def run():
                     # Upload previews must NOT silently create an approved accounting transaction.
                     assert page.evaluate("async()=> (await (await fetch('/api/evidence/records')).json()).length")==0
                     print('PASS physical CINEMA file picker -> server OCR preview; requires manual approval',flush=True)
+                    # Negative proof: a resolved false predicate MUST time out,
+                    # rather than passing because a Promise object is truthy.
+                    poll_false=0
+                    try:
+                        wait_for_api_condition(page,"async()=>{await Promise.resolve();return false}",timeout=450,poll_ms=100)
+                    except AssertionError:
+                        poll_false=1
+                    assert poll_false==1, 'Async wait negative control was bypassed'
                     # A second real company must NEVER see the first company's data.
                     other_context=browser.new_context(viewport={'width':1366,'height':768})
                     try:
