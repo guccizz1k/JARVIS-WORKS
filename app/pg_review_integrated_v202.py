@@ -19,6 +19,7 @@ from . import pg_invoice_preview_v145 as invoice_preview
 from . import pg_delivery_review_api_v154 as delivery_review
 from . import pg_import_quote_v160 as import_quote
 from . import pg_invoice_balance_v161 as invoice_balance
+from . import pg_trade_lineage_v158 as trade_lineage
 
 _MODE = "ISOLATED_DEV_PG_REVIEW_INTEGRATION"
 _REQUIRED = {
@@ -35,6 +36,7 @@ _OPTIONAL_FLAGS = (
     "JW_PG_DELIVERY_REVIEW_V154",
     "JW_PG_IMPORT_QUOTE_V160",
     "JW_PG_INVOICE_BALANCE_V161",
+    "JW_PG_TRADE_LINEAGE_V158",
 )
 
 
@@ -86,6 +88,8 @@ def preflight() -> None:
         raise RuntimeError("BLOCKED: delivery verification not ready")
     if os.environ.get("JW_PG_IMPORT_QUOTE_V160") and not import_quote.enabled():
         raise RuntimeError("BLOCKED: verified import source unavailable")
+    if os.environ.get("JW_PG_TRADE_LINEAGE_V158") and not trade_lineage.enabled():
+        raise RuntimeError("BLOCKED: trade lineage verification unavailable")
     if os.environ.get("JW_PG_INVOICE_BALANCE_V161") and not invoice_balance.enabled():
         raise RuntimeError("BLOCKED: invoice balance verification unavailable")
 
@@ -126,6 +130,7 @@ def create_app() -> FastAPI:
                 "delivery_review_only": bool(os.environ.get("JW_PG_DELIVERY_REVIEW_V154")),
                 "import_reviewed_draft_only": bool(os.environ.get("JW_PG_IMPORT_QUOTE_V160")),
                 "invoice_balance_preview_only": bool(os.environ.get("JW_PG_INVOICE_BALANCE_V161")),
+                "trade_lineage_read_only": bool(os.environ.get("JW_PG_TRADE_LINEAGE_V158")),
                 "delivery_posting": False,
                 "invoice_posting": False,
                 "payment_posting": False,
@@ -147,6 +152,7 @@ def create_app() -> FastAPI:
     for register in (
         delivery_review.register_v154_delivery_review,
         import_quote.register_v160_pg_import_quote,
+        trade_lineage.register_v158_trade_lineage,
         invoice_balance.register_v161_invoice_balance,
     ):
         register(app)  # Modules independently fail closed on malformed opt-ins.
