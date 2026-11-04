@@ -60,13 +60,13 @@ def main() -> int:
         tests=[{"name":name,"status":status,"detail":detail}
                for name,status,detail in NOTICE.findall(p.stderr)
                if name.startswith("S4L.")]
-        expected={f"S4L.{n:02d}" for n in range(1,23)}
+        expected={f"S4L.{n:02d}" for n in range(1,24)}
         observed={x["name"].split("_",1)[0] for x in tests}
         dup=[k for k,v in Counter(x["name"] for x in tests).items() if v>1]
         failures=[x for x in tests if x["status"]!="PASS"]
         # Gaps/extra names and duplicated names are fatal even if all other
         # SQL check notices claim PASS.
-        overall=("PASS" if len(tests)==22 and observed==expected
+        overall=("PASS" if len(tests)==23 and observed==expected
                  and not failures and not dup else "FAIL")
         report={"overall":overall,"actual_pg17":True,"tests":len(tests),
                 "passed":len(tests)-len(failures),"failures":failures,
