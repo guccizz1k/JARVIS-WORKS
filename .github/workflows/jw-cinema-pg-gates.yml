@@ -26,6 +26,41 @@ jobs:
           node-version: '22'
       - name: Containment guard (protected hashes, whitelist, no deleted tests, no new skips)
         run: python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Full Git history secret scan (redacted, pinned Gitleaks 8.30.0)
+        run: |
+          set -euo pipefail
+          scan_dir="$(mktemp -d)"
+          trap 'rm -rf "$scan_dir"' EXIT
+          curl -fsSL --retry 2 --max-time 40 \
+            -o "$scan_dir/gitleaks.tar.gz" \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz
+          printf '%s  %s\\n' '79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e' "$scan_dir/gitleaks.tar.gz" | sha256sum -c --status
+          tar -xzf "$scan_dir/gitleaks.tar.gz" -C "$scan_dir" gitleaks
+          chmod 700 "$scan_dir/gitleaks"
+          git rev-parse --is-shallow-repository | grep -qx false
+          set +e
+          "$scan_dir/gitleaks" git --no-banner --redact \
+            --log-opts='--all' --report-format=json \
+            --report-path="$scan_dir/report.json" . \
+            >"$scan_dir/private.log" 2>&1
+          scan_rc=$?
+          set -e
+          python3 - "$scan_dir/report.json" "$scan_rc" <<'PY'
+          import json,sys,pathlib
+          path=pathlib.Path(sys.argv[1]); code=int(sys.argv[2]); records=[]
+          if path.exists():
+              try:
+                  records=json.loads(path.read_text())
+              except (json.JSONDecodeError,UnicodeDecodeError):
+                  raise SystemExit('BLOCKED_HISTORY_SCAN_REPORT_INVALID')
+          if not isinstance(records,list):
+              raise SystemExit('BLOCKED_HISTORY_SCAN_REPORT_INVALID')
+          # Never print secret values, file paths, matches, or unredacted logs.
+          print('FULL_GIT_HISTORY_SCAN',{'exit':code,'findings':len(records)})
+          if code!=0 or records:
+              raise SystemExit('BLOCKED_SECRET_SCAN_REQUIRES_PRIVATE_REVIEW')
+          PY
+          echo 'PASS_FULL_GIT_HISTORY_REDACTED_GITLEAKS' 
       - name: Pure tests (new files only; no fastapi or database needed)
         run: |
           python -m pip install pytest
