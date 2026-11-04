@@ -234,7 +234,39 @@ def run():
                     assert '서버 OCR 분류가 접수되었습니다' in detail,detail
                     assert 'NaN' not in detail and 'undefined' not in detail,detail
                     assert not failures,failures
-                    drawer.locator('button.ibtn').first.click()
+                    # Real CINEMA review button: the server must NOT accept
+                    # approval without explicit source checked by an operator.
+                    approval_button=drawer.get_by_role('button',name='승인',exact=True)
+                    approval_button.wait_for(state='visible',timeout=12000)
+                    click_visible_area(page,approval_button,'server evidence approval')
+                    review_form=page.locator('.mback').last
+                    review_form.locator('input[name="original_checked"]').wait_for(
+                        state='visible',timeout=12000)
+                    assert not review_form.locator('input[name="original_checked"]').is_checked()
+                    review_form.locator('button[type=submit]').click()
+                    assert review_form.locator('input[name="original_checked"]').is_visible()
+                    assert page.evaluate("async()=> (await (await fetch('/api/evidence/records')).json()).length")==0
+                    # Synthetic source is known, independently generated here.
+                    assert review_form.locator('input[name="counterparty"]').input_value()=='한국상사'
+                    assert review_form.locator('input[name="document_date"]').input_value()=='2026-10-21'
+                    assert review_form.locator('input[name="gross_amount"]').input_value()=='11000'
+                    review_form.locator('input[name="original_checked"]').check()
+                    review_form.locator('button[type=submit]').click()
+                    wait_for_api_condition(page,"""async(eid)=>{
+                        const q=await fetch('/api/evidence/queue',{cache:'no-store'});
+                        const a=await fetch('/api/evidence/records',{cache:'no-store'});
+                        if(!q.ok||!a.ok)return false;
+                        const items=(await q.json()).items,records=await a.json();
+                        return items.some(i=>i.id===eid&&i.status==='confirmed')
+                            && records.some(i=>i.source_kind==='receipt'&&i.gross_amount===11000);
+                    }""",arg=receipt['id'],timeout=24000)
+                    approved=page.evaluate("async()=>await (await fetch('/api/evidence/records')).json()")
+                    assert len(approved)==1 and approved[0]['source_kind']=='receipt' and approved[0]['gross_amount']==11000
+                    assert page.evaluate("async()=>await (await fetch('/api/invoices')).json()") == []
+                    assert not failures,failures
+                    print('PASS real CINEMA OCR manual source-check guard and approved evidence API; no accounting/payment automation',flush=True)
+                    if page.locator('.drawer[role="dialog"]').count():
+                        page.locator('.drawer[role="dialog"] button.ibtn').first.click()
                     # Local demo automation defaults must NOT appear as
                     # running business automation in a server-backed session.
                     page.evaluate("location.hash='#/automation'")
