@@ -125,6 +125,7 @@ def classify_report(path: Path, scan_exit: int) -> tuple[bool, dict]:
         return False, {"status": "BLOCKED", "reason": "inconsistent_scanner_exit"}
     classes = Counter()
     unreviewed = 0
+    unknown_metadata: list[dict] = []
     seen: set[tuple] = set()
     for row in rows:
         if not isinstance(row, dict):
@@ -138,6 +139,17 @@ def classify_report(path: Path, scan_exit: int) -> tuple[bool, dict]:
         result = exact_classification(row)
         if result is None:
             unreviewed += 1
+            # Public CI logs get a path fingerprint, never paths, secret
+            # matches, source context, or secret-containing reports.
+            h=2166136261
+            for ch in str(row.get("File","")).encode("utf-8"):
+                h=((h^ch)*16777619)&0xffffffff
+            unknown_metadata.append({
+                "rule":row.get("RuleID","unknown"),
+                "commit":row.get("Commit",""),
+                "line":row.get("StartLine",0),
+                "path_ref":format(h,"08x"),
+            })
         else:
             classes[result] += 1
     accepted = unreviewed == 0
@@ -147,6 +159,7 @@ def classify_report(path: Path, scan_exit: int) -> tuple[bool, dict]:
         "total_findings": len(rows),
         "reviewed_exact_historical_false_positives": sum(classes.values()),
         "unreviewed_findings": unreviewed,
+        "unreviewed_safe_refs": unknown_metadata,
         "reviewed_classes": dict(sorted(classes.items())),
     }
 
