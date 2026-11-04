@@ -1,0 +1,69 @@
+name: JARVIS WORKS isolated PG integration review V202
+on:
+  push:
+    branches:
+      - review/jw-pg-integration-20261104
+permissions:
+  contents: read
+concurrency:
+  group: jw-v202-pg-integration-review
+  cancel-in-progress: true
+jobs:
+  protected-pg-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate 1 - immutable original and compiled integration
+        run: |
+          set -euo pipefail
+          test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = "9bedf97fe718a94f07861e23670685af00619ca8"
+          test "$(sha256sum app/main.py | cut -d' ' -f1)" = "91deef5315aca3edfe5b24145f5a7a79b7cc9de038eac27b91c7cf95cb95e345"
+          python -m py_compile app/pg_review_integrated_v202.py tests/test_pg_review_integrated_v202.py
+          node --check app/cinema_bridge_v1.js
+          node --check app/cinema_bridge_v2.js
+      - name: Install verified test dependencies
+        run: |
+          python -m pip install -r requirements.txt 'psycopg[binary]>=3,<4' pytest pytest-asyncio httpx
+      - name: Gate 2-5 - restricted PostgreSQL and regression adversarial tests
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v202
+          python -m pytest -q -ra -p no:cacheprovider \
+            tests/test_pg_review_integrated_v202.py \
+            tests/test_pg_api_v84.py \
+            tests/test_pg_v90_integrated_entry.py \
+            tests/test_pg_quote_api_v92.py \
+            tests/test_pg_quote_read_v93.py \
+            tests/test_pg_delivery_review_api_v154.py \
+            tests/test_pg_import_quote_v160.py \
+            tests/test_pg_invoice_balance_v161.py \
+            tests/test_pg_delivery_evidence_gate_v147.py \
+            tests/test_v155_review_console_and_limits.py \
+            --junitxml=artifacts/v202/v202.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('artifacts/v202/v202.xml').getroot()
+          suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          n={k:sum(int(s.attrib.get(k,0)) for s in suites)
+             for k in ('tests','failures','errors','skipped')}
+          assert n['tests']>=60 and n['failures']==0 and n['errors']==0 and n['skipped']==0,n
+          print('PASS PG review tests, not release signoff:',n)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v202-pg-contract-tests
+          path: artifacts/v202/v202.xml
+          if-no-files-found: ignore
+          retention-days: 7
