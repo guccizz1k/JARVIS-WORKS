@@ -56,7 +56,9 @@ def test_s4_enabled_cinema_writer_excludes_v92_writer(isolated_stage):
     isolated_stage.setenv("JW_PG_CINEMA_TRADE_V1", "ISOLATED_DEV_CINEMA_TRADE_ONLY")
     with TestClient(stage.create_app()) as client:
         # Legacy v92 writer route never mounts in cinema mode.
-        assert client.post("/api/pg-stage/v92/quotes", json={}).status_code == 404
+        assert client.post("/api/pg-stage/v92/quotes", json={}).status_code == 405
+        # GET route stays registered as read-only and still requires session.
+        assert client.get("/api/pg-stage/v92/quotes").status_code == 401
         # CINEMA writer route is mounted and still enforces body validation.
         assert client.post("/api/pg-stage/cinema-trade/quotes", json={}).status_code == 422
         # But no request can commit without database-verified session + CSRF.
