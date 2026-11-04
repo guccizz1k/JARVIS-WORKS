@@ -275,22 +275,16 @@ jobs:
           test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
       - name: Preserve original CINEMA, main, static content
         run: python3 -I scripts/ci_cinema_pg_guard.py
-      - name: Gate 4 actual Chromium PC dark mode, login, layout and animation
+      - name: Gate 4 real CINEMA root and original protected PC login /_legacy-ui
         run: |
           set -euo pipefail
-          python3 -m scripts.ci_v214_desktop_dark_browser
-          python3 -m scripts.ci_v216_browser_edges
-      - name: Gate 2/4 actual Chromium OCR upload and human confirmation
-        run: |
-          set -euo pipefail
-          python3 -m scripts.ci_v217_ocr_browser
-          python3 -m scripts.ci_v218_unsupported_ui_browser
-          python3 -m scripts.ci_v219_source_compare_browser
+          python3 -m scripts.ci_cinema_pg_browser_entrypoints
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: jw-cinema-real-desktop-browser-prelaunch
           path: |
+            artifacts/cinema-pg-browser/
             artifacts/v214-desktop/
             artifacts/v216-browser/
             artifacts/v217-browser/
