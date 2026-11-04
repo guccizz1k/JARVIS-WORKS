@@ -67,3 +67,98 @@ jobs:
           path: artifacts/v202/v202.xml
           if-no-files-found: ignore
           retention-days: 7
+
+  messenger-pg17-https:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing PG17 and HTTPS dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Gate - real HTTPS and ephemeral PostgreSQL messenger attachment E2E
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/ci_v190_https_pg_messenger_attachments.py
+          python -m scripts.ci_v190_https_pg_messenger_attachments
+  pg17-disposable-dr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing disposable PG17 requirements
+        run: python -m pip install -r requirements-postgres-check.txt
+      - name: Gate - actual PG17 backup digest corruption rejection and RPO
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/ci_v192_pg17_backup_integrity_rpo.py
+          python -m scripts.ci_v192_pg17_backup_integrity_rpo
+  ocr50-synthetic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    env:
+      JW_ENV: review
+      JW_V188_OCR_ACK: SYNTHETIC_LOCAL_KOREAN_FORMS_ONLY
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Korean OCR tools
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements-dev.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-kor fonts-nanum
+      - name: Gate - actually execute 50 synthetic Korean form OCR runs
+        run: |
+          set -euo pipefail
+          python -m py_compile scripts/ci_v188_ocr50_synthetic.py
+          python -m scripts.ci_v188_ocr50_synthetic
