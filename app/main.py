@@ -21,7 +21,7 @@ from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, UploadFile, File, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .import_engine import DocumentError, MAX_FILE_SIZE, supplement_review
@@ -37,6 +37,7 @@ from .exceptions_v67 import install_schema as install_exception_schema_v67, regi
 from .complex_settlement_v69 import install_schema as install_settlement_schema_v69, register_routes as register_settlement_routes_v69, settlement as adjusted_settlement_v69
 from .ops_integrity_v71 import register_routes as register_ops_integrity_routes_v71
 from .deployment_safety_v78 import require_safe_runtime
+from .cinema_entry_v1 import cinema_main_response
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get('JARVIS_DB_PATH', str(ROOT.parent / 'data' / 'works.db')))
@@ -570,12 +571,17 @@ async def response_security_headers(request: Request, call_next):
         origin=request.headers.get('Origin')
         if origin and origin != str(request.base_url).rstrip('/'):
             return JSONResponse(status_code=403,content={'detail':'요청 출처가 일치하지 않습니다'})
+    if request.url.path == '/static/cinema/JARVIS_WORKS_CINEMA.html':
+        return RedirectResponse('/', status_code=307)
     response = await call_next(request)
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['Content-Security-Policy'] = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+    if request.url.path == '/' and response.headers.get('X-JW-Cinema-Main') == '1':
+        del response.headers['X-JW-Cinema-Main']
+    else:
+        response.headers['Content-Security-Policy'] = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
     response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     if request.url.scheme == 'https':
         response.headers['Strict-Transport-Security'] = 'max-age=31536000'
@@ -1519,6 +1525,11 @@ register_draft_routes_v62(app, conn=conn, transaction=transaction,
 
 @app.get('/')
 def index():
+    return cinema_main_response()
+
+
+@app.get('/_legacy-ui')
+def legacy_ui():
     return FileResponse(ROOT/'static'/'index.html',headers={'Cache-Control':'no-store'})
 
 
