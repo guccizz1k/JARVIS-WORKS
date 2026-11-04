@@ -40,6 +40,13 @@ INSERT INTO jw_dev.cinema_pg_quote_items(id,org_id,quote_id,position,name,quanti
  VALUES('new-line-a1','ci-a','new-q-a',0,'Part B',2,1000),
        ('new-line-a2','ci-a','new-q-a',1,'Part A',5,3501);
 
+-- SHA baseline of the ENTIRE old quote identity and its item multiset,
+-- captured before any approval, never provided by client-side metadata.
+CREATE TABLE jw_s4_link_test.original_quote_sha(sha text NOT NULL);
+INSERT INTO jw_s4_link_test.original_quote_sha(sha)
+SELECT encode(sha256(convert_to(
+ jw_dev.cinema_pg_s4_legacy_snapshot('ci-a','old-q-a')::text,'UTF8')),'hex');
+
 SELECT jw_s4_link_test.ok('S4L.01_review_table_force_rls',
  (SELECT relrowsecurity AND relforcerowsecurity FROM pg_class
   WHERE oid='jw_dev.cinema_pg_s4_reviewed_links'::regclass));
@@ -143,3 +150,7 @@ SELECT jw_s4_link_test.ok('S4L.21_old_quote_not_rewritten',
  (SELECT doc_no FROM jw_dev.quotes WHERE id='old-q-a')='Q-2026-S4-0001');
 SELECT jw_s4_link_test.ok('S4L.22_total_links_exactly_one',
  (SELECT count(*) FROM jw_dev.cinema_pg_s4_reviewed_links WHERE org_id='ci-a')=1);
+
+SELECT jw_s4_link_test.ok('S4L.23_original_v92_snapshot_hash_identical',
+ (SELECT sha FROM jw_s4_link_test.original_quote_sha)=
+ encode(sha256(convert_to(jw_dev.cinema_pg_s4_legacy_snapshot('ci-a','old-q-a')::text,'UTF8')),'hex'));
