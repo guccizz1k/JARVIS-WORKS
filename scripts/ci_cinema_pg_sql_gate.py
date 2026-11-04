@@ -408,6 +408,17 @@ def main() -> int:
         steps.append({"step": "apply " + ENGINE, "ok": p.returncode == 0})
         if p.returncode != 0:
             raise SystemExit("FAIL: engine SQL: " + p.stderr.strip()[:600])
+        # Managed-Postgres bootstrap must not leave a route from the migration
+        # executor into the NOLOGIN owner role after COMMIT.
+        owner_link = db.sql(
+            "SELECT count(*) FROM pg_auth_members m "
+            "JOIN pg_roles role ON role.oid=m.roleid "
+            "JOIN pg_roles usr ON usr.oid=m.member "
+            "WHERE role.rolname='jw_cinema_owner' AND usr.rolname=session_user"
+        )
+        record("G5.M1_migration_executor_owner_membership_revoked",
+               owner_link.returncode == 0 and owner_link.stdout.strip() == "0",
+               "temporary owner SET privilege removed before commit")
         # idempotence guard: installing twice must be refused, not silently re-run
         again = db.file(ENGINE, single_transaction=True)
         record("G1.01_engine_refuses_second_install", again.returncode != 0 and "already installed" in again.stderr,
