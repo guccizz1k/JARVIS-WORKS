@@ -60,7 +60,7 @@ restoreSession=function(){
 };
 login=async function(email,password,otp){
   const t=String(otp||'').trim();
-  const auth=await _jwRequest('/api/login','POST', {email,password,...(t.length===32?{recovery_code:t}:{otp:t})});
+  const auth=await _jwRequest('/api/login','POST', {email,password,...(t?(t.length===32?{recovery_code:t}:{otp:t}):{})});
   _jwCsrf=auth.csrf_token||'';
   _jwServerUser=await _jwRequest('/api/me');
   _jwServerData=await _jwFetchSnapshot();
