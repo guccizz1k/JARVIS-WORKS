@@ -129,7 +129,7 @@ def test_evidence_open_requires_login_and_csrf(http):
     client, gate = http
     for h, code in ((headers(auth=False), 401), (headers(csrf=False), 403)):
         r = client.post(PATH + "/evidence/synthetic-id/open",
-                        json={"request_id": REQ}, headers=h)
+                        json={"request_id": REQ}, headers={**h, "Content-Type": "application/json"})
         assert r.status_code == code
     assert gate.calls == []
 
@@ -137,7 +137,7 @@ def test_evidence_open_requires_login_and_csrf(http):
 def test_evidence_open_returns_no_cache_audited_download(http):
     client, gate = http
     r = client.post(PATH + "/evidence/synthetic-id/open",
-                    json={"request_id": REQ}, headers=headers())
+                    json={"request_id": REQ}, headers=headers(content_type="application/json"))
     assert r.status_code == 200, r.text
     assert r.content == BODY
     assert r.headers["X-Evidence-SHA256"] == SHA
@@ -152,7 +152,7 @@ def test_evidence_open_without_row_is_404(http):
     client, gate = http
     gate.responses = []
     r = client.post(PATH + "/evidence/synthetic-id/open",
-                    json={"request_id": REQ}, headers=headers())
+                    json={"request_id": REQ}, headers=headers(content_type="application/json"))
     assert r.status_code == 404
 
 
@@ -161,7 +161,7 @@ def test_evidence_open_invalid_stored_media_type_fails_closed(http):
     gate.responses = [{"o_content": BODY, "o_content_type": "text/html",
                        "o_file_name": "synthetic.pdf", "o_sha256": SHA}]
     r = client.post(PATH + "/evidence/synthetic-id/open",
-                    json={"request_id": REQ}, headers=headers())
+                    json={"request_id": REQ}, headers=headers(content_type="application/json"))
     assert r.status_code == 503
 
 
@@ -182,7 +182,7 @@ def test_sql_internal_diagnostic_is_never_exposed_over_real_http(http):
 def test_delivery_confirmation_requires_csrf_before_gateway(http):
     client, gate = http
     r = client.post(PATH + "/deliveries/synthetic-id/confirm",
-                    json={"request_id": REQ}, headers=headers(csrf=False))
+                    json={"request_id": REQ}, headers=headers(csrf=False,content_type="application/json"))
     assert r.status_code == 403
     assert gate.calls == []
 
@@ -190,7 +190,7 @@ def test_delivery_confirmation_requires_csrf_before_gateway(http):
 def test_delivery_confirmation_passes_only_auditable_request_id(http):
     client, gate = http
     r = client.post(PATH + "/deliveries/synthetic-id/confirm",
-                    json={"request_id": REQ}, headers=headers())
+                    json={"request_id": REQ}, headers=headers(content_type="application/json"))
     assert r.status_code == 200
     assert len(gate.calls) == 1
     assert "cinema_pg_delivery_confirm" in gate.calls[0][1]
