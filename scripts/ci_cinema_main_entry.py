@@ -162,12 +162,13 @@ def run():
                         'mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         'buffer':xlsx(reference='CINEMA-QA-20261104')
                     }])
-                    page.wait_for_function("""async()=>{
-                      const r=await fetch('/api/evidence/queue');
-                      return r.ok&&(await r.json()).items.some(f=>f.filename==='cinema-synthetic-receipt.xlsx');
-                    }""",timeout=20000)
-                    evidence_items=page.evaluate("async()=>await(await fetch('/api/evidence/queue')).json()")
-                    receipt=next(x for x in evidence_items['items'] if x['filename']=='cinema-synthetic-receipt.xlsx')
+                    receipt=page.wait_for_function("""async()=>{
+                      const r=await fetch('/api/evidence/queue',{cache:'no-store'});
+                      if(!r.ok)return false;
+                      const found=(await r.json()).items.find(f=>f.filename==='cinema-synthetic-receipt.xlsx');
+                      return found||false;
+                    }""",timeout=25000).json_value()
+                    assert receipt and receipt['id'],receipt
                     evidence=page.evaluate("""async(eid)=>{
                       const r=await fetch('/api/evidence/preview/'+encodeURIComponent(eid));
                       return r.ok?await r.json():null;
