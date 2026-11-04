@@ -11,6 +11,8 @@ from scripts.ci_v202_bento_browser import ROOT
 
 
 
+CLICK_BLOCKERS=[]
+
 def click_visible_area(page, locator, label):
     """Physical click on an unobstructed pixel; never force a click through UI overlays."""
     locator.wait_for(state='visible',timeout=20000)
@@ -34,7 +36,11 @@ def click_visible_area(page, locator, label):
             print('PASS physical click',label,'position',point,flush=True)
             return
         page.wait_for_timeout(350)
-    raise AssertionError(f'Original CINEMA button has no clickable point: {label}: {position}')
+    CLICK_BLOCKERS.append((label,position))
+    print('BLOCKED physical mouse click; exercising native keyboard Enter for independent server API proof:',label,position,flush=True)
+    locator.focus()
+    locator.press('Enter')
+    return
 
 def run():
     assert os.environ.get('JW_ENV') == 'review'
@@ -135,6 +141,7 @@ def run():
                     finally:
                         other_context.close()
                     print('PASS CINEMA real buttons: customer POST, quote POST, status POST, tenant isolation')
+                    if CLICK_BLOCKERS:raise AssertionError('Original CINEMA UI pointer hit-test BLOCKED despite passing server API: '+str(CLICK_BLOCKERS))
                     assert not failures,failures
                     print('PASS: original visuals, real server login, no local auth bypass, real API, CSRF, CINEMA shell')
                     ctx.close()
