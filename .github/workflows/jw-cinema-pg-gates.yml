@@ -263,11 +263,17 @@ jobs:
         run: |
           set -euo pipefail
           python3 -I scripts/ci_cinema_pg_s4_atomic_gate.py
+      - name: Gate S4 verified historical dual-ledger approvals and stale-source rejection
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_s4_reviewed_gate.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: jw-cinema-s4-atomic-pg17
-          path: jw-cinema-s4-atomic-pg17.json
+          path: |
+            jw-cinema-s4-atomic-pg17.json
+            jw-cinema-s4-reviewed-pg17.json
           retention-days: 3
 
   real-desktop-browser-prelaunch:
