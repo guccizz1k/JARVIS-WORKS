@@ -376,6 +376,106 @@ def login_role_checks(db_name: str, record) -> None:
     record("G5.L5_login_role_cannot_become_owner", owner.returncode != 0 and "permission denied" in owner.stderr)
 
 
+def s4_legacy_collision_checks(db: Psql, record) -> None:
+    """Execute the EXACT Python S4 predicate against disposable PG17 + FORCE RLS.
+
+    All data is synthetic and in the already disposable database. No real
+    role, tenant, customer or invoice is created or modified.
+    """
+    import ast
+
+    tree = ast.parse((ROOT / "app/pg_cinema_register_v1.py").read_text(encoding="utf-8"))
+    expressions = [
+        n.value for n in tree.body
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "S4_LEGACY_COLLISION_SQL" for t in n.targets)
+    ]
+    if len(expressions) != 1:
+        record("G5.S4_00_runtime_predicate_exists_exactly_once", False)
+        return
+    predicate = ast.literal_eval(expressions[0])
+    expected = ("jw_dev.quotes", "jw_dev.orders", "jw_dev.invoices", "jw_dev.payments")
+    if predicate.count("%s") != 4 or any(table not in predicate for table in expected):
+        record("G5.S4_00_runtime_predicate_exists_exactly_once", False, "unexpected query")
+        return
+    record("G5.S4_00_runtime_predicate_exists_exactly_once", True, "same literal source as application")
+
+    # The existing CI v92 fixture creates quotes only, while real jw_dev has
+    # all four ledger tables. Add the three missing synthetic tables here.
+    setup = [
+        "CREATE TABLE jw_dev.orders(id text PRIMARY KEY, org_id text NOT NULL)",
+        "CREATE TABLE jw_dev.invoices(id text PRIMARY KEY, org_id text NOT NULL)",
+        "CREATE TABLE jw_dev.payments(id text PRIMARY KEY, org_id text NOT NULL)",
+    ]
+    for table in ("orders", "invoices", "payments"):
+        setup += [
+            f"ALTER TABLE jw_dev.{table} ENABLE ROW LEVEL SECURITY",
+            f"ALTER TABLE jw_dev.{table} FORCE ROW LEVEL SECURITY",
+            f"GRANT SELECT ON jw_dev.{table} TO jw_app_dev",
+            f"CREATE POLICY s4_tenant_select ON jw_dev.{table} "
+            "FOR SELECT TO jw_app_dev USING(org_id=jw_dev.current_org_from_session())",
+        ]
+    p = db.sql(*setup)
+    if p.returncode != 0:
+        record("G5.S4_01_synthetic_legacy_fixtures_initialized", False, p.stderr.strip()[:180])
+        return
+    record("G5.S4_01_synthetic_legacy_fixtures_initialized", True)
+
+    sessions = {"ci-a": "hash_a_admin1", "ci-b": "hash_b_admin", "ci-c": "hash_c_admin"}
+
+    def collision(org: str) -> tuple[bool | None, str]:
+        # Exact runtime SQL literal; four fixed tenant parameters. Authentication
+        # is done by V90 before it reaches this SQL in the real application.
+        query = predicate.replace("%s", "'" + org + "'")
+        p = db.sql("SET ROLE jw_app_dev",
+                   f"SELECT set_config('jw.session_hash','{sessions[org]}',false)",
+                   query)
+        if p.returncode != 0:
+            return None, p.stderr.strip()[:140]
+        lines = [x.strip() for x in p.stdout.splitlines() if x.strip()]
+        if not lines or lines[-1] not in ("t", "f"):
+            return None, "nonboolean predicate result"
+        return lines[-1] == "t", ""
+
+    def expect(tag: str, org: str, value: bool) -> None:
+        got, err = collision(org)
+        record(tag, got is value, f"org={org} expected={value} actual={got} err={err}")
+
+    def mutate(statement: str, tag: str) -> bool:
+        p = db.sql(statement)
+        if p.returncode != 0:
+            record(tag, False, p.stderr.strip()[:180])
+            return False
+        return True
+
+    expect("G5.S4_02_all_empty_tenant_a", "ci-a", False)
+    expect("G5.S4_03_all_empty_tenant_b", "ci-b", False)
+    if mutate(
+        "INSERT INTO jw_dev.quotes(id,org_id,customer_id,customer_name_snapshot,doc_no,title,status,vat_mode,created_at,updated_at) "
+        "VALUES ('s4-legacy-a','ci-a','ci-customer-a','S4 Synthetic','Q-S4-001','S4 synthetic','draft','exempt',now()::text,now()::text)",
+        "G5.S4_04_seed_quote"
+    ):
+        expect("G5.S4_05_quote_blocks_same_tenant", "ci-a", True)
+        expect("G5.S4_06_other_tenant_not_blocked_by_quote", "ci-b", False)
+        mutate("DELETE FROM jw_dev.quotes WHERE id='s4-legacy-a'", "G5.S4_07_remove_quote")
+    if mutate("INSERT INTO jw_dev.orders(id,org_id) VALUES('s4-order-a','ci-a')",
+              "G5.S4_08_seed_order"):
+        expect("G5.S4_09_order_blocks_same_tenant", "ci-a", True)
+        expect("G5.S4_10_other_tenant_not_blocked_by_order", "ci-b", False)
+        mutate("DELETE FROM jw_dev.orders WHERE id='s4-order-a'", "G5.S4_11_remove_order")
+    if mutate("INSERT INTO jw_dev.invoices(id,org_id) VALUES('s4-invoice-b','ci-b')",
+              "G5.S4_12_seed_invoice"):
+        expect("G5.S4_13_invoice_blocks_same_tenant", "ci-b", True)
+        expect("G5.S4_14_other_tenant_not_blocked_by_invoice", "ci-a", False)
+        mutate("DELETE FROM jw_dev.invoices WHERE id='s4-invoice-b'", "G5.S4_15_remove_invoice")
+    if mutate("INSERT INTO jw_dev.payments(id,org_id) VALUES('s4-payment-c','ci-c')",
+              "G5.S4_16_seed_payment"):
+        expect("G5.S4_17_payment_blocks_same_tenant", "ci-c", True)
+        expect("G5.S4_18_other_tenant_not_blocked_by_payment", "ci-b", False)
+        mutate("DELETE FROM jw_dev.payments WHERE id='s4-payment-c'", "G5.S4_19_remove_payment")
+    expect("G5.S4_20_cleanup_preserves_no_legacy_collision", "ci-a", False)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", help="write JSON report to this path")
@@ -432,6 +532,7 @@ def main() -> int:
         concurrency_checks(db, record)       # probabilistic smoke (parallel psql sessions)
         deterministic_lock_checks(db, record)  # deterministic lock-presence proofs
         login_role_checks(dbname, record)
+        s4_legacy_collision_checks(db, record)  # true PG17 RLS + exact S4 runtime SQL
     finally:
         if os.environ.get("JW_CINEMA_KEEP_DB") != "1":
             admin.sql(f"DROP DATABASE IF EXISTS {dbname} WITH (FORCE)")
