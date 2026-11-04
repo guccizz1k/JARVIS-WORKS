@@ -38,15 +38,33 @@ def test_quote_to_cash_exactly_once_and_cross_company_denial(api, quote_payload)
     assert api.post('/orders/from-quote', draft_order).status_code == 409
 
     invoice_request = {'order_id': order_id, 'due_date': '2099-12-31'}
+    statement_request = {'order_id': order_id}
+    assert api.post('/automation/statements/from-order', statement_request).status_code == 409
     assert api.post('/invoices/from-order', invoice_request).status_code == 409
     assert api.post(f'/orders/{order_id}/status', {'status': 'fulfilled'}).status_code == 409
     _expect(api.post(f'/orders/{order_id}/status', {'status': 'processing'}), 200)
     _expect(api.post(f'/orders/{order_id}/status', {'status': 'fulfilled'}), 200)
+    # The server stores an immutable trade statement from its fulfilled order
+    # snapshot. This proves its API, NOT a real partial-delivery ledger.
+    statement = _expect(api.post('/automation/statements/from-order', statement_request), 201)
+    assert statement['order_id'] == order_id
+    assert statement['document']['money']['total'] == total
+    assert statement['document']['legal_status'] == 'internal_business_record_not_tax_invoice'
+    assert statement['document']['finalized'] is True
+    duplicate = _expect(api.post('/automation/statements/from-order', statement_request), 200)
+    assert duplicate['id'] == statement['id'] and duplicate['reused'] is True
+    detail = _expect(api.get('/automation/statements/' + statement['id']), 200)
+    assert detail['document'] == statement['document']
 
     invoice = _expect(api.post('/invoices/from-order', invoice_request), 201)
     invoice_id = invoice['id']
     assert invoice['money']['total'] == total
     assert api.post('/invoices/from-order', invoice_request).status_code == 409
+    trace = _expect(api.get('/automation/transactions/' + order_id), 200)
+    assert trace['statement_id'] == statement['id']
+    assert trace['invoice_id'] == invoice_id
+    assert trace['remaining_balance'] == total
+    assert {x['type'] for x in trace['events']} >= {'quote', 'order', 'trade_statement', 'invoice'}
 
     payment_url = f'/invoices/{invoice_id}/payments'
     today = datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()
@@ -84,6 +102,9 @@ def test_quote_to_cash_exactly_once_and_cross_company_denial(api, quote_payload)
     assert api.c.post('/api' + payment_url, json=final, headers=other_headers).status_code == 404
     assert not any(x['id'] == invoice_id
                    for x in api.c.get('/api/invoices', headers=other_headers).json())
+    assert api.c.get('/api/automation/statements/' + statement['id'], headers=other_headers).status_code == 404
+    assert api.c.get('/api/automation/transactions/' + order_id, headers=other_headers).status_code == 404
+    assert api.c.post('/api/automation/statements/from-order',json=statement_request,headers=other_headers).status_code == 404
 
 
 def test_actual_application_sqlite_encrypted_backup_recovery(api, quote_payload,
