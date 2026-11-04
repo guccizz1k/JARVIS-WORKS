@@ -29,6 +29,7 @@ jobs:
           set -euo pipefail
           test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = "9bedf97fe718a94f07861e23670685af00619ca8"
           node --check app/cinema_bridge_v1.js
+          node --check app/cinema_bridge_v2.js
           python -m py_compile app/main.py app/cinema_entry_v1.py scripts/ci_cinema_main_entry.py
           python -m pip install 'fastapi>=0.115,<1'
           python - <<'PY'
