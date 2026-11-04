@@ -16,7 +16,7 @@ def cinema_main_response():
     # Capture the unmodified source handlers BEFORE v1 installs fail-closed stubs.
     # V2 wraps these original form builders; otherwise its UI buttons are inert.
     preserved = ("const _jwOriginalCINEMAPartnerForm=partnerForm;"
-                 "const _jwOriginalCINEMADealForm=dealForm;\\n")
+                 "const _jwOriginalCINEMADealForm=dealForm;")
     bridge = preserved + (ROOT / 'cinema_bridge_v1.js').read_text(encoding='utf-8') + '\n' + (ROOT / 'cinema_bridge_v2.js').read_text(encoding='utf-8')
     needle = 'boot();\n})();'
     if original.count(needle) != 1 or '</script>' in bridge.lower():
