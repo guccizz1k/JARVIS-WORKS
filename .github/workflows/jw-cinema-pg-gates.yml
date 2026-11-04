@@ -115,6 +115,8 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tesseract-ocr tesseract-ocr-kor fonts-nanum
           test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
           tesseract --list-langs | grep -Eq '(^|[[:space:]])kor($|[[:space:]])'
+      - name: Reconstruct historical V7.9 fixture from SHA-pinned archive (no source edits)
+        run: python3 -I scripts/ci_cinema_pg_legacy_fixture_v1.py
       - name: Gate 2-5 - whole current test suite (no skips accepted)
         run: |
           set -euo pipefail
@@ -137,7 +139,7 @@ jobs:
           retention-days: 3
 
   baseline-vs-candidate-legacy:
-    name: "Differential audit: 11 legacy test failures at pinned baseline"
+    name: "Differential: fix 11 historical fixtures without reducing checks"
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -154,7 +156,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
-      - name: Baseline and candidate must have identical legacy test outcomes
+      - name: Reconstruct approved historical fixtures only on candidate
+        run: python3 -I scripts/ci_cinema_pg_legacy_fixture_v1.py
+      - name: Baseline failing tests must become real PASS (no skips)
         run: |
           set -euo pipefail
           git worktree add --detach "$RUNNER_TEMP/jw-original-baseline" 08ea29867e962d4ac5be0e942fc1488528494428
@@ -186,11 +190,16 @@ jobs:
               outcomes[name]=entries
               print(name,{'exit':p.returncode,'total':len(entries),'fails':sum(v=='FAIL' for v in entries.values()),'errors':sum(v=='ERROR' for v in entries.values()),'skips':sum(v=='SKIP' for v in entries.values())},flush=True)
               print('tail:',p.stdout[-1200:],flush=True)
-          if outcomes['baseline']!=outcomes['candidate']:
-              changed={key:{'baseline':outcomes['baseline'].get(key),'candidate':outcomes['candidate'].get(key)} for key in set(outcomes['baseline'])|set(outcomes['candidate']) if outcomes['baseline'].get(key)!=outcomes['candidate'].get(key)}
-              raise SystemExit('NEW_OR_CHANGED_REGRESSION '+str(changed))
-          fails={k:v for k,v in outcomes['baseline'].items() if v!='PASS'}
-          if len(fails)!=11 or any(v!='FAIL' for v in fails.values()):
-              raise SystemExit('UNEXPECTED_LEGACY_BASELINE '+str(fails))
-          print('PASS_BASELINE_DIFFERENTIAL_11_PRE_EXISTING_FAILURES; WHOLE_SUITE_REMAINS_FAIL',flush=True)
+          old=outcomes['baseline']
+          new=outcomes['candidate']
+          if set(old)!=set(new) or len(old)!=12:
+              raise SystemExit('TEST_INVENTORY_CHANGED')
+          old_fail={k for k,v in old.items() if v=='FAIL'}
+          if len(old_fail)!=11 or any(v not in ('PASS','FAIL') for v in old.values()):
+              raise SystemExit('UNEXPECTED_HISTORICAL_FAILURES '+str(old))
+          if any(v!='PASS' for v in new.values()):
+              raise SystemExit('HISTORICAL_FIXTURE_REPAIR_NOT_PROVEN '+str(new))
+          if sum(old[k]=='FAIL' and new[k]=='PASS' for k in old)!=11:
+              raise SystemExit('REPAIR_DELTA_INVALID')
+          print('PASS_DIFFERENTIAL_REPAIRED_11_REAL_LEGACY_TESTS; no tests deleted/skipped',flush=True)
           PY
