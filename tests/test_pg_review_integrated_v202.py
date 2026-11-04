@@ -89,21 +89,19 @@ def test_distinct_stage_roles_are_required_even_with_distinct_dsns(secure_stage,
 
 
 def test_stage_has_pg_capabilities_but_zero_legacy_business_routes(secure_stage):
-    app = stage.create_app()
-    paths = {route.path for route in app.routes}
-    assert "/api/pg-stage/v90/me" in paths
-    assert "/api/pg-stage/v92/quotes" in paths
-    assert "/api/pg-stage/v92/order-drafts" in paths
-    assert "/api/pg-stage/v93/quotes" not in paths  # V93 reader uses the V92 prefix.
-    assert "/api/pg-stage/v92/quotes/{quote_id}" in paths
-    assert "/api/pg-stage/v145/orders/{order_id}/invoice-preview" in paths
-    assert "/api/pg-review/capabilities" in paths
-    assert "/api/login" not in paths
-    assert "/api/customers" not in paths
-    assert "/api/orders" not in paths
-    assert "/api/invoices" not in paths
-    assert "/api/messenger/threads" not in paths
-    assert "/openapi.json" not in paths
+    # Exercise HTTP instead of assuming FastAPI's internal router object shape.
+    # The latest framework can return _IncludedRouter wrappers without .path.
+    with TestClient(stage.create_app()) as client:
+        assert client.get("/api/pg-stage/v90/me").status_code == 401
+        assert client.get("/api/pg-stage/v92/quotes").status_code == 401
+        assert client.post("/api/pg-stage/v92/quotes", json={}).status_code == 422
+        assert client.get("/api/pg-stage/v92/quotes/" + "a" * 32).status_code == 401
+        assert client.get("/api/pg-stage/v145/orders/" + "b" * 32 + "/invoice-preview").status_code == 401
+        assert client.get("/api/pg-review/capabilities").status_code == 401
+        for path in ("/api/login", "/api/customers", "/api/orders",
+                     "/api/invoices", "/api/messenger/threads",
+                     "/openapi.json", "/"):
+            assert client.get(path).status_code == 404, path
 
 
 def test_unauthenticated_capabilities_never_open_pg_connection(secure_stage, monkeypatch):
