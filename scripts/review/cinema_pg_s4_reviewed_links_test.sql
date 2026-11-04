@@ -33,12 +33,16 @@ INSERT INTO jw_dev.quote_items(id,quote_id,name,quantity,unit_price,position) VA
 INSERT INTO jw_dev.cinema_pg_partners(id,org_id,name,business_number,created_by)
  VALUES('s4-part-a','ci-a','Synthetic Client','1234567890','s4-link-member-a');
 INSERT INTO jw_dev.cinema_pg_quotes(id,org_id,trade_no,partner_id,title,status,
- vat_mode,created_by,approved_by,approved_at)
- VALUES('new-q-a','ci-a','T261105-S4A','s4-part-a','Synthetic CINEMA','approved',
-  'taxable','s4-link-member-a','ci-ua',now());
+ vat_mode,created_by)
+ VALUES('new-q-a','ci-a','T261105-S4A','s4-part-a','Synthetic CINEMA','draft',
+  'taxable','s4-link-member-a');
 INSERT INTO jw_dev.cinema_pg_quote_items(id,org_id,quote_id,position,name,quantity,unit_price)
  VALUES('new-line-a1','ci-a','new-q-a',0,'Part B',2,1000),
        ('new-line-a2','ci-a','new-q-a',1,'Part A',5,3501);
+UPDATE jw_dev.cinema_pg_quotes SET status='submitted',version=2,
+ submitted_by='s4-link-member-a' WHERE id='new-q-a';
+UPDATE jw_dev.cinema_pg_quotes SET status='approved',version=3,
+ approved_by='ci-ua',approved_at=now() WHERE id='new-q-a';
 
 -- SHA baseline of the ENTIRE old quote identity and its item multiset,
 -- captured before any approval, never provided by client-side metadata.
@@ -117,11 +121,15 @@ RESET ROLE;
 -- are append-only and must never be deleted merely to clean up a test.
 BEGIN;
 INSERT INTO jw_dev.cinema_pg_quotes(id,org_id,trade_no,partner_id,title,status,
- vat_mode,created_by,approved_by,approved_at)
- VALUES('new-q-unlinked','ci-a','T261105-S4B','s4-part-a','Unlinked CINEMA','approved',
-  'taxable','s4-link-member-a','ci-ua',now());
+ vat_mode,created_by)
+ VALUES('new-q-unlinked','ci-a','T261105-S4B','s4-part-a','Unlinked CINEMA','draft',
+  'taxable','s4-link-member-a');
 INSERT INTO jw_dev.cinema_pg_quote_items(id,org_id,quote_id,position,name,quantity,unit_price)
  VALUES('new-line-unlinked','ci-a','new-q-unlinked',0,'Part A',1,50);
+UPDATE jw_dev.cinema_pg_quotes SET status='submitted',version=2,
+ submitted_by='s4-link-member-a' WHERE id='new-q-unlinked';
+UPDATE jw_dev.cinema_pg_quotes SET status='approved',version=3,
+ approved_by='ci-ua',approved_at=now() WHERE id='new-q-unlinked';
 SET ROLE jw_cinema_writer;
 SELECT set_config('jw.session_hash','hash_a_admin1',false);
 SELECT jw_s4_link_test.deny('S4L.17_unmapped_second_quote_blocks_sum',
