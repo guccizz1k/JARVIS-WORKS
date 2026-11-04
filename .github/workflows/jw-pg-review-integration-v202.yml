@@ -48,6 +48,7 @@ jobs:
             tests/test_pg_delivery_review_api_v154.py \
             tests/test_pg_import_quote_v160.py \
             tests/test_pg_invoice_balance_v161.py \
+            tests/test_v158_trade_lineage.py \
             tests/test_pg_delivery_evidence_gate_v147.py \
             tests/test_v155_review_console_and_limits.py \
             --junitxml=artifacts/v202/v202.xml
@@ -59,6 +60,18 @@ jobs:
              for k in ('tests','failures','errors','skipped')}
           assert n['tests']>=60 and n['failures']==0 and n['errors']==0 and n['skipped']==0,n
           print('PASS PG review tests, not release signoff:',n)
+          PY
+      - name: Independent no-evidence final acceptance MUST remain BLOCKED
+        run: |
+          python - <<'PY'
+          from scripts.jw_eight_stage_release_gate import report
+          result=report({}, {}, sha='a'*40)
+          assert result['release']=='BLOCKED'
+          assert result['production_deployed'] is False
+          assert result['attested_stage_count']==0
+          assert len(result['stages'])==8
+          assert all(x['status']!='PASS' and not x['complete'] for x in result['stages'])
+          print('PASS J3 independent signoff remains BLOCKED without receipts')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
