@@ -102,6 +102,91 @@ def smoke_cinema_root():
     print("PASS_CINEMA_REAL_PC_ROOT_LOGIN_DOM", flush=True)
 
 
+
+def cinema_authenticated_browser():
+    """Exercise CINEMA's ACTUAL browser login through FastAPI cookies and CSRF.
+
+    This does not prove PostgreSQL auth: the server fixture uses synthetic
+    isolated SQLite as in the existing browser acceptance suite.
+    """
+    OUT.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="jw-cinema-root-auth-") as tmp:
+        proc, log, origin = start_isolated(tmp)
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
+                try:
+                    checked = []
+                    for email in ("demo@hanbit.example", "demo@bada.example"):
+                        ctx = browser.new_context(
+                            viewport={"width": 1440, "height": 900},
+                            reduced_motion="reduce",
+                        )
+                        page = ctx.new_page()
+                        errors: list[str] = []
+                        page.on("pageerror", lambda err: errors.append(str(err)))
+                        page.goto(origin + "/", wait_until="domcontentloaded")
+                        page.locator("#login .lcard .form input[type=email]").wait_for(
+                            state="visible", timeout=20000
+                        )
+                        assert page.evaluate("""async () => (
+                          await fetch('/api/me',{credentials:'same-origin',cache:'no-store'})
+                        ).status""") == 401
+                        # The original source defaults to the registration tab
+                        # before a server session is established. CINEMA bridge
+                        # must preserve a usable LOGIN tab, but deny local-only
+                        # registration and rely on verified server credentials.
+                        page.locator("#login .tabs2 button").first.click()
+                        form = page.locator("#login .lcard form")
+                        form.locator("input[type=email]").fill(email)
+                        form.locator("input[type=password]").fill("wrong-pass")
+                        form.locator("button[type=submit]").click()
+                        page.locator("#login .lerr").filter(
+                            has_text="이메일 또는 비밀번호"
+                        ).wait_for(state="visible", timeout=10000)
+                        assert not page.locator("#app.on").count()
+                        form.locator("input[type=password]").fill("Demo!2026secure")
+                        form.locator("button[type=submit]").click()
+                        page.locator("#app.on").wait_for(state="visible", timeout=25000)
+                        user = page.evaluate("""async () => {
+                          const r=await fetch('/api/me',{credentials:'same-origin',cache:'no-store'});
+                          return {status:r.status,me:r.ok?await r.json():null};
+                        }""")
+                        assert user["status"] == 200 and user["me"]["email"] == email, user
+                        assert user["me"]["org_id"]
+                        assert not page.locator("#login").is_visible()
+                        assert not errors, errors
+                        page.reload(wait_until="domcontentloaded")
+                        page.locator("#app.on").wait_for(state="visible", timeout=25000)
+                        restored = page.evaluate("""async () => {
+                          const r=await fetch('/api/me',{credentials:'same-origin',cache:'no-store'});
+                          return r.ok?(await r.json()).org_id:null;
+                        }""")
+                        assert restored == user["me"]["org_id"]
+                        assert not errors, errors
+                        checked.append({"email": email, "org_id": restored,
+                                        "server_login": True, "wrong_password_denied": True,
+                                        "session_restored_after_reload": True})
+                        ctx.close()
+                    assert len({u["org_id"] for u in checked}) == 2, checked
+                    (OUT / "cinema-authenticated-browser.json").write_text(
+                        json.dumps({"scope": "isolated synthetic SQLite only; not PostgreSQL",
+                                    "companies": len(checked),
+                                    "login_and_reload": checked,
+                                    "actual_chromium": True},
+                                   indent=2, ensure_ascii=False)
+                    )
+                finally:
+                    browser.close()
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            log.close()
+    print("PASS_CINEMA_ROOT_REAL_FASTAPI_AUTH_TWO_COMPANIES", flush=True)
+
 def legacy_regression():
     """Run all proven original browser scripts, without mutating their files."""
     from scripts import (
@@ -125,6 +210,7 @@ def main():
     if os.getenv("JW_ENV") != "review":
         raise RuntimeError("isolated review only")
     smoke_cinema_root()
+    cinema_authenticated_browser()
     legacy_regression()
 
 
