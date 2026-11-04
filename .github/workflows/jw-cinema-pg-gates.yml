@@ -110,7 +110,7 @@ jobs:
       - name: Install only declared test dependencies
         run: |
           set -euo pipefail
-          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2'
       - name: Gate 2-5 - whole current test suite (no skips accepted)
         run: |
           set -euo pipefail
