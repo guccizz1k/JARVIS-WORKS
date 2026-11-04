@@ -81,7 +81,7 @@ _jwSeedReadOnly=function(){
   DB.users=_jwServerUser?[{id:_jwServerUser.id,email:_jwServerUser.email,name:_jwServerUser.name,
     role:_jwServerUser.role==='admin'?'admin':_jwServerUser.role==='member'?'staff':'viewer',active:true,mfa:{on:false}}]:[];
   // Permissions intentionally conservative: unsynchronised modules cannot claim a server commit.
-  DB.roles={admin:['partners.write','deals.write','finance.view','audit.view','docs.write','docs.approve'],
+  DB.roles={admin:['partners.write','deals.write','finance.view','audit.view','docs.write'],
     manager:['partners.write','deals.write','finance.view','docs.write'],staff:['partners.write','deals.write','finance.view','docs.write'],viewer:['finance.view']};
   if(_jwServerData){DB.partners=_jwServerData.partners;DB.deals=_jwServerData.deals;
     DB.audit=_jwServerData.audit;DB.files=_jwServerData.files;}
@@ -189,76 +189,9 @@ paymentForm=function(d,after){
     }});
 };
 // No local-only actions can overwrite a real server action or create a false success notification.
-// Server-backed OCR approval: the original interface already exposes review
-// actions. Keep its visual elements untouched, but require an actual human to
-// check the physical original and confirm typed fields before any server write.
-// An unclassified/unsupported consent form may never become a fake receipt.
-const _jwV2EvidenceKinds={
-  receipt:['sales','purchase','expense'],
-  sales_slip:['sales'],purchase_slip:['purchase'],
-  trade_statement:['sales','purchase'],inventory_sheet:['inventory_snapshot']
-};
-fileDecide=async function(f,ok,reason){
-  if(!f?.serverBacked||f.status!=='review'){
-    toast('서버의 검토 대기 문서만 처리할 수 있습니다.','bad');return false;
-  }
-  if(!ok){
-    toast('문서 반려는 서버 API가 아직 지원하지 않습니다. 반려된 것으로 표시하지 않습니다.','bad');return false;
-  }
-  try{
-    const preview=await _jwRequest('/api/evidence/preview/'+encodeURIComponent(f.id));
-    if(preview.id!==f.id||preview.status!=='pending'||!/^[a-f0-9]{64}$/.test(preview.digest||''))
-      throw new Error('서버 원본 검토 정보가 불완전합니다.');
-    const doc=preview.document||{};
-    const types=_jwV2EvidenceKinds[doc.document_kind];
-    if(!types||!types.length||['ambiguous','unknown','unsupported'].includes(doc.kind_inference))
-      throw new Error('원본 문서 유형을 확인할 수 없어 승인할 수 없습니다.');
-    const fields=doc.fields||{};
-    const amount=Number.isSafeInteger(fields.gross_amount)?fields.gross_amount:'';
-    return formModal({
-      title:'원본 대조 · 문서 승인',
-      note:'원본 파일은 서버에 보관되지 않습니다. 업로더가 보관 중인 실제 원본과 모든 필드를 직접 대조한 후에만 승인하세요. 승인된 기록은 회계 전표나 실제 입금으로 자동 반영되지 않습니다.',
-      values:{record_type:types.includes(doc.proposed_record_type)?doc.proposed_record_type:types[0],
-        document_date:fields.document_date||'',counterparty:fields.counterparty||'',
-        gross_amount:amount,reference_number:fields.reference_number||'',
-        sku:fields.sku||'',quantity:fields.quantity||'',unit:fields.unit||'',original_checked:false},
-      fields:[
-        {k:'record_type',label:'업무 기록 구분',type:'select',options:types,req:true},
-        {k:'counterparty',label:'거래처 · 원본 대조',req:true,max:120},
-        {k:'document_date',label:'거래·발행일 · 원본 대조',type:'date',req:true},
-        {k:'gross_amount',label:'총금액(원) · 원본 대조',type:'number',min:1,
-          validate:(v,out)=>out.record_type==='inventory_snapshot'?(v===''?'':'재고 실사에는 금액을 입력하지 마세요.'):(Number.isSafeInteger(v)&&v>0&&v<=1e9?'':'유효한 총금액을 입력하세요.')},
-        {k:'reference_number',label:'원본 문서번호',max:80},
-        {k:'sku',label:'품목코드',max:80},{k:'quantity',label:'재고수량',type:'number',min:1,
-          validate:(v,out)=>v===''?'':(Number.isSafeInteger(v)&&v>0&&v<=1e7?'':'유효한 재고수량이 필요합니다.')},
-        {k:'unit',label:'단위',max:20},
-        {k:'original_checked',label:'실제 원본문서의 내용·수치·항목을 모두 확인했습니다',type:'check',req:true,
-          validate:v=>v===true?'':'원본 대조 확인이 필요합니다.'}
-      ],submit:'서버에 승인',onSubmit:async v=>{
-        if(v.original_checked!==true)throw new Error('원본 확인 없는 자동 승인은 허용되지 않습니다.');
-        if(v.record_type==='inventory_snapshot'&&(!v.sku||!v.quantity))
-          throw new Error('재고 실사 품목코드와 수량을 확인하세요.');
-        const payload={
-          preview_digest:preview.digest,record_type:v.record_type,document_kind:doc.document_kind,
-          counterparty:v.counterparty,document_date:v.document_date,
-          gross_amount:v.record_type==='inventory_snapshot'?null:v.gross_amount,
-          reference_number:v.reference_number||'',sku:v.sku||'',
-          quantity:v.quantity===''?null:v.quantity,unit:v.unit||'',original_checked:true
-        };
-        const out=await _jwV2Commit('/api/evidence/preview/'+encodeURIComponent(f.id)+'/confirm','POST',payload);
-        if(!out||!out.id||out.accounting_posted!==false||out.payment_created!==false)
-          throw new Error('서버의 승인·회계 미반영 결과를 확인할 수 없습니다.');
-        toast('원본 대조 확인이 완료돼 서버에 증빙 기록을 저장했습니다.','ok');
-      }});
-  }catch(e){toast(e.message||'서버 증빙 검토를 열 수 없습니다.','bad');return false;}
-};
-// Original bulk action increments a counter before asynchronous writes finish.
-// Block until a properly audited per-document bulk approval endpoint exists.
-bulkDecide=function(){toast('일괄 승인은 서버가 지원하지 않습니다. 각 문서 원본을 확인해 승인하세요.','bad');};
-bulkReviewRequest=function(){toast('문서는 등록 즉시 서버 검토 대기열로 전송됩니다.','info');};
 const _jwV2Unsupported=function(){toast('해당 작업은 아직 검증된 서버 API와 연결되지 않았습니다.','bad');};
 for(const unsupported of ['addDelivery','createStatement','confirmStatement','invoiceRequest','invoiceIssue',
-    'invoiceReject','deleteDeal','deleteFile','removePayment',
+    'invoiceReject','fileReviewRequest','fileDecide','deleteDeal','deleteFile','removePayment',
     'loadSample','clearSample','resetAll','restoreBackup']) {
   // Use explicit statement rather than allowing a browser-only simulated transaction.
   switch(unsupported){
