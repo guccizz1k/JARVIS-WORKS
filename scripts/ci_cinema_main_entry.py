@@ -306,7 +306,7 @@ def run():
                               threads:(await t.json()).length};
                     }""")
                     assert not chooser_events and before==after,(before,after,len(chooser_events))
-                    assert '서버 연결 전까지' in page.locator('#flash').inner_text(), 'Missing explicit fail-closed user feedback'
+                    assert '서버 연결 전까지' in page.locator('#toasts').inner_text(), 'Missing explicit fail-closed user feedback'
                     print('PASS original messenger attachment button fail-closed, no fake transfer',flush=True)
                     print('PASS CINEMA real buttons: customer POST, quote POST, status POST, tenant isolation')
                     if CLICK_BLOCKERS:raise AssertionError('Original CINEMA UI pointer hit-test BLOCKED despite passing server API: '+str(CLICK_BLOCKERS))
