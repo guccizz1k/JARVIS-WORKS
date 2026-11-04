@@ -62,7 +62,7 @@ def semantic_fixture_guard(kind: str, line: str) -> bool:
                 and "'third@example.test'" in line
                 and "'Pass123456789'" in line)
     if kind == "password_verifier_monkeypatch":
-        return ("monkeypatch.setattr(auth,'verify_password'" in line
+        return ("monkeypatch.setattr(auth,'verify_legacy_pbkdf2'" in line
                 and "lambda pw,pw_hash:track.append(pw_hash)" in line
                 and "original(pw,pw_hash)" in line)
     return False
