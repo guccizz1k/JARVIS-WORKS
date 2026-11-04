@@ -162,13 +162,24 @@ def run():
                         'mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         'buffer':xlsx(reference='CINEMA-QA-20261104')
                     }])
-                    receipt=page.wait_for_function("""async()=>{
-                      const r=await fetch('/api/evidence/queue',{cache:'no-store'});
-                      if(!r.ok)return false;
-                      const found=(await r.json()).items.find(f=>f.filename==='cinema-synthetic-receipt.xlsx');
-                      return found||false;
-                    }""",timeout=25000).json_value()
-                    assert receipt and receipt['id'],receipt
+                    # Playwright wait_for_function must not be given an async predicate:
+                    # it treats the Promise itself as truthy before its false result.
+                    # Evaluate the awaited fetch separately, then poll synchronously.
+                    receipt=None
+                    queue_result=None
+                    for attempt in range(50):
+                        queue_result=page.evaluate("""async()=>{
+                          const r=await fetch('/api/evidence/queue',{cache:'no-store'});
+                          return {status:r.status,data:await r.json()};
+                        }""")
+                        records=queue_result.get('data',{}).get('items',[])
+                        receipt=next((f for f in records if f.get('filename')=='cinema-synthetic-receipt.xlsx'),None)
+                        if receipt:break
+                        page.wait_for_timeout(250)
+                    assert receipt and receipt['id'],{
+                        'queue':queue_result, 'toast':page.locator('#flash').inner_text(timeout=2500),
+                        'page_errors':failures
+                    }
                     evidence=page.evaluate("""async(eid)=>{
                       const r=await fetch('/api/evidence/preview/'+encodeURIComponent(eid));
                       return r.ok?await r.json():null;
