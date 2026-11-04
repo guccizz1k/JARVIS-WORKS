@@ -14,9 +14,10 @@ def fixture(tmp_path):
     (root/'scripts').mkdir();(root/'tests').mkdir()
     (bundle/'payload').mkdir(parents=True)
     quality=(ROOT/'app/evidence_quality_v70.py').read_bytes()
-    main=(Path('/mnt/data/jw_v70_release/payload/app/main.py') if Path('/mnt/data/jw_v70_release/payload/app/main.py').exists() else ROOT/'app/main.py')
     # Source golden V7.0 is built from the patch baseline: remove only the two additive lines.
-    original=ROOT.joinpath('app/main.py').read_text()
+    # Use the immutable V7.7 archive whose v7.0 delta was originally signed.
+    # Never reconstruct V7.0 by subtracting lines from a modern app/main.py.
+    original=(ROOT/'v78_addon/fixtures/v77_baseline/app/main.py').read_text()
     # V7.8 safety gate is additive; reconstruct the immutable V7.0 fixture.
     original=original.replace('from .deployment_safety_v78 import require_safe_runtime\n','')
     original=original.replace('    require_safe_runtime()\n','')
