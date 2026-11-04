@@ -112,10 +112,16 @@ def classify_report(path: Path, scan_exit: int) -> tuple[bool, dict]:
         return False, {"status": "BLOCKED", "reason": "inconsistent_scanner_exit"}
     classes = Counter()
     unreviewed = 0
+    seen: set[tuple] = set()
     for row in rows:
         if not isinstance(row, dict):
             unreviewed += 1
             continue
+        key = tuple(row.get(k) for k in ("RuleID", "Commit", "File", "StartLine"))
+        if key in seen:
+            unreviewed += 1
+            continue
+        seen.add(key)
         result = exact_classification(row)
         if result is None:
             unreviewed += 1
