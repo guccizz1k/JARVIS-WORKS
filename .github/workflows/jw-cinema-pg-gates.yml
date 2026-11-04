@@ -1,0 +1,86 @@
+name: JW CINEMA PG trade engine gates (disposable DB only)
+on:
+  push:
+    branches:
+      - review/jw-cinema-pg-engine-20261104
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-cinema-pg-gates
+  cancel-in-progress: true
+jobs:
+  containment-and-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Containment guard (protected hashes, whitelist, no deleted tests, no new skips)
+        run: python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Pure tests (new files only; no fastapi or database needed)
+        run: |
+          python -m pip install pytest
+          python -I -m pytest -q -p no:cacheprovider --noconftest -ra --junitxml=jw-cinema-pg-static.xml \
+            tests/test_cinema_pg_guard.py tests/test_cinema_pg_sql_contract.py \
+            tests/test_cinema_pg_adapter_contract.py tests/test_cinema_pg_bridge_js.py \
+            tests/test_cinema_pg_entry_load.py tests/test_cinema_pg_register.py
+      - name: Security regressions that import the real FastAPI adapter (error masking, ledger number fail-closed)
+        run: |
+          python -m pip install pytest fastapi httpx
+          python -m pytest -q -p no:cacheprovider --noconftest -ra --junitxml=jw-cinema-pg-security.xml \
+            tests/test_cinema_pg_security_regressions.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-cinema-pg-static
+          path: |
+            jw-cinema-pg-static.xml
+            jw-cinema-pg-security.xml
+          retention-days: 3
+  sql-gate-disposable-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-ephemeral-test-password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Engine + tests on a throw-away database (creates and drops its own DB)
+        run: python3 -I scripts/ci_cinema_pg_sql_gate.py --report jw-cinema-pg-sql-gate.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-cinema-pg-sql-gate
+          path: jw-cinema-pg-sql-gate.json
+          retention-days: 3

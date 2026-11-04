@@ -18,6 +18,8 @@ def cinema_main_response():
     preserved = ("const _jwOriginalCINEMAPartnerForm=partnerForm;"
                  "const _jwOriginalCINEMADealForm=dealForm;")
     bridge = preserved + (ROOT / 'cinema_bridge_v1.js').read_text(encoding='utf-8') + '\n' + (ROOT / 'cinema_bridge_v2.js').read_text(encoding='utf-8')
+    # v3 (PostgreSQL trade ledger) is inert unless /api/pg-stage/cinema-trade answers for the signed-in user.
+    bridge += '\n' + (ROOT / 'cinema_bridge_v3.js').read_text(encoding='utf-8')
     needle = 'boot();\n})();'
     if original.count(needle) != 1 or '</script>' in bridge.lower():
         raise RuntimeError('CINEMA adapter insertion point rejected')

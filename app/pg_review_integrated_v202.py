@@ -20,6 +20,7 @@ from . import pg_delivery_review_api_v154 as delivery_review
 from . import pg_import_quote_v160 as import_quote
 from . import pg_invoice_balance_v161 as invoice_balance
 from . import pg_trade_lineage_v158 as trade_lineage
+from . import pg_cinema_register_v1 as cinema_trade
 
 _MODE = "ISOLATED_DEV_PG_REVIEW_INTEGRATION"
 _REQUIRED = {
@@ -92,6 +93,8 @@ def preflight() -> None:
         raise RuntimeError("BLOCKED: trade lineage verification unavailable")
     if os.environ.get("JW_PG_INVOICE_BALANCE_V161") and not invoice_balance.enabled():
         raise RuntimeError("BLOCKED: invoice balance verification unavailable")
+    if os.environ.get("JW_PG_CINEMA_TRADE_V1") and not cinema_trade.cinema_trade_enabled():
+        raise RuntimeError("BLOCKED: CINEMA trade writer prerequisite gate denied")
 
 
 def create_app() -> FastAPI:
@@ -154,6 +157,7 @@ def create_app() -> FastAPI:
         import_quote.register_v160_pg_import_quote,
         trade_lineage.register_v158_trade_lineage,
         invoice_balance.register_v161_invoice_balance,
+        cinema_trade.register_cinema_trade_v1,
     ):
         register(app)  # Modules independently fail closed on malformed opt-ins.
     return app
