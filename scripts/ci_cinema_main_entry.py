@@ -69,6 +69,10 @@ def run():
     original = (ROOT / 'app/static/cinema/JARVIS_WORKS_CINEMA.html').read_text()
     proc = log = None
     with tempfile.TemporaryDirectory(prefix='cinema-main-e2e-') as tmp:
+        # A throwaway Fernet key is generated only for the isolated CI server.
+        # Never use or inspect real MFA secrets/credentials in this test.
+        from cryptography.fernet import Fernet
+        os.environ['JW_DATA_KEY']=Fernet.generate_key().decode('ascii')
         proc, log, url = isolated_server(tmp)
         try:
             with urllib.request.urlopen(url + '/') as r:
@@ -367,6 +371,56 @@ def run():
                     if CLICK_BLOCKERS:raise AssertionError('Original CINEMA UI pointer hit-test BLOCKED despite passing server API: '+str(CLICK_BLOCKERS))
                     assert not failures,failures
                     print('PASS: original visuals, real server login, no local auth bypass, real API, CSRF, CINEMA shell')
+                    # MFA is a separate real-browser gate, with a synthetic
+                    # member account and a one-time isolated encryption key.
+                    from app.security_hardening import totp_code
+                    mfactx=browser.new_context(viewport={'width':1366,'height':768})
+                    try:
+                        mp=mfactx.new_page()
+                        mfafail=[]
+                        mp.on('pageerror',lambda e:mfafail.append(str(e)))
+                        mp.goto(url+'/',wait_until='domcontentloaded')
+                        mp.locator('#login input[type=email]').fill(member_email)
+                        mp.locator('#login input[type=password]').fill('Demo!2026secure')
+                        mp.locator('#login button[type=submit]').click()
+                        mp.locator('#app.on').wait_for(state='visible',timeout=35000)
+                        setup=mp.evaluate("""async()=>{
+                          const me=await (await fetch('/api/me')).json();
+                          const r=await fetch('/api/security/mfa/start',{
+                            method:'POST',credentials:'same-origin',
+                            headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},
+                            body:JSON.stringify({password:'Demo!2026secure'})});
+                          return {status:r.status,csrf:me.csrf_token,data:await r.json()};
+                        }""")
+                        assert setup['status']==200 and len(setup['data']['secret'])>=20,setup['status']
+                        otp_step=int(time.time()//30)
+                        enabled=mp.evaluate("""async(a)=>{
+                          const r=await fetch('/api/security/mfa/confirm',{
+                            method:'POST',credentials:'same-origin',
+                            headers:{'Content-Type':'application/json','X-CSRF-Token':a.csrf},
+                            body:JSON.stringify({otp:a.otp})});
+                          return {status:r.status,body:await r.json()};
+                        }""",{'csrf':setup['csrf'],'otp':totp_code(setup['data']['secret'],otp_step)})
+                        assert enabled['status']==200 and enabled['body']['must_login_again'] is True
+                        assert mp.evaluate("async()=>(await fetch('/api/me')).status") == 401
+                        mp.reload(wait_until='domcontentloaded')
+                        mp.locator('#login input[type=email]').fill(member_email)
+                        mp.locator('#login input[type=password]').fill('Demo!2026secure')
+                        mp.locator('#login button[type=submit]').click()
+                        mp.locator('#login [role=alert]').wait_for(state='visible',timeout=15000)
+                        assert mp.locator('#app.on').count()==0,'Password-only MFA bypass'
+                        otp_input=mp.locator('#login input[autocomplete="one-time-code"]')
+                        assert otp_input.is_visible(),'CINEMA did not reveal the MFA field'
+                        # The setup OTP already consumed the current counter:
+                        # the server legitimately accepts the adjacent next
+                        # TOTP counter only when it is strictly newer.
+                        otp_input.fill(totp_code(setup['data']['secret'],otp_step+1))
+                        mp.locator('#login button[type=submit]').click()
+                        mp.locator('#app.on').wait_for(state='visible',timeout=35000)
+                        assert not mfafail,mfafail
+                        print('PASS real CINEMA MFA: password-only denied; synthetic OTP authorizes; replay counter enforced',flush=True)
+                    finally:
+                        mfactx.close()
                     ctx.close()
                 finally:
                     browser.close()
