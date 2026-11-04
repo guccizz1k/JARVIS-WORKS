@@ -234,15 +234,15 @@ def run():
                         member_page.locator('#login input[type=password]').fill('Demo!2026secure')
                         member_page.locator('#login button[type=submit]').click()
                         member_page.locator('#app.on').wait_for(state='visible',timeout=35000)
+                        # CINEMA lives in a closed JavaScript scope: verify role
+                        # through visible behavior and server authorization, not
+                        # by reading its non-global ME variable from page.evaluate.
                         role_result=member_page.evaluate("""async()=>{
                             const server=await(await fetch('/api/me')).json();
-                            return {backend:server.role, ui:ME.role,
-                                    canQuote:can('deals.write'),
-                                    canPartner:can('partners.write'),
-                                    canAdmin:can('users.manage')};
+                            const admin=await fetch('/api/security/overview');
+                            return {backend:server.role, adminStatus:admin.status};
                         }""")
-                        assert role_result=={'backend':'member','ui':'staff','canQuote':True,
-                                            'canPartner':True,'canAdmin':False},role_result
+                        assert role_result=={'backend':'member','adminStatus':403},role_result
                         member_page.evaluate("location.hash='#/deals'")
                         button=member_page.locator('#vw .ph .acts').get_by_role(
                             'button',name='＋ 견적서',exact=True)
