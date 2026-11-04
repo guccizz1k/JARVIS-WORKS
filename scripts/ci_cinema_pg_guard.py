@@ -37,7 +37,19 @@ PROTECTED_TREES = {"app/static": "3c8834eb4f44bd56cbe5683c9fc0e5e696add48e"}
 MODIFIABLE_EXISTING = frozenset({
     "app/pg_review_integrated_v202.py",
     "app/cinema_entry_v1.py",
+    # The only three historical fixture repairs. Never permit other old tests.
+    "tests/test_installer_v75.py",
+    "tests/test_installer_v79.py",
+    "tests/test_pg_auth_v85.py",
 })
+
+# Immutable hashes of the three repaired historical fixture tests. Changes
+# to assertions or test scenarios now fail even when path remains allowed.
+APPROVED_LEGACY_TEST_BLOBS = {
+    "tests/test_installer_v75.py": "d8b274a5455a74cced64579e2146c34837a72e0f",
+    "tests/test_installer_v79.py": "2f498ec592d315e2791f5d5915af691b4371068c",
+    "tests/test_pg_auth_v85.py": "c7df1d7bb6a749a064ea8b8611ae7df19132a046",
+}
 # New files: single path segment below the directory, strict names.
 NEW_FILE_PATTERNS = tuple(re.compile(p) for p in (
     r"^app/pg_cinema_[A-Za-z0-9_]+\.py$",
@@ -108,6 +120,15 @@ def run(root: Path) -> dict:
             continue
         actual = git("hash-object", "--", path, cwd=root).strip()
         add(f"blob:{path}", actual == expected, f"expected {expected} actual {actual}")
+
+    for path, expected in APPROVED_LEGACY_TEST_BLOBS.items():
+        file = root / path
+        if not file.is_file():
+            add(f"approved_legacy_fixture:{path}", False, "missing")
+            continue
+        actual = git("hash-object", "--", path, cwd=root).strip()
+        add(f"approved_legacy_fixture:{path}", actual == expected,
+            f"expected {expected} actual {actual}")
 
     for path, expected in PROTECTED_TREES.items():
         actual = git("rev-parse", f"HEAD:{path}", cwd=root).strip()
