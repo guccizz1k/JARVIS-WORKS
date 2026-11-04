@@ -61,7 +61,9 @@ def smoke_cinema_root():
                             if resp.status >= 500 else None)
                     response = page.goto(origin + "/", wait_until="domcontentloaded")
                     assert response is not None and response.status == 200
-                    assert response.headers.get("x-jw-cinema-main") == "1"
+                    # app.main security middleware deliberately strips the
+                    # internal rendering marker before sending public HTTP.
+                    assert "x-jw-cinema-main" not in response.headers
                     csp = response.headers.get("content-security-policy", "")
                     assert "sha256-" in csp and "frame-ancestors 'none'" in csp
                     page.locator("#login").wait_for(state="visible", timeout=18000)
@@ -79,7 +81,7 @@ def smoke_cinema_root():
                         "route": "/",
                         "actual_browser": "Chromium",
                         "viewport": [1440, 900],
-                        "cinema_main_header": True,
+                        "internal_cinema_header_not_exposed": True,
                         "csp_inline_hash": True,
                         "cinema_login_visible": True,
                         "legacy_login_at_root": False,
