@@ -82,11 +82,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Fetch reviewed fixture builder without altering original V8.9 source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: qa-tooling
+          persist-credentials: false
       - name: Historical V8.9 baseline SHA and overlay reconstruction
         run: |
           set -euo pipefail
           test "$(sha256sum app/main.py | cut -d' ' -f1)" = "e4584787c8ee97a417656e62297507caa7d618f4146398342dabc23c8a6ab25f"
-          python scripts/ci_rebuild_v79_overlay.py
+          python qa-tooling/scripts/ci_rebuild_v79_overlay.py
       - name: Install historical test dependencies
         run: |
           python -m pip install -r requirements.txt pytest pytest-asyncio httpx 'psycopg[binary]>=3,<4'
