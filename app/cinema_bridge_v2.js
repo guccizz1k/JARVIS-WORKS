@@ -211,6 +211,17 @@ if(typeof document!=='undefined' && document.addEventListener){
   },true);
   document.addEventListener('click',event=>{
     const hash=String(location.hash||'');
+    // Original CINEMA messenger stores attachments as browser-only messages.
+    // The server preview endpoint is NOT a messenger attachment API.
+    // Block this direct-click path as well as the existing submit capture.
+    if(hash.startsWith('#/messenger')){
+      const attachment=event.target.closest('button[aria-label="파일 첨부"]');
+      if(attachment){
+        event.preventDefault();event.stopImmediatePropagation();
+        toast('기업 메신저 파일 전송은 서버 연결 전까지 사용할 수 없습니다.','bad');
+        return;
+      }
+    }
     const unsafe=hash.startsWith('#/team')||hash.startsWith('#/security')||hash.startsWith('#/account')||
       hash.startsWith('#/settings/data')||hash.startsWith('#/automation');
     if(!unsafe)return;
