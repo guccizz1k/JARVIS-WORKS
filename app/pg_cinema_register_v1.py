@@ -26,6 +26,14 @@ from .pg_cinema_trade_v1 import WRITER_ROLE, VerifiedSession, create_router
 GATE_ENV = "JW_PG_CINEMA_TRADE_V1"
 GATE_VALUE = "ISOLATED_DEV_CINEMA_TRADE_ONLY"
 OWNER_ROLE = "jw_cinema_owner"
+# SQL is a fixed literal. The separate disposable PG17 S4 gate parses this
+# constant and executes the exact same predicate under tenant RLS.
+S4_LEGACY_COLLISION_SQL = (
+    "SELECT EXISTS(SELECT 1 FROM jw_dev.quotes WHERE org_id=%s) "
+    "OR EXISTS(SELECT 1 FROM jw_dev.orders WHERE org_id=%s) "
+    "OR EXISTS(SELECT 1 FROM jw_dev.invoices WHERE org_id=%s) "
+    "OR EXISTS(SELECT 1 FROM jw_dev.payments WHERE org_id=%s)"
+)
 
 
 def cinema_trade_enabled() -> bool:
@@ -52,13 +60,7 @@ class ValidatedWriterGateway:
             # A separate deployed v92 writer could still race this check;
             # full global exclusivity requires a DB-level migration policy.
             org = _identity[2]
-            cur.execute(
-                "SELECT EXISTS(SELECT 1 FROM jw_dev.quotes WHERE org_id=%s) "
-                "OR EXISTS(SELECT 1 FROM jw_dev.orders WHERE org_id=%s) "
-                "OR EXISTS(SELECT 1 FROM jw_dev.invoices WHERE org_id=%s) "
-                "OR EXISTS(SELECT 1 FROM jw_dev.payments WHERE org_id=%s)",
-                (org, org, org, org),
-            )
+            cur.execute(S4_LEGACY_COLLISION_SQL, (org, org, org, org))
             legacy = cur.fetchone()
             if legacy != (False,):
                 raise HTTPException(409, "Existing legacy trades require verified reconciliation")
