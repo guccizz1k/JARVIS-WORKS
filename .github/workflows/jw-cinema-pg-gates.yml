@@ -45,33 +45,8 @@ jobs:
             >"$scan_dir/private.log" 2>&1
           scan_rc=$?
           set -e
-          python3 - "$scan_dir/report.json" "$scan_rc" <<'PY'
-          import json,sys,pathlib
-          path=pathlib.Path(sys.argv[1]); code=int(sys.argv[2]); records=[]
-          if path.exists():
-              try:
-                  records=json.loads(path.read_text())
-              except (json.JSONDecodeError,UnicodeDecodeError):
-                  raise SystemExit('BLOCKED_HISTORY_SCAN_REPORT_INVALID')
-          if not isinstance(records,list):
-              raise SystemExit('BLOCKED_HISTORY_SCAN_REPORT_INVALID')
-          # Never print secret values, file paths, matches, or unredacted logs.
-          print('FULL_GIT_HISTORY_SCAN',{'exit':code,'findings':len(records)})
-          def path_ref(path):
-              h=2166136261
-              for unit in str(path).encode('utf-8'):
-                  h=((h^unit)*16777619)&0xffffffff
-              return format(h,'08x')
-          # Metadata alone; never print a secret match, repo path, or context.
-          if records:
-              for row in records:
-                  print('PRIVATE_REVIEW_REQUIRED',{'rule':row.get('RuleID','unknown'),
-                        'commit':row.get('Commit',''), 'path_ref':path_ref(row.get('File','')),
-                        'line':row.get('StartLine',0)})
-          if code!=0 or records:
-              raise SystemExit('BLOCKED_SECRET_SCAN_REQUIRES_PRIVATE_REVIEW')
-          PY
-          echo 'PASS_FULL_GIT_HISTORY_REDACTED_GITLEAKS' 
+          python3 -I scripts/ci_cinema_pg_history_classifier.py "$scan_dir/report.json" "$scan_rc"
+          echo 'PASS_GITLEAKS_ALL_HISTORY_WITH_EXACT_REVIEWED_FALSE_POSITIVES' 
       - name: Pure tests (new files only; no fastapi or database needed)
         run: |
           python -m pip install pytest
@@ -79,7 +54,7 @@ jobs:
             tests/test_cinema_pg_guard.py tests/test_cinema_pg_sql_contract.py \
             tests/test_cinema_pg_adapter_contract.py tests/test_cinema_pg_bridge_js.py \
             tests/test_cinema_pg_entry_load.py tests/test_cinema_pg_register.py \
-            tests/test_cinema_pg_s4_reconciliation.py
+            tests/test_cinema_pg_s4_reconciliation.py tests/test_cinema_pg_history_classifier.py
       - name: Security regressions that import the real FastAPI adapter (error masking, ledger number fail-closed)
         run: |
           python -m pip install pytest fastapi httpx
