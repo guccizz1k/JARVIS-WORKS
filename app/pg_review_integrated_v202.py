@@ -141,6 +141,9 @@ def create_app() -> FastAPI:
                 "release_ready": False,
             }
 
+    # S4 selects a single writer for this stage without modifying existing
+    # v92 business tables or the existing quote API implementation.
+    cinema_single_writer = cinema_trade.cinema_trade_enabled()
     required = (
         (pg_reader.register_stage_api, "reader"),
         (pg_auth.register_v85_auth, "auth"),
@@ -149,10 +152,6 @@ def create_app() -> FastAPI:
         (pg_quote_read.register_v93_quote_reader, "quote reader"),
         (invoice_preview.register_v145_invoice_preview, "invoice preview"),
     )
-    # S4 single-writer boundary: both ledgers may be READ in this review stage,
-    # but only one quote writer is ever mounted. Existing v92 tables and records
-    # remain unchanged; no duplicate business writes are silently attempted.
-    cinema_single_writer = cinema_trade.cinema_trade_enabled()
     for register, name in required:
         if name == "quote writer" and cinema_single_writer:
             continue  # v92 writer disabled in CINEMA trade mode (fail closed).
