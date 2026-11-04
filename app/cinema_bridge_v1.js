@@ -57,7 +57,9 @@ save=function(){};
 saveNow=function(){};
 restoreSession=function(){
   if(!_jwServerUser)return false;
-  ME={..._jwServerUser,active:true,mfa:{on:false}};
+  // Preserve server role for authorization; translate only for immutable CINEMA UI permissions.
+  const cinematicRole=_jwServerUser.role==='admin'?'admin':_jwServerUser.role==='member'?'staff':'viewer';
+  ME={..._jwServerUser,role:cinematicRole,active:true,mfa:{on:false}};
   SESS={id:'server-session',uid:ME.id,revoked:false,at:Date.now(),last:Date.now()};
   return true;
 };

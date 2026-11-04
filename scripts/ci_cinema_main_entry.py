@@ -207,6 +207,52 @@ def run():
                         }""",quote['id'])
                     finally:
                         other_context.close()
+                    # Real authenticated member role: the server returns "member" while
+                    # the immutable CINEMA role matrix calls this "staff".
+                    # Never expose admin privileges or create data outside the disposable DB.
+                    import sqlite3
+                    import uuid
+                    from datetime import datetime
+                    from zoneinfo import ZoneInfo
+                    path=Path(tmp)/'ephemeral-review.db'
+                    member_email='cinema-member@example.test'
+                    with sqlite3.connect(path) as db:
+                        record=db.execute(
+                            'SELECT org_id,password_hash FROM users WHERE email=?',
+                            ('demo@hanbit.example',)).fetchone()
+                        assert record and record[0] == user['org_id']
+                        db.execute('INSERT INTO users (id,org_id,email,password_hash,name,role,created_at)'
+                            ' VALUES (?,?,?,?,?,?,?)',
+                            (uuid.uuid4().hex,record[0],member_email,record[1],
+                             'CINEMA 실브라우저 직원','member',
+                             datetime.now(ZoneInfo('Asia/Seoul')).isoformat(timespec='seconds')))
+                    member_context=browser.new_context(viewport={'width':1366,'height':768})
+                    try:
+                        member_page=member_context.new_page()
+                        member_page.goto(url+'/',wait_until='domcontentloaded')
+                        member_page.locator('#login input[type=email]').fill(member_email)
+                        member_page.locator('#login input[type=password]').fill('Demo!2026secure')
+                        member_page.locator('#login button[type=submit]').click()
+                        member_page.locator('#app.on').wait_for(state='visible',timeout=35000)
+                        role_result=member_page.evaluate("""async()=>{
+                            const server=await(await fetch('/api/me')).json();
+                            return {backend:server.role, ui:ME.role,
+                                    canQuote:can('deals.write'),
+                                    canPartner:can('partners.write'),
+                                    canAdmin:can('users.manage')};
+                        }""")
+                        assert role_result=={'backend':'member','ui':'staff','canQuote':True,
+                                            'canPartner':True,'canAdmin':False},role_result
+                        member_page.evaluate("location.hash='#/deals'")
+                        button=member_page.locator('#vw .ph .acts').get_by_role(
+                            'button',name='＋ 견적서',exact=True)
+                        button.wait_for(state='visible',timeout=12000)
+                        button.click(timeout=10000)
+                        member_page.locator('.mback form.form').last.wait_for(
+                            state='visible',timeout=10000)
+                        print('PASS real member auth: staff-only CINEMA create form, no admin rights',flush=True)
+                    finally:
+                        member_context.close()
                     print('PASS CINEMA real buttons: customer POST, quote POST, status POST, tenant isolation')
                     if CLICK_BLOCKERS:raise AssertionError('Original CINEMA UI pointer hit-test BLOCKED despite passing server API: '+str(CLICK_BLOCKERS))
                     assert not failures,failures

@@ -67,7 +67,7 @@ _jwSeedReadOnly=function(){
   DB=defaultDB();
   DB.company={id:_jwServerUser?.org_id||'',name:_jwServerUser?.org_name||'JARVIS WORKS'};
   DB.users=_jwServerUser?[{id:_jwServerUser.id,email:_jwServerUser.email,name:_jwServerUser.name,
-    role:_jwServerUser.role,active:true,mfa:{on:false}}]:[];
+    role:_jwServerUser.role==='admin'?'admin':_jwServerUser.role==='member'?'staff':'viewer',active:true,mfa:{on:false}}]:[];
   // Permissions intentionally conservative: unsynchronised modules cannot claim a server commit.
   DB.roles={admin:['partners.write','deals.write','finance.view','audit.view','docs.write'],
     manager:['partners.write','deals.write','finance.view','docs.write'],staff:['partners.write','deals.write','finance.view','docs.write'],viewer:['finance.view']};
