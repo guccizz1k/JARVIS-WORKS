@@ -84,3 +84,50 @@ jobs:
           name: jw-cinema-pg-sql-gate
           path: jw-cinema-pg-sql-gate.json
           retention-days: 3
+
+  full-project-pytest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Gate 1 - protect unchanged CINEMA and backend entrypoint
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = "9bedf97fe718a94f07861e23670685af00619ca8"
+          test "$(git hash-object app/main.py)" = "775f500c8a7549d434ce196a8e0763aea33e1c67"
+      - name: Install only declared test dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Gate 2-5 - whole current test suite (no skips accepted)
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/cinema-pg-full
+          python3 -m pytest -q -ra -p no:cacheprovider --junitxml=artifacts/cinema-pg-full/all-tests.xml tests
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse("artifacts/cinema-pg-full/all-tests.xml").getroot()
+          items=[root] if root.tag=="testsuite" else root.findall(".//testsuite")
+          result={k:sum(int(x.attrib.get(k,0)) for x in items) for k in ("tests","errors","failures","skipped")}
+          if not items or result["tests"]<169 or any(result[k] for k in ("errors","failures","skipped")):
+              raise SystemExit("BLOCKED_FULL_REGRESSION "+str(result))
+          print("PASS_FULL_PROJECT_PYTEST",result)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-cinema-pg-full-pytest
+          path: artifacts/cinema-pg-full/all-tests.xml
+          retention-days: 3
