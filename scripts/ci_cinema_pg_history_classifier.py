@@ -49,6 +49,14 @@ REVIEWED: dict[tuple[str,str,str,int], tuple[str,str]] = {
         "ae240a85dce3bdda41b4e8dbfccd0bb4905a8ac3",
         "password_verifier_monkeypatch",
     ),
+    (
+        "generic-api-key",
+        "f07ae37859a431a123f1f851e7dd90781dc5ff85",
+        "tests/test_cinema_pg_history_classifier.py", 108,
+    ): (
+        "fcc72278dc52a923a1a0d67903d7c1d389203be0",
+        "synthetic_negative_control",
+    ),
 }
 
 def semantic_fixture_guard(kind: str, line: str) -> bool:
@@ -65,6 +73,11 @@ def semantic_fixture_guard(kind: str, line: str) -> bool:
         return ("monkeypatch.setattr(auth,'verify_legacy_pbkdf2'" in line
                 and "lambda pw,pw_hash:track.append(pw_hash)" in line
                 and "original(pw,pw_hash)" in line)
+    if kind == "synthetic_negative_control":
+        # Historical synthetic test fixture, never a deployed credential.
+        return ("assert not h.semantic_fixture_guard(kind," in line
+                and "API_KEY=" in line
+                and "actual-customer-secret" in line)
     return False
 
 def exact_classification(row: dict) -> str | None:

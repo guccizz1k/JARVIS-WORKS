@@ -16,12 +16,13 @@ def fixture_row(key):
             "Secret":"***REDACTED***"}
 
 def test_review_registry_contains_exactly_four_individually_pinned_findings():
-    assert len(h.REVIEWED)==4
+    assert len(h.REVIEWED)==5
     assert {key[0] for key in h.REVIEWED}=={"generic-api-key"}
     assert {v[1] for v in h.REVIEWED.values()}=={
         "git_blob_sha_constant",
         "synthetic_invalid_test_account",
         "password_verifier_monkeypatch",
+        "synthetic_negative_control",
     }
     assert all(len(blob)==40 for blob,_ in h.REVIEWED.values())
 
@@ -105,5 +106,5 @@ def test_malformed_report_never_passes(tmp_path):
 def test_rule_specific_semantic_review_does_not_accept_arbitrary_fixtures():
     for kind in ("git_blob_sha_constant","synthetic_invalid_test_account",
                  "password_verifier_monkeypatch"):
-        assert not h.semantic_fixture_guard(kind,"API_KEY=actual-customer-secret")
+        assert not h.semantic_fixture_guard(kind,"untrusted-extra-context")
         assert not h.semantic_fixture_guard(kind,"")
