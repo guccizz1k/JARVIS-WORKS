@@ -248,3 +248,52 @@ jobs:
           name: jw-cinema-s4-atomic-pg17
           path: jw-cinema-s4-atomic-pg17.json
           retention-days: 3
+
+  real-desktop-browser-prelaunch:
+    name: "Real Chromium PC login, premium UI and synthetic document acceptance"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned project requirements and isolated browser validation dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python3 -m pip install -r requirements.txt 'pytest>=8,<10' 'pytest-asyncio>=0.24,<2' 'httpx>=0.27,<1' 'psycopg[binary]>=3,<4' 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' 'reportlab>=4,<5'
+          python3 -m playwright install --with-deps chromium
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+      - name: Preserve original CINEMA, main, static content
+        run: python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Gate 4 actual Chromium PC dark mode, login, layout and animation
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_v214_desktop_dark_browser
+          python3 -m scripts.ci_v216_browser_edges
+      - name: Gate 2/4 actual Chromium OCR upload and human confirmation
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_v217_ocr_browser
+          python3 -m scripts.ci_v218_unsupported_ui_browser
+          python3 -m scripts.ci_v219_source_compare_browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-cinema-real-desktop-browser-prelaunch
+          path: |
+            artifacts/v214-desktop/
+            artifacts/v216-browser/
+            artifacts/v217-browser/
+            artifacts/v218-browser/
+            artifacts/v219-source-compare/
+          retention-days: 3
+          if-no-files-found: warn
