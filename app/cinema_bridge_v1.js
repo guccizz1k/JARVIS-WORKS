@@ -36,7 +36,10 @@ async function _jwFetchSnapshot(){
   }
   for (const i of invoices){
     const d=deals.find(x=>x.order && x.order.serverId===i.order_id);
-    if(d)d.invoice={no:i.doc_no||i.id,date:String(i.created_at||'').slice(0,10),due:i.due_date||'',status:i.status||'issued',total:Number(i.money?.total)||0,serverId:i.id};
+    if(!d)throw new Error('서버 청구서의 주문 연결을 확인할 수 없습니다');
+    if(i.settlement?.approved_adjustments)throw new Error('조정 정산 데이터는 CINEMA에 아직 연결되지 않았습니다');
+    d.invoice={no:i.doc_no||i.id,date:String(i.created_at||'').slice(0,10),due:i.due_date||'',status:i.status||'issued',total:Number(i.money?.total)||0,serverId:i.id};
+    d.payments=(Array.isArray(i.payments)?i.payments:[]).filter(p=>!p.reversed_at).map(p=>({id:p.id,date:p.paid_at,amount:Number(p.amount),memo:p.note||''}));
   }
   return {partners:customers.map(c=>({id:c.id,name:c.name,bizNo:c.business_number||'',contact:c.contact_name||'',phone:c.phone||'',email:c.email||'',type:'both',serverBacked:true})),deals};
 }
