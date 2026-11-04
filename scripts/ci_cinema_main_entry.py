@@ -115,7 +115,7 @@ def run():
                     quote=next(q for q in quotes if q['title']=='CINEMA 실제 견적 API 검증')
                     assert quote['customer_id']==partner['id'],quote
                     assert quote['money']['total']==2750,quote
-                    page.evaluate("location.hash='#/deals/'+"+repr(quote['id'])+")")
+                    page.evaluate("(id)=>{location.hash='#/deals/'+id}",quote['id'])
                     click_visible_area(page,page.get_by_role('button',name='견적서 발송 처리').first,'quote send')
                     page.wait_for_function("""async(qid)=>{
                       const r=await fetch('/api/quotes/'+encodeURIComponent(qid));

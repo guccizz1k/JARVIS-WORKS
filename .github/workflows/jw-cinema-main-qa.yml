@@ -30,6 +30,7 @@ jobs:
           test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = "9bedf97fe718a94f07861e23670685af00619ca8"
           node --check app/cinema_bridge_v1.js
           node --check app/cinema_bridge_v2.js
+          python -m pip install 'fastapi>=0.115,<1'
           # Syntax-check the assembled inline runtime, not just standalone bridge files.
           python - <<'PY'
           import re
@@ -42,7 +43,6 @@ jobs:
           PY
           node --check /tmp/jw_cinema_assembled.js
           python -m py_compile app/main.py app/cinema_entry_v1.py scripts/ci_cinema_main_entry.py
-          python -m pip install 'fastapi>=0.115,<1'
           python - <<'PY'
           from app.cinema_entry_v1 import cinema_main_response
           response=cinema_main_response()
