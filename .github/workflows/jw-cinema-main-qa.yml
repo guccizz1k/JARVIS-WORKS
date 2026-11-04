@@ -48,7 +48,8 @@ jobs:
       - name: Gate 2 and 3 - existing full regression
         run: |
           mkdir -p artifacts/cinema-main
-          python -m scripts.ci_rebuild_v79_overlay
+          # V8.9 historical overlay deliberately hashes old main.py; do not rewrite its proof.
+          # Test actual current source while preserving the historical archive untouched.
           python -m pytest -q -ra -p no:cacheprovider --basetemp=/tmp/jw-cinema-main --junitxml=artifacts/cinema-main/full.xml
           python - <<'PY'
           import xml.etree.ElementTree as ET
