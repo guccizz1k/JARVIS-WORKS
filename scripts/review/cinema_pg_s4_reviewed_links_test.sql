@@ -106,6 +106,9 @@ SELECT jw_s4_link_test.deny('S4L.16_wrong_tenant_cannot_read_approval',
    'old-q-b','new-q-a','independent-admin-review-evidence-a')$$,'42501');
 
 RESET ROLE;
+-- Synthetic unlinked quote exists ONLY inside this rollback. CINEMA sources
+-- are append-only and must never be deleted merely to clean up a test.
+BEGIN;
 INSERT INTO jw_dev.cinema_pg_quotes(id,org_id,trade_no,partner_id,title,status,
  vat_mode,created_by,approved_by,approved_at)
  VALUES('new-q-unlinked','ci-a','T261105-S4B','s4-part-a','Unlinked CINEMA','approved',
@@ -115,10 +118,8 @@ INSERT INTO jw_dev.cinema_pg_quote_items(id,org_id,quote_id,position,name,quanti
 SET ROLE jw_cinema_writer;
 SELECT set_config('jw.session_hash','hash_a_admin1',false);
 SELECT jw_s4_link_test.deny('S4L.17_unmapped_second_quote_blocks_sum',
- $$SELECT jw_dev.cinema_pg_s4_single_source_total()$$,'23514');
-RESET ROLE;
-DELETE FROM jw_dev.cinema_pg_quote_items WHERE id='new-line-unlinked';
-DELETE FROM jw_dev.cinema_pg_quotes WHERE id='new-q-unlinked';
+ $SELECT jw_dev.cinema_pg_s4_single_source_total()$,'23514');
+ROLLBACK;
 
 -- The old v92 quote_items can still change in this disposable fixture. Never
 -- continue using the approved link without verifying the stored source hash.
