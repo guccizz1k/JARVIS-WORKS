@@ -265,8 +265,8 @@ def run():
                     assert page.evaluate("async()=>await (await fetch('/api/invoices')).json()") == []
                     assert not failures,failures
                     print('PASS real CINEMA OCR manual source-check guard and approved evidence API; no accounting/payment automation',flush=True)
-                    if page.locator('.drawer[role="dialog"]').count():
-                        page.locator('.drawer[role="dialog"] button.ibtn').first.click()
+                    # The successful server refresh may have already detached
+                    # the drawer. Never require clicking a stale DOM node.
                     # Local demo automation defaults must NOT appear as
                     # running business automation in a server-backed session.
                     page.evaluate("location.hash='#/automation'")
