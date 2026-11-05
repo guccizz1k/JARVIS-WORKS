@@ -1,0 +1,76 @@
+name: JW CINEMA PG17 candidate gate - S4 ledger claims and P2 login role (disposable DB only)
+on:
+  push:
+    branches:
+      - review/jw-cinema-pg-engine-20261104
+    paths:
+      - scripts/review/cinema_pg_s4_dev_migration.sql
+      - scripts/review/cinema_pg_s4_dev_rollback.sql
+      - scripts/review/cinema_pg_p2_login_role.sql
+      - scripts/review/cinema_pg_p2_login_role_rollback.sql
+      - scripts/ci_cinema_pg_p1_p2_pg17_suite.py
+      - .github/workflows/jw-cinema-pg-p1-p2-pg17.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-cinema-pg-p1-p2-pg17
+  cancel-in-progress: true
+jobs:
+  p1-p2-candidate-pg17:
+    name: "S4 + P2 candidates on a throw-away PostgreSQL 17 (never touches Supabase or production)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          # Throw-away service container reachable only from this runner; no password exists anywhere.
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Containment guard (unchanged; protected hashes, whitelist, no deleted tests, no new skips)
+        run: python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Record exact server version and candidate hashes
+        run: |
+          set -euo pipefail
+          psql -X -A -t -c "show server_version" | tee pg-version.txt
+          sha256sum scripts/review/cinema_pg_s4_dev_migration.sql scripts/review/cinema_pg_s4_dev_rollback.sql \
+            scripts/review/cinema_pg_p2_login_role.sql scripts/review/cinema_pg_p2_login_role_rollback.sql \
+            scripts/ci_cinema_pg_p1_p2_pg17_suite.py | tee candidate-sha256.txt
+          git rev-parse HEAD | tee head-sha.txt
+      - name: S4 + P2 candidate suite on PostgreSQL 17 (creates and drops its own database; exit 1 on any failure)
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_p1_p2_pg17_suite.py --report jw-cinema-pg-p1-p2-pg17.json 2>&1 | tee jw-cinema-pg-p1-p2-pg17.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-cinema-pg-p1-p2-pg17
+          path: |
+            jw-cinema-pg-p1-p2-pg17.json
+            jw-cinema-pg-p1-p2-pg17.log
+            pg-version.txt
+            candidate-sha256.txt
+            head-sha.txt
+          retention-days: 30
