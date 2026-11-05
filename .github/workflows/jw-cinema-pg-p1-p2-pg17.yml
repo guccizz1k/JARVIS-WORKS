@@ -30,7 +30,7 @@ jobs:
           POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: postgres
         ports:
-          - 5432:5432
+          - 127.0.0.1:5432:5432   # loopback only; never published on the runner's external interface
         options: >-
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s
@@ -51,10 +51,27 @@ jobs:
           python-version: '3.12'
       - name: Containment guard (unchanged; protected hashes, whitelist, no deleted tests, no new skips)
         run: python3 -I scripts/ci_cinema_pg_guard.py
-      - name: Record exact server version and candidate hashes
+      - name: Assert no production, Supabase, Render or password settings exist in this job (names only; values are never printed)
+        run: |
+          set -euo pipefail
+          if env | cut -d= -f1 | grep -E '^(SUPABASE_|DATABASE_URL$|POSTGRES_URL|POSTGRES_PRISMA_URL|RENDER_|PGPASSWORD$|PGSERVICE$|PGPASSFILE$)'; then
+            echo "forbidden connection setting present in the job environment" >&2; exit 1
+          fi
+          test "$PGHOST" = "127.0.0.1"
+          echo "environment clean; target is the loopback service container only"
+      - name: Assert the service port is not published on an external interface
+        run: |
+          set -euo pipefail
+          ss -ltnH 'sport = :5432' | tee port-listeners.txt
+          if grep -E '(^|[[:space:]])(0\.0\.0\.0|\*|\[::\]):5432' port-listeners.txt; then
+            echo "PostgreSQL port 5432 is listening on a non-loopback interface" >&2; exit 1
+          fi
+      - name: Record exact server version (must be PostgreSQL 17.x) and candidate hashes
         run: |
           set -euo pipefail
           psql -X -A -t -c "show server_version" | tee pg-version.txt
+          v="$(psql -X -A -t -c "show server_version_num")"
+          test "$v" -ge 170000 && test "$v" -lt 180000 || { echo "server_version_num=$v is not PostgreSQL 17" >&2; exit 1; }
           sha256sum scripts/review/cinema_pg_s4_dev_migration.sql scripts/review/cinema_pg_s4_dev_rollback.sql \
             scripts/review/cinema_pg_p2_login_role.sql scripts/review/cinema_pg_p2_login_role_rollback.sql \
             scripts/ci_cinema_pg_p1_p2_pg17_suite.py | tee candidate-sha256.txt
@@ -72,5 +89,6 @@ jobs:
             jw-cinema-pg-p1-p2-pg17.log
             pg-version.txt
             candidate-sha256.txt
+            port-listeners.txt
             head-sha.txt
           retention-days: 30
