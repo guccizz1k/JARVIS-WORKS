@@ -119,8 +119,120 @@ BASELINE_CHECKS = (
     'S4M.10_rollback_restores_fingerprint_and_acl',
     'S4M.11_no_s4_objects_after_rollback',
 )
-EXPECTED_NEW_CHECKS = 82
-EXPECTED_CHECKS = len(BASELINE_CHECKS) + EXPECTED_NEW_CHECKS
+# The 82 checks added by the P1/P2 candidate gate are pinned by name as well (not only counted): a renamed, removed, added or
+# duplicated check makes the run fail. Dynamic names (f-strings in loops) are listed fully expanded.
+NEW_CHECKS = (
+    'S4M.00d_owner_role_is_blind_to_the_cinema_row_documents_why_old_check_was_vacuous',
+    'S4M.00e_refuses_row_in_cinema_pg_quotes_despite_rls',
+    'S4M.00f_cinema_refusal_leaves_no_residue',
+    'S4M.00g_refuses_runner_without_bypassrls',
+    'S4M.00h_install_waits_for_in_flight_writer_then_refuses_because_it_committed',
+    'S4M.12_mid_install_runs_as_cinema_owner_with_session_user_unchanged',
+    'S4M.13_mid_install_adds_exactly_one_set_only_membership_and_keeps_baseline',
+    'S4M.14_mid_install_temporary_privileges_are_exactly_the_expected_ones',
+    'S4M.15_probe_rollback_leaves_no_residue',
+    'S4M.16_membership_rows_identical_to_pre_install_all_six_columns',
+    'S4M.17_cinema_role_attributes_identical_to_pre_install',
+    'S4M.18_runner_has_no_select_on_cinema_pg_quotes_after_install',
+    'S4T.01_ten_triggers_on_expected_tables_functions_timing_enabled',
+    'S4T.02_claims_table_has_exactly_one_owner_only_policy',
+    'S4T.03_function_security_modes_and_pinned_search_path',
+    'S4T.04_s4_functions_not_executable_by_public_writer_app_anon_authenticated',
+    'S4T.05_quotes_insert_creates_exactly_one_claim_with_expected_ledger',
+    'S4T.05_orders_insert_creates_exactly_one_claim_with_expected_ledger',
+    'S4T.05_invoices_insert_creates_exactly_one_claim_with_expected_ledger',
+    'S4T.05_payments_insert_creates_exactly_one_claim_with_expected_ledger',
+    'S4T.05_cinema_pg_quotes_insert_creates_exactly_one_claim_with_expected_ledger',
+    'S4O.01_on_conflict_do_nothing_leaves_no_orphan_claim',
+    'S4O.02_on_conflict_do_update_noop_leaves_no_orphan_claim',
+    'S4O.03_another_before_trigger_skipping_the_row_leaves_no_orphan_claim',
+    'S4O.04_failed_multirow_statement_in_autocommit_leaves_no_row_and_no_claim',
+    'S4O.05_claim_made_by_earlier_row_is_undone_when_a_later_row_of_the_statement_is_refused',
+    'S4D.00_control_every_non_s4_guard_really_disabled_in_the_masking_transaction',
+    'S4D.org_move_quotes_blocked_by_s4_alone',
+    'S4D.org_move_orders_blocked_by_s4_alone',
+    'S4D.org_move_invoices_blocked_by_s4_alone',
+    'S4D.org_move_payments_blocked_by_s4_alone',
+    'S4D.org_move_cinema_pg_quotes_blocked_by_s4_alone',
+    'S4D.cross_ledger_insert_quotes_blocked_by_s4_alone',
+    'S4D.cross_ledger_insert_orders_blocked_by_s4_alone',
+    'S4D.cross_ledger_insert_invoices_blocked_by_s4_alone',
+    'S4D.cross_ledger_insert_payments_blocked_by_s4_alone',
+    'S4D.cross_ledger_insert_cinema_pg_quotes_blocked_by_s4_alone',
+    'S4Q.01_commit_race_second_ledger_waits_then_is_refused',
+    'S4Q.02_commit_race_final_state_single_ledger',
+    'S4Q.03_explicit_rollback_frees_the_tenant_for_the_other_ledger',
+    'S4Q.04_rollback_race_final_state_single_ledger',
+    'S4Q.05_same_ledger_concurrent_writers_both_succeed_with_one_claim',
+    'S4Q.06_claim_is_undone_with_a_rolled_back_savepoint',
+    'S4Q.07_opposite_order_cross_ledger_writers_resolve_by_deadlock_or_refusal_without_corruption',
+    'S4Q.08_no_tenant_has_rows_outside_its_claimed_ledger',
+    'P2.21_install_keeps_every_existing_membership_row_and_only_adds_login_role_rows',
+    'P2.20_second_rollback_restores_membership_rows_and_role_attributes_exactly',
+    'S4R.00_precondition_dangerous_state_has_claims_and_rows_in_all_ledgers',
+    'S4R.01_rollback_refused_when_claims_and_ledger_rows_exist',
+    'S4R.02_refusal_changed_nothing_objects_acl_memberships_triggers_functions_data',
+    'S4R.03_refusal_is_atomic_even_without_single_transaction_wrapper',
+    'S4R.04_claims_only_state_refused_and_unchanged',
+    'S4R.05_single_row_in_quotes_alone_refuses_rollback_and_changes_nothing',
+    'S4R.05_single_row_in_orders_alone_refuses_rollback_and_changes_nothing',
+    'S4R.05_single_row_in_invoices_alone_refuses_rollback_and_changes_nothing',
+    'S4R.05_single_row_in_payments_alone_refuses_rollback_and_changes_nothing',
+    'S4R.05_single_row_in_cinema_pg_quotes_alone_refuses_rollback_and_changes_nothing',
+    'S4R.06a_writer_committing_during_the_lock_wait_makes_the_rollback_refuse',
+    'S4R.06b_committed_row_claim_and_triggers_survived',
+    'S4R.07a_long_running_writer_makes_rollback_fail_on_lock_timeout_not_race',
+    'S4R.07b_in_flight_writer_unharmed_and_state_unchanged_after_lock_timeout',
+    'S4R.08_clean_state_precondition_all_ledgers_and_claims_empty',
+    'S4R.09_rollback_restores_membership_rows_exactly_all_six_columns',
+    'S4R.10_rollback_restores_cinema_role_attributes_and_leaves_no_runner_privilege',
+    'S4R.11_rollback_did_not_touch_non_ledger_business_data',
+    'S4R.12_second_rollback_is_refused_cleanly_nothing_to_roll_back',
+    'S4R.13_reinstall_after_rollback_works_and_restores_baseline_memberships',
+    'S4R.14_reinstalled_s4_claims_again',
+    'S4R.15_rollback_after_reinstall_with_data_is_refused_and_unchanged',
+    'S4R.16_second_clean_rollback_restores_fingerprint_acl_and_memberships',
+    'S4V.01_install_works_when_runner_already_reads_every_table_via_pg_read_all_data',
+    'S4V.02_install_adds_no_acl_or_membership_residue_in_that_configuration',
+    'S4V.03_rollback_refuses_with_data_in_that_configuration_and_changes_nothing',
+    'S4V.04_clean_rollback_in_that_configuration_restores_everything',
+    'S4V.05_cleanup_returns_runner_to_the_plain_configuration',
+    'STAT.01_workflow_uses_postgres_17_disposable_service',
+    'STAT.02_workflow_publishes_service_port_on_loopback_only',
+    'STAT.03_workflow_references_no_secrets_tokens_or_external_database_settings',
+    'STAT.04_workflow_has_read_only_contents_permission_and_no_write_scopes',
+    'STAT.05_workflow_has_no_pull_request_target_or_pull_request_trigger',
+    'STAT.06_runtime_environment_has_no_production_or_supabase_connection_settings',
+    'STAT.07_candidate_sql_files_contain_no_password_secret_or_connection_string',
+)
+ALL_CHECKS = BASELINE_CHECKS + NEW_CHECKS
+EXPECTED_NEW_CHECKS = len(NEW_CHECKS)
+EXPECTED_CHECKS = len(ALL_CHECKS)
+
+
+def verify_results(results):
+    """Pure verdict over the recorded results (no database): the run is green only if EVERY pinned check ran exactly once,
+    nothing else ran, and every result is PASS. Returns the list of problems; empty means PASS."""
+    problems = []
+    if len(set(ALL_CHECKS)) != len(ALL_CHECKS):
+        problems.append("pinned check list contains duplicates")
+    names = [r[0] for r in results]
+    seen, dup = set(), []
+    for n in names:
+        if n in seen and n not in dup: dup.append(n)
+        seen.add(n)
+    pinned_set = set(ALL_CHECKS)
+    missing = [n for n in ALL_CHECKS if n not in seen]
+    unexpected = [n for n in names if n not in pinned_set]
+    not_pass = [r[0] for r in results if r[1] != "PASS"]
+    odd = [r[0] for r in results if r[1] not in ("PASS", "FAIL")]
+    if dup: problems.append(f"duplicate check names={dup}")
+    if missing: problems.append(f"missing pinned checks={missing}")
+    if unexpected: problems.append(f"unexpected (unpinned or renamed) checks={unexpected}")
+    if not_pass: problems.append(f"{len(not_pass)} failed: {not_pass[:10]}")
+    if odd: problems.append(f"non PASS/FAIL statuses={odd}")
+    if len(results) != len(ALL_CHECKS): problems.append(f"{len(results)} checks run (expected {len(ALL_CHECKS)})")
+    return problems
 if os.environ.get("JW_CINEMA_PG_DISPOSABLE") != "1":
     raise SystemExit("BLOCKED: set JW_CINEMA_PG_DISPOSABLE=1 to confirm a throw-away local cluster")
 _host = os.environ.get("PGHOST", "")
@@ -142,6 +254,7 @@ MIG = ORIG_MIG
 HERE = Path(tempfile.mkdtemp(prefix="jw_p1p2_"))   # scratch only (never inside the repo)
 R = []
 def rec(n, ok, d=""):
+    if not isinstance(ok, bool): raise SystemExit(f"FAIL: check {n} produced a non-boolean verdict ({type(ok).__name__}); never treated as PASS")
     if any(r[0] == n for r in R): raise SystemExit("FAIL: duplicate check name " + n)
     R.append((n, "PASS" if ok else "FAIL", d)); print(("PASS " if ok else "FAIL ") + n + (" | " + d if d and not ok else ""), flush=True)
 def sh(db, sql, user=None, extra=()):
@@ -367,13 +480,13 @@ ROLLBACK;
         for op, sql in (("select", "SELECT * FROM jw_dev.cinema_pg_ledger_claims"), ("insert", "INSERT INTO jw_dev.cinema_pg_ledger_claims(org_id,ledger) VALUES('evil','legacy')"),
                         ("update", "UPDATE jw_dev.cinema_pg_ledger_claims SET ledger='legacy'"), ("delete", "DELETE FROM jw_dev.cinema_pg_ledger_claims"), ("truncate", "TRUNCATE jw_dev.cinema_pg_ledger_claims")):
             c = as_role(role, sql); rec(f"S4X.claims_{op}_denied_for_{role}", c[0] != 0 and c[1] == "42501", str(c))
-    c = as_role("jw_cinema_writer", "SELECT jw_dev.cinema_pg_s4_claim_on_insert()"); rec("S4X.writer_cannot_execute_claim_fn", c[0] != 0 and c[1] in ("42501", "0A000"), str(c))
+    c = as_role("jw_cinema_writer", "SELECT jw_dev.cinema_pg_s4_claim_on_insert()"); rec("S4X.writer_cannot_execute_claim_fn", c[0] != 0 and c[1] == "42501", str(c))   # 0A000 would mean EXECUTE was allowed
     c = as_role("jw_cinema_writer", "SET session_replication_role='replica'"); rec("S4X.writer_cannot_disable_triggers_via_replication_role", c[0] != 0 and c[1] == "42501", str(c))
     c = as_role("jw_cinema_writer", "ALTER TABLE jw_dev.cinema_pg_quotes DISABLE TRIGGER ALL"); rec("S4X.writer_cannot_alter_table_triggers", c[0] != 0 and c[1] == "42501", str(c))
     c = as_role("jw_app_dev", "ALTER TABLE jw_dev.quotes DISABLE TRIGGER ALL"); rec("S4X.app_cannot_alter_legacy_triggers", c[0] != 0 and c[1] == "42501", str(c))
     c = as_role("jw_app_dev", "DROP TRIGGER cinema_pg_s4_claim_legacy_quote ON jw_dev.quotes"); rec("S4X.app_cannot_drop_s4_trigger", c[0] != 0 and c[1] == "42501", str(c))
     c = as_role("jw_cinema_writer", "TRUNCATE jw_dev.cinema_pg_quotes"); rec("S4X.writer_cannot_truncate_cinema_quotes", c[0] != 0 and c[1] == "42501", str(c))
-    c = as_role("jw_cinema_writer", "UPDATE jw_dev.cinema_pg_quotes SET org_id='ci-p' WHERE id='cn2'"); rec("S4X.writer_cannot_move_cinema_quote_to_other_tenant", c[0] != 0, str(c))
+    c = as_role("jw_cinema_writer", "UPDATE jw_dev.cinema_pg_quotes SET org_id='ci-p' WHERE id='cn2'"); rec("S4X.writer_cannot_move_cinema_quote_to_other_tenant", c[0] != 0 and c[1] == "42501", str(c))
     q("SET ROLE jw_mig_admin; SELECT 1")  # sanity
     # The error text must come from the S4 trigger itself: existing guards raise the same SQLSTATE, so the code alone would not prove S4 works.
     SMSG = "S4: organization cannot change on a ledger row"
@@ -427,7 +540,7 @@ ROLLBACK;
     ok_a = c[0] == 0 and '"id"' in c[2]; rec("S4S.06_valid_session_A_creates_partner", ok_a, str(c))
     pid_a = q("select id from jw_dev.cinema_pg_partners where org_id='ci-a' and name='PartnerA'")
     rec("S4S.07_partner_row_tenant_is_session_org", q(f"select org_id from jw_dev.cinema_pg_partners where id='{pid_a}'") == "ci-a")
-    c = wr(ups("rq-b-00000001", pid_a, "HackedByB"), "hashB-0123456789abcdef"); rec("S4S.08_tenant_B_cannot_update_tenant_A_partner", c[0] != 0, str(c))
+    c = wr(ups("rq-b-00000001", pid_a, "HackedByB"), "hashB-0123456789abcdef"); rec("S4S.08_tenant_B_cannot_update_tenant_A_partner", c[0] != 0 and c[1] == "P0002", str(c))
     rec("S4S.09_A_partner_unchanged", q(f"select name from jw_dev.cinema_pg_partners where id='{pid_a}'") == "PartnerA")
     c = wr(ups("rq-a-00000001", None, "PartnerA"), "hashB-0123456789abcdef")
     rec("S4S.10_same_request_id_other_tenant_no_replay_leak", c[0] == 0 and pid_a not in c[2] and q("select count(*) from jw_dev.cinema_pg_partners where org_id='ci-b' and name='PartnerA'") == "1", str(c))
@@ -444,8 +557,9 @@ ROLLBACK;
                "BEGIN; SET LOCAL ROLE jw_cinema_writer; SELECT jw_dev.cinema_pg_trade_trace('x'); COMMIT;", None, ["-v", "VERBOSITY=verbose"])
     rec("S4S.16_local_guc_does_not_leak_to_next_tx_same_connection", p.returncode != 0 and "42501" in p.stderr, p.stderr[-160:])
     # documented hazard: a SESSION-level set_config(...,false) would leak across transactions on a pooled connection
-    p = sh(DB, "SELECT set_config('jw.session_hash','hashA-0123456789abcdef',false); BEGIN; SET LOCAL ROLE jw_cinema_writer; SELECT (jw_dev.cinema_pg_trade_trace('"+tn+"')->>'trade_no') IS NOT NULL OR true; COMMIT;")
-    rec("S4S.17_HAZARD_confirmed_session_level_set_leaks (app code uses only is_local=true)", p.returncode == 0, p.stderr[-120:])
+    p = sh(DB, "SELECT set_config('jw.session_hash','hashA-0123456789abcdef',false); BEGIN; SET LOCAL ROLE jw_cinema_writer; SELECT 'LEAK='||((jw_dev.cinema_pg_trade_trace('"+tn+"')->>'trade_no') = '"+tn+"'); COMMIT;")
+    # (the former "... IS NOT NULL OR true" was constant-folded to true, so the trace never ran: the hazard is now really observed)
+    rec("S4S.17_HAZARD_confirmed_session_level_set_leaks (app code uses only is_local=true)", p.returncode == 0 and "LEAK=true" in p.stdout.splitlines(), p.stdout[-120:] + p.stderr[-120:])
     # ---- R4b: real multi-connection concurrency with the candidate installed (6 tenants x 8 sessions)
     for i in range(1, 7):
         o = f"ci-k{i}"
@@ -610,10 +724,7 @@ finally:
     f = [r for r in R if r[1] != "PASS"]
     print(f"\nSUMMARY {len(R)-len(f)}/{len(R)} PASS, failures={len(f)}")
     REPORT.write_text(json.dumps({"server": ver if 'ver' in dir() else None, "server_version_num": SVN, "mode": "PG17_CI" if MAJOR == 17 else "SUPPLEMENTAL_LOCAL_PG16", "expected_checks": EXPECTED_CHECKS, "results": R}, ensure_ascii=False, indent=1))
-_bad = [r for r in R if r[1] != "PASS"]
-_names = [r[0] for r in R]
-_missing = [n for n in BASELINE_CHECKS if n not in _names]
-_odd = [r for r in R if r[1] not in ("PASS", "FAIL")]
-if _bad or _odd or _missing or len(set(_names)) != len(_names) or len(R) != EXPECTED_CHECKS:
-    raise SystemExit(f"FAIL: {len(_bad)} failed, {len(R)} checks run (expected {EXPECTED_CHECKS}), missing baseline checks={_missing}, non PASS/FAIL statuses={len(_odd)}")
+_problems = verify_results(R)
+if _problems:
+    raise SystemExit("FAIL: " + "; ".join(_problems))
 print("PASS_P1_P2_PG17_CANDIDATE_GATE" if MAJOR == 17 else "PASS_SUPPLEMENTAL_LOCAL_PG16_ONLY_NOT_PG17_EVIDENCE")

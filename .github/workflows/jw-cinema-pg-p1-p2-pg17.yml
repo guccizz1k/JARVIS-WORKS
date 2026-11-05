@@ -10,6 +10,14 @@ on:
       - scripts/review/cinema_pg_p2_login_role_rollback.sql
       - scripts/ci_cinema_pg_p1_p2_pg17_suite.py
       - .github/workflows/jw-cinema-pg-p1-p2-pg17.yml
+      # everything the suite loads at run time (a change there must re-run the PG17 candidate gate too)
+      - scripts/ci_cinema_pg_sql_gate.py
+      - scripts/review/cinema_pg_write_engine.sql
+      - db/review/ci_v90_ephemeral_pg_schema.sql
+      - db/review/ci_qa_001_jw_dev_secure_messenger_directory.sql
+      - db/review/ci_qa_002_jw_dev_messenger_rpc.sql
+      - db/review/ci_qa_006_commit_order_cursor_guard_candidate.sql
+      - db/review/ci_v92_quote_ephemeral.sql
   workflow_dispatch:
 permissions:
   contents: read
