@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classify EXACT historic Gitleaks false positives without weakening scanning.
 
-Never suppress an unreviewed finding. All four historical findings below were
+Never suppress an unreviewed finding. All five historical findings below were
 manually mapped to immutable Git blob hashes and synthetic test lines.
 Gitleaks must still scan --all Git history on every run. The private/redacted
 report stays in a temporary directory and is never uploaded or printed.
@@ -14,6 +14,11 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
+
+# The pinned historical commits are looked up in THIS repository, never in whatever directory the caller happens to be in.
+# (A classifier run from another working directory used to find no commit, mark every finding "unreviewed" and report BLOCKED
+#  although the findings were the five reviewed ones. Fail-closed is kept: an unreachable repository still means BLOCKED.)
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # (rule, exact commit SHA, exact path, exact line): (immutable Git blob SHA, class)
 REVIEWED: dict[tuple[str,str,str,int], tuple[str,str]] = {
@@ -95,13 +100,13 @@ def exact_classification(row: dict) -> str | None:
     # Read only the pinned historical commit; no user input reaches a shell.
     try:
         actual = subprocess.run(
-            ["git", "rev-parse", f"{key[1]}:{key[2]}"],
+            ["git", "-C", str(REPO_ROOT), "rev-parse", f"{key[1]}:{key[2]}"],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout.strip()
         if actual != blob:
             return None
         raw = subprocess.run(
-            ["git", "show", f"{key[1]}:{key[2]}"],
+            ["git", "-C", str(REPO_ROOT), "show", f"{key[1]}:{key[2]}"],
             capture_output=True, check=True, timeout=10,
         ).stdout.decode("utf-8")
         lines = raw.splitlines()

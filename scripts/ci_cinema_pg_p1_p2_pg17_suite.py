@@ -119,7 +119,7 @@ BASELINE_CHECKS = (
     'S4M.10_rollback_restores_fingerprint_and_acl',
     'S4M.11_no_s4_objects_after_rollback',
 )
-EXPECTED_NEW_CHECKS = 80
+EXPECTED_NEW_CHECKS = 82
 EXPECTED_CHECKS = len(BASELINE_CHECKS) + EXPECTED_NEW_CHECKS
 if os.environ.get("JW_CINEMA_PG_DISPOSABLE") != "1":
     raise SystemExit("BLOCKED: set JW_CINEMA_PG_DISPOSABLE=1 to confirm a throw-away local cluster")
@@ -248,10 +248,14 @@ try:
     q("INSERT INTO jw_dev.organizations(id,name,created_at) VALUES('pre-x','x',now()::text)")
     q("INSERT INTO jw_dev.orders(id,org_id) VALUES('pre-o','pre-x')")
     p = apply(ORIG_MIG)
+    # ONE fixed check name for both server versions (it is a pinned baseline name); only the expectation differs by version:
+    #   PG16 (supplemental): the unmodified file must refuse with its own "requires PostgreSQL 17" floor;
+    #   PG17 (CI):           that floor must pass and the file must then refuse the non-empty ledger.
     if MAJOR != 17:
-        rec("S4M.00z_original_file_requires_pg17", p.returncode != 0 and "requires PostgreSQL 17" in p.stderr, p.stderr[-120:])
+        _z_ok, _z_detail = p.returncode != 0 and "requires PostgreSQL 17" in p.stderr, p.stderr[-120:]
     else:
-        rec("S4M.00z_original_file_passes_pg17_gate_then_refuses_non_empty_ledger", p.returncode != 0 and "requires PostgreSQL 17" not in p.stderr and "non-empty ledger" in p.stderr, p.stderr[-160:])
+        _z_ok, _z_detail = p.returncode != 0 and "requires PostgreSQL 17" not in p.stderr and "non-empty ledger" in p.stderr, p.stderr[-160:]
+    rec("S4M.00z_original_file_requires_pg17", _z_ok, _z_detail)
     p = apply(MIG)
     rec("S4M.00a_refuses_non_empty_ledger", p.returncode != 0 and "non-empty ledger" in p.stderr, p.stderr[-140:])
     rec("S4M.00b_refusal_leaves_no_residue", q("select to_regclass('jw_dev.cinema_pg_ledger_claims') is null") == "t" and fp() == base)
@@ -347,6 +351,15 @@ ROLLBACK;
     rec("S4O.01_on_conflict_do_nothing_leaves_no_orphan_claim", _noN("BEGIN; INSERT INTO jw_dev.orders(id,org_id) VALUES('o-dup','ci-o1'); INSERT INTO jw_dev.orders(id,org_id) VALUES('o-dup','ci-o2') ON CONFLICT DO NOTHING; SELECT 'N='||count(*) FROM jw_dev.cinema_pg_ledger_claims WHERE org_id='ci-o2'; ROLLBACK;") == ["N=0"])
     rec("S4O.02_on_conflict_do_update_noop_leaves_no_orphan_claim", _noN("BEGIN; INSERT INTO jw_dev.orders(id,org_id) VALUES('o-dup2','ci-o1'); INSERT INTO jw_dev.orders(id,org_id) VALUES('o-dup2','ci-o3') ON CONFLICT (id) DO UPDATE SET id=orders.id; SELECT 'N='||count(*) FROM jw_dev.cinema_pg_ledger_claims WHERE org_id='ci-o3'; ROLLBACK;") == ["N=0"])
     rec("S4O.03_another_before_trigger_skipping_the_row_leaves_no_orphan_claim", _noN("BEGIN; CREATE FUNCTION jw_dev.zz_skip() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RETURN NULL; END $f$; CREATE TRIGGER zz_skip BEFORE INSERT ON jw_dev.payments FOR EACH ROW EXECUTE FUNCTION jw_dev.zz_skip(); INSERT INTO jw_dev.payments(id,org_id) VALUES('p-skip','ci-o4'); SELECT 'N='||count(*) FROM jw_dev.cinema_pg_ledger_claims WHERE org_id='ci-o4'; ROLLBACK;") == ["N=0"])
+    # A statement that FAILS (not a skipped row, not an explicit ROLLBACK) must leave neither a row nor a claim, also when it runs in autocommit.
+    mkorg("ci-o5")
+    _f1 = err_state(DB, "INSERT INTO jw_dev.orders(id,org_id) VALUES('o-f1','ci-o5'),('o-f1','ci-o5')")   # duplicate key inside ONE statement
+    rec("S4O.04_failed_multirow_statement_in_autocommit_leaves_no_row_and_no_claim", _f1[0] != 0 and _f1[1] == "23505" and q("select (select count(*) from jw_dev.cinema_pg_ledger_claims where org_id='ci-o5')||'/'||(select count(*) from jw_dev.orders where org_id='ci-o5')") == "0/0", f"{_f1[1]}")
+    # A claim created by an EARLIER row of the same statement must be undone when a LATER row is refused by S4 (statement-level atomicity).
+    mkorg("ci-o6"); mkorg("ci-o7"); q(cq("o7-c", "ci-o7"))        # ci-o7 is claimed by the CINEMA ledger
+    _f2 = err_state(DB, "INSERT INTO jw_dev.orders(id,org_id) VALUES('o-m1','ci-o6'),('o-m2','ci-o7')")
+    rec("S4O.05_claim_made_by_earlier_row_is_undone_when_a_later_row_of_the_statement_is_refused",
+        _f2[0] != 0 and _f2[1] == "23514" and "reserved" in _f2[2] and q("select (select count(*) from jw_dev.cinema_pg_ledger_claims where org_id='ci-o6')||'/'||(select count(*) from jw_dev.orders where org_id in ('ci-o6','ci-o7'))||'/'||(select ledger from jw_dev.cinema_pg_ledger_claims where org_id='ci-o7')") == "0/0/cinema", f"{_f2[1]} {_f2[2][-120:]}")
     # ---- R3: attack suite (roles used via SET ROLE inside the session)
     def as_role(role, sql): 
         p = sh(DB, f"SET ROLE {role}; {sql}", None, ["-v", "VERBOSITY=verbose"]); m = re.search(r"ERROR:\s+(\w{5}):", p.stderr); return p.returncode, (m.group(1) if m else None), (p.stdout + p.stderr).strip()[-200:]

@@ -15,7 +15,7 @@ def fixture_row(key):
     return {"RuleID":rule,"Commit":commit,"File":path,"StartLine":line,
             "Secret":"***REDACTED***"}
 
-def test_review_registry_contains_exactly_four_individually_pinned_findings():
+def test_review_registry_contains_exactly_five_individually_pinned_findings():
     assert len(h.REVIEWED)==5
     assert {key[0] for key in h.REVIEWED}=={"generic-api-key"}
     assert {v[1] for v in h.REVIEWED.values()}=={
@@ -27,7 +27,7 @@ def test_review_registry_contains_exactly_four_individually_pinned_findings():
     assert all(len(blob)==40 for blob,_ in h.REVIEWED.values())
 
 @pytest.mark.parametrize("key",list(h.REVIEWED))
-def test_all_four_gitleaks_findings_are_independently_reproducible(key):
+def test_all_five_gitleaks_findings_are_independently_reproducible(key):
     assert h.exact_classification(fixture_row(key)) == h.REVIEWED[key][1]
 
 def test_unrelated_path_never_exempted():
@@ -108,3 +108,25 @@ def test_rule_specific_semantic_review_does_not_accept_arbitrary_fixtures():
                  "password_verifier_monkeypatch"):
         assert not h.semantic_fixture_guard(kind,"untrusted-extra-context")
         assert not h.semantic_fixture_guard(kind,"")
+
+
+def test_classification_does_not_depend_on_the_callers_working_directory(tmp_path, monkeypatch):
+    """Regression: run from outside the repository, every reviewed finding used to become 'unreviewed' (BLOCKED)."""
+    monkeypatch.chdir(tmp_path)
+    for key in h.REVIEWED:
+        assert h.exact_classification(fixture_row(key)) == h.REVIEWED[key][1]
+    report = tmp_path / "scan.json"
+    report.write_text(json.dumps([fixture_row(k) for k in h.REVIEWED]))
+    ok, summary = h.classify_report(report, 1)
+    assert ok and summary["status"] == "PASS" and summary["unreviewed_findings"] == 0
+
+
+def test_unreachable_repository_still_fails_closed(tmp_path, monkeypatch):
+    """The fix must not turn a missing history into a pass."""
+    monkeypatch.setattr(h, "REPO_ROOT", tmp_path)          # not a git repository
+    for key in h.REVIEWED:
+        assert h.exact_classification(fixture_row(key)) is None
+    report = tmp_path / "scan.json"
+    report.write_text(json.dumps([fixture_row(k) for k in h.REVIEWED]))
+    ok, summary = h.classify_report(report, 1)
+    assert not ok and summary["status"] == "BLOCKED" and summary["unreviewed_findings"] == len(h.REVIEWED)
