@@ -20,6 +20,7 @@ from . import pg_delivery_review_api_v154 as delivery_review
 from . import pg_import_quote_v160 as import_quote
 from . import pg_invoice_balance_v161 as invoice_balance
 from . import pg_trade_lineage_v158 as trade_lineage
+from . import pg_cinema_register_v1 as cinema_trade
 
 _MODE = "ISOLATED_DEV_PG_REVIEW_INTEGRATION"
 _REQUIRED = {
@@ -92,6 +93,8 @@ def preflight() -> None:
         raise RuntimeError("BLOCKED: trade lineage verification unavailable")
     if os.environ.get("JW_PG_INVOICE_BALANCE_V161") and not invoice_balance.enabled():
         raise RuntimeError("BLOCKED: invoice balance verification unavailable")
+    if os.environ.get("JW_PG_CINEMA_TRADE_V1") and not cinema_trade.cinema_trade_enabled():
+        raise RuntimeError("BLOCKED: CINEMA trade writer prerequisite gate denied")
 
 
 def create_app() -> FastAPI:
@@ -138,6 +141,9 @@ def create_app() -> FastAPI:
                 "release_ready": False,
             }
 
+    # S4 selects a single writer for this stage without modifying existing
+    # v92 business tables or the existing quote API implementation.
+    cinema_single_writer = cinema_trade.cinema_trade_enabled()
     required = (
         (pg_reader.register_stage_api, "reader"),
         (pg_auth.register_v85_auth, "auth"),
@@ -147,6 +153,8 @@ def create_app() -> FastAPI:
         (invoice_preview.register_v145_invoice_preview, "invoice preview"),
     )
     for register, name in required:
+        if name == "quote writer" and cinema_single_writer:
+            continue  # v92 writer disabled in CINEMA trade mode (fail closed).
         if not register(app):
             raise RuntimeError("BLOCKED: PostgreSQL stage component unavailable: " + name)
     for register in (
@@ -154,6 +162,7 @@ def create_app() -> FastAPI:
         import_quote.register_v160_pg_import_quote,
         trade_lineage.register_v158_trade_lineage,
         invoice_balance.register_v161_invoice_balance,
+        cinema_trade.register_cinema_trade_v1,
     ):
         register(app)  # Modules independently fail closed on malformed opt-ins.
     return app
