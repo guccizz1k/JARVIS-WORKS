@@ -272,12 +272,22 @@ def pg_env(opts: dict) -> dict:
     return env
 
 
+TOOL_VERSION_RE = re.compile(r"^\S+ \(PostgreSQL\) (\d+)(?:\.\d+)*\b", re.ASCII)
+
+
+def parse_tool_major(out: str) -> int | None:
+    """``pg_dump (PostgreSQL) 17.11 (Debian 17.11-1.pgdg13+2)`` -> 17. The number right after
+    ``(PostgreSQL)`` is the version; a distribution suffix in parentheses is ignored, never parsed."""
+    match = TOOL_VERSION_RE.match((out or "").strip())
+    return int(match.group(1)) if match else None
+
+
 def tool_major(tool: str) -> int:
     out = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=15).stdout
-    match = re.search(r"(\d+)(?:\.\d+)?", out.split(")")[-1])
-    if not match:
+    major = parse_tool_major(out)
+    if major is None:
         raise BackupError("BLOCKED_V223_TOOL_VERSION_UNKNOWN")
-    return int(match.group(1))
+    return major
 
 
 def require_pg17_tools() -> None:
@@ -316,7 +326,10 @@ SIGNATURE_QUERIES = {
                       FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
                       JOIN pg_namespace n ON n.oid=c.relnamespace
                       WHERE n.nspname=%(s)s ORDER BY 1""",
-    "acl": """SELECT c.relname, coalesce(c.relacl::text,'') FROM pg_class c
+    # NULL relacl means "owner default"; an explicit ACL equal to that default (left behind by
+    # GRANT ... then REVOKE/DROP OWNED) is not dumped by pg_dump, so compare the EFFECTIVE ACL.
+    "acl": """SELECT c.relname, coalesce(c.relacl, acldefault((CASE c.relkind WHEN 'S' THEN 's'
+                     ELSE 'r' END)::"char", c.relowner))::text FROM pg_class c
               JOIN pg_namespace n ON n.oid=c.relnamespace
               WHERE n.nspname=%(s)s AND c.relkind IN ('r','p','S','v') ORDER BY 1""",
 }
@@ -683,8 +696,9 @@ def roles_in_acl(connection, schema: str) -> list[str]:
     with connection.cursor() as cur:
         cur.execute("""SELECT DISTINCT r.rolname FROM pg_roles r WHERE r.rolname !~ '^pg_' AND (
               EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace,
-                      LATERAL aclexplode(coalesce(c.relacl,'{}'::aclitem[])) a
-                      WHERE n.nspname=%(s)s AND (a.grantee=r.oid OR a.grantor=r.oid))
+                      LATERAL aclexplode(c.relacl) a
+                      WHERE n.nspname=%(s)s AND c.relacl IS NOT NULL
+                        AND (a.grantee=r.oid OR a.grantor=r.oid))
               OR EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname=%(s)s
                          AND r.rolname = ANY(p.roles))) ORDER BY 1""", {"s": schema})
         return [row[0] for row in cur.fetchall()]
