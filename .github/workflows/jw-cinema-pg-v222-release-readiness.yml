@@ -189,8 +189,6 @@ jobs:
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
       JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
-    env:
-      JW_USE_SYSTEM_CHROME: '1'
     steps:
       - uses: actions/checkout@v4
         with:
