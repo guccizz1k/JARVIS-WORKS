@@ -32,6 +32,7 @@ CHECKS = (
 )
 ORG = "ci-a"
 TOTAL = 0
+SYNTHETIC_CIPHER = ""
 
 def assert_safe(condition: bool, code: str) -> None:
     global TOTAL
@@ -92,6 +93,13 @@ def parity(s,p,org=ORG):
     return frozenset(mismatches)
 
 def fixture_sqlite(path:Path):
+    global SYNTHETIC_CIPHER
+    # CI-only Fernet key and a valid synthetic Base32 TOTP secret.
+    # Real MFA secrets never enter this fixture or its logs.
+    from cryptography.fernet import Fernet
+    os.environ["JW_DATA_KEY"] = Fernet.generate_key().decode("ascii")
+    SYNTHETIC_CIPHER = Fernet(os.environ["JW_DATA_KEY"].encode("ascii")).encrypt(
+        b"MFRGGZDFMZTWQ2LK").decode("ascii")
     with sqlite3.connect(path) as db:
         db.executescript("""
         CREATE TABLE organizations(id text primary key,name text,created_at text);
@@ -110,7 +118,7 @@ def fixture_sqlite(path:Path):
             ("ci-um",ORG,"m@invalid.test",pw,"M","member","2026-01-01"),
         ])
         db.execute("INSERT INTO staff_disabled VALUES(?,?,?)",("ci-um",ORG,"2026-02-01"))
-        db.execute("INSERT INTO mfa_credentials VALUES(?,?,?,?)",("ci-ua","SYNTHETIC_CIPHER","",-1))
+        db.execute("INSERT INTO mfa_credentials VALUES(?,?,?,?)",("ci-ua",SYNTHETIC_CIPHER,"",-1))
         db.execute("INSERT INTO mfa_recovery_codes VALUES(?,?,?,?)",("ci-ua","SYNTHETIC_SHA","2026-01-01",None))
         db.execute("INSERT INTO login_failures VALUES(?,?,?)",("a@invalid.test",4,"2026-01-01T00:00:00"))
         db.commit()
@@ -128,7 +136,7 @@ def fixture_pg(dbname):
             ("ci-um",ORG,"m@invalid.test","pbkdf2_sha256$260000$"+("aa"*16)+"$"+("bb"*32),"M","member","2026-01-01"),
         ])
         conn.execute("INSERT INTO jw_dev.staff_disabled VALUES('ci-um','ci-a','2026-02-01')")
-        conn.execute("INSERT INTO jw_dev.mfa_credentials VALUES('ci-ua','SYNTHETIC_CIPHER','',-1)")
+        conn.execute("INSERT INTO jw_dev.mfa_credentials VALUES('ci-ua',%s,'',-1)",(SYNTHETIC_CIPHER,))
         conn.execute("INSERT INTO jw_dev.mfa_recovery_codes VALUES('ci-ua','SYNTHETIC_SHA','2026-01-01',null)")
         conn.execute("INSERT INTO jw_dev.login_failures VALUES('a@invalid.test',4,'2026-01-01T00:00:00')")
 
