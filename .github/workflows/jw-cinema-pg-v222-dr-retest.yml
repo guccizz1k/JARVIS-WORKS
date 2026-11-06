@@ -1,0 +1,84 @@
+name: JW V22.2 reused V19.7 cross-cluster signed PG17 DR retest
+on:
+  push:
+    branches:
+      - candidate/jw-v222-dr-verified-20261106
+permissions:
+  contents: read
+concurrency:
+  group: jw-v222-dr-retest-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cross-cluster-dr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      source-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v197-ephemeral-source
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      restore-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v197-ephemeral-restore
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-v197-ephemeral-source@127.0.0.1:5432/postgres
+      JW_PG_CI_RESTORE_DSN: postgresql://postgres:ci-v197-ephemeral-restore@127.0.0.1:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify existing V22.2 candidate tree and all protected source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ scripts/ tests/
+          python3 -I scripts/ci_cinema_pg_guard.py
+          echo 'Docker PG17 service port identities:'
+          docker ps --filter ancestor=postgres:17 --format '{{.ID}}|{{.Ports}}'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing app and PostgreSQL test dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Validate source and two-cluster protection gates
+        run: |
+          python -m py_compile scripts/ci_v197_cross_cluster_approval_dr.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v197_cross_cluster_approval_dr.py").read_text()
+          must=("fresh_guard(source,5432)","fresh_guard(target,5433)",
+            "source_cid!=target_cid","PORTS =","live.main()",
+            "Fernet.generate_key()","InvalidToken","pg_dump",
+            "pg_restore","--no-owner","v195_confirm_import",
+            "FAIL_V197_EXPECTED_OWNER_DRIFT","PASS_V197_POST_SNAPSHOT_COMMIT_LOST_RPO_NONZERO",
+            "LIMIT_V197_SAME_GITHUB_RUNNER_TWO_CONTAINERS_NOT_OFFSITE_HOSTED_DR")
+          for word in must:
+            assert word in s,word
+          for word in ("JW_PG_STAGE_DSN","SUPABASE_DSN","onrender.com"):
+            assert word not in s,word
+          print("PASS_V197_CODE_ISOLATION_AND_TWO_CLUSTER_SOURCE_GUARD")
+          PY
+      - name: Two distinct PG17 services real source TLS and authenticated encrypted restore
+        run: python -m scripts.ci_v197_cross_cluster_approval_dr
