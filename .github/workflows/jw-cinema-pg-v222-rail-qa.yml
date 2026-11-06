@@ -1,0 +1,212 @@
+name: JW V22.2 scoped rail layout and PG17 independent acceptance
+# Only the pinned V22.2 CSS and corresponding guard exception may change.
+# No deploy, no Supabase/Render access, no write credentials.
+on:
+  push:
+    branches:
+      - candidate/jw-v222-rail-performance-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-sha-full-pytest:
+    name: Original 19c5a677 full pytest (no skips)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-rail-performance-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify unmodified original SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- db/ app/main.py app/static/cinema/
+          python3 - <<'PY'
+          import subprocess
+          allowed=[".github/workflows/jw-cinema-pg-v222-sha-qa.yml",".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_guard.py","app/static/cinematic_v222.css"]
+          changed=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert changed <= set(allowed), 'Unexpected changed files: '+repr(sorted(changed-set(allowed)))
+          print('SCOPED_DIFF_PASS', sorted(changed))
+          PY
+          test "$(git hash-object app/static/cinematic_v222.css)" = "c7c5e796688582d27ab4322f0dd5cfd25b16226a"
+          python3 -m py_compile scripts/ci_cinema_pg_guard.py
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install project and OCR test prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+      - name: Full current tests with real dependencies; zero failure and skip
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- db/ app/main.py app/static/cinema/
+          python3 -I scripts/ci_cinema_pg_legacy_fixture_v1.py
+          python3 -m pytest -q -ra -p no:cacheprovider --junitxml=jw-v222-original-all-tests.xml tests
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('jw-v222-original-all-tests.xml').getroot()
+          nodes=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          assert nodes, 'Missing JUnit evidence'
+          counts={k:sum(int(n.attrib.get(k,0)) for n in nodes) for k in ('tests','failures','errors','skipped')}
+          print('FULL_ORIGINAL_SHA_RESULTS', counts, flush=True)
+          assert counts['tests'] >= 2359 and all(counts[k]==0 for k in ('failures','errors','skipped')), counts
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-rail-full-pytest
+          path: jw-v222-original-all-tests.xml
+          retention-days: 5
+  original-sha-pg17:
+    name: Original 19c5a677 disposable PostgreSQL 17 gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-rail-performance-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact source and set up PostgreSQL clients
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- db/ app/main.py app/static/cinema/
+          python3 - <<'PY'
+          import subprocess
+          allowed=[".github/workflows/jw-cinema-pg-v222-sha-qa.yml",".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_guard.py","app/static/cinematic_v222.css"]
+          changed=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert changed <= set(allowed), 'Unexpected changed files: '+repr(sorted(changed-set(allowed)))
+          print('SCOPED_DIFF_PASS', sorted(changed))
+          PY
+          test "$(git hash-object app/static/cinematic_v222.css)" = "c7c5e796688582d27ab4322f0dd5cfd25b16226a"
+          python3 -m py_compile scripts/ci_cinema_pg_guard.py
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m pip install -r requirements-postgres-check.txt
+      - name: Engine SQL gate with fresh disposable database
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_sql_gate.py --report jw-v222-engine-pg17.json
+      - name: P1/P2 candidate suite with real PostgreSQL 17
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_p1_p2_pg17_suite.py --report jw-v222-p1p2-pg17.json
+      - name: S4 atomic ledger and reviewed-link concurrent writers
+        env:
+          PGPASSWORD: ci-only-ephemeral-test-password
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_s4_atomic_gate.py
+          python3 -I scripts/ci_cinema_pg_s4_reviewed_gate.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-rail-pg17
+          path: |
+            jw-v222-engine-pg17.json
+            jw-v222-p1p2-pg17.json
+            jw-cinema-s4-atomic-pg17.json
+            jw-cinema-s4-reviewed-pg17.json
+          retention-days: 5
+
+  v222-rail-real-chrome:
+    name: Actual V22.2 desktop Chrome 1366/1440/1920, manual approval, MP4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+      JW_USE_SYSTEM_CHROME: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-rail-performance-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Independent scoped CSS+guard audit and original ancestry
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- app/main.py db/ app/static/cinema/
+          python3 - <<'PY'
+          import subprocess
+          allowed=[".github/workflows/jw-cinema-pg-v222-sha-qa.yml",".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_guard.py","app/static/cinematic_v222.css"]
+          changed=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert changed <= set(allowed), 'Unexpected changed files: '+repr(sorted(changed-set(allowed)))
+          print('SCOPED_DIFF_PASS', sorted(changed))
+          PY
+          test "$(git hash-object app/static/cinematic_v222.css)" = "c7c5e796688582d27ab4322f0dd5cfd25b16226a"
+          python3 -m py_compile scripts/ci_cinema_pg_guard.py
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install app dependencies, actual Chrome and video encoder
+        run: |
+          set -euo pipefail
+          command -v google-chrome
+          google-chrome --version
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum ffmpeg
+          python3 -m pip install --disable-pip-version-check -r requirements.txt \
+            'pytest>=8,<10' 'pytest-asyncio>=0.24,<2' 'httpx>=0.27,<1' \
+            'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' 'reportlab>=4,<5' 'pillow>=10'
+          python3 -m playwright install ffmpeg
+          command -v ffprobe
+      - name: Strict CSP actual root login, rail geometry, all routes, document approval, reduced motion and MP4
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v222_root_browser
+      - name: Record evidence hashes even on failure
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v222-root-browser
+          find artifacts/v222-root-browser -type f ! -path '*/raw-video/*' -print0 | sort -z | xargs -0 -r sha256sum > jw-v222-rail-qa-sha256.txt
+          cat jw-v222-rail-qa-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-rail-root-chrome
+          path: |
+            artifacts/v222-root-browser/
+            !artifacts/v222-root-browser/raw-video/
+            jw-v222-rail-qa-sha256.txt
+          retention-days: 5
