@@ -443,12 +443,14 @@ def identity_verified(checks: dict) -> bool:
 PRIVILEGED_BUILTIN_ROLES = ("pg_write_all_data", "pg_execute_server_program",
                             "pg_read_server_files", "pg_write_server_files")
 ROLE_FACT_KEYS = ("superuser", "createrole", "createdb", "replication", "bypassrls",
-                  "same_session_user", "privileged_builtin_member", "database_create",
+                  "same_session_user", "settable_other_roles", "privileged_builtin_member", "database_create",
                   "schema_usage", "schema_create", "tables", "tables_unreadable",
                   "tables_writable", "rls_tables", "sequences_writable")
 ROLE_SQL = """
 SELECT r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolbypassrls,
        current_user = session_user,
+       EXISTS (SELECT 1 FROM pg_roles r2 WHERE r2.rolname <> current_user
+               AND pg_has_role(current_user, r2.oid, 'SET')),
        (SELECT coalesce(bool_or(pg_has_role(current_user, m, 'MEMBER')), false)
           FROM unnest(%(builtin)s::text[]) m),
        has_database_privilege(current_user, current_database(), 'CREATE'),
@@ -497,6 +499,8 @@ def evaluate_source_privileges(facts: dict) -> list[str]:
             bad.append(name)
     if facts["same_session_user"] is not True:
         bad.append("role_switched")
+    if facts["settable_other_roles"] is not False:
+        bad.append("settable_other_roles")
     if facts["schema_usage"] is not True:
         bad.append("schema_no_usage")
     if not (isinstance(facts["tables"], int) and facts["tables"] >= 1):

@@ -422,10 +422,20 @@ def test_row_cap_error_cannot_leak_an_attacker_shaped_table_name(monkeypatch):
 
 # ------------------------------------------------- F2: source role must be least privilege
 GOOD_ROLE = {"superuser": False, "createrole": False, "createdb": False, "replication": False,
-             "bypassrls": True, "same_session_user": True, "privileged_builtin_member": False,
+             "bypassrls": True, "same_session_user": True, "settable_other_roles": False,
+             "privileged_builtin_member": False,
              "database_create": False, "schema_usage": True, "schema_create": False,
              "tables": 62, "tables_unreadable": 0, "tables_writable": 0, "rls_tables": 61,
              "sequences_writable": 0}
+
+
+def test_set_role_membership_escalation_is_denied():
+    # A LOGIN role can have no effective INSERT permission while still being able
+    # to SET ROLE to a writer through SET TRUE / INHERIT FALSE membership.
+    # This must fail even when current_user == session_user before SET ROLE.
+    candidate = {**GOOD_ROLE, "settable_other_roles": True}
+    assert "settable_other_roles" in pb.evaluate_source_privileges(candidate)
+    assert "pg_has_role(current_user, r2.oid, 'SET')" in pb.ROLE_SQL
 
 
 def test_good_read_only_role_with_bypassrls_is_accepted_when_schema_has_rls():
@@ -442,6 +452,7 @@ def test_good_read_only_role_with_bypassrls_is_accepted_when_schema_has_rls():
     ({"database_create": True}, "database_create"),
     ({"schema_create": True}, "schema_create"),
     ({"same_session_user": False}, "role_switched"),
+    ({"settable_other_roles": True}, "settable_other_roles"),
     ({"schema_usage": False}, "schema_no_usage"),
     ({"tables": 0}, "no_tables_visible"),
     ({"tables_unreadable": 1}, "tables_unreadable"),
@@ -690,3 +701,9 @@ def test_mark_target_command_needs_a_long_token_and_never_prints_the_password(mo
     err = capsys.readouterr().err
     assert "BLOCKED_V223_TOKEN_REQUIRED_MIN_16_CHARS" in err and "localpw" not in err
     assert pb.main(["nonsense"]) == 2
+
+
+@pytest.mark.parametrize("odd", [1, "t", "true", "", 0])
+def test_settable_other_roles_accepts_only_a_real_false(odd):
+    # Anything that is not the boolean False (a driver returning 0 / 't' / '') fails closed.
+    assert "settable_other_roles" in pb.evaluate_source_privileges({**GOOD_ROLE, "settable_other_roles": odd})

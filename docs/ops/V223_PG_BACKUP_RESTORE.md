@@ -33,7 +33,8 @@ development database (`JW_PG_REAL_SOURCE=1`).
   `pg_execute_server_program`, `pg_read_server_files` or `pg_write_server_files`, can CREATE in
   the database or in the schema, holds INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER on any
   schema table or UPDATE on any sequence, cannot SELECT every table, has switched role
-  (`SET ROLE`), or has no USAGE on the schema. `BYPASSRLS` is the one deliberate allowance and
+  (`current_user != session_user`), **can SET ROLE to any other role even when
+  its permissions are not inherited**, or has no USAGE on the schema. `BYPASSRLS` is the one deliberate allowance and
   is REQUIRED when the schema has RLS tables: with FORCE RLS a role without it silently sees
   only some rows, so both the dump and the digests would be incomplete. A matching role *name*
   such as `postgres` therefore no longer passes.

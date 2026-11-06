@@ -43,21 +43,25 @@ def role_dsn(base: str, role: str, password: str) -> str:
 def f2_role_privilege_tests(source: str) -> None:
     """F2 on a real PG17: the live catalog decides, never the role name."""
     with psycopg.connect(source, autocommit=True) as admin:
-        for role in ('jw_ci_ro', 'jw_ci_ro_nobypass', 'jw_ci_rw', 'jw_ci_creator'):
+        for role in ('jw_ci_ro', 'jw_ci_ro_nobypass', 'jw_ci_rw', 'jw_ci_creator', 'jw_ci_ro_switch'):
             admin.execute(f"DROP ROLE IF EXISTS {role}")
         admin.execute("CREATE ROLE jw_ci_ro LOGIN BYPASSRLS PASSWORD 'ci-only-ro'")
         admin.execute("CREATE ROLE jw_ci_ro_nobypass LOGIN PASSWORD 'ci-only-ro2'")
         admin.execute("CREATE ROLE jw_ci_rw LOGIN BYPASSRLS PASSWORD 'ci-only-rw'")
         admin.execute("CREATE ROLE jw_ci_creator LOGIN BYPASSRLS PASSWORD 'ci-only-cr'")
-        for role in ('jw_ci_ro', 'jw_ci_ro_nobypass', 'jw_ci_rw', 'jw_ci_creator'):
+        admin.execute("CREATE ROLE jw_ci_ro_switch LOGIN BYPASSRLS PASSWORD 'ci-only-sr'")
+        for role in ('jw_ci_ro', 'jw_ci_ro_nobypass', 'jw_ci_rw', 'jw_ci_creator', 'jw_ci_ro_switch'):
             admin.execute(f"GRANT USAGE ON SCHEMA jw_dev TO {role}")
             admin.execute(f"GRANT SELECT ON ALL TABLES IN SCHEMA jw_dev TO {role}")
         admin.execute("GRANT INSERT ON jw_dev.audit_log TO jw_ci_rw")
+        # Can SET ROLE to a writer without inheriting its grants in current session.
+        admin.execute("GRANT jw_ci_rw TO jw_ci_ro_switch WITH INHERIT FALSE, SET TRUE")
         admin.execute("GRANT CREATE ON SCHEMA jw_dev TO jw_ci_creator")
     cases = (('jw_ci_ro', 'ci-only-ro', []),
              ('jw_ci_ro_nobypass', 'ci-only-ro2', ['rls_rows_not_fully_readable']),
              ('jw_ci_rw', 'ci-only-rw', ['tables_writable']),
-             ('jw_ci_creator', 'ci-only-cr', ['schema_create']))
+             ('jw_ci_creator', 'ci-only-cr', ['schema_create']),
+             ('jw_ci_ro_switch', 'ci-only-sr', ['settable_other_roles']))
     try:
         for role, password, expected in cases:
             with psycopg.connect(role_dsn(source, role, password), autocommit=True) as conn:
