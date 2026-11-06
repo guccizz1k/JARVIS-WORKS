@@ -1,0 +1,61 @@
+name: JW V22.2 independent offline Semgrep and deployment fail-closed audit
+on:
+  push:
+    branches:
+      - candidate/jw-v222-independent-security-20261106
+permissions:
+  contents: read
+jobs:
+  semgrep-scoped-full-app:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JW_ENV: review
+      SEMGREP_SEND_METRICS: "off"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact source and protected original audit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ scripts/ tests/
+          test "$(git diff --name-only f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = ".github/workflows/jw-cinema-pg-v222-independent-security.yml"
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m py_compile scripts/ci_semgrep_security.py app/deployment_safety_v78.py
+      - name: Existing source fail-closed production protection
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from app.deployment_safety_v78 import DeploymentBlocked,require_safe_runtime
+          os.environ['JW_ENV']='production'
+          try:
+              require_safe_runtime()
+          except DeploymentBlocked as e:
+              assert 'PRODUCTION_BLOCKED' in str(e)
+          else:
+              raise AssertionError('Production deployment guard unexpectedly permits SQLite')
+          print('PASS_V222_PRODUCTION_SQLITE_DEPLOYMENT_BLOCKED',flush=True)
+          PY
+      - name: Install offline local rule scanner, telemetry disabled
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check 'semgrep>=1,<2'
+          semgrep --version
+      - name: Existing 4-injected + safe-fixture + full app/scripts Semgrep
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_semgrep_security.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-independent-semgrep-evidence
+          path: artifacts/semgrep/result.json
+          retention-days: 5
