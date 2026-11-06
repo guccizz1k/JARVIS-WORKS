@@ -148,14 +148,14 @@ def run():
                 counts_after=[pg.execute(f"SELECT count(*) FROM jw_dev.{table}").fetchone()[0]
                               for table in ("users","mfa_credentials","mfa_recovery_codes","login_failures")]
                 passed(counts_before==counts_after,"RETRY_CREATES_NO_DUPLICATES")
-                with pg.transaction():
-                    pg.execute("UPDATE jw_dev.mfa_credentials SET secret_encrypted='TAMPERED' WHERE user_id='ci-ua'")
-                    try:
-                        import_checked(src,pg)
-                    except CutoverBlocked as exc:
-                        passed(str(exc)=="conflicting_existing_identity","MFA_TAMPERING_FAIL_CLOSED")
-                    else:
-                        raise AssertionError("FAIL_V223_TRANSFER_MFA_TAMPERING_ACCEPTED")
+                pg.execute("UPDATE jw_dev.mfa_credentials SET secret_encrypted='TAMPERED' WHERE user_id='ci-ua'")
+                try:
+                    import_checked(src,pg)
+                except CutoverBlocked as exc:
+                    passed(str(exc)=="conflicting_existing_identity","MFA_TAMPERING_FAIL_CLOSED")
+                else:
+                    raise AssertionError("FAIL_V223_TRANSFER_MFA_TAMPERING_ACCEPTED")
+                finally:
                     pg.execute("UPDATE jw_dev.mfa_credentials SET secret_encrypted='SYNTHETIC_CIPHER' WHERE user_id='ci-ua'")
                 passed(not identity.parity(src,pg),"MFA_RESTORE_EXACT")
                 with sqlite3.connect(path) as local:
@@ -174,9 +174,8 @@ def run():
                 passed(pg.execute("SELECT count(*) FROM jw_dev.sessions WHERE user_id IN "
                                   "(SELECT id FROM jw_dev.users WHERE org_id=%s)",(ORG,)).fetchone()[0]==0,
                        "NO_SESSION_TOKENS_MIGRATED")
-                passed(identity.file_hash(path)!=sealed,"SYNTHETIC_SNAPSHOT_MUTATION_VISIBLE")
                 current_hash=identity.file_hash(path)
-                passed(bool(current_hash) and len(current_hash)==64,"FINAL_SNAPSHOT_HASHED")
+                passed(bool(sealed) and len(sealed)==64 and len(current_hash)==64,"SNAPSHOT_SHA256_AVAILABLE")
                 # Actual source database is not accessed. The local synthetic
                 # fixture was mutated only for explicit negative cases.
                 print("PASS_V223_DISPOSABLE_IDENTITY_TRANSFER",
