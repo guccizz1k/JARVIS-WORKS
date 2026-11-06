@@ -24,9 +24,9 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
-          # app/ and db/ stay byte-identical to the approved base EXCEPT one explicitly allowed new,
-          # unwired file (the PG compatibility translation module). Any other change fails here.
-          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_compat_v1\.py$' || true)"
+          # app/ and db/ stay byte-identical to the approved base EXCEPT two explicitly allowed new,
+          # unwired files (the PG compatibility request translation and response view modules). Any other change fails here.
+          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_compat_(v1|view_v1)\.py$' || true)"
           test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
           python3 -I scripts/ci_cinema_pg_guard.py
       - name: Install full project test prerequisites
@@ -102,9 +102,9 @@ jobs:
         run: |
           set -euo pipefail
           git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
-          # app/ and db/ stay byte-identical to the approved base EXCEPT one explicitly allowed new,
-          # unwired file (the PG compatibility translation module). Any other change fails here.
-          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_compat_v1\.py$' || true)"
+          # app/ and db/ stay byte-identical to the approved base EXCEPT two explicitly allowed new,
+          # unwired files (the PG compatibility request translation and response view modules). Any other change fails here.
+          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_compat_(v1|view_v1)\.py$' || true)"
           test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
           python3 -I scripts/ci_cinema_pg_guard.py
           docker ps --filter ancestor=postgres:17 --format '{{.ID}}|{{.Ports}}'

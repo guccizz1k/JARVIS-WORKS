@@ -34,12 +34,14 @@ back to `legacy`; PG documents created in the meantime stay in PG and are listed
 * **Unit:** one organisation. Flag `trade_backend` = `legacy` (default) | `pg`. For the pilot use an
   environment allow-list (`JW_PG_TRADE_ORGS=<org ids>`): no schema change, rollback = remove the
   variable and redeploy. A table is a later step.
-* **Home of a document = the store it was created in.** Because ids look the same (fact 4), the
-  compat layer must not guess from the id. Two options, to be decided with the E2E results:
-  1. expose PG ids to the UI with a prefix (`pg_<hex>`), which is safe only if the V22.2 UI treats ids as
-     opaque (to be verified in the E2E run, not assumed); or
-  2. look the id up in the legacy table first and in the PG table second, and **refuse** (409) if both
-     answer.
+* **Home of a document = the store it was created in, and the id says which (decided).** Legacy and PG ids
+  have the same 32-hex shape (fact 4), so PG ids are exposed as `pg_<32 hex>` on **every** PG entity
+  (`app/pg_cinema_compat_view_v1.py`). Checked in the V22.2 UI source: ids are opaque - the only things done
+  with them are `order.quote_id === quote.id` (so the prefix must be applied to every entity, which the tests
+  assert), `id.split('|')` on the UI's own `id|status` pairs (the prefix has no `|`), and URL path use (the
+  prefix is `[A-Za-z0-9_]`). Routing looks only at the prefix: `pg_` plus 32 hex goes to PG, a malformed or
+  differently cased `pg_` id is refused (never treated as legacy), anything else is legacy. No lookup in both
+  stores is needed, and a collision is impossible by construction.
 * **Creation** (new quote, order from quote, payment) goes to the organisation's backend.
 * **Continuation** of a legacy document goes to legacy, including the six steps that have no PG
   equivalent (invoice from order, statement from order, order edit/acknowledge/status, adjustments).
@@ -72,8 +74,8 @@ UI consequence to accept: where the legacy UI lets one person do everything, a P
 
 ## 6. Order of work (each item verifiable without the dev database)
 1. Inventory tool + tests - **done** (15 tests, 14 mutants killed, run on synthetic DBs built from the real DDL).
-2. Compat rules, two-person guard, engine-error mapping - **done** (47 tests).
-3. Terms side tables proposal, behaviour-tested on a throw-away PG16 - **done** (36 checks); PG17 via CI is pending.
+2. Compat rules, two-person guard, engine-error mapping - **done**; response views (PG entity -> legacy shape, `pg_` ids, KST times, legacy money rule) - **done**, pinned to real engine output (59 tests, 16 breakages caught).
+3. Terms side tables + database-level quote two-person rule, behaviour-tested on a throw-away PG16 - **done** (59 checks incl. real-output view contract); PG17 via CI is pending.
 4. Wire routes behind the allow-list in an environment that has FastAPI and PG17 (CI) - **not started**.
 5. Legacy-vs-PG equivalence run for the ADAPT steps (status class, money fields, resulting status, audit rows) - **not started**.
 6. E2E for company A/B/C: sign-up, login, MFA, CSRF, RLS, quote -> payment -> report - **not started**.
