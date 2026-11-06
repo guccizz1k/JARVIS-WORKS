@@ -207,12 +207,36 @@ def run():
     q_pre = qflow("pre", A, A, A)
     last(approve("pre", A, q_pre, 2))                    # allowed BEFORE the migration: same administrator
     selfrows = last(psql("SELECT count(*) FROM jw_dev.cinema_pg_quotes WHERE status IN ('approved','ordered') "
-                         "AND (submitted_by IS NULL OR approved_by IS NOT DISTINCT FROM submitted_by)"))
+                         "AND (submitted_by IS NULL OR approved_by IS NULL OR approved_by IS NOT DISTINCT FROM submitted_by)"))
     rec("T5.00_audited_fixtures_contain_self_approved_quotes_before_migration", int(selfrows) > 0, f"rows={selfrows}")
     p = psql(file=str(TP))
     rec("T5.01_migration_applies_after_the_engine_and_its_tests", p.returncode == 0, p.stderr.strip()[:200])
     rec("T5.02_constraint_exists_and_is_not_yet_validated",
         last(psql("SELECT convalidated::text FROM pg_constraint WHERE conname='cinema_pg_quote_two_person'")) == "false")
+    # Test the exact installed CHECK expression with a disposable TEMP table.
+    # Checking only source text would miss NULL semantics of IS DISTINCT FROM.
+    null_probe = psql("""DO $quote_guard_null$
+DECLARE actual_expr text;
+DECLARE target_state text;
+BEGIN
+    SELECT pg_get_expr(c.conbin, c.conrelid) INTO actual_expr
+      FROM pg_constraint c
+     WHERE c.conrelid='jw_dev.cinema_pg_quotes'::regclass
+       AND c.conname='cinema_pg_quote_two_person' AND c.contype='c';
+    IF actual_expr IS NULL THEN RAISE EXCEPTION 'missing quote approval constraint'; END IF;
+    CREATE TEMP TABLE quote_guard_null_probe
+        (status text NOT NULL, submitted_by text, approved_by text);
+    EXECUTE format('ALTER TABLE pg_temp.quote_guard_null_probe ADD CONSTRAINT test_guard CHECK (%s)', actual_expr);
+    FOREACH target_state IN ARRAY ARRAY['approved', 'ordered'] LOOP
+        BEGIN
+            INSERT INTO pg_temp.quote_guard_null_probe VALUES (target_state, 'submitter-A', NULL);
+            RAISE EXCEPTION 'NULL approver was accepted for %', target_state;
+        EXCEPTION WHEN check_violation THEN NULL;
+        END;
+    END LOOP;
+END $quote_guard_null$;""")
+    rec("T5.16_actual_constraint_rejects_null_approver_for_approved_and_ordered",
+        state(null_probe) == "OK", state(null_probe))
     v = psql("ALTER TABLE jw_dev.cinema_pg_quotes VALIDATE CONSTRAINT cinema_pg_quote_two_person")
     rec("T5.03_validate_is_refused_while_self_approved_rows_exist", state(v) == "23514", state(v))
 

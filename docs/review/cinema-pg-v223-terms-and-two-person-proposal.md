@@ -77,6 +77,14 @@ Therefore:
 1. **Now, without touching the engine:** the compat layer refuses approval when the acting user is the
    submitter or either identity is unknown (`quote_second_person_required`,
    `quote_approval_identity_unknown`, HTTP 409) - tested, with 7 breakages caught.
+**Independent QA correction (2026-11-06):** On the real development PG17 server, `submitted_by`
+ and `approved_by` are both nullable. The first proposal's `approved_by IS DISTINCT FROM submitted_by`
+ incorrectly accepted `approved_by=NULL` with a non-NULL submitter (verified using read-only
+ SQL scalar evaluation). The revised proposal explicitly requires `approved_by IS NOT NULL` and
+ counts nullable approvers as pre-existing invalid rows. `T5.16` copies the *installed constraint*
+ expression into a disposable temp table and proves both `approved` and `ordered` reject a null
+ approver. This new PG16/PG17 gate has **not been run** in this environment.
+
 2. **Candidate implemented and tested, not applied:** `scripts/review/cinema_pg_v223_quote_two_person_proposal.sql`
    adds `cinema_pg_quote_two_person` as a **separate migration applied after the engine and its 222 checks**,
    so the audited engine and its tests (which self-approve in five places) are not edited and stay 222/222.

@@ -34,6 +34,10 @@ PG_QUOTE_TARGETS = {"submitted", "approved", "rejected", "cancelled"}
 # legacy quote status -> PG transition target. 'sent' is the UI's word for submitting a draft.
 QUOTE_STATUS_MAP = {"sent": "submitted", "accepted": "approved", "rejected": "rejected"}
 MAX_ITEMS, MAX_QTY, MAX_PRICE = 40, 100_000, 1_000_000_000      # PG request limits
+# Column limits copied from the CHECKs in scripts/review/cinema_pg_write_engine.sql (a test pins them).
+# A value the engine would reject must be refused HERE as a 422, not reach PG and come back as a 502.
+PG_TEXT_LIMITS = {"partner_name": 120, "contact_name": 80, "email": 254, "phone": 40,
+                  "quote_title": 150, "item_name": 150, "payment_reference": 80}
 
 
 class CompatRefusal(Exception):
@@ -47,11 +51,25 @@ class CompatRefusal(Exception):
         return {"code": self.code, "detail": self.detail}
 
 
+def _storable(value) -> bool:
+    """True for a str that PostgreSQL ``text`` and UTF-8 can carry: no NUL and no lone surrogate.
+    (``json.loads('"\\ud800"')`` yields a lone surrogate, which would crash ``.encode()`` with a 500.)"""
+    if not isinstance(value, str) or "\x00" in value:
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def derive_request_id(org_id: str, user_id: str, route: str, idempotency_key: str) -> str:
     """Stable PG ``request_id`` for a retried call. Without a client key there is no honest way to
     make a retry idempotent, so the caller must pass a fresh random key and accept that."""
-    if not idempotency_key or len(idempotency_key) < 8:
-        raise CompatRefusal("idempotency_key_required", "a key of at least 8 characters is needed", 400)
+    if not _storable(idempotency_key) or len(idempotency_key) < 8 or len(idempotency_key) > 256:
+        raise CompatRefusal("idempotency_key_required", "a text key of 8..256 characters is needed", 400)
+    if not all(_storable(x) and x for x in (org_id, user_id, route)):
+        raise CompatRefusal("bad_request_scope", "organisation, user and route must be non-empty text", 400)
     # length-prefixed fields: no value can contain a separator that merges two fields into one
     parts = (org_id, user_id, route, idempotency_key)
     digest = hashlib.sha256("".join(f"{len(x.encode())}:{x}" for x in parts).encode()).hexdigest()
@@ -74,14 +92,32 @@ def _body(body) -> dict:
 
 def _text(body: dict, field: str, *, required: bool = False, max_len: int = 255) -> str:
     """A text field: absent/None/'' -> ''; anything that is not a string, or is too long, is refused
-    (a number or list is never coerced to text)."""
+    (a number or list is never coerced to text). ``required`` also refuses a value that is blank after the
+    engine's ``btrim`` (spaces only), because the engine would refuse it with an unmapped CHECK error."""
     value = body.get(field)
     if value is None or value == "":
         if required:
             raise CompatRefusal("bad_" + field, f"{field} is required", 422)
         return ""
-    if not isinstance(value, str) or len(value) > max_len or "\x00" in value:
+    if not _storable(value) or len(value) > max_len:
         raise CompatRefusal("bad_" + field, f"{field} must be text of at most {max_len} characters", 422)
+    if required and not value.strip(" "):
+        raise CompatRefusal("bad_" + field, f"{field} must not be blank", 422)
+    return value
+
+
+def _name(value, code: str, max_len: int) -> str:
+    """A required name/title: text, NUL/surrogate free, 1..max_len characters and not blank after btrim."""
+    if not _storable(value) or not 1 <= len(value) <= max_len or not value.strip(" "):
+        raise CompatRefusal(code, f"must be 1..{max_len} characters and not blank", 422)
+    return value
+
+
+def _entity_id(value, code: str) -> str:
+    """An id passed by the caller (not the body): non-empty text of at most 64 characters, no controls."""
+    if not _storable(value) or not 1 <= len(value) <= 64 or any(
+            unicodedata.category(ch).startswith("C") for ch in value):
+        raise CompatRefusal(code, "id must be 1..64 characters of text", 422)
     return value
 
 
@@ -116,9 +152,7 @@ def _items(items) -> list:
         if extra:
             raise CompatRefusal("unsupported_line_field",
                                 "line fields the PG engine does not store: " + ",".join(sorted(extra)))
-        name = item.get("name")
-        if not isinstance(name, str) or not 1 <= len(name) <= 150:
-            raise CompatRefusal("bad_items", "line name must be 1..150 characters", 422)
+        name = _name(item.get("name"), "bad_items", PG_TEXT_LIMITS["item_name"])
         out.append({"name": name, "quantity": _int(item.get("quantity"), "quantity", 1, MAX_QTY),
                     "unit_price": _int(item.get("unit_price"), "unit_price", 0, MAX_PRICE)})
     return out
@@ -136,13 +170,14 @@ def partner_from_customer(body: dict, request_id: str, *, partner_id: str | None
     if digits and not re.fullmatch(r"[0-9]{10}", digits, re.ASCII):
         raise CompatRefusal("business_number_not_10_digits",
                             "PG stores only a 10-digit business number; the legacy free text is not carried", 422)
-    out = {"request_id": _request_id(request_id), "name": _text(body, "name", max_len=120),
-           "business_number": digits, "contact_name": _text(body, "contact_name"),
-           "email": _text(body, "email"), "phone": _text(body, "phone")}
-    if not 1 <= len(out["name"]) <= 120:
-        raise CompatRefusal("bad_name", "name must be 1..120 characters", 422)
+    lim = PG_TEXT_LIMITS
+    out = {"request_id": _request_id(request_id),
+           "name": _text(body, "name", required=True, max_len=lim["partner_name"]),
+           "business_number": digits, "contact_name": _text(body, "contact_name", max_len=lim["contact_name"]),
+           "email": _text(body, "email", max_len=lim["email"]), "phone": _text(body, "phone", max_len=lim["phone"])}
     if partner_id is not None:
-        out["partner_id"], out["expected_version"] = partner_id, expected_version
+        out["partner_id"] = _entity_id(partner_id, "bad_partner_id")
+        out["expected_version"] = _int(expected_version, "version", 1, 2**31 - 1)
     return out
 
 
@@ -153,9 +188,7 @@ def quote_create(body: dict, request_id: str) -> dict:
     vat = body.get("vat_mode", "taxable")
     if not isinstance(vat, str) or vat not in ("taxable", "exempt"):
         raise CompatRefusal("bad_vat_mode", "vat_mode must be taxable or exempt", 422)
-    title = body.get("title")
-    if not isinstance(title, str) or not 1 <= len(title) <= 150:
-        raise CompatRefusal("bad_title", "title must be 1..150 characters", 422)
+    title = _name(body.get("title"), "bad_title", PG_TEXT_LIMITS["quote_title"])
     return {"request_id": _request_id(request_id), "partner_id": _text(body, "customer_id", required=True, max_len=64),
             "title": title, "vat_mode": vat, "items": _items(body.get("items"))}
 
@@ -169,9 +202,7 @@ def quote_update(body: dict, request_id: str, *, expected_version: int,
         raise CompatRefusal("pg_quote_partner_is_immutable", "the customer of an existing quote cannot change")
     if body.get("vat_mode") not in (None, current_vat_mode):
         raise CompatRefusal("pg_quote_vat_mode_is_immutable", "the VAT mode of an existing quote cannot change")
-    title = body.get("title")
-    if not isinstance(title, str) or not 1 <= len(title) <= 150:
-        raise CompatRefusal("bad_title", "title must be 1..150 characters", 422)
+    title = _name(body.get("title"), "bad_title", PG_TEXT_LIMITS["quote_title"])
     return {"request_id": _request_id(request_id), "expected_version": _int(expected_version, "version", 1, 2**31 - 1),
             "title": title, "items": _items(body.get("items"))}
 
@@ -218,7 +249,7 @@ def order_from_quote(body: dict, request_id: str) -> dict:
 def payment_for_invoice(body: dict, request_id: str, *, today: date | None = None) -> dict:
     """POST /api/invoices/{id}/payments -> POST {pg}/invoices/{id}/payments. ``note`` has no PG column."""
     body = _body(body)
-    if body.get("note"):
+    if body.get("note") not in (None, ""):      # same rule as due_date: 0/False/[] are values too
         raise CompatRefusal("note_not_stored_in_pg", "cinema_pg_payments has no note column")
     paid = body.get("paid_at")
     paid_on = paid.isoformat() if isinstance(paid, date) else paid
@@ -231,7 +262,8 @@ def payment_for_invoice(body: dict, request_id: str, *, today: date | None = Non
     if paid_date > (today or date.today()):
         raise CompatRefusal("future_payment", "PG refuses a payment dated in the future", 422)
     return {"request_id": _request_id(request_id), "amount_krw": _int(body.get("amount"), "amount", 1, 100_000_000_000),
-            "paid_on": paid_on, "reference": _text(body, "reference", max_len=120)}
+            "paid_on": paid_on,
+            "reference": _text(body, "reference", required=True, max_len=PG_TEXT_LIMITS["payment_reference"])}
 
 
 # --------------------------------------------------- steps with NO honest PG equivalent

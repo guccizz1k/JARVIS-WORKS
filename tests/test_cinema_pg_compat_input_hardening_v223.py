@@ -2,6 +2,9 @@
 malformed request body is a 4xx refusal, never an unhandled exception (a route would turn that into a 500)."""
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 
 from app import pg_cinema_compat_v1 as cm
@@ -107,12 +110,89 @@ def test_impossible_or_odd_payment_date_is_a_refusal_not_a_crash(paid):
 
 
 def test_reference_is_never_silently_truncated():
-    ok = cm.payment_for_invoice({"amount": 10, "paid_at": "2026-11-01", "reference": "r" * 120}, RID)
-    assert ok["reference"] == "r" * 120
-    assert refusal(cm.payment_for_invoice, {"amount": 10, "paid_at": "2026-11-01", "reference": "r" * 121}, RID).http_status == 422
+    # the engine CHECK is length(btrim(reference)) BETWEEN 1 AND 80; 81+ must be a 422 here, not a PG 502
+    ok = cm.payment_for_invoice({"amount": 10, "paid_at": "2026-11-01", "reference": "r" * 80}, RID)
+    assert ok["reference"] == "r" * 80
+    assert refusal(cm.payment_for_invoice, {"amount": 10, "paid_at": "2026-11-01", "reference": "r" * 81}, RID).http_status == 422
     assert refusal(cm.payment_for_invoice, {"amount": 10, "paid_at": "2026-11-01", "reference": 77}, RID).http_status == 422
 
 
 def test_amount_must_be_a_plain_integer():
     for amount in (True, 10.5, "10", None, [10]):
-        assert refusal(cm.payment_for_invoice, {"amount": amount, "paid_at": "2026-11-01"}, RID).http_status == 422
+        assert refusal(cm.payment_for_invoice, {"amount": amount, "paid_at": "2026-11-01", "reference": "R"},
+                       RID).code in ("not_integer_krw", "out_of_range")
+
+
+# ------------------------------------------------------------- V22.3 QA: values the engine would refuse
+ENGINE = (Path(__file__).resolve().parents[1] / "scripts/review/cinema_pg_write_engine.sql").read_text()
+
+
+@pytest.mark.parametrize("key,pattern", [
+    ("partner_name", r"name text NOT NULL CHECK\(length\(btrim\(name\)\) BETWEEN 1 AND (\d+)\),\n  business_number"),
+    ("contact_name", r"contact_name text NOT NULL DEFAULT '' CHECK\(length\(contact_name\)<=(\d+)\)"),
+    ("email", r"email text NOT NULL DEFAULT '' CHECK\(length\(email\)<=(\d+)\)"),
+    ("phone", r"phone text NOT NULL DEFAULT '' CHECK\(length\(phone\)<=(\d+)\)"),
+    ("quote_title", r"title text NOT NULL CHECK\(length\(btrim\(title\)\) BETWEEN 1 AND (\d+)\)"),
+    ("payment_reference", r"reference text NOT NULL CHECK\(length\(btrim\(reference\)\) BETWEEN 1 AND (\d+)\)"),
+])
+def test_text_limits_match_the_engine_checks(key, pattern):
+    m = re.search(pattern, ENGINE)
+    assert m, f"engine CHECK for {key} drifted"
+    assert cm.PG_TEXT_LIMITS[key] == int(m.group(1))
+
+
+@pytest.mark.parametrize("field,limit", [("contact_name", 80), ("email", 254), ("phone", 40)])
+def test_partner_optional_text_obeys_engine_limit(field, limit):
+    ok = cm.partner_from_customer({"name": "N", field: "x" * limit}, RID)
+    assert ok[field] == "x" * limit
+    assert refusal(cm.partner_from_customer, {"name": "N", field: "x" * (limit + 1)}, RID).code == "bad_" + field
+
+
+@pytest.mark.parametrize("bad", ["a\x00b", "   ", "\ud800", "", "x" * 151, 5, None])
+def test_quote_title_engine_would_refuse_is_422(bad):
+    for fn, kw in ((cm.quote_create, {}),
+                   (cm.quote_update, {"expected_version": 1, "current_partner_id": "p", "current_vat_mode": "taxable"})):
+        assert refusal(fn, {"customer_id": "p", "title": bad, "items": ITEMS}, RID, **kw).code == "bad_title"
+
+
+@pytest.mark.parametrize("bad", ["\x00", "  ", "\udfff", "", "n" * 151])
+def test_line_name_engine_would_refuse_is_422(bad):
+    items = [{"name": bad, "quantity": 1, "unit_price": 1}]
+    assert refusal(cm.quote_create, {"customer_id": "p", "title": "T", "items": items}, RID).code == "bad_items"
+
+
+@pytest.mark.parametrize("bad", ["   ", "\ud800", "a\x00"])
+def test_partner_name_engine_would_refuse_is_422(bad):
+    assert refusal(cm.partner_from_customer, {"name": bad}, RID).code == "bad_name"
+
+
+@pytest.mark.parametrize("pid,ver", [(5, 1), ("", 1), ("p\n1", 1), ("p" * 65, 1),
+                                     ("pa-1", "3"), ("pa-1", True), ("pa-1", 0), ("pa-1", 2**31)])
+def test_partner_update_id_and_version_are_validated(pid, ver):
+    assert refusal(cm.partner_from_customer, {"name": "N"}, RID, partner_id=pid, expected_version=ver).http_status == 422
+
+
+@pytest.mark.parametrize("ref", [None, "", "   ", "r\x00", "\ud800", 7])
+def test_payment_reference_is_required_like_the_engine(ref):
+    assert refusal(cm.payment_for_invoice, {"amount": 1, "paid_at": "2026-11-01", "reference": ref}, RID).code == \
+        "bad_reference"
+
+
+@pytest.mark.parametrize("note", [0, False, [], {}, "x", " "])
+def test_payment_note_values_are_refused_not_dropped(note):
+    body = {"amount": 1, "paid_at": "2026-11-01", "reference": "R", "note": note}
+    assert refusal(cm.payment_for_invoice, body, RID).code == "note_not_stored_in_pg"
+
+
+@pytest.mark.parametrize("args", [
+    ("o", "u", "r", ["k"] * 8), ("o", "u", "r", 12345678), ("o", "u", "r", "\ud800" * 8),
+    ("o", "u", "r", "k\x00" * 4), ("o", "u", "r", "k" * 257), (None, "u", "r", "k" * 8),
+    ("o", 7, "r", "k" * 8), ("o", "u", "", "k" * 8), ("\udfff", "u", "r", "k" * 8),
+])
+def test_request_id_derivation_refuses_instead_of_crashing(args):
+    assert refusal(cm.derive_request_id, *args).http_status == 400
+
+
+def test_request_id_derivation_still_stable():
+    a = cm.derive_request_id("o", "u", "r", "key-12345")
+    assert a == cm.derive_request_id("o", "u", "r", "key-12345") and a.startswith("compat:")
