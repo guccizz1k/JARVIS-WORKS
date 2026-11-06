@@ -14,8 +14,11 @@ and its 222-case test script):
     need a fabricated delivery and statement. It is refused, never synthesised.
   * fields the PG tables have no column for (order ``due_date``, payment ``note``) are refused
     rather than discarded, because discarding would lose user data.
-  * statuses are mapped only where the meaning is the same; ``accepted`` means PG ``approved``,
-    which PG itself restricts to an admin other than the submitter.
+  * statuses are mapped only where the meaning is the same; ``accepted`` means PG ``approved``.
+    PG requires an ADMINISTRATOR for it but, measured on the engine SQL, does NOT stop the person
+    who submitted the quote from approving it (only delivery confirmation is DB-enforced as
+    "different person"). The two-person quote rule is therefore enforced HERE, fail-closed, until
+    the database constraint in docs/review/cinema-pg-v223-terms-and-two-person-proposal.md exists.
 
 Standard library only; no database, no FastAPI, no pydantic.
 """
@@ -136,13 +139,29 @@ def quote_update(body: dict, request_id: str, *, expected_version: int,
             "title": title, "items": _items(body.get("items"))}
 
 
-def quote_transition(body: dict, request_id: str, *, expected_version: int) -> dict:
-    """POST /api/quotes/{id}/status -> POST {pg}/quotes/{id}/transition."""
+def quote_transition(body: dict, request_id: str, *, expected_version: int,
+                     actor_id: str | None = None, submitted_by: str | None = None) -> dict:
+    """POST /api/quotes/{id}/status -> POST {pg}/quotes/{id}/transition.
+
+    Approving (legacy ``accepted``) needs the acting user and the quote's submitter: the same person
+    may not do both. Missing information is a refusal, never a pass."""
     legacy = body.get("status")
     if legacy not in QUOTE_STATUS_MAP:
         raise CompatRefusal("unknown_quote_status", "status must be sent, accepted or rejected", 422)
+    if legacy == "accepted":
+        quote_approval_guard(actor_id, submitted_by)
     return {"request_id": _request_id(request_id), "expected_version": _int(expected_version, "version", 1, 2**31 - 1),
             "to": QUOTE_STATUS_MAP[legacy]}
+
+
+def quote_approval_guard(actor_id: str | None, submitted_by: str | None) -> None:
+    """Two-person rule for quote approval (application level; the engine does not enforce it)."""
+    if not actor_id or not submitted_by:
+        raise CompatRefusal("quote_approval_identity_unknown",
+                            "the approver and the submitter must both be known to approve a quote", 409)
+    if actor_id == submitted_by:
+        raise CompatRefusal("quote_second_person_required",
+                            "a quote must be approved by a different administrator than the one who submitted it", 409)
 
 
 # ---------------------------------------------------------------------- orders / money
@@ -187,3 +206,36 @@ UNSUPPORTED = {
 def unsupported(step: str) -> CompatRefusal:
     code, detail = UNSUPPORTED[step]
     return CompatRefusal(code, detail, 409)
+
+
+# ------------------------------------------------------------ PG engine error -> stable refusal
+# (sqlstate, message fragment, code, http status, Korean user message). Each fragment and SQLSTATE
+# is copied from a RAISE in scripts/review/cinema_pg_write_engine.sql; a test fails if the engine
+# text drifts. Anything not listed becomes a generic 502 WITHOUT the raw database message.
+PG_ERROR_MAP = (
+    ("42501", "approver must differ from the person who recorded the delivery", "delivery_second_person_required", 409,
+     "납품 확정은 납품을 기록한 사람과 다른 관리자가 해야 합니다."),
+    ("42501", "administrator approval role required", "admin_required", 403, "관리자 권한이 필요합니다."),
+    ("42501", "valid session required", "session_required", 401, "로그인이 필요합니다."),
+    ("40001", "version is stale", "stale_version", 409, "다른 사용자가 먼저 수정했습니다. 새로 고침 후 다시 시도하세요."),
+    ("23505", "request id was already used for a different request", "idempotency_conflict", 409,
+     "같은 요청 번호가 다른 내용으로 이미 사용되었습니다."),
+    ("23505", "duplicate payment reference for this invoice", "duplicate_payment_reference", 409,
+     "이 청구서에 같은 입금 참조가 이미 있습니다."),
+    ("23514", "overpayment blocked", "overpayment", 409, "청구 잔액을 초과하는 입금입니다."),
+    ("23514", "payments require a confirmed invoice", "invoice_not_confirmed", 409, "확정된 청구서에만 입금을 기록할 수 있습니다."),
+    ("23514", "only an approved quote can become an order", "quote_not_approved", 409, "승인된 견적만 수주로 전환할 수 있습니다."),
+    ("23514", "delivery evidence file must be uploaded to the server first", "evidence_required", 422,
+     "납품 증빙 파일을 먼저 서버에 올려야 합니다."),
+    ("23514", "statements require a confirmed delivery", "delivery_not_confirmed", 409, "확정된 납품에서만 명세를 만들 수 있습니다."),
+    ("23514", "invoices require a confirmed statement", "statement_not_confirmed", 409, "확정된 명세에서만 청구서를 만들 수 있습니다."),
+    ("P0002", "not found", "not_found", 404, "대상을 찾을 수 없습니다."),
+)
+
+
+def map_pg_error(sqlstate: str, message: str) -> CompatRefusal:
+    """Translate an engine error into a stable refusal. Unknown errors never leak the raw message."""
+    for state, fragment, code, status, ko in PG_ERROR_MAP:
+        if sqlstate == state and fragment in (message or ""):
+            return CompatRefusal(code, ko, status)
+    return CompatRefusal("pg_engine_error", "the database refused the request", 502)

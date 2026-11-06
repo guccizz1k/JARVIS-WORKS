@@ -6,6 +6,9 @@ deliveries or statements.
 """
 from datetime import date
 
+import pathlib
+import re
+
 import pytest
 
 from app import pg_cinema_compat_v1 as cm
@@ -42,7 +45,8 @@ def test_quote_update_and_transition():
                           current_partner_id="pa-1", current_vat_mode="exempt")
     assert out["expected_version"] == 2 and "partner_id" not in out and "vat_mode" not in out
     assert cm.quote_transition({"status": "sent"}, RID, expected_version=1)["to"] == "submitted"
-    assert cm.quote_transition({"status": "accepted"}, RID, expected_version=1)["to"] == "approved"
+    assert cm.quote_transition({"status": "accepted"}, RID, expected_version=1,
+                               actor_id="admin-b", submitted_by="member-a")["to"] == "approved"
     assert cm.quote_transition({"status": "rejected"}, RID, expected_version=1)["to"] == "rejected"
     assert set(cm.QUOTE_STATUS_MAP.values()) <= cm.PG_QUOTE_TARGETS
 
@@ -158,3 +162,59 @@ def test_module_is_not_wired_into_the_app():
     users = [p.name for p in (root / "app").glob("*.py")
              if p.name != "pg_cinema_compat_v1.py" and "pg_cinema_compat_v1" in p.read_text(encoding="utf-8")]
     assert users == [], "wiring the module is a separate, approved step"
+
+
+# --------------------------------------------------- two-person quote approval (application level)
+@pytest.mark.parametrize("actor, submitter", [
+    ("u1", "u1"),            # the submitter approving their own quote
+    (None, "u1"), ("u1", None), (None, None), ("", "u1"), ("u1", ""),   # unknown identity fails closed
+])
+def test_quote_cannot_be_approved_by_its_submitter_or_without_knowing_who(actor, submitter):
+    e = refused(cm.quote_transition, {"status": "accepted"}, RID, expected_version=1,
+                actor_id=actor, submitted_by=submitter)
+    assert e.code in ("quote_second_person_required", "quote_approval_identity_unknown") and e.http_status == 409
+
+
+def test_second_person_rule_applies_only_to_approval():
+    for legacy, pg in (("sent", "submitted"), ("rejected", "rejected")):
+        assert cm.quote_transition({"status": legacy}, RID, expected_version=1)["to"] == pg
+    assert cm.quote_transition({"status": "accepted"}, RID, expected_version=3,
+                               actor_id="a", submitted_by="b")["expected_version"] == 3
+
+
+def test_module_documents_that_the_engine_does_not_enforce_quote_two_person_rule():
+    # Guards against re-introducing the false claim that PG itself stops self-approval.
+    assert "does NOT stop" in cm.__doc__
+
+
+# ------------------------------------------------------------------- PG error -> stable refusal
+ENGINE = (pathlib.Path(__file__).resolve().parents[1] / "scripts/review/cinema_pg_write_engine.sql").read_text()
+
+
+@pytest.mark.parametrize("state, fragment, code, status, ko", cm.PG_ERROR_MAP)
+def test_every_mapped_engine_message_exists_with_the_same_sqlstate(state, fragment, code, status, ko):
+    lines = [l for l in ENGINE.splitlines() if "RAISE EXCEPTION" in l and fragment in l]
+    assert lines, f"engine no longer raises {fragment!r}: update PG_ERROR_MAP"
+    assert all(f"ERRCODE='{state}'" in l for l in lines), (fragment, lines)
+    err = cm.map_pg_error(state, "ERROR: " + fragment)
+    assert (err.code, err.http_status) == (code, status) and err.detail == ko and ko
+
+
+def test_map_codes_are_unique_and_ascii_snake_case():
+    codes = [row[2] for row in cm.PG_ERROR_MAP]
+    assert len(codes) == len(set(codes))
+    assert all(re.fullmatch(r"[a-z][a-z_]+", c) for c in codes)
+
+
+def test_unknown_or_mismatched_engine_errors_become_502_without_the_raw_message():
+    raw = "ERROR: relation jw_dev.secret_table does not exist at character 17"
+    e = cm.map_pg_error("42P01", raw)
+    assert (e.code, e.http_status) == ("pg_engine_error", 502) and "secret_table" not in e.detail
+    # right words, wrong SQLSTATE: must not be classified
+    assert cm.map_pg_error("23514", "approver must differ from the person who recorded the delivery").code == "pg_engine_error"
+    assert cm.map_pg_error("42501", None).code == "pg_engine_error"
+
+
+def test_delivery_second_person_message_maps_to_a_waiting_for_another_person_code():
+    e = cm.map_pg_error("42501", "approver must differ from the person who recorded the delivery")
+    assert e.code == "delivery_second_person_required" and e.http_status == 409

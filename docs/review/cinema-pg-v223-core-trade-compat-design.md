@@ -37,16 +37,22 @@ with the formal PG procedure has been verified.
 | READ (8) | the list/read routes | generic PG listing; there is no get-by-id route yet, so a thin filter or a new read function is needed |
 | GAP (8) | invoice from order, statement from order, order edit / acknowledge / status, 3 adjustment routes | **stay on the legacy SQLite route**; in a PG-backed mode they answer `409` with the codes in `UNSUPPORTED`. No synthesis |
 
-## Not decided yet (needs the owner)
-* **Cutover unit.** Customers, quotes, orders, invoices and payments reference each other. A
-  customer id from SQLite means nothing in PG and vice versa, so the unit that switches must be the
-  whole chain per organisation (or SQLite data must be migrated first). Is there SQLite data that has
-  to be carried over, or is it demo-only?
-* **Two missing fields.** Add `due_date` (orders) and `note` (payments) to PG - a development DB
-  schema change needing approval and a migration with rollback - or retire them from the PG mode?
-* **Who approves.** PG requires an admin other than the submitter to approve a quote and a second
-  user to confirm a delivery. The legacy UI lets one user do everything. In PG mode the UI will
-  need to show "waiting for a second person", which is a behaviour change the owner must accept.
+## Decisions (updated 2026-11-06 after the owner's F7 message)
+* **Cutover unit - decided:** one organisation's whole trade chain; existing SQLite data is preserved
+  and never copied into the PG chain with invented records. Details: `cinema-pg-v223-org-cutover-design.md`.
+* **`due_date` and payment `note` - decided to keep, not remove:** a PG schema proposal exists and is
+  behaviour-tested on a throw-away PG16; it is **not applied**. Details:
+  `cinema-pg-v223-terms-and-two-person-proposal.md`. Until it is approved, the compat layer still refuses these
+  two fields rather than dropping them. The same document also covers the invoice **pay-by** date, which the
+  first version of this design had missed.
+* **Two-person approval - kept, with a correction.** An earlier version of this file said PG itself requires
+  an administrator *other than the submitter* to approve a quote. **That was wrong**: the engine checks only
+  the administrator role (delivery confirmation is the only database-enforced "different person" rule). The
+  quote rule is now enforced in the compat layer, fail-closed; a database constraint is proposed with its
+  measured impact on the 222-case gate.
+* **Still open for the owner:** administrator-only steps in PG versus "any signed-in user" in legacy (member
+  accounts would get 403 in a PG-home organisation); how PG ids are told apart from legacy ids in the UI
+  (both are 32-hex).
 
 ## Equivalence check that must pass before any step is switched
 For every ADAPT step run the same synthetic input through the legacy route and through the
