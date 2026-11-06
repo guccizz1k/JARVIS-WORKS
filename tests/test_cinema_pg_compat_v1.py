@@ -156,12 +156,16 @@ def test_request_id_is_stable_for_a_retry_and_distinct_otherwise():
     assert cm.derive_request_id("a", "b\x1fc", "r", "idem-key-0001") != cm.derive_request_id("a\x1fb", "c", "r", "idem-key-0001")
 
 
-def test_module_is_not_wired_into_the_app():
+def test_module_is_wired_only_through_the_gated_legacy_api():
+    # V22.3: wiring was approved as a separate step. The ONLY application user is the legacy-contract
+    # router, which mounts behind its own gate + the CINEMA trade gate, per-company allow-list default nobody.
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     users = [p.name for p in (root / "app").glob("*.py")
              if p.name != "pg_cinema_compat_v1.py" and "pg_cinema_compat_v1" in p.read_text(encoding="utf-8")]
-    assert users == [], "wiring the module is a separate, approved step"
+    assert users == ["pg_cinema_legacy_api_v1.py"]
+    assert "def register_legacy_api_v1" in (root / "app/pg_cinema_legacy_api_v1.py").read_text(encoding="utf-8")
+    assert "pg_cinema_legacy_api_v1" not in (root / "app/main.py").read_text(encoding="utf-8")
 
 
 # --------------------------------------------------- two-person quote approval (application level)

@@ -21,6 +21,7 @@ from . import pg_import_quote_v160 as import_quote
 from . import pg_invoice_balance_v161 as invoice_balance
 from . import pg_trade_lineage_v158 as trade_lineage
 from . import pg_cinema_register_v1 as cinema_trade
+from . import pg_cinema_legacy_api_v1 as cinema_legacy_api
 
 _MODE = "ISOLATED_DEV_PG_REVIEW_INTEGRATION"
 _REQUIRED = {
@@ -95,6 +96,9 @@ def preflight() -> None:
         raise RuntimeError("BLOCKED: invoice balance verification unavailable")
     if os.environ.get("JW_PG_CINEMA_TRADE_V1") and not cinema_trade.cinema_trade_enabled():
         raise RuntimeError("BLOCKED: CINEMA trade writer prerequisite gate denied")
+    if os.environ.get(cinema_legacy_api.GATE_ENV) and not (
+            cinema_legacy_api.legacy_api_gate_on() and cinema_trade.cinema_trade_enabled()):
+        raise RuntimeError("BLOCKED: legacy-contract PG API needs its own gate and the CINEMA trade gate")
 
 
 def create_app() -> FastAPI:
@@ -165,4 +169,8 @@ def create_app() -> FastAPI:
         cinema_trade.register_cinema_trade_v1,
     ):
         register(app)  # Modules independently fail closed on malformed opt-ins.
+    # V22.3: legacy UI contract on the PG engine. Own gate + CINEMA trade gate; per-company
+    # allow-list read per request, default nobody. Registered separately so the reviewed
+    # optional list above stays unchanged.
+    cinema_legacy_api.register_legacy_api_v1(app)
     return app

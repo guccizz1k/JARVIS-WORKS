@@ -1,7 +1,8 @@
 """Legacy (V22.2 UI) request -> PostgreSQL cinema-trade request translation. PURE LOGIC.
 
-Status: NOT WIRED INTO ANY ROUTE. Importing this module changes nothing in the running app, so
-the existing SQLite-backed behaviour is untouched. It is the first, testable piece of the
+Status (V22.3): wired ONLY through ``app/pg_cinema_legacy_api_v1.py``, which mounts behind its own gate and
+the CINEMA trade gate, with a per-company allow-list that is empty by default. ``app/main.py`` (SQLite) does
+not import it, so the existing SQLite-backed behaviour is untouched. It is the first, testable piece of the
 server-side compatibility layer (option A): it decides, for every field the V22.2 UI can send,
 whether it can be carried into the PostgreSQL engine EXACTLY, and refuses (with a stable code)
 when it cannot. Nothing is dropped silently and nothing is invented.
@@ -301,6 +302,8 @@ PG_ERROR_MAP = (
     ("23505", "duplicate payment reference for this invoice", "duplicate_payment_reference", 409,
      "이 청구서에 같은 입금 참조가 이미 있습니다."),
     ("23514", "overpayment blocked", "overpayment", 409, "청구 잔액을 초과하는 입금입니다."),
+    # found by the V22.3 HTTP E2E: editing a non-draft quote reached the user as a generic 502
+    ("23514", "only draft quotes can be edited", "quote_not_editable", 409, "초안 상태의 견적만 수정할 수 있습니다."),
     ("23514", "payments require a confirmed invoice", "invoice_not_confirmed", 409, "확정된 청구서에만 입금을 기록할 수 있습니다."),
     ("23514", "only an approved quote can become an order", "quote_not_approved", 409, "승인된 견적만 수주로 전환할 수 있습니다."),
     ("23514", "delivery evidence file must be uploaded to the server first", "evidence_required", 422,
@@ -320,9 +323,18 @@ PG_CONSTRAINT_ERRORS = (
 )
 
 
+# Unique INDEXES of the engine (not named constraints). Found by the V22.3 HTTP E2E: a second partner with the
+# same business number in one company was an unmapped 23505 and reached the user as a generic 502.
+# Each name must appear as ``CREATE UNIQUE INDEX <name>`` in the engine file; a test checks it.
+PG_UNIQUE_INDEX_ERRORS = (
+    ("23505", "cinema_pg_partner_bn_uq", "duplicate_business_number", 409,
+     "같은 사업자등록번호의 거래처가 이미 있습니다.", "scripts/review/cinema_pg_write_engine.sql"),
+)
+
+
 def map_pg_error(sqlstate: str, message: str) -> CompatRefusal:
     """Translate an engine error into a stable refusal. Unknown errors never leak the raw message."""
-    for state, name, code, status, ko, _file in PG_CONSTRAINT_ERRORS:
+    for state, name, code, status, ko, _file in PG_CONSTRAINT_ERRORS + PG_UNIQUE_INDEX_ERRORS:
         if sqlstate == state and f'"{name}"' in (message or ""):
             return CompatRefusal(code, ko, status)
     for state, fragment, code, status, ko in PG_ERROR_MAP:

@@ -1,0 +1,57 @@
+name: JW V22.3 legacy UI API on the CINEMA PG engine (HTTP E2E, disposable PG17)
+on:
+  push:
+    branches:
+      - candidate/jw-v223-pg-backup-restore-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v223-legacy-api-e2e-pg17:
+    name: Legacy routes -> compat -> engine, tenants A/B/C, two-person, idempotency, rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      e2e-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-e2e
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5435'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-v223-e2e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard and server version
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
+          python3 -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'show server_version' | tee /dev/stderr | grep -E '^17\.'
+      - name: Install test dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Offline router tests
+        run: python3 -m pytest -q -p no:cacheprovider tests/test_cinema_pg_legacy_api_v223.py tests/test_cinema_pg_compat_v1.py tests/test_cinema_pg_compat_input_hardening_v223.py tests/test_cinema_pg_compat_view_v223.py
+      - name: HTTP E2E on PostgreSQL 17 (exactly 74 checks)
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_legacy_api_e2e_v223 | tee legacy-api-e2e.log
+          grep -E '^PASS: 74 checks, 0 failed, expected exactly 74$' legacy-api-e2e.log
+          echo 'SYNTHETIC ONLY: disposable PG17; production TLS path, browser, HTTPS and Supabase NOT exercised.'

@@ -432,11 +432,11 @@ def test_non_object_and_bad_vat_mode_fail_closed():
         vw.quote_view({**SHAPES["quote_approved"], "vat_mode": "zero"}, partner_name=NAME)
 
 
-# ------------------------------------------------------------------------------- not wired
-def test_view_module_is_not_imported_by_any_application_module():
-    for f in (ROOT / "app").glob("*.py"):
-        if f.name != "pg_cinema_compat_view_v1.py":
-            assert "pg_cinema_compat_view_v1" not in f.read_text(encoding="utf-8"), f.name
+# ------------------------------------------------------------- wired only through the gated legacy API
+def test_view_module_is_imported_only_by_the_gated_legacy_api():
+    users = [f.name for f in (ROOT / "app").glob("*.py") if f.name != "pg_cinema_compat_view_v1.py"
+             and "pg_cinema_compat_view_v1" in f.read_text(encoding="utf-8")]
+    assert users == ["pg_cinema_legacy_api_v1.py"]
 
 
 def test_the_legacy_ddl_parser_really_reads_the_columns_it_is_compared_against():

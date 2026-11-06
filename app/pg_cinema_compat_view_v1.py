@@ -1,4 +1,5 @@
-"""PostgreSQL engine entity -> legacy (V22.2 UI) response shape. PURE LOGIC, NOT WIRED INTO ANY ROUTE.
+"""PostgreSQL engine entity -> legacy (V22.2 UI) response shape. PURE LOGIC.
+Used only by the gated ``app/pg_cinema_legacy_api_v1.py`` (V22.3); ``app/main.py`` does not import it.
 
 The V22.2 UI keeps working unchanged only if a PG-home document looks exactly like a legacy one. This
 module builds those shapes and refuses (``ViewError``) instead of inventing a value when the engine did
