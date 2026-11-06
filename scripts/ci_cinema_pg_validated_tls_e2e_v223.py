@@ -100,6 +100,7 @@ def real_build_app():
     must(trade.register_cinema_trade_v1(app), "TRADE_REGISTERED")
     must(legacy.register_legacy_api_v1(app), "VALIDATED_LEGACY_REGISTERED")
     paths = {getattr(route, "path", "") for route in app.routes}
+    print("JW_V223_REGISTERED_PATHS", json.dumps(sorted(paths)))
     must("/api/quotes" in paths and "/api/orders/from-quote" in paths, "LEGACY_PATHS_REGISTERED")
     return app
 
