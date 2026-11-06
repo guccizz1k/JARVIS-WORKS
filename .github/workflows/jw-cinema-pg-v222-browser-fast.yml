@@ -1,0 +1,77 @@
+name: JW V22.2 fast isolated native Chrome root acceptance
+# Dedicated read-only UI QA. Reuse runner-installed Chrome to avoid browser downloads.
+# Does not deploy or connect to Supabase, Render, or any external business DB.
+on:
+  push:
+    branches:
+      - candidate/jw-v222-browser-fast-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-root-native-chrome:
+    name: V22.2 / real browser, synthetic login, routes, MP4, measured perf
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+      JW_USE_SYSTEM_CHROME: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-browser-fast-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm exact original ancestor, protected app, and only QA-file changes
+        run: |
+          set -euo pipefail
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- app/ db/ tests/
+          python3 - <<'PY'
+          import subprocess
+          base='19c5a6771b8d0925d1bb32d0119f6ad186b57fd4'
+          allowed={'.github/workflows/jw-cinema-pg-v222-sha-qa.yml',
+                   '.github/workflows/jw-cinema-pg-v222-browser-fast.yml',
+                   'scripts/ci_cinema_pg_v222_root_browser.py'}
+          actual=set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines())
+          print('Changed QA files:',sorted(actual))
+          assert actual <= allowed, sorted(actual-allowed)
+          PY
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Use runner-installed Chrome and install only Python application dependencies
+        run: |
+          set -euo pipefail
+          command -v google-chrome
+          google-chrome --version
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg
+          fi
+          python3 -m pip install --disable-pip-version-check -r requirements.txt \
+            'pytest>=8,<10' 'pytest-asyncio>=0.24,<2' 'httpx>=0.27,<1' \
+            'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' 'reportlab>=4,<5' 'pillow>=10'
+          python3 -c "from playwright.sync_api import sync_playwright; print('Playwright import OK')"
+          ffprobe -version | head -1
+      - name: Run actual root acceptance with strict CSP, native Chrome, verified MP4
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v222_root_browser
+      - name: Preserve exact evidence SHA-256 and failure records
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v222-root-browser
+          find artifacts/v222-root-browser -type f ! -path '*/raw-video/*' -print0 | sort -z | xargs -0 -r sha256sum > jw-v222-native-chrome-sha256.txt
+          cat jw-v222-native-chrome-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-native-chrome-real-root-evidence
+          path: |
+            artifacts/v222-root-browser/
+            !artifacts/v222-root-browser/raw-video/
+            jw-v222-native-chrome-sha256.txt
+          retention-days: 5

@@ -664,7 +664,12 @@ def main() -> int:
                "root_ui_candidate": "JW_ROOT_UI=v222", "budgets_PROVISIONAL_UNCALIBRATED": BUDGET,
                "viewports": {}}
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True, args=["--no-sandbox"])
+        # Use the GitHub-hosted Ubuntu runner's preinstalled Chrome for isolated
+        # CI when requested. Default remains Playwright's Chromium everywhere else.
+        launch_options = {"headless": True, "args": ["--no-sandbox"]}
+        if os.environ.get("JW_USE_SYSTEM_CHROME") == "1":
+            launch_options["channel"] = "chrome"
+        browser = pw.chromium.launch(**launch_options)
         results["chromium"] = browser.version
         try:
             with c.section("entry"):
