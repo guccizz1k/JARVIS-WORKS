@@ -102,7 +102,15 @@ def real_build_app():
     print("JW_V223_AFTER_TRADE", len(app.routes), len(app.router.routes), flush=True)
     must(legacy.register_legacy_api_v1(app), "VALIDATED_LEGACY_REGISTERED")
     print("JW_V223_AFTER_LEGACY", len(app.routes), len(app.router.routes), flush=True)
-    paths = {getattr(route, "path", "") for route in app.routes}
+    def nested_paths(routes):
+        for route in routes:
+            p = getattr(route, "path", None)
+            if p:
+                yield p
+            children = getattr(route, "routes", None)
+            if children is not None:
+                yield from nested_paths(children)
+    paths = set(nested_paths(app.routes))
     print("JW_V223_REGISTERED_PATHS", json.dumps(sorted(paths)))
     must("/api/quotes" in paths and "/api/orders/from-quote" in paths, "LEGACY_PATHS_REGISTERED")
     return app
