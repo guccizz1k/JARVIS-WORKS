@@ -97,8 +97,11 @@ def prepare():
 def real_build_app():
     prepare()
     app = FastAPI()
+    print("JW_V223_BEFORE_REGISTRATION", len(app.routes), len(app.router.routes), type(app).__name__, flush=True)
     must(trade.register_cinema_trade_v1(app), "TRADE_REGISTERED")
+    print("JW_V223_AFTER_TRADE", len(app.routes), len(app.router.routes), flush=True)
     must(legacy.register_legacy_api_v1(app), "VALIDATED_LEGACY_REGISTERED")
+    print("JW_V223_AFTER_LEGACY", len(app.routes), len(app.router.routes), flush=True)
     paths = {getattr(route, "path", "") for route in app.routes}
     print("JW_V223_REGISTERED_PATHS", json.dumps(sorted(paths)))
     must("/api/quotes" in paths and "/api/orders/from-quote" in paths, "LEGACY_PATHS_REGISTERED")
