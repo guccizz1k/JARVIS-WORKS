@@ -707,3 +707,50 @@ def test_mark_target_command_needs_a_long_token_and_never_prints_the_password(mo
 def test_settable_other_roles_accepts_only_a_real_false(odd):
     # Anything that is not the boolean False (a driver returning 0 / 't' / '') fails closed.
     assert "settable_other_roles" in pb.evaluate_source_privileges({**GOOD_ROLE, "settable_other_roles": odd})
+
+
+# F7: negative-test artifacts must be streamed; large real dumps must never be
+# read into RAM just to flip one ciphertext byte or truncate a copy.
+@pytest.mark.parametrize("size", [0, 1, pb.CHUNK + 5, 3 * pb.CHUNK + 53])
+def test_negative_cipher_copies_are_private_and_fail_authentication(tmp_path, key, size):
+    plaintext = make(tmp_path, size)
+    enc = tmp_path / "enc"
+    pb.encrypt_file(plaintext, enc, key)
+    digest_before = __import__("hashlib").sha256(enc.read_bytes()).hexdigest()
+    for kind in ("tamper", "truncation"):
+        bad = tmp_path / kind
+        pb.write_negative_cipher_copy(enc, bad, kind)
+        assert bad.stat().st_mode & 0o777 == 0o600
+        with pytest.raises(pb.BackupError):
+            pb.decrypt_file(bad, tmp_path / f"{kind}.plain", key)
+    assert __import__("hashlib").sha256(enc.read_bytes()).hexdigest() == digest_before
+
+
+def test_negative_artifact_helpers_do_not_use_path_read_bytes(tmp_path, key, monkeypatch):
+    src = make(tmp_path, 2 * pb.CHUNK + 37)
+    enc, partial = tmp_path / "enc", tmp_path / "partial"
+    pb.encrypt_file(src, enc, key)
+    def no_read_bytes(self):
+        raise AssertionError("negative-test helper attempted whole-file read_bytes")
+    monkeypatch.setattr(pb.Path, "read_bytes", no_read_bytes)
+    pb.write_negative_cipher_copy(enc, tmp_path / "tamper", "tamper")
+    pb.write_negative_cipher_copy(enc, tmp_path / "cut", "truncation")
+    pb.write_partial_restore_copy(src, partial)
+    assert partial.stat().st_size == src.stat().st_size * 6 // 10
+    assert partial.stat().st_mode & 0o777 == 0o600
+
+
+def test_negative_artifact_fail_closed_no_unsafe_overwrite(tmp_path, key):
+    src = make(tmp_path, 50)
+    enc = tmp_path / "enc"
+    pb.encrypt_file(src, enc, key)
+    existing = tmp_path / "existing"
+    existing.write_bytes(b"preserve")
+    with pytest.raises(pb.BackupError, match="OUTPUT_EXISTS"):
+        pb.write_negative_cipher_copy(enc, existing, "tamper")
+    assert existing.read_bytes() == b"preserve"
+    with pytest.raises(pb.BackupError, match="UNKNOWN_NEGATIVE_TEST"):
+        pb.write_negative_cipher_copy(enc, tmp_path / "bad", "unknown")
+    with pytest.raises(pb.BackupError, match="OUTPUT_EXISTS"):
+        pb.write_partial_restore_copy(src, existing)
+    assert existing.read_bytes() == b"preserve"

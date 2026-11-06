@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -153,6 +154,59 @@ def decrypt_file(src: Path, dst: Path, key: bytes) -> str:
         Path(dst).unlink(missing_ok=True)
         raise
     return digest.hexdigest()
+
+
+def write_negative_cipher_copy(src: Path, dst: Path, kind: str) -> None:
+    """Make a corrupt 0600 ciphertext copy without loading the entire file into RAM."""
+    src, dst = Path(src), Path(dst)
+    if kind not in ("tamper", "truncation"):
+        raise BackupError("BLOCKED_V223_UNKNOWN_NEGATIVE_TEST")
+    payload_offset = len(MAGIC) + 4 + 4
+    size = src.stat().st_size
+    if size <= payload_offset:
+        raise BackupError("BLOCKED_V223_ENCRYPTED_ARTIFACT_TOO_SHORT")
+    created = False
+    try:
+        with open(src, "rb") as original, _open_new(dst) as output:
+            created = True
+            shutil.copyfileobj(original, output, length=CHUNK)
+            if kind == "tamper":
+                original.seek(payload_offset)
+                byte = original.read(1)
+                if len(byte) != 1:
+                    raise BackupError("BLOCKED_V223_ENCRYPTED_ARTIFACT_TOO_SHORT")
+                output.seek(payload_offset)
+                output.write(bytes([byte[0] ^ 1]))
+            else:
+                output.truncate(max(0, size - 40))
+            output.flush()
+            os.fsync(output.fileno())
+    except BaseException:
+        if created:
+            dst.unlink(missing_ok=True)
+        raise
+
+
+def write_partial_restore_copy(src: Path, dst: Path) -> None:
+    """Write a 60%-length damaged custom-format dump using bounded buffers."""
+    src, dst = Path(src), Path(dst)
+    remaining = src.stat().st_size * 6 // 10
+    created = False
+    try:
+        with open(src, "rb") as original, _open_new(dst) as output:
+            created = True
+            while remaining > 0:
+                block = original.read(min(CHUNK, remaining))
+                if not block:
+                    raise BackupError("BLOCKED_V223_PARTIAL_DUMP_SOURCE_TRUNCATED")
+                output.write(block)
+                remaining -= len(block)
+            output.flush()
+            os.fsync(output.fileno())
+    except BaseException:
+        if created:
+            dst.unlink(missing_ok=True)
+        raise
 
 
 # ---------------------------------------------------------------------- DSN guards
@@ -704,13 +758,10 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
         summary["dump_bytes"] = plain.stat().st_size
         plain.unlink()
         # negative tests on the ENCRYPTED artifact (never on the only copy)
-        data = bytearray(enc.read_bytes())
-        for label, mutate in (("tamper_rejected", lambda d: d.__setitem__(len(d) // 2, d[len(d) // 2] ^ 1)),
-                              ("truncation_rejected", lambda d: d.__delitem__(slice(-40, None)))):
-            copy = bytearray(data)
-            mutate(copy)
+        for label, kind in (("tamper_rejected", "tamper"),
+                            ("truncation_rejected", "truncation")):
             bad = work / f"{nonce}.{label}"
-            bad.write_bytes(bytes(copy))
+            write_negative_cipher_copy(enc, bad, kind)
             try:
                 decrypt_file(bad, work / f"{nonce}.{label}.out", key)
                 summary[label] = False
@@ -751,7 +802,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
         # TOC can be intact. Demand a failed REAL restore into another isolated
         # disposable database; never use --list as a proxy for restore success.
         half = work / f"{nonce}.half"
-        half.write_bytes(back.read_bytes()[: back.stat().st_size * 6 // 10])
+        write_partial_restore_copy(back, half)
         bad_restore_db = f"{restore_db}_truncated"
         with psycopg.connect(target_admin_dsn, autocommit=True) as admin:
             admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(bad_restore_db)))
