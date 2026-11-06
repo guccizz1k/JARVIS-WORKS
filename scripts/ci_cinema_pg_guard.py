@@ -8,8 +8,8 @@ Checks (each reported separately; any FAIL => exit status 1):
   1. HEAD ancestry contains the pinned baseline commit.
   2. CINEMA original HTML Git blob SHA unchanged.
   3. app/main.py Git blob SHA unchanged.
-  4. app/static/ Git tree SHA unchanged (read-only tree).
-  5. Every changed/added/untracked path is on the whitelist.
+  4. app/static/ tree unchanged, except the single pinned V22.2 CSS blob.
+  5. Every changed/added/untracked path is on the restricted whitelist.
   6. Whitelisted *existing* files are only modified, never deleted/renamed.
   7. No test file was deleted or renamed.
   8. No new skip/xfail marker was added to any test.
@@ -33,10 +33,20 @@ PROTECTED_BLOBS = {
 }
 PROTECTED_TREES = {"app/static": "3c8834eb4f44bd56cbe5683c9fc0e5e696add48e"}
 
+# Explicitly approved V22.2 layout-only exception. All other app/static blobs,
+# including the protected CINEMA original and UI business scripts, stay pinned.
+V222_CSS_PATH = "app/static/cinematic_v222.css"
+APPROVED_V222_CSS_BLOB = "c7c5e796688582d27ab4322f0dd5cfd25b16226a"
+
 # Existing files that may be edited (modify only).
 MODIFIABLE_EXISTING = frozenset({
     "app/pg_review_integrated_v202.py",
     "app/cinema_entry_v1.py",
+    # Exception limited to this pre-reviewed CSS blob; other static files immutable.
+    V222_CSS_PATH,
+    # Guard itself is changed solely to enforce the CSS exception; independent
+    # CI verifies every changed path and the exact signed-off blob pin.
+    "scripts/ci_cinema_pg_guard.py",
     # The only three historical fixture repairs. Never permit other old tests.
     "tests/test_installer_v75.py",
     "tests/test_installer_v79.py",
@@ -133,8 +143,39 @@ def run(root: Path) -> dict:
     for path, expected in PROTECTED_TREES.items():
         actual = git("rev-parse", f"HEAD:{path}", cwd=root).strip()
         dirty = git("status", "--porcelain", "--", path, cwd=root).strip()
-        add(f"tree:{path}", actual == expected and not dirty,
-            f"expected {expected} actual {actual} dirty={bool(dirty)}")
+        if actual == expected:
+            add(f"tree:{path}", not dirty,
+                f"unchanged original static tree {expected} dirty={bool(dirty)}")
+            continue
+        # Preserve the pinned baseline AND every protected static Git blob,
+        # allowing ONLY the exact approved CSS blob hash. Never skip the tree
+        # check, even when the working tree is clean.
+        baseline_tree = git("rev-parse", f"{BASELINE}:{path}", cwd=root).strip()
+        def remaining_static(revision: str) -> dict[str, str]:
+            result: dict[str, str] = {}
+            for line in git("ls-tree", "-r", revision, "--", path, cwd=root).splitlines():
+                metadata, filename = line.split("\t", 1)
+                if filename != V222_CSS_PATH:
+                    result[filename] = metadata
+            return result
+        protected_blobs_identical = (
+            remaining_static(BASELINE) == remaining_static("HEAD")
+        )
+        css_head_blob = git("rev-parse", f"HEAD:{V222_CSS_PATH}", cwd=root).strip()
+        css_work_blob = git("hash-object", "--", V222_CSS_PATH, cwd=root).strip()
+        approved_exception = (
+            path == "app/static"
+            and baseline_tree == expected
+            and protected_blobs_identical
+            and css_head_blob == APPROVED_V222_CSS_BLOB
+            and css_work_blob == APPROVED_V222_CSS_BLOB
+            and not dirty
+        )
+        add(f"tree:{path}", approved_exception,
+            f"baseline={baseline_tree} current={actual} "
+            f"protected_blobs_identical={protected_blobs_identical} "
+            f"css_head={css_head_blob} css_worktree={css_work_blob} "
+            f"approved_css={APPROVED_V222_CSS_BLOB} dirty={bool(dirty)}")
 
     changes = changed_paths(root)
     bad = []

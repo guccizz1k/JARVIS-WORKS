@@ -279,3 +279,35 @@ html[data-jw206-theme=dark]{
   padding-left:clamp(126px,9.25vw,168px);
  }
 }
+
+/* V22.2 desktop rail safety, scoped to the widths where live Chromium
+   geometry found the collapsed 77px rail overlapping first nav/main controls.
+   This affects only V22.2 presentation; original CINEMA HTML is unchanged. */
+@media (min-width:1100px) and (max-width:1499px) {
+ #app-shell:not(.hidden) .jw210-business-nav {
+  width:calc(100% - 208px)!important;
+  max-width:1480px!important;
+  margin-left:112px!important;
+  margin-right:96px!important;
+ }
+ #app-shell:not(.hidden) #main-content:not(:has(.jw210-home)) {
+  width:calc(100% - 208px)!important;
+  max-width:1550px!important;
+  margin-left:112px!important;
+  margin-right:96px!important;
+ }
+ /* Reduce costly software-GPU backdrop passes on mid-width PCs without
+    changing functional controls or removing the cinematic light language. */
+ #app-shell:not(.hidden) .jw210-business-nav {
+  backdrop-filter:blur(8px)!important;
+  -webkit-backdrop-filter:blur(8px)!important;
+ }
+ #app-shell:not(.hidden) .jw210-metric {
+  backdrop-filter:blur(6px)!important;
+  -webkit-backdrop-filter:blur(6px)!important;
+ }
+ .jw222-hero-float {
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+ }
+}
