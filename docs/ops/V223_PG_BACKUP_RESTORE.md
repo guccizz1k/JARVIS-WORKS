@@ -20,8 +20,13 @@ development database (`JW_PG_REAL_SOURCE=1`).
    snapshot; the tool does not claim zero.
 
 ## Safety rules enforced in code
-- Source must be `sslmode=verify-full` with `sslrootcert`, and
-  `JW_PG_EXPECT_SOURCE_HOST` must match the approved source host exactly;
+- Source must be `sslmode=verify-full` with `sslrootcert`. For a real source ALL of these must
+  agree with operator-supplied expectations, and are checked BEFORE `pg_dump` (a database that
+  fails is never dumped; only the names of failed checks are printed): host, port, Supabase
+  project ref (derived from the DSN: `db.<ref>.supabase.co` or pooler login `<role>.<ref>`),
+  database name and role (from the DSN AND the live session), server major >= 17, and a
+  schema-shape fingerprint of the live database (`IDENTITY_SQL` in the tool). A blank
+  expectation never matches, even against a blank value;
   target must be `localhost`,
   declared `JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE`, and not equal to the source.
 - `pg_dump`/`pg_restore` must be major version 17 or newer (PG16 clients are refused).
@@ -39,13 +44,23 @@ export JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE
 export JW_PG_BACKUP_KEY="$(python -c 'import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
 export JW_PG_REAL_SOURCE=1
 export JW_PG_EXPECT_SOURCE_HOST='<host-confirmed-in-supabase-dashboard>'
+export JW_PG_EXPECT_SOURCE_PORT='5432'
+export JW_PG_EXPECT_PROJECT_REF='<20-letter-project-ref-from-dashboard>'
+export JW_PG_EXPECT_DBNAME='postgres'
+export JW_PG_EXPECT_ROLE='<restricted-read-role>'
+export JW_PG_EXPECT_SCHEMA_FINGERPRINT='<see below>'
 python -m scripts.pg_backup_v223 run          # needs pg_dump/pg_restore 17 on PATH
 ```
 
-`JW_PG_EXPECT_SOURCE_HOST` must exactly equal the hostname of the approved `JW_PG_SOURCE_DSN`.
+`JW_PG_EXPECT_SCHEMA_FINGERPRINT` should come from a different channel than the DSN, e.g. run
+`IDENTITY_SQL` (replace `%(s)s` with `'jw_dev'`) through the Supabase management plane for the
+approved project and copy its last column. A database with a different shape, a different
+project ref, database or role fails before any dump is taken. Limits: a restored COPY of the
+real database has the same shape, so the project ref and host checks are what exclude it;
+and all expectations are still supplied by the operator, so they are only as independent as
+the channel they came from.
 A synthetic database cannot be accepted as the real development database solely by setting
-`JW_PG_REAL_SOURCE=1`; independent evidence tying the host/project to the approved
-Supabase development project is still required for product-level PASS.
+`JW_PG_REAL_SOURCE=1` or by copying its own values into the expectations.
 
 Use a read-only database role for the source if one can be created; the Supabase direct
 connection host may be IPv6-only on the Free plan, so a session-mode pooler address may be
@@ -54,7 +69,7 @@ Keep `JW_PG_BACKUP_KEY` somewhere other than the backup file.
 
 ## What has and has not been executed
 - Executed: `tests/test_v223_pg_backup.py` (encryption, guards, redaction, signature diff,
-  strict verdict rules) — DB-free logic only (19/19 PASS locally).
+  strict verdict rules, independent source identity) — DB-free logic only (35/35 PASS locally).
 - NOT RUN: the dump → restore → signature path against any PostgreSQL 17 (no Docker daemon,
   no PG17 client and no `psycopg` in the authoring environment). First run must happen on a
   disposable PG17 with a synthetic source; only then against the real development DB.

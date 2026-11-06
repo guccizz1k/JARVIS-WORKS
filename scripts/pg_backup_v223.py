@@ -298,6 +298,96 @@ def signature_digest(sig: dict) -> str:
     return hashlib.sha256(json.dumps(sig, sort_keys=True, default=str).encode()).hexdigest()
 
 
+# --------------------------------------------------------- independent source identity
+# A host name alone cannot prove which database was dumped (another database or role on the
+# same host, or a restored copy elsewhere, would look similar). A real-source run therefore
+# needs ALL of these to agree with expectations supplied out-of-band by the operator:
+#   host, port, Supabase project ref (derived from the DSN), database name and role (both
+#   from the DSN AND from the live session), server major >= 17, and a path-independent
+#   fingerprint of the live schema shape. The expected fingerprint should be computed
+#   through a different channel than the DSN (for example the Supabase management plane).
+IDENTITY_ENV = {
+    "host": "JW_PG_EXPECT_SOURCE_HOST", "port": "JW_PG_EXPECT_SOURCE_PORT",
+    "project_ref": "JW_PG_EXPECT_PROJECT_REF", "dbname": "JW_PG_EXPECT_DBNAME",
+    "role": "JW_PG_EXPECT_ROLE", "schema_fingerprint": "JW_PG_EXPECT_SCHEMA_FINGERPRINT",
+}
+IDENTITY_CHECKS = ("host", "port", "project_ref", "dbname", "role", "server_major",
+                   "schema_fingerprint")
+PROJECT_REF_RE = re.compile(r"[a-z]{20}")
+IDENTITY_SQL = """
+SELECT t.tables, t.force_rls, f.functions, g.triggers, t.tmd5, f.fmd5,
+       md5(concat_ws('|', t.tables, t.force_rls, f.functions, g.triggers, t.tmd5, f.fmd5))
+FROM (SELECT count(*) AS tables, count(*) FILTER (WHERE c.relforcerowsecurity) AS force_rls,
+             md5(coalesce(string_agg(c.relname, ',' ORDER BY c.relname), '')) AS tmd5
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = %(s)s AND c.relkind IN ('r','p')) t,
+     (SELECT count(*) AS functions,
+             md5(coalesce(string_agg(p.proname || '/' || p.pronargs, ','
+                 ORDER BY p.proname || '/' || p.pronargs), '')) AS fmd5
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = %(s)s AND p.prokind IN ('f','p')) f,
+     (SELECT count(*) AS triggers FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = %(s)s AND NOT tg.tgisinternal) g
+"""
+
+
+def project_ref_from_dsn(opts: dict) -> str:
+    """Direct host ``db.<ref>.supabase.co`` or pooler login ``<role>.<ref>``; else ''."""
+    match = re.fullmatch(r"db\.([a-z]{20})\.supabase\.co", opts.get("host", ""))
+    if not match:
+        match = re.fullmatch(r"[^.]+\.([a-z]{20})", opts.get("user", ""))
+    return match.group(1) if match else ""
+
+
+def dsn_role(opts: dict) -> str:
+    match = re.fullmatch(r"([^.]+)\.[a-z]{20}", opts.get("user", ""))
+    return match.group(1) if match else opts.get("user", "")
+
+
+def read_identity_expectations(environ: dict | None = None) -> dict:
+    env = os.environ if environ is None else environ
+    return {key: env.get(name, "").strip() for key, name in IDENTITY_ENV.items()}
+
+
+def fetch_live_identity(connection, schema: str) -> dict:
+    """SELECT-only facts about the live session; no names or row values are returned."""
+    check_schema(schema)
+    with connection.cursor() as cur:
+        cur.execute("SELECT current_database(), current_user, "
+                    "current_setting('server_version_num')::int / 10000")
+        dbname, user, major = cur.fetchone()
+        cur.execute(IDENTITY_SQL, {"s": schema})
+        fingerprint = cur.fetchone()[-1]
+    return {"dbname": dbname, "user": user, "major": int(major), "fingerprint": fingerprint}
+
+
+def check_source_identity(opts: dict, live: dict, expected: dict) -> dict:
+    """Return {check: bool}. An absent expectation or absent live fact is always False."""
+    def same(a, b) -> bool:
+        return bool(a) and bool(b) and a == b
+
+    ref = project_ref_from_dsn(opts)
+    want = {k: (expected.get(k) or "") for k in IDENTITY_ENV}
+    return {
+        "host": same(opts.get("host", ""), want["host"].lower()),
+        "port": same(opts.get("port", ""), want["port"]),
+        "project_ref": PROJECT_REF_RE.fullmatch(ref) is not None and same(ref, want["project_ref"]),
+        "dbname": same(opts.get("dbname", ""), want["dbname"]) and same(live.get("dbname", ""), want["dbname"]),
+        "role": same(dsn_role(opts), want["role"]) and same(live.get("user", ""), want["role"]),
+        "server_major": isinstance(live.get("major"), int) and live["major"] >= 17,
+        "schema_fingerprint": same(live.get("fingerprint", ""), want["schema_fingerprint"].lower()),
+    }
+
+
+def identity_failures(checks: dict) -> list[str]:
+    return [name for name in IDENTITY_CHECKS if checks.get(name) is not True]
+
+
+def identity_verified(checks: dict) -> bool:
+    return set(checks) == set(IDENTITY_CHECKS) and not identity_failures(checks)
+
+
 # ------------------------------------------------------------------------ pipeline
 def verdict(summary: dict) -> str:
     """P0-1 is PASS only for a real source restored to a separate PG17 with 0 diffs and
@@ -369,6 +459,15 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             summary["server_version"] = conn.execute("SHOW server_version").fetchone()[0]
             src_sig = fetch_signature(conn, schema)
             roles = roles_in_acl(conn, schema)
+            identity_checks = None
+            if real_source:
+                # Verified BEFORE pg_dump: a database that fails identity is never dumped.
+                identity_checks = check_source_identity(
+                    src, fetch_live_identity(conn, schema), read_identity_expectations())
+                summary["identity_checks"] = identity_checks
+                if not identity_verified(identity_checks):
+                    raise BackupError("BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED:"
+                                      + ",".join(identity_failures(identity_checks)))
             t0 = t()
             run_tool(["pg_dump", "--format=custom", f"--schema={schema}", "--no-owner",
                       f"--snapshot={snapshot}", "--lock-wait-timeout=30s",
@@ -376,7 +475,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             summary["timings_s"]["dump"] = round(t() - t0, 3)
             summary["snapshot_consistent"] = True
             summary["source_identity_verified"] = (not real_source or
-                        bool(expected_host and src["host"] == expected_host.lower()))
+                        identity_verified(identity_checks or {}))
         summary["encrypt"] = encrypt_file(plain, enc, key)
         summary["dump_bytes"] = plain.stat().st_size
         plain.unlink()

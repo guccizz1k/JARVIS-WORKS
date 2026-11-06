@@ -178,3 +178,98 @@ def test_verdict_never_passes_without_real_source_and_all_negative_tests():
     missing = dict(full)
     del missing["wrong_key_rejected"]
     assert pb.verdict(missing).startswith("PARTIAL")
+
+
+REF = "abcdefghijklmnopqrst"
+OTHER_REF = "tsrqponmlkjihgfedcba"
+FP = "0123456789abcdef0123456789abcdef"
+DIRECT = (f"postgresql://reader:pw@db.{REF}.supabase.co:5432/postgres"
+          "?sslmode=verify-full&sslrootcert=/ca.crt")
+POOLER = (f"postgresql://reader.{REF}:pw@aws-0-region.pooler.supabase.com:5432/postgres"
+          "?sslmode=verify-full&sslrootcert=/ca.crt")
+EXPECT = {"host": f"db.{REF}.supabase.co", "port": "5432", "project_ref": REF,
+          "dbname": "postgres", "role": "reader", "schema_fingerprint": FP}
+LIVE = {"dbname": "postgres", "user": "reader", "major": 17, "fingerprint": FP}
+
+
+def identity(dsn=DIRECT, live=None, expected=None):
+    return pb.check_source_identity(pb.parse_dsn(dsn), {**LIVE, **(live or {})},
+                                    {**EXPECT, **(expected or {})})
+
+
+def test_project_ref_comes_from_direct_host_or_pooler_login_only():
+    assert pb.project_ref_from_dsn(pb.parse_dsn(DIRECT)) == REF
+    assert pb.project_ref_from_dsn(pb.parse_dsn(POOLER)) == REF
+    assert pb.dsn_role(pb.parse_dsn(POOLER)) == "reader"
+    assert pb.project_ref_from_dsn(pb.parse_dsn(LOCAL)) == ""
+    assert pb.project_ref_from_dsn(pb.parse_dsn(
+        f"postgresql://u:p@evil.example.com/{REF}")) == ""
+
+
+def test_identity_all_checks_pass_for_matching_direct_and_pooler_sources():
+    assert pb.identity_verified(identity())
+    pooler_expect = {"host": "aws-0-region.pooler.supabase.com"}
+    assert pb.identity_verified(identity(POOLER, expected=pooler_expect))
+
+
+@pytest.mark.parametrize("kwargs,failed", [
+    ({"live": {"dbname": "other_db"}}, "dbname"),          # same host, different database
+    ({"expected": {"dbname": "other_db"}}, "dbname"),
+    ({"live": {"user": "someone_else"}}, "role"),           # same host, different role
+    ({"expected": {"role": "someone_else"}}, "role"),
+    ({"expected": {"project_ref": OTHER_REF}}, "project_ref"),
+    ({"expected": {"host": "db.other.supabase.co"}}, "host"),
+    ({"expected": {"port": "6543"}}, "port"),
+    ({"live": {"major": 16}}, "server_major"),
+    ({"live": {"fingerprint": "f" * 32}}, "schema_fingerprint"),
+])
+def test_identity_single_mismatch_fails_exactly_that_check(kwargs, failed):
+    checks = identity(**kwargs)
+    assert pb.identity_failures(checks) == [failed]
+    assert not pb.identity_verified(checks)
+
+
+def test_identity_missing_expectation_or_live_fact_never_verifies():
+    for key in pb.IDENTITY_ENV:
+        assert not pb.identity_verified(identity(expected={key: ""})), key
+    assert not pb.identity_verified(identity(live={"fingerprint": ""}))
+    assert not pb.identity_verified(identity(live={"major": None}))
+    partial = identity()
+    del partial["port"]
+    assert not pb.identity_verified(partial)
+    assert not pb.identity_verified({})
+
+
+def test_empty_expected_and_empty_actual_never_count_as_a_match():
+    # Both sides blank (unset env + unreadable fact) must NOT verify; a naive a == b would.
+    assert pb.identity_failures(identity(
+        live={"fingerprint": ""}, expected={"schema_fingerprint": ""})) == ["schema_fingerprint"]
+    no_user = "postgresql://db.%s.supabase.co/postgres?sslmode=verify-full&sslrootcert=/ca" % REF
+    blank = pb.check_source_identity(
+        pb.parse_dsn(no_user), {**LIVE, "user": ""}, {**EXPECT, "role": ""})
+    assert "role" in pb.identity_failures(blank)
+    assert pb.identity_failures(identity(live={"dbname": ""}, expected={"dbname": ""})) == ["dbname"]
+
+
+def test_synthetic_local_database_cannot_be_relabelled_real_by_copying_its_own_values():
+    own = {"host": "127.0.0.1", "port": "5432", "project_ref": "", "dbname": "postgres",
+           "role": "postgres", "schema_fingerprint": FP}
+    checks = pb.check_source_identity(pb.parse_dsn(LOCAL), {**LIVE, "user": "postgres"}, own)
+    assert pb.identity_failures(checks) == ["project_ref"]
+    assert not pb.identity_verified(checks)
+
+
+def test_expectations_are_read_from_environment_and_stripped():
+    env = {"JW_PG_EXPECT_SOURCE_HOST": " h ", "JW_PG_EXPECT_PROJECT_REF": REF}
+    got = pb.read_identity_expectations(env)
+    assert got["host"] == "h" and got["project_ref"] == REF and got["role"] == ""
+
+
+def test_identity_sql_is_read_only_parameterised_and_schema_independent_of_literals():
+    import re
+    assert pb.IDENTITY_SQL.count("%(s)s") == 3 and "jw_dev" not in pb.IDENTITY_SQL
+    tokens = set(re.findall(r"[A-Za-z_]+", pb.IDENTITY_SQL.upper()))
+    forbidden = {"INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "GRANT",
+                 "REVOKE", "TRUNCATE", "COPY", "DO", "CALL"}
+    assert not tokens & forbidden, tokens & forbidden
+    assert ";" not in pb.IDENTITY_SQL
