@@ -1,0 +1,325 @@
+name: JW V22.2 P1-P5 isolated DR TLS E2E OCR readiness
+# Standalone review-only evidence: no customer data, no Supabase, no Render, no deploy.
+on:
+  push:
+    branches:
+      - candidate/jw-v222-release-readiness-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v222-release-readiness-review
+  cancel-in-progress: false
+
+jobs:
+  stage-1-cross-cluster-restore:
+    name: Stage 1 - independent disposable PG17 cross-cluster encrypted restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      source-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v197-ephemeral-source
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      restore-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v197-ephemeral-restore
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-v197-ephemeral-source@127.0.0.1:5432/postgres
+      JW_PG_CI_RESTORE_DSN: postgresql://postgres:ci-v197-ephemeral-restore@127.0.0.1:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-release-readiness-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ tests/ scripts/
+          test "$(git diff --name-only f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = ".github/workflows/jw-cinema-pg-v222-release-readiness.yml"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install already-approved PostgreSQL and application dependencies
+        run: python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Separate PG17 cluster restore, tamper denial and measured RPO limitation
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v197_cross_cluster_approval_dr.py
+          python3 -m scripts.ci_v197_cross_cluster_approval_dr
+          echo "LIMIT: Synthetic PG17 clusters on one runner. Real Supabase backup NOT PERFORMED."
+  stage-3-https-quote:
+    name: Stage 3 - actual loopback TLS restricted PG17 quote and draft order
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-release-readiness-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ tests/ scripts/
+          test "$(git diff --name-only f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = ".github/workflows/jw-cinema-pg-v222-release-readiness.yml"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install restricted PG17 actual HTTPS dependencies
+        run: python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Real TLS HTTP and RLS A/B/C quote review draft/internal order
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v184_actual_https_pg_order.py
+          python3 -m scripts.ci_v184_actual_https_pg_order
+          echo "LIMIT: Local TLS only, not deployed Render staging."
+  stage-3-https-messenger:
+    name: Stage 3 - actual loopback TLS PG17 messenger and attachments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-release-readiness-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ tests/ scripts/
+          test "$(git diff --name-only f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = ".github/workflows/jw-cinema-pg-v222-release-readiness.yml"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install restricted PG17 and real HTTPS dependencies
+        run: python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Real TLS messenger attachment, cross-tenant denial and concurrent replay
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v190_https_pg_messenger_attachments.py
+          python3 -m scripts.ci_v190_https_pg_messenger_attachments
+          echo "LIMIT: No hosted Render messenger E2E."
+  stage-3-real-browser-pg17:
+    name: Stage 3 - actual Chrome multipart and signed PG17 approval to order
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    env:
+      JW_USE_SYSTEM_CHROME: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-release-readiness-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ tests/ scripts/
+          test "$(git diff --name-only f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = ".github/workflows/jw-cinema-pg-v222-release-readiness.yml"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install PG17 and browser dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'playwright>=1.50,<2'
+          python3 -m playwright install --with-deps chromium
+      - name: Native multipart real Chromium to PG17 with RLS and HMAC receipt
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v199_exact_shape_browser_pg17.py
+          python3 -m scripts.ci_v199_exact_shape_browser_pg17
+          echo "LIMIT: Product route browser fixture, not deployed V22.2 with live Supabase."
+  stage-4-ocr-synthetic-50:
+    name: Stage 4 - Korean OCR robustness 50 synthetic documents ONLY
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    env:
+      JW_ENV: review
+      JW_V188_OCR_ACK: SYNTHETIC_LOCAL_KOREAN_FORMS_ONLY
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-release-readiness-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ tests/ scripts/
+          test "$(git diff --name-only f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = ".github/workflows/jw-cinema-pg-v222-release-readiness.yml"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install system OCR libraries and supported font
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-eng tesseract-ocr-kor
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'pillow>=10,<13'
+      - name: Actual 50 Tesseract operations and explicit synthetic-only verdict
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v188_ocr50_synthetic.py
+          python3 -m scripts.ci_v188_ocr50_synthetic
+          echo "BLOCKED: 50 licensed real-business document and ground-truth OCR acceptance NOT RUN."
+  stage-5-release-fail-closed:
+    name: Stage 5 - independent protected-source and no-release decision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-release-readiness-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/ tests/ scripts/
+          test "$(git diff --name-only f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = ".github/workflows/jw-cinema-pg-v222-release-readiness.yml"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Run review containment and independent release policy controls
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/jw_eight_stage_release_gate.py scripts/ci_cinema_pg_guard.py
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root=Path('.')
+          original='19c5a6771b8d0925d1bb32d0119f6ad186b57fd4'
+          current=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert subprocess.run(['git','merge-base','--is-ancestor',original,current]).returncode==0
+          items=subprocess.check_output(['git','diff','--name-only',original,current],text=True).splitlines()
+          allow={
+            '.github/workflows/jw-cinema-pg-v222-browser-fast.yml',
+            '.github/workflows/jw-cinema-pg-v222-rail-qa.yml',
+            '.github/workflows/jw-cinema-pg-v222-sha-qa.yml',
+            '.github/workflows/jw-cinema-pg-v222-release-readiness.yml',
+            'app/static/cinematic_v222.css',
+            'scripts/ci_cinema_pg_guard.py',
+            'scripts/ci_cinema_pg_v222_root_browser.py'}
+          assert set(items)<=allow,sorted(set(items)-allow)
+          assert subprocess.run(['git','diff','--quiet',original,current,'--','app/main.py','app/static/cinema/','db/']).returncode==0
+          assert os.getenv('JW_PG_CI_ROOT_DSN') is None, 'Cross-job DB credentials must never be available'
+          report={
+            'tested_sha':current,
+            'original_sha':original,
+            'changed_files':items,
+            'original_protected':'PASS',
+            'supabase_real_backup':'BLOCKED_NOT_CAPTURED',
+            'supabase_migration':'NOT_RUN',
+            'hosted_https_latest_sha':'NOT_RUN',
+            'real_customer_ocr50':'NOT_RUN',
+            'real_pc_gpu_60fps':'NOT_MEASURED',
+            'release':'BLOCKED',
+            'main_merge':'NOT_RUN',
+            'production_deploy':'NOT_RUN',
+            'security_signoff':'NOT_RUN',
+          }
+          Path('jw-v222-release-readiness.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          print('PASS_V222_RELEASE_GUARD_EVIDENCE_NO_PRODUCTION_CUTOVER')
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jw-v222-P1-P5-failclosed-report
+          path: jw-v222-release-readiness.json
+          retention-days: 7
