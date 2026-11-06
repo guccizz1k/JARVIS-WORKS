@@ -12,6 +12,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from app.security_hardening import secret_for_user
+from cryptography.fernet import Fernet
 import psycopg
 from scripts import ci_cinema_pg_identity_bridge_v223 as identity
 from scripts import ci_cinema_pg_sql_gate as gate
@@ -73,6 +75,15 @@ def import_checked(source, pg, fail_after=None):
                 values=tuple(source_row)
                 # Password encoding is the exact format accepted by the existing
                 # v85 verifier. Never log a credential or a record identifier.
+                if table=="mfa_credentials" and values[1]:
+                    try:
+                        # A copied Fernet ciphertext is not sufficient: the
+                        # actual application key must decrypt the TOTP secret.
+                        decrypted = secret_for_user(values[1])
+                        if not decrypted or len(decrypted)>512:
+                            raise ValueError("invalid synthetic TOTP secret")
+                    except Exception as exc:
+                        raise CutoverBlocked("mfa_key_unavailable") from exc
                 if table=="users":
                     encoded=values[3]
                     parts=encoded.split("$") if isinstance(encoded,str) else []
@@ -120,10 +131,10 @@ def run():
             p=db.file(path)
             if p.returncode:
                 raise AssertionError("FAIL_V223_TRANSFER_BASE_SCHEMA")
-        identity.fixture_pg(dbname)
         with tempfile.TemporaryDirectory(prefix="jw-identity-transfer-") as tmp:
             path=Path(tmp)/"offline-sqlite-copy.db"
             identity.fixture_sqlite(path)
+            identity.fixture_pg(dbname)
             sealed=identity.file_hash(path)
             with identity.ro_sqlite(path) as src, psycopg.connect(dbname=dbname,autocommit=True) as pg:
                 reset_one_org(pg)
@@ -156,8 +167,21 @@ def run():
                 else:
                     raise AssertionError("FAIL_V223_TRANSFER_MFA_TAMPERING_ACCEPTED")
                 finally:
-                    pg.execute("UPDATE jw_dev.mfa_credentials SET secret_encrypted='SYNTHETIC_CIPHER' WHERE user_id='ci-ua'")
+                    pg.execute("UPDATE jw_dev.mfa_credentials SET secret_encrypted=%s WHERE user_id='ci-ua'",
+                               (identity.SYNTHETIC_CIPHER,))
                 passed(not identity.parity(src,pg),"MFA_RESTORE_EXACT")
+                good_key=os.environ["JW_DATA_KEY"]
+                os.environ["JW_DATA_KEY"]=Fernet.generate_key().decode("ascii")
+                try:
+                    try:
+                        import_checked(src,pg)
+                    except CutoverBlocked as exc:
+                        passed(str(exc)=="mfa_key_unavailable","WRONG_MFA_KEY_FAIL_CLOSED")
+                    else:
+                        raise AssertionError("FAIL_V223_TRANSFER_WRONG_MFA_KEY_ACCEPTED")
+                finally:
+                    os.environ["JW_DATA_KEY"]=good_key
+                passed(not identity.parity(src,pg),"WRONG_KEY_DID_NOT_MUTATE_PG")
                 with sqlite3.connect(path) as local:
                     local.execute("INSERT INTO sessions VALUES('fake-token','ci-ua','2099-01-01','csrf','x','2026')")
                     local.commit()
