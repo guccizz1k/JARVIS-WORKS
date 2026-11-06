@@ -44,9 +44,8 @@ MODIFIABLE_EXISTING = frozenset({
     "app/cinema_entry_v1.py",
     # Exception limited to this pre-reviewed CSS blob; other static files immutable.
     V222_CSS_PATH,
-    # Guard itself is changed solely to enforce the CSS exception; independent
-    # CI verifies every changed path and the exact signed-off blob pin.
-    "scripts/ci_cinema_pg_guard.py",
+    # The guard file was added after BASELINE and remains authorized by the
+    # existing ci_cinema_pg_*.py new-file rule (status A), preserving tests.
     # The only three historical fixture repairs. Never permit other old tests.
     "tests/test_installer_v75.py",
     "tests/test_installer_v79.py",
