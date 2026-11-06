@@ -22,7 +22,7 @@ development database (`JW_PG_REAL_SOURCE=1`).
 ## Safety rules enforced in code
 - Source must be `sslmode=verify-full` with `sslrootcert`. For a real source ALL of these must
   agree with operator-supplied expectations, and are checked BEFORE `pg_dump` (a database that
-  fails is never dumped; only the names of failed checks are printed): host, port, Supabase
+  fails is neither scanned in full nor dumped; only the names of failed checks are printed): host, port, Supabase
   project ref (derived from the DSN: `db.<ref>.supabase.co` or pooler login `<role>.<ref>`),
   database name and role (from the DSN AND the live session), server major >= 17, and a
   schema-shape fingerprint of the live database (`IDENTITY_SQL` in the tool). A blank
@@ -69,7 +69,7 @@ Keep `JW_PG_BACKUP_KEY` somewhere other than the backup file.
 
 ## What has and has not been executed
 - Executed: `tests/test_v223_pg_backup.py` (encryption, guards, redaction, signature diff,
-  strict verdict rules, independent source identity) — DB-free logic only (35/35 PASS locally).
+  strict verdict rules, independent source identity) — DB-free logic only (38/38 PASS locally; includes identifier-quoting and identity-before-scan cases).
 - NOT RUN: the dump → restore → signature path against any PostgreSQL 17 (no Docker daemon,
   no PG17 client and no `psycopg` in the authoring environment). First run must happen on a
   disposable PG17 with a synthetic source; only then against the real development DB.

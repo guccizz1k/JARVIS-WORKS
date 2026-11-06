@@ -191,6 +191,13 @@ def check_schema(schema: str) -> str:
     return schema
 
 
+def quote_pg_identifier(value: str) -> str:
+    """Quote an identifier sourced from the PostgreSQL catalog, including embedded quotes."""
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise BackupError("BLOCKED_V223_INVALID_CATALOG_IDENTIFIER")
+    return '"' + value.replace('"', '""') + '"'
+
+
 def pg_env(opts: dict) -> dict:
     env = {**os.environ, "PGHOST": opts["host"], "PGPORT": opts["port"],
            "PGUSER": opts["user"], "PGPASSWORD": opts["password"], "PGDATABASE": opts["dbname"]}
@@ -267,7 +274,8 @@ def fetch_signature(connection, schema: str) -> dict:
         rows = {}
         for table, _, _ in sig["tables"]:
             cur.execute(f'SELECT count(*), coalesce(md5(string_agg(md5(t::text),\'\' '
-                        f'ORDER BY md5(t::text))),\'\') FROM "{schema}"."{table}" t')
+                        f'ORDER BY md5(t::text))),\'\') FROM '
+                        f'{quote_pg_identifier(schema)}.{quote_pg_identifier(table)} t')
             count, digest = cur.fetchone()
             rows[table] = [int(count), digest]
         sig["rows"] = rows
@@ -457,17 +465,17 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             conn.execute("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             snapshot = conn.execute("SELECT pg_export_snapshot()").fetchone()[0]
             summary["server_version"] = conn.execute("SHOW server_version").fetchone()[0]
-            src_sig = fetch_signature(conn, schema)
-            roles = roles_in_acl(conn, schema)
             identity_checks = None
             if real_source:
-                # Verified BEFORE pg_dump: a database that fails identity is never dumped.
+                # Verify identity BEFORE scanning full tables or dumping the source.
                 identity_checks = check_source_identity(
                     src, fetch_live_identity(conn, schema), read_identity_expectations())
                 summary["identity_checks"] = identity_checks
                 if not identity_verified(identity_checks):
                     raise BackupError("BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED:"
                                       + ",".join(identity_failures(identity_checks)))
+            src_sig = fetch_signature(conn, schema)
+            roles = roles_in_acl(conn, schema)
             t0 = t()
             run_tool(["pg_dump", "--format=custom", f"--schema={schema}", "--no-owner",
                       f"--snapshot={snapshot}", "--lock-wait-timeout=30s",

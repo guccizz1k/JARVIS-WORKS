@@ -63,9 +63,9 @@ APPROVED_LEGACY_TEST_BLOBS = {
 # A changed backup tool or test must be reaudited and repinned; this is NOT a
 # wildcard exemption from original CINEMA/PostgreSQL change containment.
 APPROVED_V223_BACKUP_BLOBS = {
-    "scripts/pg_backup_v223.py": "f2336651ac3f8d3b4cb12b103930e68e55abec60",
-    "tests/test_v223_pg_backup.py": "5a8b72a1f5ae974fff5a1df84143148e439abefd",
-    "docs/ops/V223_PG_BACKUP_RESTORE.md": "899528f51a17ee989db0417046fd537ac4a9169a",
+    "scripts/pg_backup_v223.py": "062a099e7b76f22acc614202247cb21f154d1c12",
+    "tests/test_v223_pg_backup.py": "4da9cc046d7f9b39092bdcb742929341d007f026",
+    "docs/ops/V223_PG_BACKUP_RESTORE.md": "fd011865da28e348a975d6d80b08b62912fa6bb9",
     "docs/ops/V223_SYNTHETIC_CI.md": "75646e7b94898eb138afcf12faa360432240f97e",
 }
 

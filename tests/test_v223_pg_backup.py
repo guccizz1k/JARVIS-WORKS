@@ -273,3 +273,85 @@ def test_identity_sql_is_read_only_parameterised_and_schema_independent_of_liter
                  "REVOKE", "TRUNCATE", "COPY", "DO", "CALL"}
     assert not tokens & forbidden, tokens & forbidden
     assert ";" not in pb.IDENTITY_SQL
+
+
+def test_catalog_identifier_quotes_embedded_double_quote_and_sql_metacharacters():
+    assert pb.quote_pg_identifier('normal') == '"normal"'
+    assert pb.quote_pg_identifier('has"quote') == '"has""quote"'
+    assert pb.quote_pg_identifier('x"; DROP TABLE jw_dev.audit_log; --') == (
+        '"x""; DROP TABLE jw_dev.audit_log; --"')
+    for bad in ('', 'bad\x00name'):
+        with pytest.raises(pb.BackupError):
+            pb.quote_pg_identifier(bad)
+
+
+def test_invalid_real_source_fails_before_table_signature_or_pg_dump(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    trace = []
+
+    class FakeCursorResult:
+        def __init__(self, value):
+            self.value = value
+        def fetchone(self):
+            return (self.value,)
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def execute(self, sql):
+            if 'pg_export_snapshot' in sql:
+                return FakeCursorResult('fake-snapshot')
+            if 'SHOW server_version' in sql:
+                return FakeCursorResult('17.11')
+            return FakeCursorResult(None)
+
+    fake_psycopg = types.ModuleType('psycopg')
+    fake_psycopg.connect = lambda *_args, **_kwargs: FakeConnection()
+    fake_psycopg.sql = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, 'psycopg', fake_psycopg)
+    monkeypatch.setattr(pb, 'require_pg17_tools', lambda: None)
+    monkeypatch.setattr(pb, 'load_key', lambda: b'K' * 32)
+    monkeypatch.setattr(pb, 'fetch_live_identity', lambda *_args: {
+        'dbname': 'wrong', 'user': 'reader', 'major': 17,
+        'fingerprint': 'not-expected',
+    })
+    monkeypatch.setattr(pb, 'fetch_signature', lambda *_args: trace.append('signature'))
+    monkeypatch.setattr(pb, 'roles_in_acl', lambda *_args: trace.append('roles'))
+    monkeypatch.setattr(pb, 'run_tool', lambda *_args, **_kwargs: trace.append('dump'))
+    monkeypatch.setenv('JW_PG_CI_ALLOW', 'ONLY_EPHEMERAL_LOCAL_DATABASE')
+    monkeypatch.setenv('JW_PG_EXPECT_SOURCE_HOST', f'db.{REF}.supabase.co')
+    with pytest.raises(pb.BackupError, match='BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED'):
+        pb.run(DIRECT, LOCAL, real_source=True, workdir=tmp_path)
+    assert trace == []
+
+
+def test_fetch_signature_uses_escaped_catalog_table_identifier():
+    history = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def execute(self, statement, params=None):
+            history.append(str(statement))
+        def fetchall(self):
+            if 'FROM pg_class c JOIN pg_namespace' in history[-1] and "c.relkind IN ('r','p')" in history[-1]:
+                return [('has"quote', False, False)]
+            return []
+        def fetchone(self):
+            if 'pg_stat_user_tables' in history[-1]:
+                return (0,)
+            return (0, '')
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    pb.fetch_signature(Connection(), 'jw_dev')
+    assert any('FROM "jw_dev"."has""quote" t' in entry for entry in history)
+    assert not any('FROM "jw_dev"."has"quote" t' in entry for entry in history)
