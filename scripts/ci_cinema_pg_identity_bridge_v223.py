@@ -123,7 +123,7 @@ def fixture_pg(dbname):
         conn.execute("CREATE TABLE jw_dev.login_failures(email text primary key,attempts bigint,first_failed_at text)")
         conn.execute("UPDATE jw_dev.organizations SET name='A',created_at='2026-01-01' WHERE id=%s",(ORG,))
         conn.execute("UPDATE jw_dev.users SET email='a@invalid.test',name='A',password_hash=%s,role='admin',created_at='2026-01-01' WHERE id='ci-ua'",("pbkdf2_sha256$260000$"+("aa"*16)+"$"+("bb"*32),))
-        conn.executemany("INSERT INTO jw_dev.users(id,org_id,email,password_hash,name,role,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s)",[
+        conn.cursor().executemany("INSERT INTO jw_dev.users(id,org_id,email,password_hash,name,role,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s)",[
             ("ci-ua2",ORG,"a2@invalid.test","pbkdf2_sha256$260000$"+("aa"*16)+"$"+("bb"*32),"A2","admin","2026-01-01"),
             ("ci-um",ORG,"m@invalid.test","pbkdf2_sha256$260000$"+("aa"*16)+"$"+("bb"*32),"M","member","2026-01-01"),
         ])
