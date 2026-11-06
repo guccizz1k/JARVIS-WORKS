@@ -160,13 +160,21 @@ def test_diff_signatures_reports_names_not_values():
 
 
 def test_verdict_never_passes_without_real_source_and_all_negative_tests():
-    full = {"source_is_real_dev_db": True, "signature_mismatches": [], "tamper_rejected": True,
+    full = {"source_is_real_dev_db": True, "source_identity_verified": True,
+            "snapshot_consistent": True, "restore_verified": True,
+            "decrypt_sha256_matches": True, "tables": 2,
+            "signature_mismatches": [], "tamper_rejected": True,
             "wrong_key_rejected": True, "truncation_rejected": True,
             "partial_dump_restore_rejected": True}
     assert pb.verdict(full) == "PASS"
     assert pb.verdict({**full, "source_is_real_dev_db": False}).startswith("NOT_P0_1_PASS")
     assert pb.verdict({**full, "signature_mismatches": ["rows:a"]}).startswith("FAIL")
     assert pb.verdict({**full, "tamper_rejected": False}).startswith("PARTIAL")
+    assert pb.verdict({**full, "snapshot_consistent": False}).startswith("PARTIAL")
+    assert pb.verdict({**full, "restore_verified": False}).startswith("PARTIAL")
+    assert pb.verdict({**full, "decrypt_sha256_matches": False}).startswith("PARTIAL")
+    assert pb.verdict({**full, "source_identity_verified": False}).startswith("PARTIAL")
+    assert pb.verdict({**full, "tables": 0}).startswith("PARTIAL")
     missing = dict(full)
     del missing["wrong_key_rejected"]
     assert pb.verdict(missing).startswith("PARTIAL")

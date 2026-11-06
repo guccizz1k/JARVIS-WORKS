@@ -5,7 +5,8 @@ was restored. P0-1 stays `BLOCKED` until `verdict` prints `PASS` for the real
 development database (`JW_PG_REAL_SOURCE=1`).
 
 ## What the tool does
-1. Reads the source (SELECT + `pg_dump` only; the connection is set read-only) and records a
+1. Reads the source (SELECT + `pg_dump` only) in an exported PostgreSQL repeatable-read,
+   read-only snapshot and records a
    signature: per-table row count + digest, RLS / FORCE RLS flags, policies, functions,
    triggers, indexes, constraints, table ACLs.
 2. `pg_dump --format=custom --schema=jw_dev`, then encrypts with chunked AES-256-GCM
@@ -13,11 +14,15 @@ development database (`JW_PG_REAL_SOURCE=1`).
 3. Negative tests on the encrypted copy: bit-flip, truncation, wrong key, half-written dump.
 4. Decrypts, restores into a **new database on a local disposable PG17**, then compares
    signatures. Any difference is reported by name only and the verdict becomes `FAIL`.
+   A truncated archive is tested with a second REAL restore attempt, not `pg_restore --list`.
+   Missing restore, snapshot, source-identity or decrypt evidence prevents `PASS`.
 5. Records dump time and restore time (RTO). RPO is by definition the gap since the
    snapshot; the tool does not claim zero.
 
 ## Safety rules enforced in code
-- Source must be `sslmode=verify-full` with `sslrootcert`; target must be `localhost`,
+- Source must be `sslmode=verify-full` with `sslrootcert`, and
+  `JW_PG_EXPECT_SOURCE_HOST` must match the approved source host exactly;
+  target must be `localhost`,
   declared `JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE`, and not equal to the source.
 - `pg_dump`/`pg_restore` must be major version 17 or newer (PG16 clients are refused).
 - Output contains counts, digests and timings only; passwords are redacted from errors.
@@ -33,8 +38,14 @@ export JW_PG_TARGET_ADMIN_DSN='postgresql://postgres:localpw@127.0.0.1:55432/pos
 export JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE
 export JW_PG_BACKUP_KEY="$(python -c 'import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode())')"
 export JW_PG_REAL_SOURCE=1
+export JW_PG_EXPECT_SOURCE_HOST='<host-confirmed-in-supabase-dashboard>'
 python -m scripts.pg_backup_v223 run          # needs pg_dump/pg_restore 17 on PATH
 ```
+
+`JW_PG_EXPECT_SOURCE_HOST` must exactly equal the hostname of the approved `JW_PG_SOURCE_DSN`.
+A synthetic database cannot be accepted as the real development database solely by setting
+`JW_PG_REAL_SOURCE=1`; independent evidence tying the host/project to the approved
+Supabase development project is still required for product-level PASS.
 
 Use a read-only database role for the source if one can be created; the Supabase direct
 connection host may be IPv6-only on the Free plan, so a session-mode pooler address may be
@@ -43,7 +54,7 @@ Keep `JW_PG_BACKUP_KEY` somewhere other than the backup file.
 
 ## What has and has not been executed
 - Executed: `tests/test_v223_pg_backup.py` (encryption, guards, redaction, signature diff,
-  verdict rules) — DB-free logic only.
+  strict verdict rules) — DB-free logic only (19/19 PASS locally).
 - NOT RUN: the dump → restore → signature path against any PostgreSQL 17 (no Docker daemon,
   no PG17 client and no `psycopg` in the authoring environment). First run must happen on a
   disposable PG17 with a synthetic source; only then against the real development DB.

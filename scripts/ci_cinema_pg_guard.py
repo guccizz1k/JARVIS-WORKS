@@ -59,6 +59,16 @@ APPROVED_LEGACY_TEST_BLOBS = {
     "tests/test_installer_v79.py": "2f498ec592d315e2791f5d5915af691b4371068c",
     "tests/test_pg_auth_v85.py": "c7df1d7bb6a749a064ea8b8611ae7df19132a046",
 }
+# V22.3 P0-1 approval is confined to these exact, already reviewed Git blobs.
+# A changed backup tool or test must be reaudited and repinned; this is NOT a
+# wildcard exemption from original CINEMA/PostgreSQL change containment.
+APPROVED_V223_BACKUP_BLOBS = {
+    "scripts/pg_backup_v223.py": "d4bc3e0bea6f74c884e5a4bab900fe7f13c0dbfb",
+    "tests/test_v223_pg_backup.py": "f0cdd3f858b066cbc6579b482b89fa5537d529bd",
+    "docs/ops/V223_PG_BACKUP_RESTORE.md": "a69f5fecfb8654234be2bd893ae6e81dbd9345a8",
+    "docs/ops/V223_SYNTHETIC_CI.md": "75646e7b94898eb138afcf12faa360432240f97e",
+}
+
 # New files: single path segment below the directory, strict names.
 NEW_FILE_PATTERNS = tuple(re.compile(p) for p in (
     r"^app/pg_cinema_[A-Za-z0-9_]+\.py$",
@@ -68,6 +78,10 @@ NEW_FILE_PATTERNS = tuple(re.compile(p) for p in (
     r"^scripts/review/cinema_pg_[A-Za-z0-9_]+\.sql$",
     r"^\.github/workflows/jw-cinema-pg-[A-Za-z0-9_-]+\.yml$",
     r"^docs/review/cinema-pg-[A-Za-z0-9_-]+\.md$",
+    r"^scripts/pg_backup_v223\.py$",
+    r"^tests/test_v223_pg_backup\.py$",
+    r"^docs/ops/V223_PG_BACKUP_RESTORE\.md$",
+    r"^docs/ops/V223_SYNTHETIC_CI\.md$",
 ))
 SKIP_MARKERS = re.compile(
     r"(pytest\.mark\.(skip|skipif|xfail)|pytest\.(skip|xfail)\(|unittest\.skip|\bskipTest\()"
@@ -129,6 +143,15 @@ def run(root: Path) -> dict:
             continue
         actual = git("hash-object", "--", path, cwd=root).strip()
         add(f"blob:{path}", actual == expected, f"expected {expected} actual {actual}")
+
+    for path, expected in APPROVED_V223_BACKUP_BLOBS.items():
+        file = root / path
+        if not file.is_file():
+            add(f"approved_v223_backup:{path}", False, "missing")
+            continue
+        actual = git("hash-object", "--", path, cwd=root).strip()
+        add(f"approved_v223_backup:{path}", actual == expected,
+            f"expected {expected} actual {actual}")
 
     for path, expected in APPROVED_LEGACY_TEST_BLOBS.items():
         file = root / path

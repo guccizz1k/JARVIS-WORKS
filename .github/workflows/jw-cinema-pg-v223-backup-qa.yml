@@ -1,0 +1,130 @@
+name: JW V22.3 P0-1 synthetic backup real PG17 restore verification
+on:
+  push:
+    branches:
+      - candidate/jw-v223-pg-backup-restore-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v223-full-pytest:
+    name: New 19 tests plus protected full regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert protected original and exact patch scope
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
+          git diff --quiet 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install full project test prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
+      - name: Execute new backup security tests and all application tests
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_legacy_fixture_v1.py
+          python3 -m pytest -q -ra -p no:cacheprovider --junitxml=v223-all-pytest.xml tests
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('v223-all-pytest.xml').getroot()
+          nodes=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          count={k:sum(int(n.get(k,0)) for n in nodes) for k in ('tests','failures','errors','skipped')}
+          assert count['tests']>=2395 and all(count[k]==0 for k in ('failures','errors','skipped')),count
+          print('PASS_V223_FULL_REGRESSION',count)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v223-review-all-tests-junit
+          path: v223-all-pytest.xml
+          retention-days: 5
+  v223-disposable-double-pg17:
+    name: Two real disposable PG17 clusters and encrypted backup restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      source-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-source
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      restore-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-restore
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_SYNTHETIC: '1'
+      JW_PG_SOURCE_DSN: postgresql://postgres:ci-only-v223-source@127.0.0.1:5432/postgres
+      JW_PG_TARGET_ADMIN_DSN: postgresql://postgres:ci-only-v223-restore@127.0.0.1:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify original protection and both independent PG17 service containers
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
+          git diff --quiet 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/
+          python3 -I scripts/ci_cinema_pg_guard.py
+          docker ps --filter ancestor=postgres:17 --format '{{.ID}}|{{.Ports}}'
+          test "$(docker ps --filter ancestor=postgres:17 -q | wc -l)" -ge 2
+      - name: Install Python PG17 test dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=44,<47' 'pytest>=8,<10'
+      - name: Use PostgreSQL 17 client binaries from official ephemeral Docker image
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v223-pg17-bin"
+          for tool in pg_dump pg_restore; do
+            cat > "$RUNNER_TEMP/v223-pg17-bin/$tool" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host --user "\$(id -u):\$(id -g)" \
+            -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD \
+            -e PGDATABASE -e PGSSLMODE -e PGSSLROOTCERT postgres:17 $tool "\$@"
+          EOF
+            chmod 0700 "$RUNNER_TEMP/v223-pg17-bin/$tool"
+          done
+          echo "$RUNNER_TEMP/v223-pg17-bin" >> "$GITHUB_PATH"
+      - name: Execute actual dump-encrypt-decrypt-restore-compare and negative tests
+        run: |
+          set -euo pipefail
+          pg_dump --version
+          pg_restore --version
+          python3 -m scripts.ci_cinema_pg_v223_backup_synthetic
+          echo 'NOT_P0_1_REAL_DB_PASS: only temporary independent test databases were used.'

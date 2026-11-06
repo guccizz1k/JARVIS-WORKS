@@ -304,8 +304,16 @@ def verdict(summary: dict) -> str:
     every negative test rejected. Anything else is stated as such, never PASS."""
     if not summary.get("source_is_real_dev_db"):
         return "NOT_P0_1_PASS: source was not the real development database"
+    # A user-provided 'real_source' switch alone is never proof that a real
+    # backup was restored. Require independent execution evidence as well.
+    required_evidence = ("source_identity_verified", "snapshot_consistent",
+                         "restore_verified", "decrypt_sha256_matches")
+    if not all(summary.get(k) is True for k in required_evidence):
+        return "PARTIAL: source, snapshot, decrypt or actual restore not verified"
     if summary.get("signature_mismatches") != []:
         return "FAIL: restored database differs from source"
+    if not isinstance(summary.get("tables"), int) or summary["tables"] < 1:
+        return "PARTIAL: no verified application tables"
     needed = ("tamper_rejected", "wrong_key_rejected", "truncation_rejected",
               "partial_dump_restore_rejected")
     if not all(summary.get(k) is True for k in needed):
@@ -334,6 +342,11 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
 
     check_schema(schema)
     src = guard_source(source_dsn) if real_source else parse_dsn(source_dsn)
+    # Explicit source binding prevents arbitrary synthetic or third-party DSNs
+    # from being relabeled as an approved real development DB.
+    expected_host = os.environ.get("JW_PG_EXPECT_SOURCE_HOST", "")
+    if real_source and (not expected_host or expected_host.lower() != src["host"]):
+        raise BackupError("BLOCKED_V223_REAL_SOURCE_HOST_NOT_VERIFIED")
     tgt = guard_target(target_admin_dsn, source_dsn)
     key = load_key()
     require_pg17_tools()
@@ -347,15 +360,23 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     t = time.monotonic
     created = False
     try:
-        with psycopg.connect(source_dsn) as conn:
-            conn.read_only = True
+        # PostgreSQL exported snapshot keeps source signatures and pg_dump
+        # consistent under concurrent writes (the transaction stays open until
+        # pg_dump exits). The read-only permission is enforced by PostgreSQL.
+        with psycopg.connect(source_dsn, autocommit=True) as conn:
+            conn.execute("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            snapshot = conn.execute("SELECT pg_export_snapshot()").fetchone()[0]
             summary["server_version"] = conn.execute("SHOW server_version").fetchone()[0]
             src_sig = fetch_signature(conn, schema)
             roles = roles_in_acl(conn, schema)
-        t0 = t()
-        run_tool(["pg_dump", "--format=custom", f"--schema={schema}", "--no-owner",
-                  "--lock-wait-timeout=30s", "--file", str(plain)], src, timeout=600)
-        summary["timings_s"]["dump"] = round(t() - t0, 3)
+            t0 = t()
+            run_tool(["pg_dump", "--format=custom", f"--schema={schema}", "--no-owner",
+                      f"--snapshot={snapshot}", "--lock-wait-timeout=30s",
+                      "--file", str(plain)], src, timeout=600)
+            summary["timings_s"]["dump"] = round(t() - t0, 3)
+            summary["snapshot_consistent"] = True
+            summary["source_identity_verified"] = (not real_source or
+                        bool(expected_host and src["host"] == expected_host.lower()))
         summary["encrypt"] = encrypt_file(plain, enc, key)
         summary["dump_bytes"] = plain.stat().st_size
         plain.unlink()
@@ -381,6 +402,8 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             summary["wrong_key_rejected"] = True
         t1 = t()
         summary["decrypt_sha256_matches"] = decrypt_file(enc, back, key) == summary["encrypt"]["plain_sha256"]
+        if not summary["decrypt_sha256_matches"]:
+            raise BackupError("FAIL_V223_BACKUP_DECRYPT_HASH_MISMATCH")
         run_tool(["pg_restore", "--list", str(back)], tgt, timeout=60)
         with psycopg.connect(target_admin_dsn, autocommit=True) as admin:
             admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(restore_db)))
@@ -398,16 +421,29 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
         with psycopg.connect(restore_dsn) as tconn:
             restored_sig = fetch_signature(tconn, schema)
         summary["signature_mismatches"] = diff_signatures(src_sig, restored_sig)
+        summary["restore_verified"] = not summary["signature_mismatches"]
         summary["tables"] = len(src_sig["tables"])
         summary["signature_sha256"] = signature_digest(src_sig)
-        # deterministic partial-failure test: a half-written dump must NOT restore
+        # A truncated archive can still pass `pg_restore --list` because its
+        # TOC can be intact. Demand a failed REAL restore into another isolated
+        # disposable database; never use --list as a proxy for restore success.
         half = work / f"{nonce}.half"
         half.write_bytes(back.read_bytes()[: back.stat().st_size * 6 // 10])
+        bad_restore_db = f"{restore_db}_truncated"
+        with psycopg.connect(target_admin_dsn, autocommit=True) as admin:
+            admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(bad_restore_db)))
         try:
-            run_tool(["pg_restore", "--list", str(half)], tgt, timeout=60)
-            summary["partial_dump_restore_rejected"] = False
-        except BackupError:
-            summary["partial_dump_restore_rejected"] = True
+            try:
+                run_tool(["pg_restore", "--no-owner", "--exit-on-error",
+                          "--dbname", bad_restore_db, str(half)],
+                         {**tgt, "dbname": bad_restore_db}, timeout=60)
+                summary["partial_dump_restore_rejected"] = False
+            except BackupError:
+                summary["partial_dump_restore_rejected"] = True
+        finally:
+            with psycopg.connect(target_admin_dsn, autocommit=True) as admin:
+                admin.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                              sql.Identifier(bad_restore_db)))
         summary["rpo_note"] = "snapshot backup: commits after pg_dump started are not included"
     finally:
         for path in (plain, back, work / f"{nonce}.half"):
@@ -431,6 +467,11 @@ def main(argv: list[str]) -> int:
                       real_source=os.environ.get("JW_PG_REAL_SOURCE") == "1")
     except BackupError as exc:
         print(redact(str(exc), *secrets), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        # Never print traceback or error strings from DB clients in public logs;
+        # they may include unredacted credentials or customer data.
+        print("FAIL_V223_UNEXPECTED_" + type(exc).__name__, file=sys.stderr)
         return 1
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if summary["verdict"] == "PASS" else 1
