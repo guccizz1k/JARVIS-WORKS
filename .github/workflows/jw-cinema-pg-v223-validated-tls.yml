@@ -1,0 +1,79 @@
+name: JW V22.3 real V9 verify-full TLS and ValidatedLegacyTx (disposable PG17)
+on:
+  push:
+    branches:
+      - candidate/jw-v223-pg-backup-restore-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validated-tls-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v223-tls-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5435'
+      PGUSER: postgres
+      PGPASSWORD: ci-v223-tls-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard original and verify PG17
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}$'
+      - name: Install test dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Configure disposable PG17 server TLS with local self-signed test CA
+        shell: bash
+        run: |
+          set -euo pipefail
+          certdir="$RUNNER_TEMP/jw-v223-tls"
+          mkdir -p "$certdir"
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 1 -nodes \
+            -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+            -keyout "$certdir/server.key" -out "$certdir/server.crt" >/dev/null 2>&1
+          cid="$(docker ps --filter publish=5435 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+          docker cp "$certdir/server.key" "$cid:/tmp/jw-v223-server.key"
+          docker cp "$certdir/server.crt" "$cid:/tmp/jw-v223-server.crt"
+          docker exec -u root "$cid" sh -c \
+            'chown postgres:postgres /tmp/jw-v223-server.key /tmp/jw-v223-server.crt; chmod 0600 /tmp/jw-v223-server.key; chmod 0644 /tmp/jw-v223-server.crt'
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='/tmp/jw-v223-server.crt'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_key_file='/tmp/jw-v223-server.key'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl='on'"
+          docker exec -u postgres "$cid" pg_ctl -D /var/lib/postgresql/data reload
+          for i in $(seq 1 15); do
+            if [ "$(psql -X -Atc 'SHOW ssl')" = on ]; then break; fi
+            sleep 1
+          done
+          test "$(psql -X -Atc 'SHOW ssl')" = on
+          echo "JW_PG_CI_TLS_CA=$certdir/server.crt" >> "$GITHUB_ENV"
+      - name: Run production V9 validated connection and HTTP E2E (74 cases)
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_validated_tls_e2e_v223 | tee v223-validated-tls.log
+          grep -F 'PASS_V223_REAL_VALIDATED_LEGACY_TX_TLS_PG17' v223-validated-tls.log
+          grep -F 'PASS: 74 checks, 0 failed, expected exactly 74' v223-validated-tls.log
+          echo 'DISPOSABLE PG17 ONLY: Supabase and real browser/HTTPS deployment were not exercised.'
