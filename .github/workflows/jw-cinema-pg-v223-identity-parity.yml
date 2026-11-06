@@ -53,3 +53,12 @@ jobs:
           grep -F 'PASS_V223_IDENTITY_REJECT_PG_TOKEN_REUSE' identity-cutover.log
           grep -F 'PASS_V223_IDENTITY_REJECT_MFA_DOWNGRADE' identity-cutover.log
           echo 'DISPOSABLE ONLY: no actual SQLite business data, Supabase writes or service routing changes.'
+
+      - name: Atomic identity import, interrupted rollback and repeated-run idempotence
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_identity_transfer_v223 | tee identity-transfer.log
+          grep -F 'PASS_V223_DISPOSABLE_IDENTITY_TRANSFER' identity-transfer.log
+          grep -F 'PASS_V223_TRANSFER_INTERRUPTED_IMPORT_ROLLS_BACK_ALL_ROWS' identity-transfer.log
+          grep -F 'PASS_V223_TRANSFER_MFA_TAMPERING_FAIL_CLOSED' identity-transfer.log
+          grep -F 'PASS_V223_TRANSFER_NO_SESSION_TOKENS_MIGRATED' identity-transfer.log
