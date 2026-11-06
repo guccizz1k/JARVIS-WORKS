@@ -31,7 +31,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
           git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- app/ db/
-          test -z "$(git diff --name-only 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD | grep -Ev '^(\\.github/workflows/jw-cinema-pg-v222-sha-qa\\.yml|scripts/ci_cinema_pg_v222_root_browser\\.py)$' || true)"
+          test -z "$(git diff --name-only 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD | grep -Ev '^([.]github/workflows/jw-cinema-pg-v222-sha-qa[.]yml|scripts/ci_cinema_pg_v222_root_browser[.]py)$' || true)"
           python3 -I scripts/ci_cinema_pg_guard.py
       - name: Install project and OCR test prerequisites
         run: |
@@ -101,7 +101,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
           git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- app/ db/
-          test -z "$(git diff --name-only 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD | grep -Ev '^(\\.github/workflows/jw-cinema-pg-v222-sha-qa\\.yml|scripts/ci_cinema_pg_v222_root_browser\\.py)$' || true)"
+          test -z "$(git diff --name-only 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD | grep -Ev '^([.]github/workflows/jw-cinema-pg-v222-sha-qa[.]yml|scripts/ci_cinema_pg_v222_root_browser[.]py)$' || true)"
           python3 -I scripts/ci_cinema_pg_guard.py
           python3 -m pip install -r requirements-postgres-check.txt
       - name: Engine SQL gate with fresh disposable database
@@ -151,7 +151,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
           git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- app/ db/
-          test -z "$(git diff --name-only 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD | grep -Ev '^(\\.github/workflows/jw-cinema-pg-v222-sha-qa\\.yml|scripts/ci_cinema_pg_v222_root_browser\\.py)$' || true)"
+          test -z "$(git diff --name-only 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD | grep -Ev '^([.]github/workflows/jw-cinema-pg-v222-sha-qa[.]yml|scripts/ci_cinema_pg_v222_root_browser[.]py)$' || true)"
           python3 -I scripts/ci_cinema_pg_guard.py
       - name: Install isolated Chromium and recording tools
         run: |
