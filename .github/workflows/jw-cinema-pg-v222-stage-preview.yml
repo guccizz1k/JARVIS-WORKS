@@ -1,0 +1,84 @@
+name: JW V22.2 synthetic authenticated HTTPS stage preparation
+on:
+  push:
+    branches:
+      - candidate/jw-v222-https-sandbox-20261106
+permissions:
+  contents: read
+jobs:
+  review-only-auth-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JW_ENV: review
+      JW_ROOT_UI: v222
+      DEMO_SEED: '1'
+      JARVIS_DB_PATH: /tmp/jw_v222_ci_preview.sqlite
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect existing source and exact isolated change set
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed={
+            'scripts/ci_cinema_pg_v222_stage_preview.py',
+            'tests/test_cinema_pg_v222_stage_preview.py',
+            '.github/workflows/jw-cinema-pg-v222-stage-preview.yml'}
+          got=set(subprocess.check_output(['git','diff','--name-only','f0a2ed04b08d8c4133fdf1281d3b133455fe457f','HEAD'],text=True).splitlines())
+          assert got==allowed,(got,allowed)
+          PY
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m py_compile scripts/ci_cinema_pg_v222_stage_preview.py tests/test_cinema_pg_v222_stage_preview.py
+      - name: Install original FastAPI app and isolated HTTP tests
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements.txt 'pytest>=8,<10' 'httpx>=0.27,<1'
+      - name: Negative and positive stage boundary tests
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q -ra -p no:cacheprovider tests/test_cinema_pg_v222_stage_preview.py
+      - name: Actual localhost FastAPI V22.2 entry and public-token check
+        run: |
+          set -euo pipefail
+          export JW_PREVIEW_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          python3 -m uvicorn scripts.ci_cinema_pg_v222_stage_preview:app --host 127.0.0.1 --port 8769 --log-level warning &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import os,time
+          import httpx
+          base='http://127.0.0.1:8769'
+          for _ in range(30):
+            try:
+              with httpx.Client(timeout=2,trust_env=False) as c:
+                a=c.get(base+'/')
+                if a.status_code==401:
+                  break
+            except httpx.RequestError:pass
+            time.sleep(.25)
+          else:raise AssertionError('Preview server not ready')
+          assert 'Basic' in a.headers.get('www-authenticate','')
+          assert a.headers.get('x-robots-tag')=='noindex, nofollow, noarchive'
+          with httpx.Client(timeout=10,trust_env=False,auth=('review',os.environ['JW_PREVIEW_SECRET'])) as c:
+            home=c.get(base+'/')
+            assert home.status_code==200,(home.status_code,home.text[:200])
+            assert '/static/cinematic_v222.css' in home.text
+            assert 'lang="ko"' in home.text
+            asset=c.get(base+'/static/cinematic_v222.css')
+            assert asset.status_code==200
+            assert 'desktop rail safety' in asset.text
+          with httpx.Client(timeout=5,trust_env=False) as c:
+            assert c.get(base+'/static/cinematic_v222.css').status_code==401
+          print('PASS_V222_REAL_ASGI_STAGE_AUTHENTICATED_ROOT_ASSET_AND_DENIED_UNAUTHENTICATED_ACCESS',flush=True)
+          PY
+          echo "LIMIT: Loopback smoke test, not hosted service or external uptime proof."
