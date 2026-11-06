@@ -44,7 +44,7 @@ jobs:
           python3 -I scripts/ci_cinema_pg_guard.py
           psql -X -Atc 'show server_version_num' | grep -E '^17[0-9]{4}$'
       - name: Install test-only PostgreSQL dependency
-        run: python3 -m pip install --disable-pip-version-check -r requirements-postgres-check.txt
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
       - name: Strict cross-store identity/MFA/session parity, 10 fault injections
         run: |
           set -euo pipefail
