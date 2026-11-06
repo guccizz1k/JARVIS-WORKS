@@ -157,6 +157,7 @@ def run() -> int:
                 bad_csrf = c.post("/api/customers", json={
                     "name": "PG Partner", "business_number": "8111111111"
                 }, headers={"X-CSRF-Token": sqlite_csrf})
+                print("JW_V223_CSRF_PROBE", bad_csrf.status_code, bad_csrf.text[:240], flush=True)
                 check(bad_csrf.status_code == 403, "PG_REJECTS_LEGACY_CSRF")
 
                 pg_customer = c.post("/api/customers", json={
