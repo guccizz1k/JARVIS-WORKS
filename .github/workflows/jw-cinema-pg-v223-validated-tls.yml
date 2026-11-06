@@ -71,10 +71,14 @@ jobs:
           done
           test "$(psql -X -Atc 'SHOW ssl')" = on
           echo "JW_PG_CI_TLS_CA=$certdir/server.crt" >> "$GITHUB_ENV"
-      - name: Run production V9 validated connection and HTTP E2E (74 cases)
+          echo "JW_PG_CI_TLS_SERVER_CERT=$certdir/server.crt" >> "$GITHUB_ENV"
+          echo "JW_PG_CI_TLS_SERVER_KEY=$certdir/server.key" >> "$GITHUB_ENV"
+      - name: Run production V9 validated connection and real HTTPS E2E (74 cases)
         run: |
           set -euo pipefail
-          python3 -m scripts.ci_cinema_pg_validated_tls_e2e_v223 | tee v223-validated-tls.log
+          python3 -m scripts.ci_cinema_pg_https_v223 | tee v223-validated-tls.log
           grep -F 'PASS_V223_REAL_VALIDATED_LEGACY_TX_TLS_PG17' v223-validated-tls.log
+          grep -F 'PASS_V223_REAL_HTTPS_74_HTTP_E2E_VERIFIED_TLS' v223-validated-tls.log
+          grep -F 'PASS_V223_HTTPS_UNTRUSTED_CERT_REFUSED' v223-validated-tls.log
           grep -F 'PASS: 74 checks, 0 failed, expected exactly 74' v223-validated-tls.log
-          echo 'DISPOSABLE PG17 ONLY: Supabase and real browser/HTTPS deployment were not exercised.'
+          echo 'DISPOSABLE PG17 LOOPBACK HTTPS ONLY: Supabase and external HTTPS deployment were not exercised.'
