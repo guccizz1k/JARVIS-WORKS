@@ -256,3 +256,10 @@ async def test_cookie_isolation_on_pg_login_and_native_pg_route():
         assert cut.PG_COOKIE in c.cookies and cut.UPSTREAM_COOKIE not in c.cookies
         assert cut.LEGACY_COOKIE not in c.cookies
         assert (await c.get("/api/pg-stage/v90/me")).json()["cookie"] == P
+
+
+def test_factory_blocks_without_importing_backends(monkeypatch):
+    monkeypatch.delenv(cut.FRONT_FLAG, raising=False)
+    monkeypatch.setenv("JW_ENV", "test")
+    with pytest.raises(RuntimeError, match="BLOCKED: cutover pilot"):
+        cut.create_app()
