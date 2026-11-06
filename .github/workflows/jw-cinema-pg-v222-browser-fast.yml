@@ -54,6 +54,8 @@ jobs:
             'pytest>=8,<10' 'pytest-asyncio>=0.24,<2' 'httpx>=0.27,<1' \
             'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' 'reportlab>=4,<5' 'pillow>=10'
           python3 -c "from playwright.sync_api import sync_playwright; print('Playwright import OK')"
+          # Video recording uses Playwright's own FFmpeg package, not the OS binary.
+          python3 -m playwright install ffmpeg
           ffprobe -version | head -1
       - name: Run actual root acceptance with strict CSP, native Chrome, verified MP4
         run: |
