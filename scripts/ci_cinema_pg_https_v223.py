@@ -65,6 +65,20 @@ def run() -> int:
         if response.status_code != 401 or response.url.scheme != "https":
             raise AssertionError(f"FAIL_V223_HTTPS_UNAUTHENTICATED_ROUTE: {response.status_code}")
         print("PASS_V223_HTTPS_VERIFIED_TLS_SOCKET_AND_401", flush=True)
+        if os.environ.get("JW_V223_INTEGRATED_HTTPS") == "1":
+            health = client.get("/health")
+            if (health.status_code != 200 or health.json().get("release_ready") is not False
+                    or health.headers.get("X-Frame-Options") != "DENY"
+                    or health.headers.get("Cache-Control") != "no-store"):
+                raise AssertionError("FAIL_V223_INTEGRATED_HTTPS_HEALTH_OR_HEADERS")
+            no_auth = client.get("/api/pg-review/capabilities")
+            if no_auth.status_code != 401:
+                raise AssertionError(f"FAIL_V223_INTEGRATED_CAPABILITIES_AUTH: {no_auth.status_code}")
+            bad_login = client.post("/api/pg-stage/v85/login", json={})
+            if bad_login.status_code != 422:
+                raise AssertionError(f"FAIL_V223_INTEGRATED_AUTH_ROUTE: {bad_login.status_code}")
+            print("PASS_V223_INTEGRATED_HTTPS_HEALTH_CAPABILITIES_AUTH_AND_HEADERS", flush=True)
+
         try:
             with httpx.Client(base_url=url, verify=True, trust_env=False, timeout=3) as untrusted:
                 untrusted.get("/api/quotes")
