@@ -1,0 +1,713 @@
+name: JW V22.2 integrated P1-P5 same-SHA regression, PG17, Chrome, DR, TLS E2E, OCR and security
+on:
+  push:
+    branches:
+      - candidate/jw-v222-integrated-prelaunch-20261106
+permissions:
+  contents: read
+concurrency:
+  group: jw-v222-integrated-prelaunch
+  cancel-in-progress: false
+jobs:
+  original-sha-full-pytest:
+    name: Original 19c5a677 full pytest (no skips)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify unmodified original SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- db/ app/main.py app/static/cinema/
+          python3 - <<'PY'
+          import subprocess
+          allowed=[".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"]
+          changed=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert changed <= set(allowed), 'Unexpected changed files: '+repr(sorted(changed-set(allowed)))
+          print('SCOPED_DIFF_PASS', sorted(changed))
+          PY
+          test "$(git hash-object app/static/cinematic_v222.css)" = "c7c5e796688582d27ab4322f0dd5cfd25b16226a"
+          python3 -m py_compile scripts/ci_cinema_pg_guard.py
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install project and OCR test prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+      - name: Full current tests with real dependencies; zero failure and skip
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- db/ app/main.py app/static/cinema/
+          python3 -I scripts/ci_cinema_pg_legacy_fixture_v1.py
+          python3 -m pytest -q -ra -p no:cacheprovider --junitxml=jw-v222-original-all-tests.xml tests
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('jw-v222-original-all-tests.xml').getroot()
+          nodes=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          assert nodes, 'Missing JUnit evidence'
+          counts={k:sum(int(n.attrib.get(k,0)) for n in nodes) for k in ('tests','failures','errors','skipped')}
+          print('FULL_ORIGINAL_SHA_RESULTS', counts, flush=True)
+          assert counts['tests'] >= 2376 and all(counts[k]==0 for k in ('failures','errors','skipped')), counts
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-integrated-full-pytest
+          path: jw-v222-original-all-tests.xml
+          retention-days: 5
+  original-sha-pg17:
+    name: Original 19c5a677 disposable PostgreSQL 17 gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact source and set up PostgreSQL clients
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- db/ app/main.py app/static/cinema/
+          python3 - <<'PY'
+          import subprocess
+          allowed=[".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"]
+          changed=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert changed <= set(allowed), 'Unexpected changed files: '+repr(sorted(changed-set(allowed)))
+          print('SCOPED_DIFF_PASS', sorted(changed))
+          PY
+          test "$(git hash-object app/static/cinematic_v222.css)" = "c7c5e796688582d27ab4322f0dd5cfd25b16226a"
+          python3 -m py_compile scripts/ci_cinema_pg_guard.py
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m pip install -r requirements-postgres-check.txt
+      - name: Engine SQL gate with fresh disposable database
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_sql_gate.py --report jw-v222-engine-pg17.json
+      - name: P1/P2 candidate suite with real PostgreSQL 17
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_p1_p2_pg17_suite.py --report jw-v222-p1p2-pg17.json
+      - name: S4 atomic ledger and reviewed-link concurrent writers
+        env:
+          PGPASSWORD: ci-only-ephemeral-test-password
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_s4_atomic_gate.py
+          python3 -I scripts/ci_cinema_pg_s4_reviewed_gate.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-integrated-pg17
+          path: |
+            jw-v222-engine-pg17.json
+            jw-v222-p1p2-pg17.json
+            jw-cinema-s4-atomic-pg17.json
+            jw-cinema-s4-reviewed-pg17.json
+          retention-days: 5
+
+  v222-rail-real-chrome:
+    name: Actual V22.2 desktop Chrome 1366/1440/1920, manual approval, MP4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+      JW_USE_SYSTEM_CHROME: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Independent scoped CSS+guard audit and original ancestry
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git diff --quiet 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4 HEAD -- app/main.py db/ app/static/cinema/
+          python3 - <<'PY'
+          import subprocess
+          allowed=[".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"]
+          changed=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert changed <= set(allowed), 'Unexpected changed files: '+repr(sorted(changed-set(allowed)))
+          print('SCOPED_DIFF_PASS', sorted(changed))
+          PY
+          test "$(git hash-object app/static/cinematic_v222.css)" = "c7c5e796688582d27ab4322f0dd5cfd25b16226a"
+          python3 -m py_compile scripts/ci_cinema_pg_guard.py
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install app dependencies, actual Chrome and video encoder
+        run: |
+          set -euo pipefail
+          command -v google-chrome
+          google-chrome --version
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum ffmpeg
+          python3 -m pip install --disable-pip-version-check -r requirements.txt \
+            'pytest>=8,<10' 'pytest-asyncio>=0.24,<2' 'httpx>=0.27,<1' \
+            'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' 'reportlab>=4,<5' 'pillow>=10'
+          python3 -m playwright install ffmpeg
+          command -v ffprobe
+      - name: Strict CSP actual root login, rail geometry, all routes, document approval, reduced motion and MP4
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v222_root_browser
+      - name: Record evidence hashes even on failure
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v222-root-browser
+          find artifacts/v222-root-browser -type f ! -path '*/raw-video/*' -print0 | sort -z | xargs -0 -r sha256sum > jw-v222-rail-qa-sha256.txt
+          cat jw-v222-rail-qa-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-integrated-root-chrome
+          path: |
+            artifacts/v222-root-browser/
+            !artifacts/v222-root-browser/raw-video/
+            jw-v222-rail-qa-sha256.txt
+          retention-days: 5
+  stage-3-https-quote:
+    name: Stage 3 - actual loopback TLS restricted PG17 quote and draft order
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install restricted PG17 actual HTTPS dependencies
+        run: python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Real TLS HTTP and RLS A/B/C quote review draft/internal order
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v184_actual_https_pg_order.py
+          python3 -m scripts.ci_v184_actual_https_pg_order
+          echo "LIMIT: Local TLS only, not deployed Render staging."
+  stage-3-https-messenger:
+    name: Stage 3 - actual loopback TLS PG17 messenger and attachments
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install restricted PG17 and real HTTPS dependencies
+        run: python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Real TLS messenger attachment, cross-tenant denial and concurrent replay
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v190_https_pg_messenger_attachments.py
+          python3 -m scripts.ci_v190_https_pg_messenger_attachments
+          echo "LIMIT: No hosted Render messenger E2E."
+  stage-3-real-browser-pg17:
+    name: Stage 3 - actual Chrome multipart and signed PG17 approval to order
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install PG17 and browser dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'playwright>=1.50,<2'
+          python3 -m playwright install --with-deps chromium
+      - name: Native multipart real Chromium to PG17 with RLS and HMAC receipt
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v199_exact_shape_browser_pg17.py
+          python3 -m scripts.ci_v199_exact_shape_browser_pg17
+          echo "LIMIT: Product route browser fixture, not deployed V22.2 with live Supabase."
+  stage-4-ocr-synthetic-50:
+    name: Stage 4 - Korean OCR robustness 50 synthetic documents ONLY
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    env:
+      JW_ENV: review
+      JW_V188_OCR_ACK: SYNTHETIC_LOCAL_KOREAN_FORMS_ONLY
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install system OCR libraries and supported font
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-eng tesseract-ocr-kor
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'pillow>=10,<13'
+      - name: Actual 50 Tesseract operations and explicit synthetic-only verdict
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/ci_v188_ocr50_synthetic.py
+          python3 -m scripts.ci_v188_ocr50_synthetic
+          echo "BLOCKED: 50 licensed real-business document and ground-truth OCR acceptance NOT RUN."
+  stage-5-release-fail-closed:
+    name: Stage 5 - independent protected-source and no-release decision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/jw-v222-integrated-prelaunch-20261106
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert unchanged source and guard before test
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Run review containment and independent release policy controls
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/jw_eight_stage_release_gate.py scripts/ci_cinema_pg_guard.py
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root=Path('.')
+          original='19c5a6771b8d0925d1bb32d0119f6ad186b57fd4'
+          current=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert subprocess.run(['git','merge-base','--is-ancestor',original,current]).returncode==0
+          items=subprocess.check_output(['git','diff','--name-only',original,current],text=True).splitlines()
+          allow={
+            '.github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml',
+            'scripts/ci_cinema_pg_v222_stage_preview.py',
+            'tests/test_cinema_pg_v222_stage_preview.py',
+            '.github/workflows/jw-cinema-pg-v222-browser-fast.yml',
+            '.github/workflows/jw-cinema-pg-v222-rail-qa.yml',
+            '.github/workflows/jw-cinema-pg-v222-sha-qa.yml',
+            '.github/workflows/jw-cinema-pg-v222-release-readiness.yml',
+            'app/static/cinematic_v222.css',
+            'scripts/ci_cinema_pg_guard.py',
+            'scripts/ci_cinema_pg_v222_root_browser.py'}
+          assert set(items)<=allow,sorted(set(items)-allow)
+          assert subprocess.run(['git','diff','--quiet',original,current,'--','app/main.py','app/static/cinema/','db/']).returncode==0
+          assert os.getenv('JW_PG_CI_ROOT_DSN') is None, 'Cross-job DB credentials must never be available'
+          report={
+            'tested_sha':current,
+            'original_sha':original,
+            'changed_files':items,
+            'original_protected':'PASS',
+            'supabase_real_backup':'BLOCKED_NOT_CAPTURED',
+            'supabase_migration':'NOT_RUN',
+            'hosted_https_latest_sha':'NOT_RUN',
+            'real_customer_ocr50':'NOT_RUN',
+            'real_pc_gpu_60fps':'NOT_MEASURED',
+            'release':'BLOCKED',
+            'main_merge':'NOT_RUN',
+            'production_deploy':'NOT_RUN',
+            'security_signoff':'NOT_RUN',
+          }
+          Path('jw-v222-release-readiness.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          print('PASS_V222_RELEASE_GUARD_EVIDENCE_NO_PRODUCTION_CUTOVER')
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jw-v222-integrated-P1-P5-failclosed-report
+          path: jw-v222-release-readiness.json
+          retention-days: 7
+  integrated-cross-cluster-dr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      source-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v197-ephemeral-source
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      restore-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v197-ephemeral-restore
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-v197-ephemeral-source@127.0.0.1:5432/postgres
+      JW_PG_CI_RESTORE_DSN: postgresql://postgres:ci-v197-ephemeral-restore@127.0.0.1:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify existing V22.2 candidate tree and all protected source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          python3 -I scripts/ci_cinema_pg_guard.py
+          echo 'Docker PG17 service port identities:'
+          docker ps --filter ancestor=postgres:17 --format '{{.ID}}|{{.Ports}}'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing app and PostgreSQL test dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Validate source and two-cluster protection gates
+        run: |
+          python -m py_compile scripts/ci_v197_cross_cluster_approval_dr.py
+          python - <<'PY'
+          from pathlib import Path
+          s=Path("scripts/ci_v197_cross_cluster_approval_dr.py").read_text()
+          must=("fresh_guard(source,5432)","fresh_guard(target,5433)",
+            "source_cid!=target_cid","PORTS =","live.main()",
+            "Fernet.generate_key()","InvalidToken","pg_dump",
+            "pg_restore","--no-owner","v195_confirm_import",
+            "FAIL_V197_EXPECTED_OWNER_DRIFT","PASS_V197_POST_SNAPSHOT_COMMIT_LOST_RPO_NONZERO",
+            "LIMIT_V197_SAME_GITHUB_RUNNER_TWO_CONTAINERS_NOT_OFFSITE_HOSTED_DR")
+          for word in must:
+            assert word in s,word
+          for word in ("JW_PG_STAGE_DSN","SUPABASE_DSN","onrender.com"):
+            assert word not in s,word
+          print("PASS_V197_CODE_ISOLATION_AND_TWO_CLUSTER_SOURCE_GUARD")
+          PY
+      - name: Two distinct PG17 services real source TLS and authenticated encrypted restore
+        run: python -m scripts.ci_v197_cross_cluster_approval_dr
+  semgrep-scoped-full-app:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JW_ENV: review
+      SEMGREP_SEND_METRICS: "off"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact source and protected original audit
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m py_compile scripts/ci_semgrep_security.py app/deployment_safety_v78.py
+      - name: Existing source fail-closed production protection
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from app.deployment_safety_v78 import DeploymentBlocked,require_safe_runtime
+          os.environ['JW_ENV']='production'
+          try:
+              require_safe_runtime()
+          except DeploymentBlocked as e:
+              assert 'PRODUCTION_BLOCKED' in str(e)
+          else:
+              raise AssertionError('Production deployment guard unexpectedly permits SQLite')
+          print('PASS_V222_PRODUCTION_SQLITE_DEPLOYMENT_BLOCKED',flush=True)
+          PY
+      - name: Install offline local rule scanner, telemetry disabled
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check 'semgrep>=1,<2'
+          semgrep --version
+      - name: Existing 4-injected + safe-fixture + full app/scripts Semgrep
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_semgrep_security.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-integrated-semgrep-evidence
+          path: artifacts/semgrep/result.json
+          retention-days: 5
+  review-only-auth-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JW_ENV: review
+      JW_ROOT_UI: v222
+      DEMO_SEED: '1'
+      JARVIS_DB_PATH: /tmp/jw_v222_integrated_ci_preview.sqlite
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect existing source and exact isolated change set
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD)" = "f0a2ed04b08d8c4133fdf1281d3b133455fe457f"
+          git diff --quiet f0a2ed04b08d8c4133fdf1281d3b133455fe457f HEAD -- app/ db/
+          python3 - <<'PY'
+          import subprocess
+          allowed=set([".github/workflows/jw-cinema-pg-v222-browser-fast.yml",".github/workflows/jw-cinema-pg-v222-rail-qa.yml",".github/workflows/jw-cinema-pg-v222-sha-qa.yml","app/static/cinematic_v222.css","scripts/ci_cinema_pg_guard.py","scripts/ci_cinema_pg_v222_root_browser.py","scripts/ci_cinema_pg_v222_stage_preview.py","tests/test_cinema_pg_v222_stage_preview.py",".github/workflows/jw-cinema-pg-v222-integrated-prelaunch.yml"])
+          actual=set(subprocess.check_output(['git','diff','--name-only','19c5a6771b8d0925d1bb32d0119f6ad186b57fd4','HEAD'],text=True).splitlines())
+          assert actual == allowed, {'missing':sorted(allowed-actual),'unapproved':sorted(actual-allowed)}
+          print('PASS_INTEGRATED_SHA_EXACT_REVIEW_SCOPE', sorted(actual))
+          PY
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m py_compile scripts/ci_cinema_pg_v222_stage_preview.py tests/test_cinema_pg_v222_stage_preview.py
+      - name: Install original FastAPI app and isolated HTTP tests
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements.txt 'pytest>=8,<10' 'httpx>=0.27,<1'
+      - name: Negative and positive stage boundary tests
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q -ra -p no:cacheprovider tests/test_cinema_pg_v222_stage_preview.py
+      - name: Actual localhost FastAPI V22.2 entry and public-token check
+        run: |
+          set -euo pipefail
+          export JW_PREVIEW_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+          python3 -m uvicorn scripts.ci_cinema_pg_v222_stage_preview:app --host 127.0.0.1 --port 8769 --log-level warning &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import os,time
+          import httpx
+          base='http://127.0.0.1:8769'
+          for _ in range(30):
+            try:
+              with httpx.Client(timeout=2,trust_env=False) as c:
+                a=c.get(base+'/')
+                if a.status_code==401:
+                  break
+            except httpx.RequestError:pass
+            time.sleep(.25)
+          else:raise AssertionError('Preview server not ready')
+          assert 'Basic' in a.headers.get('www-authenticate','')
+          assert a.headers.get('x-robots-tag')=='noindex, nofollow, noarchive'
+          with httpx.Client(timeout=10,trust_env=False,auth=('review',os.environ['JW_PREVIEW_SECRET'])) as c:
+            home=c.get(base+'/')
+            assert home.status_code==200,(home.status_code,home.text[:200])
+            assert '/static/cinematic_v222.css' in home.text
+            assert 'lang="ko"' in home.text
+            asset=c.get(base+'/static/cinematic_v222.css')
+            assert asset.status_code==200
+            assert 'desktop rail safety' in asset.text
+          with httpx.Client(timeout=5,trust_env=False) as c:
+            assert c.get(base+'/static/cinematic_v222.css').status_code==401
+          print('PASS_V222_REAL_ASGI_STAGE_AUTHENTICATED_ROOT_ASSET_AND_DENIED_UNAUTHENTICATED_ACCESS',flush=True)
+          PY
+          echo "LIMIT: Loopback smoke test, not hosted service or external uptime proof."
