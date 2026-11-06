@@ -9,6 +9,7 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
+from app import pg_cinema_legacy_api_v1 as legacy
 from app import pg_auth_v85 as auth
 from app import pg_review_integrated_v202 as integrated
 from scripts import ci_cinema_pg_https_v223 as https_runner
@@ -74,7 +75,17 @@ def integrated_build_app():
             raise AssertionError("FAIL_V223_INTEGRATED_AUTH_ROLE_TLS_BOUNDARIES")
         print("PASS_V223_INTEGRATED_AUTH_ROLE_SEPARATE_TLS", flush=True)
 
-    app = integrated.create_app()
+    # Preserve the integrated factory; supply only the deterministic test clock
+    # to the same legacy router seam used in the already-passing V9 E2E.
+    original_factory = legacy.create_legacy_router
+    def clocked_factory(tx, **kwargs):
+        kwargs["today"] = lambda: validated.e2e.Clock.today
+        return original_factory(tx, **kwargs)
+    legacy.create_legacy_router = clocked_factory
+    try:
+        app = integrated.create_app()
+    finally:
+        legacy.create_legacy_router = original_factory
     print("PASS_V223_INTEGRATED_FACTORY_CREATED", flush=True)
     return app
 
