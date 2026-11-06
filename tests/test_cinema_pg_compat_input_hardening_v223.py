@@ -1,0 +1,118 @@
+"""Input hardening of app.pg_cinema_compat_v1: no unusable identity passes the two-person quote rule, and a
+malformed request body is a 4xx refusal, never an unhandled exception (a route would turn that into a 500)."""
+from __future__ import annotations
+
+import pytest
+
+from app import pg_cinema_compat_v1 as cm
+
+RID = "req-00000001"
+ITEMS = [{"name": "A", "quantity": 1, "unit_price": 100}]
+
+
+def refusal(fn, *a, **kw) -> cm.CompatRefusal:
+    with pytest.raises(cm.CompatRefusal) as exc:
+        fn(*a, **kw)
+    return exc.value
+
+
+# ------------------------------------------------------------- quote approval: identities
+@pytest.mark.parametrize("actor,submitter", [
+    (None, "u1"), ("u1", None), (None, None), ("", "u1"), ("u1", ""), (0, 0), (1, "1"), (True, 1),
+    (" u1", "u1"), ("u1 ", "u1"), ("u1", " u1"), ("   ", "   "), ("u1\x00", "u1"), ("u1\n", "u1"),
+    (b"u1", b"u1"), (["u1"], ["u1"]), (("u1",), ("u1",)), ({"id": "u1"}, {"id": "u1"}), ("u​1", "u1"),
+])
+def test_unusable_identity_is_unknown_not_passed(actor, submitter):
+    assert refusal(cm.quote_approval_guard, actor, submitter).code in (
+        "quote_approval_identity_unknown", "quote_second_person_required")
+    assert refusal(cm.quote_approval_guard, actor, submitter).http_status == 409
+
+
+@pytest.mark.parametrize("actor,submitter", [(" u1", "u1"), ("u1 ", "u1"), (None, "u1"), (1, "1"), ("u​1", "u1")])
+def test_padding_and_wrong_types_are_unknown_specifically(actor, submitter):
+    assert refusal(cm.quote_approval_guard, actor, submitter).code == "quote_approval_identity_unknown"
+
+
+@pytest.mark.parametrize("actor,submitter", [("U1", "u1"), ("u1", "U1"), ("ｕ１", "u1"), ("abc", "abc")])
+def test_same_person_in_another_spelling_is_still_the_same_person(actor, submitter):
+    assert refusal(cm.quote_approval_guard, actor, submitter).code == "quote_second_person_required"
+
+
+def test_two_different_people_pass():
+    assert cm.quote_approval_guard("u1", "u2") is None
+    assert cm.quote_approval_guard("a" * 32, "b" * 32) is None
+
+
+def test_transition_accepted_needs_both_identities_even_when_missing_from_the_call():
+    assert refusal(cm.quote_transition, {"status": "accepted"}, RID, expected_version=1).code == \
+        "quote_approval_identity_unknown"
+    assert cm.quote_transition({"status": "accepted"}, RID, expected_version=1, actor_id="u1",
+                               submitted_by="u2")["to"] == "approved"
+
+
+# ------------------------------------------------------------- bodies that are not objects
+@pytest.mark.parametrize("bad", [None, "accepted", 5, ["accepted"], (1,)])
+@pytest.mark.parametrize("fn,kw", [
+    (cm.partner_from_customer, {}), (cm.quote_create, {}), (cm.order_from_quote, {}),
+    (cm.payment_for_invoice, {}),
+    (cm.quote_update, {"expected_version": 1, "current_partner_id": "p", "current_vat_mode": "taxable"}),
+    (cm.quote_transition, {"expected_version": 1, "actor_id": "u1", "submitted_by": "u2"}),
+])
+def test_non_object_body_is_a_422_refusal(fn, kw, bad):
+    err = refusal(fn, bad, RID, **kw)
+    assert err.http_status in (400, 422)
+
+
+@pytest.mark.parametrize("status", [["accepted"], {}, 5, None, True, "ACCEPTED", "approved"])
+def test_unhashable_or_odd_status_is_unknown_status(status):
+    assert refusal(cm.quote_transition, {"status": status}, RID, expected_version=1,
+                   actor_id="u1", submitted_by="u2").code == "unknown_quote_status"
+
+
+# ------------------------------------------------------------- text fields are never coerced
+@pytest.mark.parametrize("field,value", [("name", 5), ("name", ["x"]), ("business_number", 1234567890),
+                                         ("contact_name", {}), ("email", 7), ("phone", ["1"]), ("name", "a\x00b")])
+def test_partner_text_fields_must_be_text(field, value):
+    body = {"name": "N", "business_number": "1234567890", field: value}
+    assert refusal(cm.partner_from_customer, body, RID).http_status == 422
+
+
+def test_partner_business_number_must_be_ascii_digits():
+    assert refusal(cm.partner_from_customer, {"name": "N", "business_number": "１２３４５６７８９０"}, RID).code == \
+        "business_number_not_10_digits"
+    assert cm.partner_from_customer({"name": "N", "business_number": "123-45-67890"}, RID)["business_number"] == "1234567890"
+
+
+@pytest.mark.parametrize("cid", [5, ["p"], {"a": 1}, "", None])
+def test_quote_create_needs_a_text_customer_id(cid):
+    assert refusal(cm.quote_create, {"customer_id": cid, "title": "T", "items": ITEMS}, RID).http_status == 422
+
+
+@pytest.mark.parametrize("vat", [["taxable"], {}, 5, "TAXABLE"])
+def test_quote_create_vat_mode_unhashable_or_wrong(vat):
+    assert refusal(cm.quote_create, {"customer_id": "p", "title": "T", "vat_mode": vat, "items": ITEMS}, RID).code == \
+        "bad_vat_mode"
+
+
+@pytest.mark.parametrize("qid", [5, ["q"], "", None])
+def test_order_from_quote_needs_a_text_quote_id(qid):
+    assert refusal(cm.order_from_quote, {"quote_id": qid}, RID).http_status == 422
+
+
+# ------------------------------------------------------------- payments
+@pytest.mark.parametrize("paid", ["2026-02-30", "2026-13-01", "2026-00-10", "２０２０-01-01", "2026-1-1",
+                                  "2026-11-01T00:00:00", 20261101, None, ["2026-11-01"]])
+def test_impossible_or_odd_payment_date_is_a_refusal_not_a_crash(paid):
+    assert refusal(cm.payment_for_invoice, {"amount": 10, "paid_at": paid}, RID).http_status == 422
+
+
+def test_reference_is_never_silently_truncated():
+    ok = cm.payment_for_invoice({"amount": 10, "paid_at": "2026-11-01", "reference": "r" * 120}, RID)
+    assert ok["reference"] == "r" * 120
+    assert refusal(cm.payment_for_invoice, {"amount": 10, "paid_at": "2026-11-01", "reference": "r" * 121}, RID).http_status == 422
+    assert refusal(cm.payment_for_invoice, {"amount": 10, "paid_at": "2026-11-01", "reference": 77}, RID).http_status == 422
+
+
+def test_amount_must_be_a_plain_integer():
+    for amount in (True, 10.5, "10", None, [10]):
+        assert refusal(cm.payment_for_invoice, {"amount": amount, "paid_at": "2026-11-01"}, RID).http_status == 422

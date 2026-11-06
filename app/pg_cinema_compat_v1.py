@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from datetime import date
 
 REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
@@ -63,6 +64,39 @@ def _request_id(value: str) -> str:
     return value
 
 
+def _body(body) -> dict:
+    """Every translator reads fields with ``.get``; anything but a JSON object is a client error (422),
+    never an unhandled AttributeError that a route would turn into a 500."""
+    if not isinstance(body, dict):
+        raise CompatRefusal("bad_body", "the request body must be a JSON object", 422)
+    return body
+
+
+def _text(body: dict, field: str, *, required: bool = False, max_len: int = 255) -> str:
+    """A text field: absent/None/'' -> ''; anything that is not a string, or is too long, is refused
+    (a number or list is never coerced to text)."""
+    value = body.get(field)
+    if value is None or value == "":
+        if required:
+            raise CompatRefusal("bad_" + field, f"{field} is required", 422)
+        return ""
+    if not isinstance(value, str) or len(value) > max_len or "\x00" in value:
+        raise CompatRefusal("bad_" + field, f"{field} must be text of at most {max_len} characters", 422)
+    return value
+
+
+def _identity(value) -> str | None:
+    """Canonical form of a user id for the same-person comparison, or None when it is unusable.
+    Usable = a non-empty string without surrounding whitespace or control characters. The canonical form is
+    NFKC + casefold, so ' U1', 'u1 ' (rejected as unusable) and fullwidth/case variants cannot make one
+    person look like two."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        return None
+    if any(unicodedata.category(ch).startswith("C") for ch in value):
+        return None
+    return unicodedata.normalize("NFKC", value).casefold()
+
+
 def _int(value, field: str, lo: int, hi: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise CompatRefusal("not_integer_krw", f"{field} must be an integer (KRW has no fractions)", 422)
@@ -97,13 +131,14 @@ def partner_from_customer(body: dict, request_id: str, *, partner_id: str | None
     if (partner_id is None) != (expected_version is None):
         raise CompatRefusal("version_required_for_update",
                             "an update must carry both the partner id and its current version", 422)
-    digits = re.sub(r"[\s-]", "", body.get("business_number") or "")
-    if digits and not re.fullmatch(r"[0-9]{10}", digits):
+    body = _body(body)
+    digits = re.sub(r"[\s-]", "", _text(body, "business_number", max_len=64))
+    if digits and not re.fullmatch(r"[0-9]{10}", digits, re.ASCII):
         raise CompatRefusal("business_number_not_10_digits",
                             "PG stores only a 10-digit business number; the legacy free text is not carried", 422)
-    out = {"request_id": _request_id(request_id), "name": body.get("name") or "",
-           "business_number": digits, "contact_name": body.get("contact_name") or "",
-           "email": body.get("email") or "", "phone": body.get("phone") or ""}
+    out = {"request_id": _request_id(request_id), "name": _text(body, "name", max_len=120),
+           "business_number": digits, "contact_name": _text(body, "contact_name"),
+           "email": _text(body, "email"), "phone": _text(body, "phone")}
     if not 1 <= len(out["name"]) <= 120:
         raise CompatRefusal("bad_name", "name must be 1..120 characters", 422)
     if partner_id is not None:
@@ -114,13 +149,14 @@ def partner_from_customer(body: dict, request_id: str, *, partner_id: str | None
 # ------------------------------------------------------------------------------ quotes
 def quote_create(body: dict, request_id: str) -> dict:
     """POST /api/quotes -> POST {pg}/quotes. ``customer_id`` becomes ``partner_id``."""
+    body = _body(body)
     vat = body.get("vat_mode", "taxable")
-    if vat not in ("taxable", "exempt"):
+    if not isinstance(vat, str) or vat not in ("taxable", "exempt"):
         raise CompatRefusal("bad_vat_mode", "vat_mode must be taxable or exempt", 422)
     title = body.get("title")
     if not isinstance(title, str) or not 1 <= len(title) <= 150:
         raise CompatRefusal("bad_title", "title must be 1..150 characters", 422)
-    return {"request_id": _request_id(request_id), "partner_id": body.get("customer_id") or "",
+    return {"request_id": _request_id(request_id), "partner_id": _text(body, "customer_id", required=True, max_len=64),
             "title": title, "vat_mode": vat, "items": _items(body.get("items"))}
 
 
@@ -128,6 +164,7 @@ def quote_update(body: dict, request_id: str, *, expected_version: int,
                  current_partner_id: str, current_vat_mode: str) -> dict:
     """PUT /api/quotes/{id} -> PUT {pg}/quotes/{id}. PG cannot change the partner or VAT mode of an
     existing quote; a legacy edit that tries to is refused instead of ignored."""
+    body = _body(body)
     if body.get("customer_id") not in (None, current_partner_id):
         raise CompatRefusal("pg_quote_partner_is_immutable", "the customer of an existing quote cannot change")
     if body.get("vat_mode") not in (None, current_vat_mode):
@@ -145,8 +182,8 @@ def quote_transition(body: dict, request_id: str, *, expected_version: int,
 
     Approving (legacy ``accepted``) needs the acting user and the quote's submitter: the same person
     may not do both. Missing information is a refusal, never a pass."""
-    legacy = body.get("status")
-    if legacy not in QUOTE_STATUS_MAP:
+    legacy = _body(body).get("status")
+    if not isinstance(legacy, str) or legacy not in QUOTE_STATUS_MAP:
         raise CompatRefusal("unknown_quote_status", "status must be sent, accepted or rejected", 422)
     if legacy == "accepted":
         quote_approval_guard(actor_id, submitted_by)
@@ -154,12 +191,15 @@ def quote_transition(body: dict, request_id: str, *, expected_version: int,
             "to": QUOTE_STATUS_MAP[legacy]}
 
 
-def quote_approval_guard(actor_id: str | None, submitted_by: str | None) -> None:
-    """Two-person rule for quote approval (application level; the engine does not enforce it)."""
-    if not actor_id or not submitted_by:
+def quote_approval_guard(actor_id, submitted_by) -> None:
+    """Two-person rule for quote approval (application level; the engine does not enforce it).
+    Fail-closed: a missing, non-text, blank, padded or control-character identity is "unknown" and refuses;
+    two identities that are equal after NFKC + casefold are the same person and refuse."""
+    actor, submitter = _identity(actor_id), _identity(submitted_by)
+    if actor is None or submitter is None:
         raise CompatRefusal("quote_approval_identity_unknown",
                             "the approver and the submitter must both be known to approve a quote", 409)
-    if actor_id == submitted_by:
+    if actor == submitter:
         raise CompatRefusal("quote_second_person_required",
                             "a quote must be approved by a different administrator than the one who submitted it", 409)
 
@@ -167,25 +207,31 @@ def quote_approval_guard(actor_id: str | None, submitted_by: str | None) -> None
 # ---------------------------------------------------------------------- orders / money
 def order_from_quote(body: dict, request_id: str) -> dict:
     """POST /api/orders/from-quote -> POST {pg}/orders. ``due_date`` has no PG column."""
+    body = _body(body)
     if body.get("due_date") not in (None, ""):
         raise CompatRefusal("due_date_not_stored_in_pg",
                             "cinema_pg_orders has no due date; carrying it would need a schema change "
                             "that has not been approved, and dropping it would lose the value")
-    return {"request_id": _request_id(request_id), "quote_id": body.get("quote_id") or ""}
+    return {"request_id": _request_id(request_id), "quote_id": _text(body, "quote_id", required=True, max_len=64)}
 
 
 def payment_for_invoice(body: dict, request_id: str, *, today: date | None = None) -> dict:
     """POST /api/invoices/{id}/payments -> POST {pg}/invoices/{id}/payments. ``note`` has no PG column."""
+    body = _body(body)
     if body.get("note"):
         raise CompatRefusal("note_not_stored_in_pg", "cinema_pg_payments has no note column")
     paid = body.get("paid_at")
     paid_on = paid.isoformat() if isinstance(paid, date) else paid
-    if not isinstance(paid_on, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", paid_on):
+    if not isinstance(paid_on, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", paid_on, re.ASCII):
         raise CompatRefusal("bad_paid_on", "paid_at must be YYYY-MM-DD", 422)
-    if date.fromisoformat(paid_on) > (today or date.today()):
+    try:
+        paid_date = date.fromisoformat(paid_on)
+    except ValueError:
+        raise CompatRefusal("bad_paid_on", "paid_at is not a real calendar date", 422) from None
+    if paid_date > (today or date.today()):
         raise CompatRefusal("future_payment", "PG refuses a payment dated in the future", 422)
     return {"request_id": _request_id(request_id), "amount_krw": _int(body.get("amount"), "amount", 1, 100_000_000_000),
-            "paid_on": paid_on, "reference": str(body.get("reference") or "")[:120]}
+            "paid_on": paid_on, "reference": _text(body, "reference", max_len=120)}
 
 
 # --------------------------------------------------- steps with NO honest PG equivalent
