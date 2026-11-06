@@ -218,3 +218,22 @@ def test_unknown_or_mismatched_engine_errors_become_502_without_the_raw_message(
 def test_delivery_second_person_message_maps_to_a_waiting_for_another_person_code():
     e = cm.map_pg_error("42501", "approver must differ from the person who recorded the delivery")
     assert e.code == "delivery_second_person_required" and e.http_status == 409
+
+
+# --------------------------------------------- constraint errors from the PROPOSED migrations
+ROOT_DIR = pathlib.Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("state, name, code, status, ko, sql_file", cm.PG_CONSTRAINT_ERRORS)
+def test_every_mapped_constraint_name_is_declared_in_its_migration_file(state, name, code, status, ko, sql_file):
+    text = (ROOT_DIR / sql_file).read_text(encoding="utf-8")
+    assert re.search(rf"ADD CONSTRAINT {name}\b", text), f"{name} is not declared in {sql_file}"
+    err = cm.map_pg_error(state, f'ERROR: new row for relation "cinema_pg_quotes" violates check constraint "{name}"')
+    assert (err.code, err.http_status, err.detail) == (code, status, ko)
+
+
+def test_constraint_mapping_needs_both_the_sqlstate_and_the_exact_quoted_name():
+    msg = 'violates check constraint "cinema_pg_quote_two_person"'
+    assert cm.map_pg_error("23505", msg).code == "pg_engine_error"
+    assert cm.map_pg_error("23514", 'violates check constraint "cinema_pg_quote_two_person_x"').code == "pg_engine_error"
+    assert cm.map_pg_error("23514", "cinema_pg_quote_two_person without quotes").code == "pg_engine_error"

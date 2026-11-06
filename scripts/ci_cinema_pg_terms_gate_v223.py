@@ -13,16 +13,19 @@ from __future__ import annotations
 
 import hashlib
 import os
+import pathlib
 import re
 import secrets
 import subprocess
 import sys
 
 from scripts import ci_cinema_pg_sql_gate as gate
+from app import pg_cinema_compat_v1 as compat
+from app import pg_cinema_compat_view_v1 as view
 
 ROOT = gate.ROOT
 SQLFILE = ROOT / "scripts/review/cinema_pg_v223_terms_proposal.sql"
-EXPECTED_MIN_CHECKS = 36
+EXPECTED_MIN_CHECKS = 59
 DB = ""
 RID = secrets.token_hex(4)
 results = []
@@ -186,6 +189,96 @@ def run():
         "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='jw_dev' "
         "AND c.relname IN ('cinema_pg_order_terms','cinema_pg_invoice_terms','cinema_pg_payment_notes') "
         "AND c.relrowsecurity AND c.relforcerowsecurity")) == "3")
+
+    # ------------------------- T5: database-level two-person rule for quotes (separate migration)
+    # JW_V223_TWO_PERSON_SQL lets a mutation check point the gate at a deliberately broken copy.
+    TP = pathlib.Path(os.environ.get("JW_V223_TWO_PERSON_SQL") or ROOT / "scripts/review/cinema_pg_v223_quote_two_person_proposal.sql")
+    def qflow(tag, creator, submitter, approver):
+        A_ = "hash_a_admin1"
+        part = last(w(A_, f"SELECT jw_dev.cinema_pg_partner_upsert('rq-t5-p-{tag}-{RID}',NULL,'T5 {tag} {RID}','','','','',NULL)->'entity'->>'id'"))
+        qid = last(w(creator, f"SELECT jw_dev.cinema_pg_quote_create('rq-t5-q-{tag}-{RID}','{part}','T5 {tag}','exempt',"
+                              f"'[{{\"name\":\"Part\",\"quantity\":1,\"unit_price\":100}}]'::jsonb)->'entity'->>'id'"))
+        last(w(submitter, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-s-{tag}-{RID}','{qid}',1,'submitted')"))
+        return qid
+
+    def approve(tag, session, qid, version, rid=""):
+        return w(session, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-a{rid}-{tag}-{RID}','{qid}',{version},'approved')->'entity'->>'status'")
+
+    q_pre = qflow("pre", A, A, A)
+    last(approve("pre", A, q_pre, 2))                    # allowed BEFORE the migration: same administrator
+    selfrows = last(psql("SELECT count(*) FROM jw_dev.cinema_pg_quotes WHERE status IN ('approved','ordered') "
+                         "AND (submitted_by IS NULL OR approved_by IS NOT DISTINCT FROM submitted_by)"))
+    rec("T5.00_audited_fixtures_contain_self_approved_quotes_before_migration", int(selfrows) > 0, f"rows={selfrows}")
+    p = psql(file=str(TP))
+    rec("T5.01_migration_applies_after_the_engine_and_its_tests", p.returncode == 0, p.stderr.strip()[:200])
+    rec("T5.02_constraint_exists_and_is_not_yet_validated",
+        last(psql("SELECT convalidated::text FROM pg_constraint WHERE conname='cinema_pg_quote_two_person'")) == "false")
+    v = psql("ALTER TABLE jw_dev.cinema_pg_quotes VALIDATE CONSTRAINT cinema_pg_quote_two_person")
+    rec("T5.03_validate_is_refused_while_self_approved_rows_exist", state(v) == "23514", state(v))
+
+    q1 = qflow("self", A, A, A)
+    p = approve("self", A, q1, 2)
+    rec("T5.04_submitter_cannot_approve_own_quote", state(p) == "23514" and "cinema_pg_quote_two_person" in p.stderr, state(p))
+    mapped = compat.map_pg_error(state(p), p.stderr)
+    rec("T5.05_real_pg_error_maps_to_the_stable_app_code", (mapped.code, mapped.http_status) == ("quote_second_person_required", 409), mapped.code)
+    rec("T5.06_refused_approval_leaves_the_quote_submitted",
+        last(psql(f"SELECT status FROM jw_dev.cinema_pg_quotes WHERE id='{q1}'")) == "submitted")
+    p = approve("self", A2, q1, 2, "2")
+    rec("T5.07_a_different_administrator_can_then_approve_it", state(p) == "OK" and "approved" in p.stdout, state(p))
+    q2 = qflow("mem", M, M, M)
+    rec("T5.08_member_submits_admin_approves", state(approve("mem", A, q2, 2)) == "OK")
+    q3 = qflow("ord", A, A, A)
+    approve("ord", A2, q3, 2)
+    o = w(A, f"SELECT jw_dev.cinema_pg_order_create('rq-t5-o-{RID}','{q3}')->'entity'->>'status'")
+    rec("T5.09_approved_quote_still_converts_to_an_order", state(o) == "OK",
+        state(o) + " " + o.stderr.strip()[:120])
+    q4 = qflow("rej", A, A, A)
+    last(w(A2, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-rj-{RID}','{q4}',2,'rejected')"))
+    last(w(M, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-dr-{RID}','{q4}',3,'draft')"))
+    last(w(M, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-rs-{RID}','{q4}',4,'submitted')"))
+    rec("T5.10_resubmission_by_a_member_is_approvable_by_an_admin", state(approve("rej", A, q4, 5)) == "OK")
+    q5 = qflow("rs2", A, A, A)
+    last(w(A2, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-rj2-{RID}','{q5}',2,'rejected')"))
+    last(w(A2, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-dr2-{RID}','{q5}',3,'draft')"))
+    last(w(A2, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-rs2-{RID}','{q5}',4,'submitted')"))
+    p = approve("rs2", A2, q5, 5)
+    rec("T5.11_whoever_resubmitted_cannot_approve_the_resubmission", state(p) == "23514", state(p))
+    rec("T5.12_other_transitions_are_unaffected_cancel_an_approved_quote",
+        state(w(A, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-cn-{RID}','{q1}',3,'cancelled')")) == "OK")
+    o = w(A, f"SELECT jw_dev.cinema_pg_order_create('rq-t5-opre-{RID}','{q_pre}')->'entity'->>'status'")
+    rec("T5.14_CONSEQUENCE_a_quote_self_approved_before_the_migration_can_no_longer_become_an_order",
+        state(o) == "23514" and "cinema_pg_quote_two_person" in o.stderr, state(o))
+    c = w(A, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t5-cnpre-{RID}','{q_pre}',3,'cancelled')")
+    rec("T5.15_CONSEQUENCE_but_it_can_still_be_cancelled_so_the_owner_can_clear_such_rows", state(c) == "OK", state(c))
+    integ = last(w(A, "SELECT count(*) FROM jw_dev.cinema_pg_integrity_check()"))
+    rec("T5.13_engine_integrity_check_still_reports_nothing", integ == "0", f"rows={integ}")
+
+    # ---------------- T6: the legacy-shaped views against REAL engine output on this server
+    import json as _json
+
+    def entity(session, expr):
+        return _json.loads(last(w(session, f"SELECT ({expr})->'entity'")))
+    pt = entity(A, f"jw_dev.cinema_pg_partner_upsert('rq-t6-p-{RID}',NULL,'T6 {RID}','','','','',NULL)")
+    rec("T6.01_partner_entity_has_every_key_the_view_reads", set(view.ENTITY_KEYS["partner"]) <= set(pt), sorted(set(view.ENTITY_KEYS["partner"]) - set(pt)))
+    qt = entity(M, f"jw_dev.cinema_pg_quote_create('rq-t6-q-{RID}','{pt['id']}','T6','taxable',"
+                   f"'[{{\"name\":\"X\",\"quantity\":3,\"unit_price\":1005}}]'::jsonb)")
+    rec("T6.02_quote_entity_has_every_key_the_view_reads", set(view.ENTITY_KEYS["quote"]) <= set(qt) and set(view.ENTITY_KEYS["quote_item"]) <= set(qt["items"][0]))
+    last(w(M, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t6-s-{RID}','{qt['id']}',1,'submitted')"))
+    last(w(A, f"SELECT jw_dev.cinema_pg_quote_transition('rq-t6-a-{RID}','{qt['id']}',2,'approved')"))
+    od = entity(A, f"jw_dev.cinema_pg_order_create('rq-t6-o-{RID}','{qt['id']}')")
+    rec("T6.03_order_entity_has_every_key_the_view_reads", set(view.ENTITY_KEYS["order"]) <= set(od) and set(view.ENTITY_KEYS["order_item"]) <= set(od["items"][0]))
+    shown = view.order_view(od, partner_name=pt["name"], title="T6")
+    qshown = view.quote_view({**qt, "status": "approved"}, partner_name=pt["name"])
+    rec("T6.04_order_view_joins_to_quote_view_like_the_ui_expects", shown["quote_id"] == qshown["id"] and shown["status"] == "received")
+    bad = [(sub, mode) for sub in (0, 1, 4, 5, 6, 14, 15, 16, 25, 95, 105, 1000, 3015, 3265, 999999995)
+           for mode in ("taxable", "exempt")
+           if int(last(psql(f"SELECT jw_dev.cinema_pg_vat({sub},'{mode}')")))
+           != view.money([{"quantity": 1, "unit_price": sub}], mode)["vat"]]
+    rec("T6.05_python_vat_equals_the_server_vat_function", not bad, bad[:3])
+    pay_inv = last(psql("SELECT i.id FROM jw_dev.cinema_pg_invoices i WHERE i.status='confirmed' LIMIT 1"))
+    prow = entity(A, f"jw_dev.cinema_pg_payment_record('rq-t6-pay-{RID}','{pay_inv}',1,current_date,'T6-{RID}')")
+    rec("T6.06_payment_entity_has_every_key_the_view_reads", set(view.ENTITY_KEYS["payment"]) <= set(prow), sorted(set(view.ENTITY_KEYS["payment"]) - set(prow)))
+    rec("T6.07_every_engine_id_is_32_lowercase_hex", all(view.RAW_ID.fullmatch(x["id"]) for x in (pt, qt, od, prow)))
 
     fails = [n for n, ok in results if not ok]
     print(f"\nTOTAL {len(results)} FAILED {len(fails)}", fails)

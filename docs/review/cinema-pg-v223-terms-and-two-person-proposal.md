@@ -77,9 +77,19 @@ Therefore:
 1. **Now, without touching the engine:** the compat layer refuses approval when the acting user is the
    submitter or either identity is unknown (`quote_second_person_required`,
    `quote_approval_identity_unknown`, HTTP 409) - tested, with 7 breakages caught.
-2. **Proposed, needs approval:** the database constraint above, plus changing the 5 fixture call sites to a
-   second administrator, then re-running the full gate (must stay 222/222 on PG17). Existing development rows
-   where one person did both would need `NOT VALID` and a review before `VALIDATE`.
+2. **Candidate implemented and tested, not applied:** `scripts/review/cinema_pg_v223_quote_two_person_proposal.sql`
+   adds `cinema_pg_quote_two_person` as a **separate migration applied after the engine and its 222 checks**,
+   so the audited engine and its tests (which self-approve in five places) are not edited and stay 222/222.
+   It is `NOT VALID` (new/updated rows are checked, old rows are not) and is checked by 17 extra checks (T5.*) in
+   `ci_cinema_pg_terms_gate_v223.py` on a throw-away PG16.15: self-approval refused (23514) and mapped from the
+   real PG error text to `quote_second_person_required`; a different administrator, or a member-submitted quote,
+   still approves; a resubmission cannot be approved by whoever resubmitted it; order conversion still works;
+   the engine's integrity check stays empty. 5 breakages of the migration were each caught.
+   **Consequences measured, owner must accept before applying to the dev schema:**
+   * `VALIDATE CONSTRAINT` is refused while self-approved rows exist (the audited fixtures hold 6 such rows);
+   * a quote that was self-approved **before** the migration can no longer become an order (23514), because a
+     `NOT VALID` check still applies when the row is updated; it **can** still be cancelled, which is how the owner
+     clears such rows after reviewing them with the count query in the SQL header.
 3. Until (2) happens, anyone with direct `jw_cinema_writer` access (the gated `/api/pg-stage/...` routes)
    can still approve their own quote. The compat layer does not cover those routes.
 

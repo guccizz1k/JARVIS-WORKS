@@ -233,8 +233,20 @@ PG_ERROR_MAP = (
 )
 
 
+# Constraint violations raised by the PROPOSED migrations (not by an engine RAISE). The name must appear as
+# ``CONSTRAINT <name>`` in the named SQL file; a test checks it. Harmless while the migration is not applied.
+PG_CONSTRAINT_ERRORS = (
+    ("23514", "cinema_pg_quote_two_person", "quote_second_person_required", 409,
+     "견적은 제출한 사람과 다른 관리자가 승인해야 합니다.",
+     "scripts/review/cinema_pg_v223_quote_two_person_proposal.sql"),
+)
+
+
 def map_pg_error(sqlstate: str, message: str) -> CompatRefusal:
     """Translate an engine error into a stable refusal. Unknown errors never leak the raw message."""
+    for state, name, code, status, ko, _file in PG_CONSTRAINT_ERRORS:
+        if sqlstate == state and f'"{name}"' in (message or ""):
+            return CompatRefusal(code, ko, status)
     for state, fragment, code, status, ko in PG_ERROR_MAP:
         if sqlstate == state and fragment in (message or ""):
             return CompatRefusal(code, ko, status)
