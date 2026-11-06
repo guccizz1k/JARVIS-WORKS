@@ -29,6 +29,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git switch -c jw-candidate-local-ci
           python3 -I scripts/ci_cinema_pg_guard.py
       - name: Install project and OCR test prerequisites
         run: |
@@ -95,6 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          git switch -c jw-candidate-local-ci
           python3 -I scripts/ci_cinema_pg_guard.py
           python3 -m pip install -r requirements-postgres-check.txt
       - name: Engine SQL gate with fresh disposable database
