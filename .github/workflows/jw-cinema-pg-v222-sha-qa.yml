@@ -1,0 +1,122 @@
+name: JW V22.2 original SHA isolated PG17 and full regression
+# QA-only helper branch: code checkout is the exact original Claude commit.
+# No deploy, no Supabase/Render access, no write credentials.
+on:
+  push:
+    branches:
+      - candidate/jw-v222-validation-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  original-sha-full-pytest:
+    name: Original 19c5a677 full pytest (no skips)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify unmodified original SHA
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install project and OCR test prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+      - name: Full current tests with real dependencies; zero failure and skip
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          python3 -I scripts/ci_cinema_pg_legacy_fixture_v1.py
+          python3 -m pytest -q -ra -p no:cacheprovider --junitxml=jw-v222-original-all-tests.xml tests
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('jw-v222-original-all-tests.xml').getroot()
+          nodes=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          assert nodes, 'Missing JUnit evidence'
+          counts={k:sum(int(n.attrib.get(k,0)) for n in nodes) for k in ('tests','failures','errors','skipped')}
+          print('FULL_ORIGINAL_SHA_RESULTS', counts, flush=True)
+          assert counts['tests'] >= 2359 and all(counts[k]==0 for k in ('failures','errors','skipped')), counts
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-original-full-pytest
+          path: jw-v222-original-all-tests.xml
+          retention-days: 5
+  original-sha-pg17:
+    name: Original 19c5a677 disposable PostgreSQL 17 gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-ephemeral-test-password
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 19c5a6771b8d0925d1bb32d0119f6ad186b57fd4
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact source and set up PostgreSQL clients
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "19c5a6771b8d0925d1bb32d0119f6ad186b57fd4"
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m pip install -r requirements-postgres-check.txt
+      - name: Engine SQL gate with fresh disposable database
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_sql_gate.py --report jw-v222-engine-pg17.json
+      - name: P1/P2 candidate suite with real PostgreSQL 17
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_p1_p2_pg17_suite.py --report jw-v222-p1p2-pg17.json
+      - name: S4 atomic ledger and reviewed-link concurrent writers
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_s4_atomic_gate.py
+          python3 -I scripts/ci_cinema_pg_s4_reviewed_gate.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v222-original-pg17
+          path: |
+            jw-v222-engine-pg17.json
+            jw-v222-p1p2-pg17.json
+            jw-cinema-s4-atomic-pg17.json
+            jw-cinema-s4-reviewed-pg17.json
+          retention-days: 5
