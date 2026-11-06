@@ -161,8 +161,31 @@ def attach_monitors(page, bucket):
     page.on("response", lambda r: bucket["http_5xx"].append((r.status, r.url)) if r.status >= 500 else None)
 
 
+def wait_for_js(page, expression, arg=None, timeout=30000):
+    """Poll through Playwright CDP evaluation, preserving strict CSP without unsafe-eval.
+
+    Playwright wait_for_function injects JS via eval and fails on the production
+    script-src 'self' CSP; page.evaluate works without relaxing that policy.
+    """
+    deadline = time.monotonic() + timeout / 1000.0
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            if page.evaluate(expression, arg):
+                return True
+        except Exception as exc:
+            if page.is_closed():
+                raise
+            last_error = exc
+        page.wait_for_timeout(80)
+    raise AssertionError(
+        f"Expected browser condition was not satisfied within {timeout}ms"
+        + (f"; last evaluation error: {last_error!s}" if last_error is not None else "")
+    )
+
+
 def photon_track(page, selector, samples=5, gap_ms=420):
-    page.wait_for_function("(s)=>{const c=document.querySelector(s);return !!c&&c.width>0&&c.height>0}",
+    wait_for_js(page, "(s)=>{const c=document.querySelector(s);return !!c&&c.width>0&&c.height>0}",
                            arg=selector, timeout=20000)
     points = []
     for _ in range(samples):
@@ -200,7 +223,7 @@ def open_route(page, route):
         button = page.locator(f'.jw210-business-nav [data-jw210-page="{route}"]')
     started = time.perf_counter()
     button.click(timeout=15000)
-    page.wait_for_function("(r)=>typeof state!=='undefined'&&state.page===r", arg=route, timeout=25000)
+    wait_for_js(page, "(r)=>typeof state!=='undefined'&&state.page===r", arg=route, timeout=25000)
     page.locator("#main-content").wait_for(state="visible", timeout=10000)
     elapsed = (time.perf_counter() - started) * 1000
     size = page.viewport_size
@@ -277,7 +300,7 @@ def login(c, page, tag, reduced=False, wrong_first=True):
     if reduced:
         page.wait_for_timeout(1500)
     else:
-        page.wait_for_function("window.__jwEntry&&window.__jwEntry.t1!==null", timeout=15000)
+        wait_for_js(page, "window.__jwEntry&&window.__jwEntry.t1!==null", timeout=15000)
     entry = page.evaluate("window.__jwEntry")
     if reduced:
         c.check(f"{tag}:entrance_animation_skipped_when_reduced",
@@ -297,7 +320,7 @@ def login(c, page, tag, reduced=False, wrong_first=True):
 
 
 def workspace_checks(c, page, tag, reduced=False):
-    page.wait_for_function("""()=>{const s=document.querySelector('.jw210-infinity-stage');
+    wait_for_js(page, """()=>{const s=document.querySelector('.jw210-infinity-stage');
         return s&&s.getBoundingClientRect().width>250&&!document.querySelector('#app-shell').classList.contains('jw214-entry-playing')}""",
                            timeout=15000)
     c.check(f"{tag}:is_v222_not_cinema",
@@ -339,7 +362,7 @@ def rail_overlap_checks(c, page, tag, label):
 
 def rail_open_checks(c, page, tag):
     page.locator(".jw210-rail").hover()
-    page.wait_for_function("document.querySelector('.jw210-rail').getBoundingClientRect().width>150", timeout=5000)
+    wait_for_js(page, "document.querySelector('.jw210-rail').getBoundingClientRect().width>150", timeout=5000)
     items = page.evaluate("""()=>[...document.querySelectorAll('.jw210-rail-item')].filter(e=>{
         const r=e.getBoundingClientRect(),s=getComputedStyle(e);return s.display!=='none'&&r.height>1})
         .map(e=>{const r=e.getBoundingClientRect();return {y:r.top,b:r.bottom,x:r.left,r:r.right,
@@ -596,10 +619,10 @@ def recording_pass(c, browser, url, bucket, results):
             page.locator("#login-form button[type=submit]").click()
             page.locator(".jw210-home").wait_for(state="visible", timeout=30000)
             with contextlib.suppress(Exception):  # best effort: mid-animation still for the evidence set
-                page.wait_for_function("document.querySelector('#app-shell').classList.contains('jw214-entry-playing')",
+                wait_for_js(page, "document.querySelector('#app-shell').classList.contains('jw214-entry-playing')",
                                        timeout=3000)
                 shot(page, "03-login-success-entrance-1440.png")
-            page.wait_for_function("window.__jwEntry&&window.__jwEntry.t1!==null", timeout=15000)
+            wait_for_js(page, "window.__jwEntry&&window.__jwEntry.t1!==null", timeout=15000)
             page.wait_for_timeout(2500)
             for scene in ("source", "continuity", "assurance"):
                 for _ in range(3):
