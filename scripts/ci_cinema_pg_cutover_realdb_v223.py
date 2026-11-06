@@ -152,7 +152,7 @@ def run() -> int:
                         "VALUES (%s,%s,'ci-ua',(now()+interval '1 hour')::text,%s,now()::text)",
                         ("ci-cutover", hashlib.sha256(pg_token.encode()).hexdigest(), pg_csrf)
                     )
-                c.cookies.set(cut.PG_COOKIE, pg_token, domain="testserver", path="/")
+                c.cookies.set(cut.PG_COOKIE, pg_token, path="/")
                 enabled.add("ci-a")
                 bad_csrf = c.post("/api/customers", json={
                     "name": "PG Partner", "business_number": "8111111111"
