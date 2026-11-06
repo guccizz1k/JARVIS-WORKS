@@ -1,0 +1,55 @@
+name: JW V22.3 P0-2 terms side tables (PROPOSAL) on a disposable PG17
+on:
+  push:
+    branches:
+      - candidate/jw-v223-pg-backup-restore-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v223-terms-gate-pg17:
+    name: Unchanged engine + proposed order/invoice/payment terms tables on PG17
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      terms-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-terms
+          POSTGRES_DB: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5434'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-v223-terms
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard and server version
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
+          python3 -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'show server_version' | tee /dev/stderr | grep -E '^17\.'
+      - name: Engine SQL gate (unchanged engine, must stay 222/222)
+        run: python3 scripts/ci_cinema_pg_sql_gate.py --report engine-gate.json
+      - name: Terms side tables proposal gate
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_terms_gate_v223 | tee terms-gate.log
+          grep -E '^PASS: [0-9]+ checks, 0 failed' terms-gate.log
+          echo 'PROPOSAL ONLY: a disposable database was used; nothing was applied to Supabase.'
