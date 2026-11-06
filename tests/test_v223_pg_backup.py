@@ -161,6 +161,7 @@ def test_diff_signatures_reports_names_not_values():
 
 def test_verdict_never_passes_without_real_source_and_all_negative_tests():
     full = {"source_is_real_dev_db": True, "source_identity_verified": True,
+            "source_role_least_privilege": True, "target_proven_ephemeral": True,
             "snapshot_consistent": True, "restore_verified": True,
             "decrypt_sha256_matches": True, "tables": 2,
             "signature_mismatches": [], "tamper_rejected": True,
@@ -175,6 +176,12 @@ def test_verdict_never_passes_without_real_source_and_all_negative_tests():
     assert pb.verdict({**full, "decrypt_sha256_matches": False}).startswith("PARTIAL")
     assert pb.verdict({**full, "source_identity_verified": False}).startswith("PARTIAL")
     assert pb.verdict({**full, "tables": 0}).startswith("PARTIAL")
+    assert pb.verdict({**full, "source_role_least_privilege": False}).startswith("PARTIAL")
+    assert pb.verdict({**full, "target_proven_ephemeral": False}).startswith("PARTIAL")
+    for gone in ("source_role_least_privilege", "target_proven_ephemeral"):
+        absent = dict(full)
+        del absent[gone]
+        assert pb.verdict(absent).startswith("PARTIAL")
     missing = dict(full)
     del missing["wrong_key_rejected"]
     assert pb.verdict(missing).startswith("PARTIAL")
@@ -314,6 +321,7 @@ def test_invalid_real_source_fails_before_table_signature_or_pg_dump(monkeypatch
     fake_psycopg.sql = types.SimpleNamespace()
     monkeypatch.setitem(sys.modules, 'psycopg', fake_psycopg)
     monkeypatch.setattr(pb, 'require_pg17_tools', lambda: None)
+    monkeypatch.setattr(pb, 'verify_ephemeral_target', lambda *_a, **_k: None)  # covered below
     monkeypatch.setattr(pb, 'load_key', lambda: b'K' * 32)
     monkeypatch.setattr(pb, 'fetch_live_identity', lambda *_args: {
         'dbname': 'wrong', 'user': 'reader', 'major': 17,
@@ -329,29 +337,356 @@ def test_invalid_real_source_fails_before_table_signature_or_pg_dump(monkeypatch
     assert trace == []
 
 
+class SigCursor:
+    """Scripted cursor: records every statement; behaviour chosen by the caller."""
+    def __init__(self, history, tables, exact, raise_on=None):
+        self.history, self.tables, self.exact, self.raise_on = history, tables, exact, raise_on
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        return False
+    def execute(self, statement, params=None):
+        text = str(statement)
+        self.history.append(text)
+        if self.raise_on and self.raise_on in text:
+            raise type("QueryCanceled", (Exception,), {})("canceling statement due to statement timeout")
+    def fetchall(self):
+        last = self.history[-1]
+        if "FROM pg_class c JOIN pg_namespace" in last and "c.relkind IN ('r','p')" in last:
+            return [(t, False, False) for t in self.tables]
+        return []
+    def fetchone(self):
+        last = self.history[-1]
+        if "bit(64)" in last:
+            return (self.exact, "1", "2")
+        return (self.exact,)
+
+
+class SigConnection:
+    def __init__(self, tables, exact=0, raise_on=None):
+        self.history = []
+        self._args = (tables, exact, raise_on)
+    def cursor(self):
+        return SigCursor(self.history, *self._args)
+
+
 def test_fetch_signature_uses_escaped_catalog_table_identifier():
-    history = []
+    conn = SigConnection(['has"quote'])
+    pb.fetch_signature(conn, 'jw_dev')
+    assert any('FROM "jw_dev"."has""quote" t' in entry for entry in conn.history)
+    assert not any('FROM "jw_dev"."has"quote" t' in entry for entry in conn.history)
+
+
+# ---------------------------------------------------------------- F5: bounded signature
+def test_row_cap_uses_exact_counts_and_never_the_planner_estimate(monkeypatch):
+    monkeypatch.setattr(pb, "MAX_TABLE_ROWS", 10)
+    conn = SigConnection(["big_table"], exact=11)       # catalog statistics are not consulted
+    with pytest.raises(pb.BackupError, match="BLOCKED_V223_TABLE_OVER_ROW_CAP:big_table"):
+        pb.fetch_signature(conn, "jw_dev")
+    assert not any("pg_stat" in h or "n_live_tup" in h for h in conn.history)
+    assert not any("bit(64)" in h for h in conn.history), "no row hashing before the cap check"
+
+
+def test_total_row_cap_is_checked_from_exact_counts_before_any_digest(monkeypatch):
+    monkeypatch.setattr(pb, "MAX_TABLE_ROWS", 10)
+    monkeypatch.setattr(pb, "MAX_SIGNATURE_ROWS", 5)
+    conn = SigConnection(["a", "b", "c"], exact=3)      # 3 tables x 3 rows = 9 > 5
+    with pytest.raises(pb.BackupError, match="BLOCKED_V223_TABLE_TOO_LARGE_FOR_ROW_DIGEST"):
+        pb.fetch_signature(conn, "jw_dev")
+    assert not any("bit(64)" in h for h in conn.history)
+
+
+def test_row_digest_is_streamed_order_independent_and_timeboxed():
+    conn = SigConnection(["t1"], exact=2)
+    sig = pb.fetch_signature(conn, "jw_dev")
+    assert "statement_timeout" in conn.history[0] and "set_config" in conn.history[0]
+    digest_sql = [h for h in conn.history if "bit(64)" in h][0]
+    assert "string_agg" not in digest_sql and "ORDER BY" not in digest_sql.upper()
+    assert sig["rows"]["t1"][0] == 2 and len(sig["rows"]["t1"][1]) == 32
+    assert "n_live_tup" not in "".join(conn.history)
+
+
+def test_statement_timeout_is_reported_as_a_stable_blocked_code():
+    conn = SigConnection(["t1"], exact=1, raise_on="bit(64)")
+    with pytest.raises(pb.BackupError, match="BLOCKED_V223_SIGNATURE_STATEMENT_TIMEOUT"):
+        pb.fetch_signature(conn, "jw_dev")
+
+
+def test_row_cap_error_cannot_leak_an_attacker_shaped_table_name(monkeypatch):
+    monkeypatch.setattr(pb, "MAX_TABLE_ROWS", 1)
+    hostile = 'x"; DROP TABLE y;-- ' + "z" * 100
+    with pytest.raises(pb.BackupError) as info:
+        pb.fetch_signature(SigConnection([hostile], exact=2), "jw_dev")
+    assert '"' not in str(info.value) and ";" not in str(info.value) and len(str(info.value)) < 120
+
+
+# ------------------------------------------------- F2: source role must be least privilege
+GOOD_ROLE = {"superuser": False, "createrole": False, "createdb": False, "replication": False,
+             "bypassrls": True, "same_session_user": True, "privileged_builtin_member": False,
+             "database_create": False, "schema_usage": True, "schema_create": False,
+             "tables": 62, "tables_unreadable": 0, "tables_writable": 0, "rls_tables": 61,
+             "sequences_writable": 0}
+
+
+def test_good_read_only_role_with_bypassrls_is_accepted_when_schema_has_rls():
+    assert set(GOOD_ROLE) == set(pb.ROLE_FACT_KEYS)
+    assert pb.evaluate_source_privileges(GOOD_ROLE) == []
+
+
+@pytest.mark.parametrize("change,expected", [
+    ({"superuser": True}, "superuser"),
+    ({"createrole": True}, "createrole"),
+    ({"createdb": True}, "createdb"),
+    ({"replication": True}, "replication"),
+    ({"privileged_builtin_member": True}, "privileged_builtin_member"),
+    ({"database_create": True}, "database_create"),
+    ({"schema_create": True}, "schema_create"),
+    ({"same_session_user": False}, "role_switched"),
+    ({"schema_usage": False}, "schema_no_usage"),
+    ({"tables": 0}, "no_tables_visible"),
+    ({"tables_unreadable": 1}, "tables_unreadable"),
+    ({"tables_writable": 1}, "tables_writable"),
+    ({"sequences_writable": 1}, "sequences_writable"),
+    ({"bypassrls": False}, "rls_rows_not_fully_readable"),
+])
+def test_each_excess_privilege_is_reported_by_name(change, expected):
+    assert expected in pb.evaluate_source_privileges({**GOOD_ROLE, **change})
+
+
+def test_no_bypassrls_is_fine_only_when_the_schema_has_no_rls_tables():
+    assert pb.evaluate_source_privileges({**GOOD_ROLE, "bypassrls": False, "rls_tables": 0}) == []
+
+
+def test_postgres_style_superuser_is_rejected_even_if_name_matches_expectation():
+    admin = {**GOOD_ROLE, "superuser": True, "createrole": True, "createdb": True,
+             "tables_writable": 62, "schema_create": True, "database_create": True}
+    assert {"superuser", "tables_writable", "schema_create"} <= set(pb.evaluate_source_privileges(admin))
+
+
+@pytest.mark.parametrize("facts", [{}, {**GOOD_ROLE, "tables": None},
+                                   {k: v for k, v in GOOD_ROLE.items() if k != "superuser"},
+                                   {**GOOD_ROLE, "extra": True}])
+def test_incomplete_or_unexpected_role_facts_fail_closed(facts):
+    assert pb.evaluate_source_privileges(facts) == ["facts_incomplete"]
+
+
+def test_role_sql_only_reads_catalogs_and_is_parameterised():
+    sql = pb.ROLE_SQL.upper()
+    for word in ("INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "CREATE TABLE", "GRANT ", "SET ROLE"):
+        assert word not in sql.replace("'UPDATE'", "").replace("'INSERT'", "").replace("'DELETE'", "")
+    assert "%(S)S" in sql and "CURRENT_USER" in sql and "pg_has_role".upper() in sql
+
+
+def _real_source_env(monkeypatch):
+    monkeypatch.setenv("JW_PG_CI_ALLOW", "ONLY_EPHEMERAL_LOCAL_DATABASE")
+    for key, name in pb.IDENTITY_ENV.items():
+        monkeypatch.setenv(name, {"host": f"db.{REF}.supabase.co", "port": "5432",
+                                  "project_ref": REF, "dbname": "postgres", "role": "reader",
+                                  "schema_fingerprint": FP}[key])
+
+
+def _fake_psycopg(monkeypatch, connections):
+    import sys
+    import types
+
+    class Conn:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, sql, *a):
+            class R:
+                def fetchone(self_inner):
+                    return ("fake-snapshot",) if "pg_export_snapshot" in sql else ("17.11",)
+            return R()
+
+    def connect(dsn, **kwargs):
+        connections.append(dsn)
+        return Conn()
+
+    fake = types.ModuleType("psycopg")
+    fake.connect = connect
+    fake.sql = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+
+
+def test_privileged_source_role_blocks_before_signature_or_dump(monkeypatch, tmp_path):
+    trace, connections = [], []
+    _fake_psycopg(monkeypatch, connections)
+    _real_source_env(monkeypatch)
+    monkeypatch.setattr(pb, "require_pg17_tools", lambda: None)
+    monkeypatch.setattr(pb, "verify_ephemeral_target", lambda *_a, **_k: None)
+    monkeypatch.setattr(pb, "load_key", lambda: b"K" * 32)
+    monkeypatch.setattr(pb, "fetch_live_identity", lambda *_a: {
+        "dbname": "postgres", "user": "reader", "major": 17, "fingerprint": FP})
+    monkeypatch.setattr(pb, "fetch_role_facts", lambda *_a: {**GOOD_ROLE, "superuser": True})
+    monkeypatch.setattr(pb, "fetch_signature", lambda *_a: trace.append("signature"))
+    monkeypatch.setattr(pb, "roles_in_acl", lambda *_a: trace.append("roles"))
+    monkeypatch.setattr(pb, "run_tool", lambda *_a, **_k: trace.append("dump"))
+    with pytest.raises(pb.BackupError, match="BLOCKED_V223_SOURCE_ROLE_NOT_LEAST_PRIVILEGE:superuser"):
+        pb.run(DIRECT, LOCAL, real_source=True, workdir=tmp_path)
+    assert trace == []
+
+
+# --------------------------------------- F1: restore target must prove it is disposable
+TOKEN = "t" * 32
+GOOD_TARGET = {"dbname": "postgres", "in_recovery": False, "major": 17,
+               "databases": ["jw_ephemeral_marker", "postgres"],
+               "marker_comment": pb.EPHEMERAL_MARKER_PREFIX + TOKEN, "user_relations": 0}
+
+
+def test_marked_empty_pg17_target_is_accepted_including_our_own_leftovers():
+    assert pb.evaluate_target_facts(GOOD_TARGET, TOKEN) == []
+    with_left = {**GOOD_TARGET, "databases": ["jw_ephemeral_marker", "jw_v223_0123456789", "postgres"]}
+    assert pb.evaluate_target_facts(with_left, TOKEN) == []
+
+
+@pytest.mark.parametrize("change,token,expected", [
+    ({}, "", "token_missing_or_short"),
+    ({}, "short", "token_missing_or_short"),
+    ({}, "u" * 32, "marker_token_mismatch"),
+    ({"marker_comment": None}, TOKEN, "marker_token_mismatch"),
+    ({"marker_comment": pb.EPHEMERAL_MARKER_PREFIX + "x" * 32}, TOKEN, "marker_token_mismatch"),
+    ({"databases": ["postgres"]}, TOKEN, "marker_missing"),
+    ({"databases": ["jw_ephemeral_marker", "postgres", "customer_data"]}, TOKEN, "foreign_databases_present"),
+    ({"databases": ["jw_ephemeral_marker", "postgres", "jw_v223_zz"]}, TOKEN, "foreign_databases_present"),
+    ({"databases": ["jw_ephemeral_marker", "postgres", "jw_v223_0123456789_x"]}, TOKEN, "foreign_databases_present"),
+    ({"user_relations": 3}, TOKEN, "postgres_database_not_empty"),
+    ({"in_recovery": True}, TOKEN, "target_is_replica"),
+    ({"major": 16}, TOKEN, "target_older_than_17"),
+    ({"dbname": "template1"}, TOKEN, "admin_database_not_postgres"),
+])
+def test_unproven_target_is_rejected_by_name(change, token, expected):
+    assert expected in pb.evaluate_target_facts({**GOOD_TARGET, **change}, token)
+
+
+def test_localhost_plus_environment_variable_alone_is_no_longer_enough():
+    # The original QA repro: only host + JW_PG_CI_ALLOW were checked.
+    assert pb.guard_target(LOCAL, SRC, {"JW_PG_CI_ALLOW": "ONLY_EPHEMERAL_LOCAL_DATABASE"})["host"] == "127.0.0.1"
+    forwarded_production = {**GOOD_TARGET, "marker_comment": None, "databases": ["postgres", "app_prod"],
+                            "user_relations": 40}
+    failures = pb.evaluate_target_facts(forwarded_production, TOKEN)
+    assert {"marker_token_mismatch", "marker_missing", "foreign_databases_present",
+            "postgres_database_not_empty"} & set(failures)
+
+
+@pytest.mark.parametrize("facts", [{}, {k: v for k, v in GOOD_TARGET.items() if k != "major"}])
+def test_incomplete_target_facts_fail_closed(facts):
+    assert pb.evaluate_target_facts(facts, TOKEN) == ["facts_incomplete"]
+
+
+def test_target_probe_failure_stops_before_any_source_connection_or_create(monkeypatch, tmp_path):
+    connections, executed = [], []
+    import sys
+    import types
 
     class Cursor:
         def __enter__(self):
             return self
-        def __exit__(self, *args):
+        def __exit__(self, *a):
             return False
         def execute(self, statement, params=None):
-            history.append(str(statement))
-        def fetchall(self):
-            if 'FROM pg_class c JOIN pg_namespace' in history[-1] and "c.relkind IN ('r','p')" in history[-1]:
-                return [('has"quote', False, False)]
-            return []
+            executed.append(str(statement))
         def fetchone(self):
-            if 'pg_stat_user_tables' in history[-1]:
-                return (0,)
-            return (0, '')
+            return ("postgres", False, 17, ["postgres", "customer_data"], None, 12)
 
-    class Connection:
+    class Probe:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def cursor(self):
+            return Cursor()
+        def execute(self, statement, *a):
+            executed.append(str(statement))
+
+    def connect(dsn, **kwargs):
+        connections.append(dsn)
+        return Probe()
+
+    fake = types.ModuleType("psycopg")
+    fake.connect = connect
+    fake.sql = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    monkeypatch.setattr(pb, "require_pg17_tools", lambda: None)
+    monkeypatch.setattr(pb, "load_key", lambda: b"K" * 32)
+    monkeypatch.setenv("JW_PG_CI_ALLOW", "ONLY_EPHEMERAL_LOCAL_DATABASE")
+    monkeypatch.setenv(pb.EPHEMERAL_TOKEN_ENV, TOKEN)
+    with pytest.raises(pb.BackupError, match="BLOCKED_V223_TARGET_NOT_PROVEN_EPHEMERAL") as info:
+        pb.run(SRC.replace("db.example", f"db.{REF}"), LOCAL, real_source=False, workdir=tmp_path)
+    assert "foreign_databases_present" in str(info.value)
+    assert connections == [LOCAL], "the source database must not be contacted"
+    assert not any(w in " ".join(executed).upper() for w in ("CREATE DATABASE", "DROP DATABASE", "CREATE ROLE"))
+
+
+def test_token_comes_from_environment_not_from_the_dsn(monkeypatch):
+    class Cursor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, statement, params=None):
+            pass
+        def fetchone(self):
+            return tuple(GOOD_TARGET[k] for k in pb.TARGET_FACT_KEYS)
+
+    class Conn:
         def cursor(self):
             return Cursor()
 
-    pb.fetch_signature(Connection(), 'jw_dev')
-    assert any('FROM "jw_dev"."has""quote" t' in entry for entry in history)
-    assert not any('FROM "jw_dev"."has"quote" t' in entry for entry in history)
+    monkeypatch.delenv(pb.EPHEMERAL_TOKEN_ENV, raising=False)
+    with pytest.raises(pb.BackupError, match="token_missing_or_short"):
+        pb.verify_ephemeral_target(Conn())
+    monkeypatch.setenv(pb.EPHEMERAL_TOKEN_ENV, TOKEN)
+    pb.verify_ephemeral_target(Conn())          # proven
+
+
+def test_marker_provisioning_refuses_a_populated_cluster_without_creating_anything(monkeypatch):
+    import sys
+    import types
+    executed = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, statement, params=None):
+            executed.append(str(statement))
+        def fetchone(self):
+            return ("postgres", False, 17, ["postgres", "customer_data"], None, 9)
+
+    class Admin:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def cursor(self):
+            return Cursor()
+        def execute(self, statement, *a):
+            executed.append("DIRECT:" + str(statement))
+
+    fake = types.ModuleType("psycopg")
+    fake.connect = lambda *a, **k: Admin()
+    fake.sql = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "psycopg", fake)
+    with pytest.raises(pb.BackupError, match="BLOCKED_V223_MARKER_REFUSED_CLUSTER_NOT_EMPTY"):
+        pb.provision_ephemeral_marker(LOCAL, TOKEN)
+    assert not any(e.startswith("DIRECT:") for e in executed)
+
+
+def test_restore_dsn_keeps_credentials_and_query_when_switching_database():
+    dsn = "postgresql://postgres:pw@127.0.0.1:5433/postgres?sslmode=disable&connect_timeout=5"
+    assert pb.dsn_with_dbname(dsn, "jw_v223_abc") == \
+        "postgresql://postgres:pw@127.0.0.1:5433/jw_v223_abc?sslmode=disable&connect_timeout=5"
+    assert pb.dsn_with_dbname(LOCAL, "x").endswith("@127.0.0.1:5432/x")
+
+
+def test_mark_target_command_needs_a_long_token_and_never_prints_the_password(monkeypatch, capsys):
+    monkeypatch.setenv("JW_PG_TARGET_ADMIN_DSN", LOCAL)
+    monkeypatch.setenv("JW_PG_CI_ALLOW", "ONLY_EPHEMERAL_LOCAL_DATABASE")
+    monkeypatch.setenv(pb.EPHEMERAL_TOKEN_ENV, "short")
+    assert pb.main(["mark-target"]) == 1
+    err = capsys.readouterr().err
+    assert "BLOCKED_V223_TOKEN_REQUIRED_MIN_16_CHARS" in err and "localpw" not in err
+    assert pb.main(["nonsense"]) == 2

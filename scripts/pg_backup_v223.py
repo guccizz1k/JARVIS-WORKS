@@ -33,6 +33,8 @@ CHUNK = 1 << 20
 MAX_CHUNK_CIPHERTEXT = CHUNK + 16
 SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 MAX_SIGNATURE_ROWS = 5_000_000
+MAX_TABLE_ROWS = 2_000_000          # exact per-table cap (not a planner estimate)
+STATEMENT_TIMEOUT = "300s"          # applied to every signature query (transaction local)
 
 
 class BackupError(RuntimeError):
@@ -198,6 +200,14 @@ def quote_pg_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
 
+def dsn_with_dbname(dsn: str, dbname: str) -> str:
+    """Same DSN (scheme, credentials, host, query such as sslmode) with another database."""
+    parts = urlsplit(dsn)
+    from urllib.parse import quote, urlunsplit
+    return urlunsplit((parts.scheme, parts.netloc, "/" + quote(dbname, safe=""),
+                       parts.query, parts.fragment))
+
+
 def pg_env(opts: dict) -> dict:
     env = {**os.environ, "PGHOST": opts["host"], "PGPORT": opts["port"],
            "PGUSER": opts["user"], "PGPASSWORD": opts["password"], "PGDATABASE": opts["dbname"]}
@@ -258,26 +268,54 @@ SIGNATURE_QUERIES = {
 }
 
 
+def _safe_label(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_]", "?", str(name))[:40]
+
+
 def fetch_signature(connection, schema: str) -> dict:
     """``connection`` is an open psycopg connection. Only SELECTs are issued; row data
-    is reduced to a per-table (count, md5-of-row-hashes) pair and never returned."""
+    is reduced to a per-table (count, digest) pair and never returned.
+
+    Row digests are streamed in constant memory: each row is hashed on the server and
+    the 64-bit halves are summed (order independent, so no sort and no string_agg of
+    the whole table). Sizes are bounded by EXACT counts, never by planner estimates,
+    and every query runs under a transaction-local statement_timeout."""
     check_schema(schema)
     sig: dict = {"schema": schema}
     with connection.cursor() as cur:
-        for name, query in SIGNATURE_QUERIES.items():
-            cur.execute(query, {"s": schema})
-            sig[name] = [list(row) for row in cur.fetchall()]
-        cur.execute("SELECT coalesce(sum(n_live_tup),0) FROM pg_stat_user_tables "
-                    "WHERE schemaname=%s", (schema,))
-        if int(cur.fetchone()[0]) > MAX_SIGNATURE_ROWS:
-            raise BackupError("BLOCKED_V223_TABLE_TOO_LARGE_FOR_ROW_DIGEST")
-        rows = {}
-        for table, _, _ in sig["tables"]:
-            cur.execute(f'SELECT count(*), coalesce(md5(string_agg(md5(t::text),\'\' '
-                        f'ORDER BY md5(t::text))),\'\') FROM '
-                        f'{quote_pg_identifier(schema)}.{quote_pg_identifier(table)} t')
-            count, digest = cur.fetchone()
-            rows[table] = [int(count), digest]
+        cur.execute("SELECT set_config('statement_timeout', %s, true)", (STATEMENT_TIMEOUT,))
+        try:
+            for name, query in SIGNATURE_QUERIES.items():
+                cur.execute(query, {"s": schema})
+                sig[name] = [list(row) for row in cur.fetchall()]
+            tables = [row[0] for row in sig["tables"]]
+            total = 0
+            for table in tables:   # pass 1: bounded exact counts, no row hashing yet
+                cur.execute(f"SELECT count(*) FROM (SELECT 1 FROM {quote_pg_identifier(schema)}."
+                            f"{quote_pg_identifier(table)} LIMIT %s) s", (MAX_TABLE_ROWS + 1,))
+                exact = int(cur.fetchone()[0])
+                if exact > MAX_TABLE_ROWS:
+                    raise BackupError("BLOCKED_V223_TABLE_OVER_ROW_CAP:" + _safe_label(table))
+                total += exact
+                if total > MAX_SIGNATURE_ROWS:
+                    raise BackupError("BLOCKED_V223_TABLE_TOO_LARGE_FOR_ROW_DIGEST")
+            rows = {}
+            for table in tables:   # pass 2: streamed order-independent digest
+                cur.execute(
+                    "SELECT count(*), coalesce(sum(('x'||substr(h,1,16))::bit(64)::bigint::numeric),0)::text, "
+                    "coalesce(sum(('x'||substr(h,17,16))::bit(64)::bigint::numeric),0)::text "
+                    f"FROM (SELECT md5(t::text) AS h FROM {quote_pg_identifier(schema)}."
+                    f"{quote_pg_identifier(table)} t) s")
+                count, low, high = cur.fetchone()
+                if int(count) > MAX_TABLE_ROWS:
+                    raise BackupError("BLOCKED_V223_TABLE_OVER_ROW_CAP:" + _safe_label(table))
+                rows[table] = [int(count), hashlib.md5(f"{count}:{low}:{high}".encode()).hexdigest()]
+        except BackupError:
+            raise
+        except Exception as exc:
+            if type(exc).__name__ == "QueryCanceled":
+                raise BackupError("BLOCKED_V223_SIGNATURE_STATEMENT_TIMEOUT") from None
+            raise
         sig["rows"] = rows
     return sig
 
@@ -396,6 +434,166 @@ def identity_verified(checks: dict) -> bool:
     return set(checks) == set(IDENTITY_CHECKS) and not identity_failures(checks)
 
 
+# ------------------------------------------------ F2: source role must be least privilege
+# A matching role NAME proves nothing about its power. Before any table is scanned or
+# dumped, the live session's attributes and privileges are read (SELECT only).
+# BYPASSRLS is the one deliberate allowance: with FORCE ROW LEVEL SECURITY a dump or a
+# row digest taken without it would silently see only some rows. It is allowed only when
+# the schema actually has RLS tables, and everything that could WRITE stays forbidden.
+PRIVILEGED_BUILTIN_ROLES = ("pg_write_all_data", "pg_execute_server_program",
+                            "pg_read_server_files", "pg_write_server_files")
+ROLE_FACT_KEYS = ("superuser", "createrole", "createdb", "replication", "bypassrls",
+                  "same_session_user", "privileged_builtin_member", "database_create",
+                  "schema_usage", "schema_create", "tables", "tables_unreadable",
+                  "tables_writable", "rls_tables", "sequences_writable")
+ROLE_SQL = """
+SELECT r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolreplication, r.rolbypassrls,
+       current_user = session_user,
+       (SELECT coalesce(bool_or(pg_has_role(current_user, m, 'MEMBER')), false)
+          FROM unnest(%(builtin)s::text[]) m),
+       has_database_privilege(current_user, current_database(), 'CREATE'),
+       has_schema_privilege(current_user, %(s)s, 'USAGE'),
+       has_schema_privilege(current_user, %(s)s, 'CREATE'),
+       t.tables, t.unreadable, t.writable, t.rls_tables, q.writable_seq
+FROM pg_roles r,
+     LATERAL (SELECT count(*) AS tables,
+                     count(*) FILTER (WHERE NOT has_table_privilege(c.oid, 'SELECT')) AS unreadable,
+                     count(*) FILTER (WHERE has_table_privilege(c.oid, 'INSERT')
+                                         OR has_table_privilege(c.oid, 'UPDATE')
+                                         OR has_table_privilege(c.oid, 'DELETE')
+                                         OR has_table_privilege(c.oid, 'TRUNCATE')
+                                         OR has_table_privilege(c.oid, 'REFERENCES')
+                                         OR has_table_privilege(c.oid, 'TRIGGER')) AS writable,
+                     count(*) FILTER (WHERE c.relrowsecurity) AS rls_tables
+              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = %(s)s AND c.relkind IN ('r','p')) t,
+     LATERAL (SELECT count(*) FILTER (WHERE has_sequence_privilege(c.oid, 'UPDATE')) AS writable_seq
+              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = %(s)s AND c.relkind = 'S') q
+WHERE r.rolname = current_user
+"""
+
+
+def fetch_role_facts(connection, schema: str) -> dict:
+    check_schema(schema)
+    with connection.cursor() as cur:
+        cur.execute(ROLE_SQL, {"s": schema, "builtin": list(PRIVILEGED_BUILTIN_ROLES)})
+        row = cur.fetchone()
+    if row is None or len(row) != len(ROLE_FACT_KEYS):
+        return {}
+    return dict(zip(ROLE_FACT_KEYS, row))
+
+
+def evaluate_source_privileges(facts: dict) -> list[str]:
+    """Names of violated rules; empty means least privilege. Missing facts fail closed."""
+    if set(facts) != set(ROLE_FACT_KEYS) or any(v is None for v in facts.values()):
+        return ["facts_incomplete"]
+    bad = []
+    for key, name in (("superuser", "superuser"), ("createrole", "createrole"),
+                      ("createdb", "createdb"), ("replication", "replication"),
+                      ("privileged_builtin_member", "privileged_builtin_member"),
+                      ("database_create", "database_create"), ("schema_create", "schema_create")):
+        if facts[key] is not False:
+            bad.append(name)
+    if facts["same_session_user"] is not True:
+        bad.append("role_switched")
+    if facts["schema_usage"] is not True:
+        bad.append("schema_no_usage")
+    if not (isinstance(facts["tables"], int) and facts["tables"] >= 1):
+        bad.append("no_tables_visible")
+    for key, name in (("tables_unreadable", "tables_unreadable"), ("tables_writable", "tables_writable"),
+                      ("sequences_writable", "sequences_writable")):
+        if facts[key] != 0:
+            bad.append(name)
+    if isinstance(facts["rls_tables"], int) and facts["rls_tables"] > 0 and facts["bypassrls"] is not True:
+        bad.append("rls_rows_not_fully_readable")
+    return bad
+
+
+# ------------------------------------------- F1: restore target must PROVE it is disposable
+# ``localhost`` and an environment variable prove nothing (a tunnel or a forwarded port can
+# point anywhere). The target cluster must carry a marker that the operator planted in the
+# disposable cluster, bound to a secret token, AND look empty: no user database other than
+# ``postgres``, the marker and our own leftovers, and no relations in ``postgres``.
+EPHEMERAL_TOKEN_ENV = "JW_PG_TARGET_EPHEMERAL_TOKEN"
+EPHEMERAL_MARKER_DB = "jw_ephemeral_marker"
+EPHEMERAL_MARKER_PREFIX = "JW_EPHEMERAL_V1:"
+LEFTOVER_DB_RE = re.compile(r"jw_v223_[0-9a-f]{10}(_truncated)?")
+TARGET_SQL = """
+SELECT current_database(), pg_is_in_recovery(),
+       current_setting('server_version_num')::int / 10000,
+       (SELECT array_agg(datname ORDER BY datname) FROM pg_database WHERE NOT datistemplate),
+       (SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = %(m)s),
+       (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')
+           AND n.nspname !~ '^pg_(temp|toast_temp)'
+           AND c.relkind IN ('r','p','v','m','S','f'))
+"""
+TARGET_FACT_KEYS = ("dbname", "in_recovery", "major", "databases", "marker_comment", "user_relations")
+
+
+def fetch_target_facts(connection) -> dict:
+    with connection.cursor() as cur:
+        cur.execute(TARGET_SQL, {"m": EPHEMERAL_MARKER_DB})
+        row = cur.fetchone()
+    return dict(zip(TARGET_FACT_KEYS, row)) if row and len(row) == len(TARGET_FACT_KEYS) else {}
+
+
+def evaluate_target_facts(facts: dict, token: str, require_marker: bool = True) -> list[str]:
+    """Names of failed proofs (never values). Empty list = target proven disposable."""
+    import hmac
+    if set(facts) != set(TARGET_FACT_KEYS):
+        return ["facts_incomplete"]
+    bad = []
+    if len(token or "") < 16:
+        bad.append("token_missing_or_short")
+    if facts["dbname"] != "postgres":
+        bad.append("admin_database_not_postgres")
+    if facts["in_recovery"] is not False:
+        bad.append("target_is_replica")
+    if not isinstance(facts["major"], int) or facts["major"] < 17:
+        bad.append("target_older_than_17")
+    names = list(facts["databases"] or [])
+    foreign = [n for n in names if n not in ("postgres", EPHEMERAL_MARKER_DB)
+               and not LEFTOVER_DB_RE.fullmatch(n)]
+    if foreign:
+        bad.append("foreign_databases_present")
+    if facts["user_relations"] != 0:
+        bad.append("postgres_database_not_empty")
+    if require_marker:
+        want = EPHEMERAL_MARKER_PREFIX + (token or "")
+        comment = facts["marker_comment"] or ""
+        if EPHEMERAL_MARKER_DB not in names:
+            bad.append("marker_missing")
+        elif len(token or "") < 16 or not hmac.compare_digest(comment.encode(), want.encode()):
+            bad.append("marker_token_mismatch")
+    return bad
+
+
+def verify_ephemeral_target(connection, token: str | None = None) -> None:
+    token = os.environ.get(EPHEMERAL_TOKEN_ENV, "") if token is None else token
+    failures = evaluate_target_facts(fetch_target_facts(connection), token)
+    if failures:
+        raise BackupError("BLOCKED_V223_TARGET_NOT_PROVEN_EPHEMERAL:" + ",".join(failures))
+
+
+def provision_ephemeral_marker(admin_dsn: str, token: str) -> None:
+    """For the operator of a disposable cluster (CI container setup). Refuses any cluster
+    that already holds foreign databases or relations, so it cannot label a populated one."""
+    import psycopg
+    from psycopg import sql
+    with psycopg.connect(admin_dsn, autocommit=True) as admin:
+        failures = evaluate_target_facts(fetch_target_facts(admin), token, require_marker=False)
+        if failures:
+            raise BackupError("BLOCKED_V223_MARKER_REFUSED_CLUSTER_NOT_EMPTY:" + ",".join(failures))
+        exists = admin.execute("SELECT 1 FROM pg_database WHERE datname=%s",
+                               (EPHEMERAL_MARKER_DB,)).fetchone()
+        if not exists:
+            admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(EPHEMERAL_MARKER_DB)))
+        admin.execute(sql.SQL("COMMENT ON DATABASE {} IS {}").format(
+            sql.Identifier(EPHEMERAL_MARKER_DB), sql.Literal(EPHEMERAL_MARKER_PREFIX + token)))
+
+
 # ------------------------------------------------------------------------ pipeline
 def verdict(summary: dict) -> str:
     """P0-1 is PASS only for a real source restored to a separate PG17 with 0 diffs and
@@ -404,7 +602,8 @@ def verdict(summary: dict) -> str:
         return "NOT_P0_1_PASS: source was not the real development database"
     # A user-provided 'real_source' switch alone is never proof that a real
     # backup was restored. Require independent execution evidence as well.
-    required_evidence = ("source_identity_verified", "snapshot_consistent",
+    required_evidence = ("source_identity_verified", "source_role_least_privilege",
+                         "target_proven_ephemeral", "snapshot_consistent",
                          "restore_verified", "decrypt_sha256_matches")
     if not all(summary.get(k) is True for k in required_evidence):
         return "PARTIAL: source, snapshot, decrypt or actual restore not verified"
@@ -448,13 +647,18 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     tgt = guard_target(target_admin_dsn, source_dsn)
     key = load_key()
     require_pg17_tools()
+    # F1: prove the restore target is a disposable cluster BEFORE connecting to the source
+    # or issuing any CREATE/DROP on the target.
+    with psycopg.connect(target_admin_dsn, autocommit=True) as probe:
+        verify_ephemeral_target(probe)
     work = Path(workdir or tempfile.mkdtemp(prefix="jw_v223_"))
     work.mkdir(parents=True, exist_ok=True, mode=0o700)
     nonce = os.urandom(5).hex()
     restore_db = f"jw_v223_{nonce}"
     plain, enc, back = (work / f"{nonce}.dump", work / f"{nonce}.jwpgbk", work / f"{nonce}.back")
     summary: dict = {"source_is_real_dev_db": bool(real_source), "schema": schema,
-                     "restore_db": restore_db, "timings_s": {}}
+                     "restore_db": restore_db, "timings_s": {},
+                     "target_proven_ephemeral": True}
     t = time.monotonic
     created = False
     try:
@@ -474,6 +678,14 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
                 if not identity_verified(identity_checks):
                     raise BackupError("BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED:"
                                       + ",".join(identity_failures(identity_checks)))
+            role_failures = []
+            if real_source:
+                # F2: least privilege proof, still before any table scan or dump.
+                role_failures = evaluate_source_privileges(fetch_role_facts(conn, schema))
+                if role_failures:
+                    raise BackupError("BLOCKED_V223_SOURCE_ROLE_NOT_LEAST_PRIVILEGE:"
+                                      + ",".join(role_failures))
+            summary["source_role_least_privilege"] = (not real_source) or not role_failures
             src_sig = fetch_signature(conn, schema)
             roles = roles_in_acl(conn, schema)
             t0 = t()
@@ -516,7 +728,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(restore_db)))
             created = True
         restore_opts = {**tgt, "dbname": restore_db}
-        restore_dsn = target_admin_dsn.rsplit("/", 1)[0] + "/" + restore_db
+        restore_dsn = dsn_with_dbname(target_admin_dsn, restore_db)
         with psycopg.connect(restore_dsn, autocommit=True) as tconn:
             for role in roles:
                 tconn.execute(sql.SQL("DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname={}) "
@@ -562,10 +774,31 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     return summary
 
 
+def mark_target() -> int:
+    """``mark-target``: plant the ephemeral marker in the disposable restore cluster."""
+    target, token = os.environ.get("JW_PG_TARGET_ADMIN_DSN", ""), os.environ.get(EPHEMERAL_TOKEN_ENV, "")
+    try:
+        if len(token) < 16:
+            raise BackupError("BLOCKED_V223_TOKEN_REQUIRED_MIN_16_CHARS")
+        guard_target(target, os.environ.get("JW_PG_SOURCE_DSN", "postgresql://none@invalid.invalid/none"))
+        provision_ephemeral_marker(target, token)
+    except BackupError as exc:
+        print(redact(str(exc), parse_dsn(target)["password"] if target else ""), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print("FAIL_V223_UNEXPECTED_" + type(exc).__name__, file=sys.stderr)
+        return 1
+    print("OK_V223_TARGET_MARKED")
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if argv == ["mark-target"]:
+        return mark_target()
     if len(argv) != 1 or argv[0] != "run":
         print("usage: JW_PG_SOURCE_DSN=... JW_PG_TARGET_ADMIN_DSN=... JW_PG_BACKUP_KEY=... "
-              "JW_PG_REAL_SOURCE=1 python -m scripts.pg_backup_v223 run", file=sys.stderr)
+              "JW_PG_TARGET_EPHEMERAL_TOKEN=... JW_PG_REAL_SOURCE=1 "
+              "python -m scripts.pg_backup_v223 [mark-target|run]", file=sys.stderr)
         return 2
     source, target = os.environ.get("JW_PG_SOURCE_DSN", ""), os.environ.get("JW_PG_TARGET_ADMIN_DSN", "")
     secrets = [parse_dsn(d)["password"] for d in (source, target) if d]

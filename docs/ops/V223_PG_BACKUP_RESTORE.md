@@ -26,9 +26,35 @@ development database (`JW_PG_REAL_SOURCE=1`).
   project ref (derived from the DSN: `db.<ref>.supabase.co` or pooler login `<role>.<ref>`),
   database name and role (from the DSN AND the live session), server major >= 17, and a
   schema-shape fingerprint of the live database (`IDENTITY_SQL` in the tool). A blank
-  expectation never matches, even against a blank value;
-  target must be `localhost`,
-  declared `JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE`, and not equal to the source.
+  expectation never matches, even against a blank value.
+- **Source role is least privilege (F2)**, checked from the live session right after the
+  identity check and before any table scan or dump. Refused (by name) when the role is
+  SUPERUSER / CREATEROLE / CREATEDB / REPLICATION, a member of `pg_write_all_data`,
+  `pg_execute_server_program`, `pg_read_server_files` or `pg_write_server_files`, can CREATE in
+  the database or in the schema, holds INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER on any
+  schema table or UPDATE on any sequence, cannot SELECT every table, has switched role
+  (`SET ROLE`), or has no USAGE on the schema. `BYPASSRLS` is the one deliberate allowance and
+  is REQUIRED when the schema has RLS tables: with FORCE RLS a role without it silently sees
+  only some rows, so both the dump and the digests would be incomplete. A matching role *name*
+  such as `postgres` therefore no longer passes.
+- **Restore target proves it is disposable (F1)**, before the source is even contacted and
+  before any CREATE/DROP. `localhost` plus `JW_PG_CI_ALLOW` is only the first screen. The target
+  must additionally: be PG17+ and not a replica; be reached through database `postgres`;
+  carry the marker database `jw_ephemeral_marker` whose comment equals
+  `JW_EPHEMERAL_V1:<token>` for the token in `JW_PG_TARGET_EPHEMERAL_TOKEN` (>= 16 chars,
+  compared in constant time); hold no database other than `postgres`, the marker and our own
+  `jw_v223_<10 hex>[_truncated]` leftovers; and contain no relations in `postgres`. A tunnel to
+  a real database fails because it is not marked, is not empty, or both.
+  The marker is planted by whoever creates the disposable cluster (`mark-target`, below), and
+  the command refuses to mark a cluster that is not empty, so it cannot label a populated one.
+- **Signature size is bounded by exact counts, not statistics (F5).** Per-table cap
+  `MAX_TABLE_ROWS` (2,000,000) and total cap `MAX_SIGNATURE_ROWS` (5,000,000) are enforced with
+  bounded `count(*)` queries before any row is hashed; the planner estimate `n_live_tup` is no
+  longer used. Row digests are streamed on the server (per-row md5, 64-bit halves summed:
+  constant memory, independent of row order, any changed value changes the digest) instead of
+  one `string_agg` over the whole table, and every signature query runs under a
+  transaction-local `statement_timeout` of 300 s. Over-cap or timeout stops with a stable
+  `BLOCKED_V223_*` code; only a sanitised, truncated table label is printed.
 - `pg_dump`/`pg_restore` must be major version 17 or newer (PG16 clients are refused).
 - Output contains counts, digests and timings only; passwords are redacted from errors.
 
@@ -38,6 +64,7 @@ secrets or in public Actions logs/artifacts. Run it on your own PC instead:
 
 ```bash
 docker run -d --name jw-pg17 -e POSTGRES_PASSWORD=localpw -p 127.0.0.1:55432:5432 postgres:17
+export JW_PG_TARGET_EPHEMERAL_TOKEN="$(python -c 'import secrets;print(secrets.token_hex(16))')"
 export JW_PG_SOURCE_DSN='postgresql://<restricted-read-role>:<pw>@<host>:5432/postgres?sslmode=verify-full&sslrootcert=/path/to/supabase-ca.crt'
 export JW_PG_TARGET_ADMIN_DSN='postgresql://postgres:localpw@127.0.0.1:55432/postgres'
 export JW_PG_CI_ALLOW=ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -49,6 +76,7 @@ export JW_PG_EXPECT_PROJECT_REF='<20-letter-project-ref-from-dashboard>'
 export JW_PG_EXPECT_DBNAME='postgres'
 export JW_PG_EXPECT_ROLE='<restricted-read-role>'
 export JW_PG_EXPECT_SCHEMA_FINGERPRINT='<see below>'
+python -m scripts.pg_backup_v223 mark-target  # once per fresh container: plants the marker (refuses a non-empty cluster)
 python -m scripts.pg_backup_v223 run          # needs pg_dump/pg_restore 17 on PATH
 ```
 
@@ -62,14 +90,29 @@ the channel they came from.
 A synthetic database cannot be accepted as the real development database solely by setting
 `JW_PG_REAL_SOURCE=1` or by copying its own values into the expectations.
 
-Use a read-only database role for the source if one can be created; the Supabase direct
-connection host may be IPv6-only on the Free plan, so a session-mode pooler address may be
-needed for IPv4 networks (verify in the Supabase dashboard; not verified here).
+The source role is now REQUIRED to be a dedicated read-only role (see F2 above): `LOGIN`,
+`BYPASSRLS`, `USAGE` on `jw_dev`, `SELECT` on its tables and sequences, nothing else.
+**Open question, not verified here:** whether the Supabase `postgres` role is allowed to create a
+`BYPASSRLS` login role on this project. If it is not, a dump that sees every row is impossible
+without a more privileged role and this check will (correctly) refuse to continue; do not weaken
+the check, decide on another approved route instead. Creating that role is a change to the
+development database and needs your separate approval.
+The Supabase direct connection host may be IPv6-only on the Free plan, so a session-mode pooler
+address may be needed for IPv4 networks (verify in the Supabase dashboard; not verified here).
 Keep `JW_PG_BACKUP_KEY` somewhere other than the backup file.
 
 ## What has and has not been executed
-- Executed: `tests/test_v223_pg_backup.py` (encryption, guards, redaction, signature diff,
-  strict verdict rules, independent source identity) — DB-free logic only (38/38 PASS locally; includes identifier-quoting and identity-before-scan cases).
-- NOT RUN: the dump → restore → signature path against any PostgreSQL 17 (no Docker daemon,
-  no PG17 client and no `psycopg` in the authoring environment). First run must happen on a
-  disposable PG17 with a synthetic source; only then against the real development DB.
+- Executed: `tests/test_v223_pg_backup.py` — DB-free logic, 88 tests, no skips (encryption,
+  guards, redaction, signature diff, strict verdict rules, source identity, identifier quoting,
+  F1 target proof, F2 least privilege, F5 bounded streamed signature). Ten deliberate
+  weakenings of the new controls were each caught by at least one test.
+- Executed on a throw-away **PostgreSQL 16** (the only server available to the author; NOT
+  PG17): the F1/F2/F5 SQL against real catalogs. Roles `postgres`, read-only, read-only+BYPASSRLS,
+  read-write and schema-creator received exactly the expected verdicts, and a clean, a marked, a
+  wrong-token, a foreign-database and a non-empty target cluster were classified as expected.
+  This validates the SQL text, not the PG17 path.
+- NOT RUN: the dump -> restore -> signature path and `scripts/ci_cinema_pg_v223_backup_synthetic.py`
+  (which now also exercises F1/F2/F5 on two real PG17 clusters) against any PostgreSQL 17 (no
+  Docker daemon, no PG17 client and no `psycopg` in the authoring environment). First run must
+  happen on disposable PG17 (CI workflow `jw-cinema-pg-v223-backup-qa.yml`); only then against the
+  real development DB.
