@@ -1,0 +1,55 @@
+name: JW V22.3 SQLite-PG strict identity cutover parity (disposable PG17)
+on:
+  push:
+    branches:
+      - candidate/jw-v223-pg-backup-restore-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sqlite-pg-identity-parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v223-cutover-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5435'
+      PGUSER: postgres
+      PGPASSWORD: ci-v223-cutover-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preserve original code and require PostgreSQL 17
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'show server_version_num' | grep -E '^17[0-9]{4}$'
+      - name: Install test-only PostgreSQL dependency
+        run: python3 -m pip install --disable-pip-version-check -r requirements-postgres-check.txt
+      - name: Strict cross-store identity/MFA/session parity, 10 fault injections
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_identity_bridge_v223 | tee identity-cutover.log
+          grep -F 'PASS_V223_SQLITE_PG_IDENTITY_GATE' identity-cutover.log
+          grep -F 'PASS_V223_IDENTITY_REJECT_PG_TOKEN_REUSE' identity-cutover.log
+          grep -F 'PASS_V223_IDENTITY_REJECT_MFA_DOWNGRADE' identity-cutover.log
+          echo 'DISPOSABLE ONLY: no actual SQLite business data, Supabase writes or service routing changes.'
