@@ -1,0 +1,35 @@
+name: JW V22.3 SQLite-PG cutover front dual-session pilot security
+on:
+  push:
+    branches:
+      - candidate/jw-v223-pg-backup-restore-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cutover-front-security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protected source boundary guard
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install application test dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Verify compile and fail-closed cutover behavior
+        run: |
+          set -euo pipefail
+          python3 -m py_compile app/pg_cinema_cutover_front_v223.py tests/test_cinema_pg_cutover_front_v223.py
+          python3 -m pytest -q -rA tests/test_cinema_pg_cutover_front_v223.py | tee cutover-front.log
+          grep -E '12 passed' cutover-front.log
+          echo 'DISPOSABLE TEST STUBS ONLY: SQLite real users, PG real sessions, UI and public HTTPS cutover NOT verified.'
