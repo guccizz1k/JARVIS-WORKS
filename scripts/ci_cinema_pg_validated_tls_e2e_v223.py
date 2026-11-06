@@ -108,6 +108,9 @@ def real_build_app():
             if p:
                 yield p
             children = getattr(route, "routes", None)
+            if children is None:
+                mounted = getattr(route, "app", None)
+                children = getattr(mounted, "routes", None)
             if children is not None:
                 yield from nested_paths(children)
     paths = set(nested_paths(app.routes))
