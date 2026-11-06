@@ -1,0 +1,58 @@
+name: JW V22.3 real SQLite + disposable PG17 cutover-front E2E
+on:
+  push:
+    branches:
+      - candidate/jw-v223-pg-backup-restore-20261106
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  actual-dual-database-cutover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v223-front-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5435'
+      PGUSER: postgres
+      PGPASSWORD: ci-v223-front-only
+      JW_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check original protection and PG17
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'show server_version_num' | grep -E '^17[0-9]{4}$'
+      - name: Install existing test dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Run actual SQLite-session / PG17-engine two-store E2E
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee cutover-realdb.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=20 failures=0 synthetic_only=true' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_CROSS_ORG_SESSION_REJECTED' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_SQLITE_ORIGINAL_RECORD_PRESERVED' cutover-realdb.log
+          echo 'DISPOSABLE SQLITE & PG17 ONLY; native PG login, live Supabase, browser and public HTTPS NOT tested here.'
