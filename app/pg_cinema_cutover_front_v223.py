@@ -271,14 +271,15 @@ class CutoverFront:
 
 def create_app():
     """Explicit isolated preview entrypoint, never wired into app.main."""
-    from . import main as legacy
-    from . import pg_review_integrated_v202 as pg_stage
-    from . import pg_cinema_legacy_api_v1 as trade
-    from . import pg_v90_integrated_entry as v90
+    # Fail closed before importing either application or opening any source.
     if (os.environ.get(FRONT_FLAG) != OPT_IN
             or os.environ.get("JW_ENV", "").lower() not in ("dev", "development", "test")
             or os.environ.get("JW_INSECURE_LOCAL_DEV") == "1"):
         raise RuntimeError("BLOCKED: cutover pilot must be explicit and non-production")
+    from . import main as legacy
+    from . import pg_review_integrated_v202 as pg_stage
+    from . import pg_cinema_legacy_api_v1 as trade
+    from . import pg_v90_integrated_entry as v90
     if not trade.legacy_api_gate_on():
         raise RuntimeError("BLOCKED: PG trade feature is disabled")
     pg = pg_stage.create_app()
