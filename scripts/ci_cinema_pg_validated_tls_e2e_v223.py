@@ -100,7 +100,18 @@ def real_build_app():
     print("JW_V223_BEFORE_REGISTRATION", len(app.routes), len(app.router.routes), type(app).__name__, flush=True)
     must(trade.register_cinema_trade_v1(app), "TRADE_REGISTERED")
     print("JW_V223_AFTER_TRADE", len(app.routes), len(app.router.routes), flush=True)
-    must(legacy.register_legacy_api_v1(app), "VALIDATED_LEGACY_REGISTERED")
+    # Preserve the genuine production registration and ValidatedLegacyTx.
+    # Inject only a deterministic clock into its existing, testable router seam
+    # so the 31-day overdue scenario is evaluated without changing real time.
+    original_factory = legacy.create_legacy_router
+    def clocked_factory(tx, **kwargs):
+        kwargs["today"] = lambda: e2e.Clock.today
+        return original_factory(tx, **kwargs)
+    legacy.create_legacy_router = clocked_factory
+    try:
+        must(legacy.register_legacy_api_v1(app), "VALIDATED_LEGACY_REGISTERED")
+    finally:
+        legacy.create_legacy_router = original_factory
     print("JW_V223_AFTER_LEGACY", len(app.routes), len(app.router.routes), flush=True)
     def nested_paths(routes):
         for route in routes:
