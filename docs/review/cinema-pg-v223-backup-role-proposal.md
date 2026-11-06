@@ -106,3 +106,20 @@ This is PG16 evidence for the SQL and the check, not PG17 and not this Supabase 
 - [ ] Owner will run the SQL (or approves an agent to apply it with no password in the statement).
 - [ ] Owner sets the password locally and confirms the `VALID UNTIL` date.
 - [ ] Verification result (62 readable / 0 writable / not settable) recorded before the first dump.
+
+## 7. V22.3 gate findings (disposable PostgreSQL, not Supabase)
+`scripts/ci_cinema_pg_v223_migration_gate.py` runs `scripts/review/cinema_pg_v223_backup_role_proposal.sql`
+as a NON-superuser admin shaped like the observed `postgres` (LOGIN CREATEROLE BYPASSRLS, ADMIN-only member
+of `jw_cinema_owner`, owner of `jw_dev` and the legacy tables and sequences). Two defects of the recipe
+above were found and fixed in the SQL files (this document's section 3 is kept as written for history):
+1. **Not transactional.** When one GRANT failed, the temporary `INHERIT TRUE` membership of the admin in
+   `jw_cinema_owner` stayed behind. The SQL file now runs in one transaction; check `MB.00b` proves a failing
+   run leaves neither the role nor the membership.
+2. **`DROP OWNED BY jw_backup_ro` is refused** for a CREATEROLE admin on PG16+ (it holds only ADMIN on the role
+   it created). `cinema_pg_v223_backup_role_rollback.sql` disables login first, revokes explicitly under the same
+   temporary grant right, then drops the role, in one transaction.
+With the fixed files, the backup tool's own F2/F6 check ACCEPTS the role, it reads every `jw_dev` table
+(FORCE-RLS rows included), writes nothing (25006), cannot `SET ROLE jw_cinema_owner`, and is not a member of
+`pg_read_all_data`. Local run: PG16 (supplemental). PG17 run: workflow `jw-cinema-pg-v223-legacy-api-e2e.yml`.
+Still required before any real use: the owner's explicit approval, running it on Supabase, and the real
+read-only verification query of section 3 returning 62 / 0.

@@ -55,3 +55,9 @@ jobs:
           python3 -m scripts.ci_cinema_pg_legacy_api_e2e_v223 | tee legacy-api-e2e.log
           grep -E '^PASS: 74 checks, 0 failed, expected exactly 74$' legacy-api-e2e.log
           echo 'SYNTHETIC ONLY: disposable PG17; production TLS path, browser, HTTPS and Supabase NOT exercised.'
+      - name: Dev-DB migration candidates, rollbacks and backup role on PostgreSQL 17 (exactly 36 checks)
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v223_migration_gate | tee migration-gate.log
+          grep -E '^PASS: 36 checks, 0 failed, expected exactly 36$' migration-gate.log
+          echo 'CANDIDATES ONLY: nothing was applied to Supabase; the Supabase-shaped admin is an imitation.'

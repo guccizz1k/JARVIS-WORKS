@@ -167,7 +167,11 @@ def _pg_id(value: str, kind: str = "document") -> str:
 
 
 def _fn_exists(cur, signature: str) -> bool:
-    cur.execute("SELECT to_regprocedure(%s) IS NOT NULL", (signature,))
+    """True only if the function exists AND the current (writer) role may EXECUTE it. The lossless
+    terms "disable" step revokes EXECUTE and keeps the data: the router then refuses new due dates and
+    notes (409) while still showing the ones already stored."""
+    cur.execute("SELECT to_regprocedure(%s) IS NOT NULL AND "
+                "coalesce(has_function_privilege(to_regprocedure(%s), 'EXECUTE'), false)", (signature, signature))
     return bool(cur.fetchone()[0])
 
 
