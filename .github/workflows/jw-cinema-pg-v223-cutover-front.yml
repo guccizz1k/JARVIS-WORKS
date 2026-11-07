@@ -5,6 +5,7 @@ on:
       - candidate/jw-v223-pg-backup-restore-20261106
       - review/jw-v223-two-track-integration-20261107
       - review/jw-v223-track-a-login-revocation-20261107
+      - review/jw-v223-ab-cutover-integration-20261107
   workflow_dispatch:
 permissions:
   contents: read
