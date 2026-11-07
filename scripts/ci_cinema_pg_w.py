@@ -42,17 +42,18 @@ def sha256(path):
             h.update(chunk)
     return h.hexdigest()
 
-def find_input():
-    if STAGING.is_symlink() or not STAGING.is_dir():
-        raise BackupError("BLOCKED_STAGING_DIRECTORY_MISSING")
-    found=[p for p in STAGING.iterdir() if p.is_file() and
+def find_input(directory=None):
+    directory=STAGING if directory is None else Path(directory)
+    if directory.is_symlink() or not directory.is_dir():
+        raise BackupError("BLOCKED_ARCHIVE_DIRECTORY_MISSING")
+    found=[p for p in directory.iterdir() if p.is_file() and
            not p.is_symlink() and ARCHIVE_RE.fullmatch(p.name)]
     if len(found)!=1:
         raise BackupError("BLOCKED_EXPECT_EXACTLY_ONE_ARCHIVE")
     a=found[0]
     label=a.name.removesuffix(".jwpgbk")
-    m=STAGING/(label+".manifest.jwpgbk")
-    k=STAGING/(label+".key")
+    m=directory/(label+".manifest.jwpgbk")
+    k=directory/(label+".key")
     if any(not p.is_file() or p.is_symlink() for p in (a,m,k)):
         raise BackupError("BLOCKED_MATCHING_MANIFEST_OR_KEY_MISSING")
     if not 40<a.stat().st_size<1<<30 or not 40<m.stat().st_size<1<<24 or k.stat().st_size>256:
@@ -87,6 +88,26 @@ def private_transfer(files):
             raise BackupError("BLOCKED_FILE_TRANSFER_CHECKSUM")
         a.unlink()
     return dest
+
+def find_or_import_archive():
+    """Keep authenticated backups reusable after a failed restore attempt.
+
+    First intake: verify staged paths are git-ignored, then copy into protected
+    HOME. Later invocations reuse ONLY the matching complete private triplet;
+    they never require re-uploading the user's encrypted source backup.
+    """
+    try:
+        return private_transfer(find_input())
+    except BackupError as exc:
+        # Only the absence of a *staged archive* permits a private-file retry.
+        # A partial or invalid staged archive must fail closed instead.
+        if str(exc)!="BLOCKED_EXPECT_EXACTLY_ONE_ARCHIVE":
+            raise
+        if STAGING.is_dir() and any(p.name.endswith(".jwpgbk") or
+                                     p.name.endswith(".key") for p in STAGING.iterdir()):
+            raise BackupError("BLOCKED_STAGING_PARTIAL_ARCHIVE")
+        return find_input(PRIVATE)
+
 
 def read_key(path):
     if path.is_symlink() or (path.stat().st_mode & 0o077):
@@ -232,7 +253,7 @@ def verify_restore():
     # stopped container may be restarted; never initialize another database.
     target_status=ensure_local_target(dsn,token)
     print("LOCAL_RESTORE_TARGET="+target_status)
-    files=private_transfer(find_input())
+    files=find_or_import_archive()
     archive,manifest,keyfile=files
     key=read_key(keyfile)
     db="jw_v223_"+secrets.token_hex(5)
