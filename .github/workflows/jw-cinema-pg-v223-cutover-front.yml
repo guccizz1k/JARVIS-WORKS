@@ -29,7 +29,9 @@ jobs:
       - name: Verify compile and fail-closed cutover behavior
         run: |
           set -euo pipefail
-          python3 -m py_compile app/pg_cinema_cutover_front_v223.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py
-          python3 -m pytest -q -rA tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py | tee cutover-front.log
-          grep -E '23 passed' cutover-front.log
+          python3 -m py_compile app/pg_cinema_cutover_front_v223.py app/pg_cinema_cutover_ui_v223.py app/cinema_entry_v1.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py tests/test_cinema_pg_cutover_ui_v223.py
+          python3 -c 'from app.pg_cinema_cutover_ui_v223 import JS; from pathlib import Path; Path("/tmp/jw-cutover-ui-v223.js").write_text(JS, encoding="utf-8")'
+          node --check /tmp/jw-cutover-ui-v223.js
+          python3 -m pytest -q -rA tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py tests/test_cinema_pg_cutover_ui_v223.py | tee cutover-front.log
+          grep -E '31 passed' cutover-front.log
           echo 'DISPOSABLE TEST STUBS ONLY: SQLite real users, PG real sessions, UI and public HTTPS cutover NOT verified.'
