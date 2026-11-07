@@ -70,3 +70,17 @@ jobs:
           test "$(stat -c %a "$HOME/.local/share/jw-v223-restore/restore.sh")" = "600"
           test "$(docker inspect --format '{{ (index (index .NetworkSettings.Ports "5432/tcp") 0).HostIp }}' jw-v223-restore)" = "127.0.0.1"
           echo 'PASS: local disposable PG17 and idempotent marker verified, Supabase untouched, no real backup.'
+
+      - name: Verify official public Supabase CA network endpoint (no credentials, no SQL)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from scripts.ci_cinema_pg_s import fetch_ca, verify_tls
+          ca=fetch_ca()
+          print("PUBLIC_CA_CERTIFICATE=VALID")
+          v=verify_tls(ca)
+          print("PUBLIC_CA_POOLER_TLS_RESULT="+v)
+          if v != "CA_CHAIN_AND_HOST_VERIFIED":
+              raise SystemExit(1)
+          print("PUBLIC_CA_VERIFY_FULL=PASS (network only; no login or DB write)")
+          PY
