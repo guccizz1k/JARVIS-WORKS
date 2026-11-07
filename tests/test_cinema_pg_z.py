@@ -39,6 +39,15 @@ class SafeMismatchEvidence(unittest.TestCase):
                 decrypt.assert_not_called()
                 server.assert_not_called()
 
+    def test_legitimate_function_signature_label_can_be_reported(self):
+        label='functions:jw_dev.example(uuid, integer)'
+        with tempfile.TemporaryDirectory() as d:
+            self.make_case(d,label=label)
+            with patch.dict(os.environ,{"CODESPACES":"true"}),\
+                 patch.object(z.w,"PRIVATE",Path(d)),\
+                 patch.object(z.w,"ROOT",Path.cwd()):
+                self.assertEqual(z.read_report()["mismatch"],label)
+
     def test_off_codespaces_denied(self):
         with patch.dict(os.environ,{"CODESPACES":"false"}):
             with self.assertRaises(BackupError):
