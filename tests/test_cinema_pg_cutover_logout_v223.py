@@ -191,3 +191,18 @@ async def test_insecure_upstream_session_issuance_still_denied():
         assert r.status_code == 503 and r.json()["code"] == "insecure_upstream_session"
         assert cookies(c) == (False, False)
         assert st["pg_revocations"] == st["legacy_revocations"] == 0
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.asyncio
+async def test_safe_http_methods_never_revoke_both_sessions(method):
+    app, st = harness()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="https://testserver") as c:
+        await login_both(c)
+        r = await c.request(method, "/api/logout", headers={
+            "X-CSRF-Token": LEGACY_CSRF, "X-JW-PG-CSRF": PG_CSRF
+        })
+        assert r.status_code == 405
+        assert cookies(c) == (True, True)
+        assert st["pg_revocations"] == st["legacy_revocations"] == 0
