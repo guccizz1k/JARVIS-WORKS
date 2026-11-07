@@ -52,7 +52,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee cutover-realdb.log
-          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=28 failures=0 synthetic_only=true' cutover-realdb.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=30 failures=0 synthetic_only=true' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_GET_LOGOUT_NEVER_REVOKES' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_HEAD_LOGOUT_NEVER_REVOKES' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_PG_BROWSER_COOKIE_ISSUED_VIA_HTTP' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_SESSION_ROW_REVOKED' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_REAL_SQLITE_SESSION_ROW_REVOKED' cutover-realdb.log
