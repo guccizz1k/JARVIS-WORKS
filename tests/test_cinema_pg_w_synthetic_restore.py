@@ -69,6 +69,13 @@ def main():
                               .format(sql.Identifier(t)))
                     c.execute(sql.SQL("ALTER TABLE jw_dev.{} FORCE ROW LEVEL SECURITY")
                               .format(sql.Identifier(t)))
+            # Recreate the *exact* flagged CHECK from live PG17.11 metadata.
+            # No user data copied: only the schema constraint expression.
+            c.execute("ALTER TABLE jw_dev.t01 ADD COLUMN company_name text NOT NULL DEFAULT 'Acme'")
+            c.execute("ALTER TABLE jw_dev.t01 ADD CONSTRAINT "
+                      "review_signup_requests_v151_company_name_check "
+                      "CHECK (length(company_name) >= 2 AND length(company_name) <= 120 "
+                      "AND company_name = btrim(company_name))")
             for i in range(22):
                 c.execute("INSERT INTO jw_dev.t00 VALUES (%s,%s)",(i,"synthetic"+str(i)))
             c.execute(sql.SQL("ALTER TABLE jw_dev.t00 OWNER TO {}").format(sql.Identifier(owner)))
@@ -78,6 +85,16 @@ def main():
             roles=roles_in_acl(c,"jw_dev")
         if any(role in roles for role in acl_only):
             raise RuntimeError("test fixture must expose missing schema/function-only roles")
+        # Source metadata read-only expectation: same PG17 canonical CHECK text.
+        source_constraint=[row for row in sig["constraints"]
+            if row[0]=="t01.review_signup_requests_v151_company_name_check"]
+        if len(source_constraint)!=1:
+            raise RuntimeError("synthetic source CHECK missing")
+        LIVE_CHECK_MD5="72e0665493e1a02794f703dc7b24a0e5"
+        if source_constraint[0][1]!=LIVE_CHECK_MD5:
+            print("CHECK_SYNTHETIC_SOURCE_CANONICAL_DIFFERS_FROM_SUPABASE")
+        else:
+            print("CHECK_SYNTHETIC_SOURCE_CANONICAL_EQUALS_SUPABASE")
         if len(sig["tables"])!=62 or sum(v[0] for v in sig["rows"].values())!=22:
             raise RuntimeError("synthetic source shape wrong")
         plaintext=w.STAGING/(label+".dump")
