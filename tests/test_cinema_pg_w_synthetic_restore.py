@@ -61,7 +61,7 @@ def main():
                 c.execute(sql.SQL("GRANT EXECUTE ON FUNCTION jw_dev.synthetic_ping() TO {}")
                           .format(sql.Identifier(role)))
             for i in range(62):
-                t=f"t{i:02d}"
+                t="review_signup_requests_v151" if i==1 else f"t{i:02d}"
                 c.execute(sql.SQL("CREATE TABLE jw_dev.{} (id integer PRIMARY KEY, note text)")
                           .format(sql.Identifier(t)))
                 if i<61:
@@ -71,39 +71,35 @@ def main():
                               .format(sql.Identifier(t)))
             # Recreate the *exact* flagged CHECK from live PG17.11 metadata.
             # No user data copied: only the schema constraint expression.
-            c.execute("ALTER TABLE jw_dev.t01 ADD COLUMN company_name text NOT NULL DEFAULT 'Acme'")
-            c.execute("ALTER TABLE jw_dev.t01 ADD CONSTRAINT "
+            c.execute("ALTER TABLE jw_dev.review_signup_requests_v151 ADD COLUMN company_name text NOT NULL DEFAULT 'Acme'")
+            c.execute("ALTER TABLE jw_dev.review_signup_requests_v151 ADD CONSTRAINT "
                       "review_signup_requests_v151_company_name_check "
                       "CHECK ((length(company_name) >= 2 AND length(company_name) <= 120) "
                       "AND company_name = btrim(company_name))")
             for i in range(22):
                 c.execute("INSERT INTO jw_dev.t00 VALUES (%s,%s)",(i,"synthetic"+str(i)))
             c.execute(sql.SQL("ALTER TABLE jw_dev.t00 OWNER TO {}").format(sql.Identifier(owner)))
-            c.execute(sql.SQL("GRANT SELECT ON jw_dev.t01 TO {}").format(sql.Identifier(owner)))
+            c.execute(sql.SQL("GRANT SELECT ON jw_dev.review_signup_requests_v151 TO {}").format(sql.Identifier(owner)))
         with psycopg.connect(dsn,dbname=name) as c:
             sig=fetch_signature(c,"jw_dev")
             roles=roles_in_acl(c,"jw_dev")
+        # SYNTHETIC ONLY: simulate the old source's different stored AND
+        # parenthesization, which pg_dump/PG17 restores to the flattened form.
+        # This does NOT modify a real backup, real manifest, or external DB.
+        expected_key=w.V151_CONSTRAINT_KEY
+        synthetic_row=[row for row in sig["constraints"] if row[0]==expected_key]
+        if len(synthetic_row)!=1:
+            raise RuntimeError("historical CHECK fixture missing")
+        expected_target=__import__("hashlib").md5(
+            w.V151_RESTORED_DEF.encode("utf-8")).hexdigest()
+        expected_source=__import__("hashlib").md5(
+            w.V151_SOURCE_DEF.encode("utf-8")).hexdigest()
+        if synthetic_row[0][1]!=expected_target:
+            raise RuntimeError("synthetic PG17 check deparse unexpectedly changed")
+        synthetic_row[0][1]=expected_source
+        print("SYNTHETIC_HISTORICAL_CHECK_PARENTHESES_DIFF_INJECTED=PASS")
         if any(role in roles for role in acl_only):
             raise RuntimeError("test fixture must expose missing schema/function-only roles")
-        # Source metadata read-only expectation: same PG17 canonical CHECK text.
-        source_constraint=[row for row in sig["constraints"]
-            if row[0]=="t01.review_signup_requests_v151_company_name_check"]
-        if len(source_constraint)!=1:
-            raise RuntimeError("synthetic source CHECK missing")
-        LIVE_CHECK_MD5="72e0665493e1a02794f703dc7b24a0e5"
-        if source_constraint[0][1]!=LIVE_CHECK_MD5:
-            print("CHECK_SYNTHETIC_SOURCE_CANONICAL_DIFFERS_FROM_SUPABASE")
-            with psycopg.connect(dsn,dbname=name) as c:
-                detail=c.execute(
-                    "SELECT pg_get_constraintdef(k.oid) FROM pg_constraint k "
-                    "JOIN pg_class t ON t.oid=k.conrelid "
-                    "JOIN pg_namespace n ON n.oid=t.relnamespace "
-                    "WHERE n.nspname='jw_dev' AND t.relname='t01' AND "
-                    "k.conname='review_signup_requests_v151_company_name_check'"
-                ).fetchone()
-                print("SYNTHETIC_CHECK_TEXT="+str(detail[0] if detail else "MISSING"))
-        else:
-            print("CHECK_SYNTHETIC_SOURCE_CANONICAL_EQUALS_SUPABASE")
         if len(sig["tables"])!=62 or sum(v[0] for v in sig["rows"].values())!=22:
             raise RuntimeError("synthetic source shape wrong")
         plaintext=w.STAGING/(label+".dump")
