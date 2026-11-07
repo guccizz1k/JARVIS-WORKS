@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from scripts.ci_cinema_pg_r import SECRET_FILE
 from scripts.pg_backup_v223 import (
     BackupError,
