@@ -22,16 +22,16 @@ jobs:
         run: |
           set -euo pipefail
           python -I scripts/ci_cinema_pg_guard.py
-          bash -n scripts/ops/jw_v223_codespace_bootstrap.sh
-          python -m py_compile scripts/ops/jw_v223_codespace_check.py tests/test_jw_v223_codespace_check.py
+          python -m py_compile scripts/ci_cinema_pg_v223_codespace_bootstrap.py
+          python -m py_compile scripts/ci_cinema_pg_v223_codespace_check.py tests/test_cinema_pg_v223_codespace_check.py
       - name: Fail-closed tools-only tests; NEVER touch database
         run: |
           set -euo pipefail
-          python -m unittest discover -s tests -p 'test_jw_v223_codespace_check.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_v223_codespace_check.py' -v
           set +e
-          out=$(bash scripts/ops/jw_v223_codespace_bootstrap.sh --prepare 2>&1)
+          out=$(python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare 2>&1)
           rc=$?
           set -e
           test "$rc" -eq 2
-          grep -F 'BLOCKED: This bootstrap is only permitted in an approved GitHub Codespace.' <<< "$out"
+          grep -F 'BLOCKED: only an approved GitHub Codespace may prepare the tools' <<< "$out"
           echo 'PASS: no database accessed; real backup NOT RUN.'

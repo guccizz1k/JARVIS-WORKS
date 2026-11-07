@@ -16,7 +16,7 @@ Owner approval: development-project change C (temporary backup role) and GitHub 
 2. Tap **Code → Codespaces → Create codespace on this branch**. Check free allowance and stop before any unapproved paid usage.
 3. In the Codespace terminal run:
 
-    bash scripts/ops/jw_v223_codespace_bootstrap.sh --prepare
+    python3 -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare
 
 4. Report only the PASS/BLOCKED summary. Even when everything passes, it prints TOOLS_READY_ONLY — NOT a real backup PASS.
 

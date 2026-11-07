@@ -6,7 +6,7 @@ import io
 import os
 import unittest
 from unittest.mock import patch
-from scripts.ops import jw_v223_codespace_check as c
+from scripts import ci_cinema_pg_v223_codespace_check as c
 
 
 class CodespacePreflight(unittest.TestCase):
