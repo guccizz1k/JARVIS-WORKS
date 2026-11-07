@@ -72,6 +72,7 @@ def main() -> int:
         print("BLOCKED: cannot create protected local credential file")
         return 2
     created = False
+    ready = False
     try:
         env = dict(os.environ)
         env["POSTGRES_PASSWORD"] = password
@@ -84,6 +85,7 @@ def main() -> int:
         created = True
         for _ in range(40):
             if live_local(password):
+                ready = True
                 print("PASS: isolated local PostgreSQL 17 TCP connection verified")
                 print("PASS: strong secret saved outside git with file mode 0600")
                 print("LOCAL_RESTORE_TARGET_READY_ONLY: no Supabase connection or backup executed")
@@ -97,7 +99,7 @@ def main() -> int:
     finally:
         # On unsuccessful setup, clean up only the disposable container created by this invocation.
         # The credential file is likewise created only by this invocation.
-        if not created or not live_local(password):
+        if not ready:
             if created:
                 try:
                     docker("rm", "-f", CONTAINER)
