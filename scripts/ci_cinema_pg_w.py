@@ -32,6 +32,10 @@ PRIVATE=Path.home()/".local/share/jw-v223-restore/real-backup-input"
 PROJECT="rvymwwzclagvljnofyss"
 SCHEMA="jw_dev"
 FINGERPRINT="afd89e64e80ecbc8216af114e0682ee7"
+POSTAB_FINGERPRINT="d3e6284dfbd277b43041052ea8f927ca"
+POSTAB_STAGING=ROOT/"jw-private-transfer-postab"
+POSTAB_PRIVATE=Path.home()/".local/share/jw-v223-restore/postab-input"
+POSTAB_TABLES=65
 # Independently confirmed in the live DEV catalog (read-only, 2026-11-07).
 # Windows exporter v1 inventories table ACL and policy grantees, but excludes
 # schema and function ACL grantees. pg_dump includes those GRANTs regardless.
@@ -70,7 +74,8 @@ def find_input(directory=None):
         raise BackupError("BLOCKED_ENCRYPTED_FILE_SIZE_INVALID")
     return a,m,k
 
-def private_transfer(files):
+def private_transfer(files, private_dir=None):
+    private_dir=PRIVATE if private_dir is None else Path(private_dir)
     """Copies three ignored files into HOME, then erases the staged copies."""
     for p in files:
         rel=p.relative_to(ROOT)
@@ -80,12 +85,12 @@ def private_transfer(files):
                          cwd=ROOT,capture_output=True,timeout=5)
         if a.returncode!=0 or b.returncode==0:
             raise BackupError("BLOCKED_STAGING_IS_GIT_TRACKABLE")
-    if PRIVATE.is_symlink():
+    if private_dir.is_symlink():
         raise BackupError("BLOCKED_PRIVATE_DIRECTORY_SYMLINK")
     os.umask(0o077)
-    PRIVATE.mkdir(parents=True,exist_ok=True,mode=0o700)
-    PRIVATE.chmod(0o700)
-    dest=[PRIVATE/p.name for p in files]
+    private_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
+    private_dir.chmod(0o700)
+    dest=[private_dir/p.name for p in files]
     if any(p.exists() or p.is_symlink() for p in dest):
         raise BackupError("BLOCKED_FILES_ALREADY_IMPORTED")
     for a,b in zip(files,dest):
@@ -99,7 +104,9 @@ def private_transfer(files):
         a.unlink()
     return dest
 
-def find_or_import_archive():
+def find_or_import_archive(staging_dir=None,private_dir=None):
+    staging_dir=STAGING if staging_dir is None else Path(staging_dir)
+    private_dir=PRIVATE if private_dir is None else Path(private_dir)
     """Keep authenticated backups reusable after a failed restore attempt.
 
     First intake: verify staged paths are git-ignored, then copy into protected
@@ -107,16 +114,16 @@ def find_or_import_archive():
     they never require re-uploading the user's encrypted source backup.
     """
     try:
-        return private_transfer(find_input())
+        return private_transfer(find_input(staging_dir),private_dir)
     except BackupError as exc:
         # Only the absence of a *staged archive* permits a private-file retry.
         # A partial or invalid staged archive must fail closed instead.
         if str(exc)!="BLOCKED_EXPECT_EXACTLY_ONE_ARCHIVE":
             raise
-        if STAGING.is_dir() and any(p.name.endswith(".jwpgbk") or
-                                     p.name.endswith(".key") for p in STAGING.iterdir()):
+        if staging_dir.is_dir() and any(p.name.endswith(".jwpgbk") or
+                                     p.name.endswith(".key") for p in staging_dir.iterdir()):
             raise BackupError("BLOCKED_STAGING_PARTIAL_ARCHIVE")
-        return find_input(PRIVATE)
+        return find_input(private_dir)
 
 
 def read_key(path):
@@ -127,12 +134,17 @@ def read_key(path):
         raise BackupError("BLOCKED_AES256_KEY_LENGTH")
     return k
 
-def check_manifest(m,encrypted):
+def check_manifest(m,encrypted,expected_fingerprint=None,expected_tables=62,postab=False):
+    if expected_fingerprint is None:
+        expected_fingerprint=FINGERPRINT
+    if postab and (m.get("post_ab_validated") is not True or
+                   m.get("backup_profile")!="JW_V223_POST_AB_65"):
+        raise BackupError("BLOCKED_POSTAB_MANIFEST_PROFILE")
     if (m.get("real_source") is not True or m.get("project_ref")!=PROJECT or
-        m.get("schema")!=SCHEMA or m.get("source_fingerprint")!=FINGERPRINT or
+        m.get("schema")!=SCHEMA or m.get("source_fingerprint")!=expected_fingerprint or
         m.get("snapshot_consistent") is not True or
         m.get("source_backup_verdict")!="EXPORT_ONLY_NOT_DR_PASS" or
-        m.get("tables")!=62 or m.get("table_row_total")!=22 or
+        m.get("tables")!=expected_tables or m.get("table_row_total")!=22 or
         m.get("server_major")!=17):
         raise BackupError("BLOCKED_SOURCE_MANIFEST_IDENTITY")
     if m.get("cipher_sha256")!=sha256(encrypted) or not re.fullmatch(
@@ -140,7 +152,7 @@ def check_manifest(m,encrypted):
         raise BackupError("BLOCKED_MANIFEST_ARCHIVE_DIGEST")
     sig=m.get("signature")
     if (not isinstance(sig,dict) or sig.get("schema")!=SCHEMA or
-        len(sig.get("tables",[]))!=62 or
+        len(sig.get("tables",[]))!=expected_tables or
         sum(int(v[0]) for v in sig.get("rows",{}).values())!=22):
         raise BackupError("BLOCKED_MANIFEST_SIGNATURE_COUNTS")
     roles=m.get("roles")
@@ -356,7 +368,15 @@ def ensure_local_target(dsn: str, token: str) -> str:
     raise BackupError("BLOCKED_LOCAL_DB_UNREACHABLE_AFTER_RESTART")
 
 
-def verify_restore():
+def verify_restore(profile="preab"):
+    if profile=="preab":
+        expected_fingerprint,expected_tables=FINGERPRINT,62
+        staging_dir,private_dir=STAGING,PRIVATE
+    elif profile=="postab":
+        expected_fingerprint,expected_tables=POSTAB_FINGERPRINT,POSTAB_TABLES
+        staging_dir,private_dir=POSTAB_STAGING,POSTAB_PRIVATE
+    else:
+        raise BackupError("BLOCKED_UNKNOWN_RESTORE_PROFILE")
     if os.environ.get("CODESPACES")!="true" or Path.cwd().resolve()!=ROOT.resolve():
         raise BackupError("BLOCKED_APPROVED_CODESPACE_REQUIRED")
     import psycopg
@@ -369,16 +389,17 @@ def verify_restore():
     # stopped container may be restarted; never initialize another database.
     target_status=ensure_local_target(dsn,token)
     print("LOCAL_RESTORE_TARGET="+target_status)
-    files=find_or_import_archive()
+    files=find_or_import_archive(staging_dir,private_dir)
     archive,manifest,keyfile=files
     key=read_key(keyfile)
     db="jw_v223_"+secrets.token_hex(5)
-    with tempfile.TemporaryDirectory(prefix="jw_restore_",dir=PRIVATE) as tmp:
+    with tempfile.TemporaryDirectory(prefix="jw_restore_",dir=private_dir) as tmp:
         work=Path(tmp)
         manifest_plain=work/"manifest.json"
         decrypt_file(manifest,manifest_plain,key)
         m=json.loads(manifest_plain.read_text("utf-8"))
-        roles=check_manifest(m,archive)
+        roles=check_manifest(m,archive,expected_fingerprint=expected_fingerprint,
+                            expected_tables=expected_tables,postab=(profile=="postab"))
         plaintext=work/"backup.dump"
         if decrypt_file(archive,plaintext,key)!=m["plain_sha256"]:
             raise BackupError("BLOCKED_PLAIN_DUMP_DIGEST_MISMATCH")
@@ -436,12 +457,12 @@ def verify_restore():
             finally:
                 with psycopg.connect(dsn,autocommit=True,connect_timeout=6) as c:
                     c.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(bad_db)))
-            passed=(len(actual.get("tables",[]))==62 and count==22 and
+            passed=(len(actual.get("tables",[]))==expected_tables and count==22 and
                     not mismatch and all(neg.values()))
             report={"verdict":"PASS" if passed else "FAIL",
                     "source_real":True,"verified_disposable_pg17":True,
                     "encrypted_archive_sha256":sha256(archive),
-                    "schema_fingerprint":FINGERPRINT,
+                    "schema_fingerprint":expected_fingerprint,
                     "source_signature_sha256":signature_digest(m["signature"]),
                     "restore_signature_sha256":signature_digest(actual),
                     "table_count":len(actual.get("tables",[])),"row_count":count,
@@ -452,8 +473,8 @@ def verify_restore():
                     "comparison_version":2,
                     "negative_tests":neg}
             base=archive.name.removesuffix(".jwpgbk")
-            legacy=PRIVATE/(base+".restore-report.json")
-            evidence=PRIVATE/(base+".restore-v2-report.json")
+            legacy=private_dir/(base+".restore-report.json")
+            evidence=private_dir/(base+".restore-v2-report.json")
             if legacy.is_symlink() or evidence.is_symlink():
                 raise BackupError("BLOCKED_RESTORE_REPORT_SYMLINK")
             # Preserve the previous actual FAIL report as immutable historical
