@@ -33,7 +33,7 @@ class LocalRestoreGate(unittest.TestCase):
 
     def test_existing_local_secret_does_not_launch(self):
         with patch.dict(os.environ, {"CODESPACES": "true"}), patch.object(r.shutil, "which", return_value="/usr/bin/docker"), \
-             patch.object(r.SECRET_FILE, "exists", return_value=True), patch.object(r, "docker") as d:
+             patch.object(type(r.SECRET_FILE), "exists", return_value=True), patch.object(r, "docker") as d:
             code, msg = self.run_quiet()
         self.assertEqual(code, 2)
         self.assertIn("already exists", msg)
