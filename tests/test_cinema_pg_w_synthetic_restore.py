@@ -56,7 +56,7 @@ def main():
             for role in acl_only:
                 c.execute(sql.SQL("GRANT USAGE ON SCHEMA jw_dev TO {}").format(sql.Identifier(role)))
             c.execute("CREATE FUNCTION jw_dev.synthetic_ping() RETURNS integer "
-                      "LANGUAGE SQL AS $ SELECT 1 $")
+                      "LANGUAGE SQL AS 'SELECT 1'")
             for role in acl_only:
                 c.execute(sql.SQL("GRANT EXECUTE ON FUNCTION jw_dev.synthetic_ping() TO {}")
                           .format(sql.Identifier(role)))
@@ -125,6 +125,11 @@ def main():
         raise RuntimeError("synthetic stopped-container setup failed")
     result=w.verify_restore()
     if result!=0:
+        # This is a synthetic-only CI fixture. Never show user backup content.
+        reports=list(w.PRIVATE.glob(label+".restore-report.json"))
+        if reports:
+            report=json.loads(reports[0].read_text(encoding="utf-8"))
+            print("SYNTHETIC_MISMATCH_LABELS="+repr(report.get("mismatch_labels")))
         raise RuntimeError("synthetic restore parity failed")
     # A second full restore from protected HOME must pass without re-upload.
     # Includes source-free signature and all four negative tests again.
