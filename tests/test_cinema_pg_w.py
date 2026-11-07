@@ -165,6 +165,48 @@ class RestoreOnlySafety(unittest.TestCase):
             w.run_restore_with_reason(
                 ["psql","--exit-on-error"],"bad",db="postgres",seconds=10)
 
+    def test_only_verified_v151_and_grouping_can_be_proven_equivalent(self):
+        import hashlib
+        key=w.V151_CONSTRAINT_KEY
+        def sig(h):
+            return {"constraints":[[key,h]]}
+        source=sig(hashlib.md5(w.V151_SOURCE_DEF.encode()).hexdigest())
+        target=sig(hashlib.md5(w.V151_RESTORED_DEF.encode()).hexdigest())
+        label="constraints:"+key
+
+        class LocalPg17:
+            def __init__(self,flags=(True,False,True,"text","default","pg_catalog")):
+                self.flags=flags
+                self.calls=0
+            def execute(self,sql):
+                self.calls+=1
+                return self
+            def fetchone(self):
+                return ((w.V151_RESTORED_DEF,*self.flags) if self.calls==1 else (0,))
+
+        db=LocalPg17()
+        self.assertEqual(
+            w.verified_v151_semantic_equivalence(source,target,[label],db),
+            [label])
+        self.assertEqual(db.calls,2)
+
+        # A malicious or genuinely changed CHECK is never bypassed.
+        bad_target=sig("0"*32)
+        db=LocalPg17()
+        self.assertEqual(w.verified_v151_semantic_equivalence(
+            source,bad_target,[label],db),[])
+        self.assertEqual(db.calls,0)
+        db=LocalPg17()
+        self.assertEqual(w.verified_v151_semantic_equivalence(
+            source,target,[label,"indexes:changed"],db),[])
+        self.assertEqual(db.calls,0)
+        db=LocalPg17(flags=(False,False,True,"text","default","pg_catalog"))
+        self.assertEqual(w.verified_v151_semantic_equivalence(
+            source,target,[label],db),[])
+        db=LocalPg17(flags=(True,False,True,"varchar(120)","default","pg_catalog"))
+        self.assertEqual(w.verified_v151_semantic_equivalence(
+            source,target,[label],db),[])
+
     def test_main_without_approved_codespace_never_opens_target(self):
         with patch.dict(os.environ,{"CODESPACES":"false"}), \
              patch.object(w,"read_private_target") as target:
