@@ -71,32 +71,3 @@ jobs:
           test "$(docker inspect --format '{{ (index (index .NetworkSettings.Ports "5432/tcp") 0).HostIp }}' jw-v223-restore)" = "127.0.0.1"
           echo 'PASS: local disposable PG17 and idempotent marker verified, Supabase untouched, no real backup.'
 
-      - name: Inspect public CA HTTPS candidate responses (diagnostic only; no DB, no secrets)
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from urllib.request import Request, urlopen
-          from urllib.parse import urlsplit
-          from cryptography import x509
-          from scripts.ci_cinema_pg_s import OFFICIAL_URLS
-          for url in OFFICIAL_URLS:
-              try:
-                  with urlopen(Request(url,headers={"User-Agent":"jw-v223-ca-check/1"}),timeout=10) as response:
-                      data=response.read(131000)
-                      final=urlsplit(response.geturl())
-                      print("OFFICIAL_CA_URL_PATH="+urlsplit(url).path,
-                            "HTTP_STATUS="+str(response.status),
-                            "FINAL_HOST="+str(final.hostname),
-                            "LEN="+str(len(data)),
-                            "STARTS_PEM="+str(data.startswith(b"-----BEGIN CERTIFICATE-----")))
-                      if data.startswith(b"-----BEGIN CERTIFICATE-----"):
-                          try:
-                              certs=x509.load_pem_x509_certificates(data)
-                              print("CA_SUBJECTS="+repr([x.subject.rfc4514_string() for x in certs]))
-                          except ValueError:
-                              print("CA_PARSE=INVALID")
-              except Exception as ex:
-                  print("OFFICIAL_CA_URL_PATH="+urlsplit(url).path,
-                        "FETCH_ERROR_TYPE="+type(ex).__name__,
-                        "HTTP_ERROR_CODE="+str(getattr(ex,"code","NONE")))
-          PY
