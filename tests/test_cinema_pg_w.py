@@ -91,6 +91,45 @@ class RestoreOnlySafety(unittest.TestCase):
                                      "truncation_rejected":True,
                                      "wrong_key_rejected":True})
 
+    def test_private_archive_can_resume_without_reupload(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            staging=root/"staged"
+            staging.mkdir()
+            private=root/"private"
+            private.mkdir()
+            a,m,k,_=self.fixture(private)
+            with patch.object(w,"STAGING",staging), patch.object(w,"PRIVATE",private), \
+                 patch.object(w,"private_transfer") as move:
+                self.assertEqual(w.find_or_import_archive(),(a,m,k))
+                move.assert_not_called()
+
+    def test_partial_staging_never_falls_back_to_private(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            staging=root/"staged"
+            staging.mkdir()
+            private=root/"private"
+            private.mkdir()
+            self.fixture(private)
+            (staging/"orphan.key").write_text("not an archive")
+            with patch.object(w,"STAGING",staging), patch.object(w,"PRIVATE",private):
+                with self.assertRaisesRegex(BackupError,"STAGING_PARTIAL_ARCHIVE"):
+                    w.find_or_import_archive()
+
+    def test_new_staged_archive_imported_once_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            staging=root/"staged"
+            staging.mkdir()
+            private=root/"private"
+            private.mkdir()
+            triplet=self.fixture(staging)
+            with patch.object(w,"STAGING",staging), patch.object(w,"PRIVATE",private), \
+                 patch.object(w,"private_transfer",return_value=triplet[:3]) as move:
+                self.assertEqual(w.find_or_import_archive(),triplet[:3])
+                move.assert_called_once()
+
     def test_main_without_approved_codespace_never_opens_target(self):
         with patch.dict(os.environ,{"CODESPACES":"false"}), \
              patch.object(w,"read_private_target") as target:
