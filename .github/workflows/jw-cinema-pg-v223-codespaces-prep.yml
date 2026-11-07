@@ -29,6 +29,7 @@ jobs:
           python -m py_compile scripts/ci_cinema_pg_u.py tests/test_cinema_pg_u.py
           python -m py_compile scripts/ci_cinema_pg_v.py tests/test_cinema_pg_v.py
           python -m py_compile scripts/ci_cinema_pg_w.py tests/test_cinema_pg_w.py
+          python -m py_compile scripts/ci_cinema_pg_x.py tests/test_cinema_pg_x.py
           python -m py_compile tests/test_cinema_pg_w_synthetic_restore.py
           python -m py_compile scripts/ci_cinema_pg_m.py tests/test_cinema_pg_m.py
           python -m py_compile scripts/ci_cinema_pg_r.py tests/test_cinema_pg_r.py
@@ -61,6 +62,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_cinema_pg_u.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_v.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_w.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_x.py' -v
           set +e
           auth_out=$(CODESPACES=false python scripts/ci_cinema_pg_u.py 2>&1)
           auth_rc=$?
@@ -73,6 +75,13 @@ jobs:
           export PATH="/usr/lib/postgresql/17/bin:$PATH"
           python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare
           printf '/jw-private-transfer/\n' >> .git/info/exclude
+          # Recover a deliberately stopped local PG17 without rebuilding or bypassing marker checks.
+          docker stop jw-v223-restore >/dev/null
+          python - <<'PY'
+          from scripts.ci_cinema_pg_x import ensure_local_target
+          ensure_local_target()
+          print("PASS_SYNTHETIC_STOPPED_PG17_AUTORECOVERED_WITH_MARKER")
+          PY
           python tests/test_cinema_pg_w_synthetic_restore.py
 
           python - <<'PY'
