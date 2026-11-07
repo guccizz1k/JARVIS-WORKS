@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -106,6 +107,102 @@ class RestoreOnlySafety(unittest.TestCase):
         self.assertNotIn("secret_pass",str(args))
         self.assertEqual(kwargs["env"]["PGPASSWORD"],"secret_pass")
         self.assertEqual(kwargs["env"]["PGHOST"],"127.0.0.1")
+
+
+    def inspect_fixture(self, **changes):
+        c = {
+            "Name": "/jw-v223-restore",
+            "Config": {"Image": "postgres:17"},
+            "HostConfig": {
+                "Privileged": False, "NetworkMode": "default",
+                "RestartPolicy": {"Name": "no"},
+                "PortBindings": {"5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "55432"}]},
+            },
+            "Mounts": [{"Type": "volume"}],
+            "State": {"Running": False},
+        }
+        for key,value in changes.items():
+            c[key]=value
+        return json.dumps([c])
+
+    def test_stopped_container_identity_verified_without_start(self):
+        import subprocess
+        output=subprocess.CompletedProcess([],0,stdout=self.inspect_fixture(),stderr="")
+        with patch.object(w.subprocess,"run",return_value=output) as runner:
+            self.assertIs(w.inspect_disposable_container(),False)
+        runner.assert_called_once_with(
+            ["docker","container","inspect","jw-v223-restore"],
+            capture_output=True,text=True,check=False,timeout=10)
+
+    def test_wrong_or_public_container_port_never_accepted(self):
+        import subprocess
+        data=json.loads(self.inspect_fixture())
+        data[0]["HostConfig"]["PortBindings"]["5432/tcp"][0]["HostIp"]="0.0.0.0"
+        with patch.object(w.subprocess,"run",return_value=subprocess.CompletedProcess([],0,stdout=json.dumps(data),stderr="")):
+            with self.assertRaisesRegex(BackupError,"IDENTITY_UNVERIFIED"):
+                w.inspect_disposable_container()
+
+    def test_foreign_container_or_bind_mount_refused(self):
+        import subprocess
+        for bad in ({"Config":{"Image":"postgres:16"}},
+                    {"Mounts":[{"Type":"bind","Source":"/sensitive"}]}):
+            with patch.object(w.subprocess,"run",return_value=subprocess.CompletedProcess(
+                    [],0,stdout=self.inspect_fixture(**bad),stderr="")):
+                with self.assertRaisesRegex(BackupError,"IDENTITY_UNVERIFIED"):
+                    w.inspect_disposable_container()
+
+    def test_valid_stopped_container_restart_rechecks_marker(self):
+        import psycopg
+        import subprocess
+        class Connected:
+            def __enter__(self):
+                return self
+            def __exit__(self,*args):
+                return False
+        with patch("psycopg.connect",side_effect=[
+                  psycopg.OperationalError("old target paused"),Connected()]), \
+             patch.object(w,"inspect_disposable_container",return_value=False), \
+             patch.object(w,"verify_ephemeral_target") as marker, \
+             patch.object(w.subprocess,"run",return_value=subprocess.CompletedProcess([],0,stdout="",stderr="")) as run:
+            self.assertEqual(w.ensure_local_target("local://dummy","private-token"),"RESTARTED_MARKER_VERIFIED")
+            run.assert_called_once_with(["docker","start","jw-v223-restore"],
+                                        capture_output=True,text=True,timeout=25,check=False)
+            marker.assert_called_once()
+
+    def test_unreachable_running_container_refuses_restart(self):
+        import psycopg
+        with patch("psycopg.connect",side_effect=psycopg.OperationalError("unreachable")), \
+             patch.object(w,"inspect_disposable_container",return_value=True), \
+             patch.object(w.subprocess,"run") as subprocess_run:
+            with self.assertRaisesRegex(BackupError,"RUNNING_LOCAL_DB_UNREACHABLE"):
+                w.ensure_local_target("local://dummy","token")
+            subprocess_run.assert_not_called()
+
+    def test_invalid_target_marker_stops_before_docker(self):
+        class Connected:
+            def __enter__(self):
+                return self
+            def __exit__(self,*args):
+                return False
+        with patch("psycopg.connect",return_value=Connected()), \
+             patch.object(w,"verify_ephemeral_target",
+                          side_effect=BackupError("BLOCKED_TARGET_NOT_PROVEN")), \
+             patch.object(w,"inspect_disposable_container") as inspect:
+            with self.assertRaises(BackupError):
+                w.ensure_local_target("local://dummy","token")
+            inspect.assert_not_called()
+
+    def test_target_failure_never_moves_uploaded_archive(self):
+        with patch.dict(os.environ,{"CODESPACES":"true"}), \
+             patch.object(w,"read_private_target",return_value={
+                "JW_PG_TARGET_ADMIN_DSN":"local://dummy",
+                "JW_PG_TARGET_EPHEMERAL_TOKEN":"fake"}), \
+             patch.object(w,"ensure_local_target",
+                          side_effect=BackupError("BLOCKED_LOCAL_DB_UNREACHABLE_AFTER_RESTART")), \
+             patch.object(w,"private_transfer") as moved:
+            with self.assertRaises(BackupError):
+                w.verify_restore()
+            moved.assert_not_called()
 
 if __name__=="__main__":
     unittest.main()
