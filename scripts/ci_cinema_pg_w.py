@@ -519,9 +519,9 @@ def verify_restore(profile="preab"):
                 with psycopg.connect(dsn,autocommit=True,connect_timeout=6) as c:
                     c.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(db)))
 
-def main():
+def main(profile="preab"):
     try:
-        return verify_restore()
+        return verify_restore(profile=profile)
     except Exception as err:
         code=str(err) if isinstance(err,BackupError) else type(err).__name__
         if not re.fullmatch(r"(?:BLOCKED|FAIL)_[A-Z0-9_]+",code):
