@@ -286,6 +286,8 @@ class CutoverFront:
                 return await self._forward(self.pg_app, scope, receive, send, PG_COOKIE)
             if not is_trade(path):
                 if path == "/api/logout" and _safe_cookie(scope, PG_COOKIE):
+                    if method != "POST":
+                        raise CutoverRefused("logout_method_not_allowed", 405)
                     return await self._dual_logout(scope, receive, send)
                 if _ID_PART.search(path):
                     raise CutoverRefused("pg_document_feature_unsupported")
