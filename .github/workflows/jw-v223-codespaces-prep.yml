@@ -1,0 +1,37 @@
+name: JW V22.3 Codespaces DR preparation safety tests
+on:
+  push:
+    branches:
+      - review/jw-v223-codespaces-dr-prep-20261107
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prep-only-no-data:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protected-source guard and new tools compile
+        run: |
+          set -euo pipefail
+          python -I scripts/ci_cinema_pg_guard.py
+          bash -n scripts/ops/jw_v223_codespace_bootstrap.sh
+          python -m py_compile scripts/ops/jw_v223_codespace_check.py tests/test_jw_v223_codespace_check.py
+      - name: Fail-closed tools-only tests; NEVER touch database
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_jw_v223_codespace_check.py' -v
+          set +e
+          out=$(bash scripts/ops/jw_v223_codespace_bootstrap.sh --prepare 2>&1)
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -F 'BLOCKED: This bootstrap is only permitted in an approved GitHub Codespace.' <<< "$out"
+          echo 'PASS: no database accessed; real backup NOT RUN.'
