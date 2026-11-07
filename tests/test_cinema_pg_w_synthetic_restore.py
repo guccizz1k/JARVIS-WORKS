@@ -96,6 +96,9 @@ def main():
             w.V151_SOURCE_DEF.encode("utf-8")).hexdigest()
         if synthetic_row[0][1]!=expected_target:
             raise RuntimeError("synthetic PG17 check deparse unexpectedly changed")
+        # Snapshot the real PG17-normalized check signature, then simulate the
+        # historic source digest in the encrypted SYNTHETIC manifest.
+        normalized_sig=json.loads(json.dumps(sig))
         synthetic_row[0][1]=expected_source
         print("SYNTHETIC_HISTORICAL_CHECK_PARENTHESES_DIFF_INJECTED=PASS")
         if any(role in roles for role in acl_only):
@@ -128,6 +131,29 @@ def main():
         keyfile=w.STAGING/(label+".key")
         keyfile.write_text(base64.urlsafe_b64encode(key).decode()+"\n")
         keyfile.chmod(0o600)
+        # An immutable, earlier FAIL report must remain untouched while a
+        # separately named V2 success attestation is created.
+        from scripts.pg_backup_v223 import signature_digest
+        legacy_data={
+            "verdict":"FAIL","source_real":True,
+            "verified_disposable_pg17":True,
+            "encrypted_archive_sha256":w.sha256(archived),
+            "schema_fingerprint":w.FINGERPRINT,
+            "source_signature_sha256":signature_digest(sig),
+            "restore_signature_sha256":signature_digest(normalized_sig),
+            "table_count":62,"row_count":22,
+            "mismatch_count":1,
+            "mismatch_labels":["constraints:"+w.V151_CONSTRAINT_KEY],
+            "negative_tests":{
+                "tamper_rejected":True,"truncation_rejected":True,
+                "wrong_key_rejected":True,"partial_dump_restore_rejected":True,
+            },
+        }
+        w.PRIVATE.mkdir(parents=True,exist_ok=True,mode=0o700)
+        w.PRIVATE.chmod(0o700)
+        old_evidence=w.PRIVATE/(label+".restore-report.json")
+        old_evidence.write_text(json.dumps(legacy_data,sort_keys=True))
+        old_evidence.chmod(0o600)
     finally:
         if created:
             with psycopg.connect(dsn,autocommit=True) as c:
@@ -146,6 +172,18 @@ def main():
     if stopped.returncode:
         raise RuntimeError("synthetic stopped-container setup failed")
     result=w.verify_restore()
+    # The previous failed proof is an immutable audit trail.
+    if json.loads(old_evidence.read_text(encoding="utf-8"))!=legacy_data:
+        raise RuntimeError("historical FAIL evidence was overwritten")
+    v2=w.PRIVATE/(label+".restore-v2-report.json")
+    if not v2.is_file():
+        raise RuntimeError("versioned V2 evidence not written")
+    v2_data=json.loads(v2.read_text(encoding="utf-8"))
+    if not (v2_data["verdict"]=="PASS" and
+            v2_data["raw_mismatch_count"]==1 and
+            v2_data["mismatch_count"]==0 and
+            v2_data["verified_equivalence"]==["constraints:"+w.V151_CONSTRAINT_KEY]):
+        raise RuntimeError("versioned equivalence proof is incomplete")
     if result!=0:
         # This is a synthetic-only CI fixture. Never show user backup content.
         reports=list(w.PRIVATE.glob(label+".restore-report.json"))
@@ -158,6 +196,7 @@ def main():
     repeated=w.verify_restore()
     if repeated!=0:
         raise RuntimeError("private archive replay verification failed")
+    print("PASS_LEGACY_FAIL_PRESERVED_AND_VERSION2_EQUIVALENCE_EVIDENCE")
     print("PASS_PRIVATE_ENCRYPTED_BACKUP_REPEAT_WITHOUT_REUPLOAD")
     print("PASS_SYNTHETIC_PG17_ENCRYPTED_RESTORE_SIGNATURE_AND_NEGATIVE_TESTS")
     print("REAL_SUPABASE_DATA_NOT_USED_NOT_DR_PASS")
