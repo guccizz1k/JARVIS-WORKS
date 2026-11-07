@@ -70,6 +70,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_cinema_pg_m.py' -v
           python scripts/ci*pg_m.py
           python scripts/ci*pg_m.py
+          python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare
           python tests/test_cinema_pg_w_synthetic_restore.py
 
           python - <<'PY'
