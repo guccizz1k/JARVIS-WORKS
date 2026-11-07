@@ -110,7 +110,7 @@ def run_live():
         opts.get("user")!=f"{ROLE}.{PROJECT_REF}"):
         raise BackupError("BLOCKED_WRONG_REAL_DEV_DATABASE_IDENTITY")
     import psycopg
-    with psycopg.connect(dsn,connect_timeout=8) as conn:
+    with psycopg.connect(dsn,connect_timeout=8,autocommit=True) as conn:
         conn.execute("BEGIN READ ONLY")
         user,db,major,read_only=conn.execute(
             "SELECT current_user,current_database(),"
