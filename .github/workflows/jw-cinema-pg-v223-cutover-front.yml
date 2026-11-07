@@ -29,7 +29,7 @@ jobs:
       - name: Verify compile and fail-closed cutover behavior
         run: |
           set -euo pipefail
-          python3 -m py_compile app/pg_cinema_cutover_front_v223.py tests/test_cinema_pg_cutover_front_v223.py
-          python3 -m pytest -q -rA tests/test_cinema_pg_cutover_front_v223.py | tee cutover-front.log
-          grep -E '13 passed' cutover-front.log
+          python3 -m py_compile app/pg_cinema_cutover_front_v223.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py
+          python3 -m pytest -q -rA tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py | tee cutover-front.log
+          grep -E '21 passed' cutover-front.log
           echo 'DISPOSABLE TEST STUBS ONLY: SQLite real users, PG real sessions, UI and public HTTPS cutover NOT verified.'
