@@ -13,6 +13,9 @@ import secrets
 import stat
 import sys
 
+# Supports direct invocation from the repo-root Codespaces terminal.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from scripts.ci_cinema_pg_q import CREDS, ROLE, decode_salt, make_verifier
 from scripts.ci_cinema_pg_s import CERT_FILE, HOST, PORT, load_dashboard_ca
 from scripts.pg_backup_v223 import evaluate_source_privileges, fetch_role_facts
