@@ -23,7 +23,7 @@ let checks=0;
 const pass=(condition,name)=>{checks++;assert.ok(condition,name); console.log('PASS_V223_UI_JS_'+name)};
 const json=(value,status=200)=>({ok:status>=200&&status<300,status,json:async()=>value});
 
-async function scenario(active,verifyOk=true){
+async function scenario(active,verifyOk=true,opts={}){
   const called=[];
   const state={
     ME:null,_jwServerUser:null,_jwServerData:null,_jwCsrf:'',
@@ -35,7 +35,7 @@ async function scenario(active,verifyOk=true){
     _jwRequest:async(path,method='GET',body=null)=>{
       called.push({path,method,body,original:true});
       if(path==='/api/login')return {csrf_token:'legacy-csrf-token'};
-      if(path==='/api/me')return {org_id:'A',id:'actor',role:'admin'};
+      if(path==='/api/me'){if(opts.meFail)throw Error('synthetic-me-unavailable');return {org_id:'A',id:'actor',role:'admin'};}
       if(path==='/api/quotes')return [{id:'sqlite-doc'}];
       if(path==='/api/pg-stage/cutover/legacy/quotes')
         return [{id:'sqlite-doc'}];
@@ -56,14 +56,16 @@ async function scenario(active,verifyOk=true){
     fetch:async(path,options={})=>{
       called.push({path,method:options.method||'GET',headers:options.headers||{},body:options.body||null});
       if(path==='/api/pg-stage/cutover/status')
-        return json({cutover_available:true,pg_required:active});
+        return opts.statusCode?json({code:'synthetic-status-error'},opts.statusCode):
+          json({cutover_available:true,pg_required:active});
       if(path==='/api/pg-stage/v85/login')return json({csrf_token:'pg-token-secret-12345678'});
       if(path==='/api/pg-stage/cutover/verify')
         return verifyOk?json({identity_verified:true}):json({code:'identity_mismatch'},403);
       if(path==='/api/pg-stage/cutover/legacy/quotes')return json([{id:'sqlite-doc'}]);
       if(path==='/api/quotes')return json({id:'pg-doc'});
       if(path==='/api/pg-stage/cinema-trade/partners')return json({id:'pg-ledger'});
-      if(path==='/api/logout')return json({ok:true});
+      if(path==='/api/logout')return opts.logoutFail?
+        json({code:'synthetic-revocation-error'},503):json({ok:true});
       throw Error('unrecognized fetch '+path);
     },
     console,
@@ -114,6 +116,45 @@ async function scenario(active,verifyOk=true){
   pass(failure&&!vm.runInContext('_jwCutoverActive',bad),
        'MISMATCH_REJECTS_LOGIN');
   pass(badCalls.some(x=>x.path==='/api/logout'),'MISMATCH_ATTEMPTS_BOTH_REVOKE');
+
+
+  const {ctx:statusDown,called:statusDownCalls}=await scenario(true,true,{statusCode:503});
+  let statusDownError='';
+  try{await statusDown.login('ci@example.test','synthetic-password','123456')}
+  catch(e){statusDownError=e.message}
+  pass(statusDownError.includes('기업 전환 상태'),'STATUS_503_DENIES_LOGIN');
+  pass(statusDownCalls.some(x=>x.path==='/api/logout'&&x.method==='POST')&&
+       statusDown._jwCsrf===''&&statusDown._jwServerUser===null,
+       'STATUS_503_REVOKES_LEGACY');
+
+  const {ctx:missing,called:missingCalls}=await scenario(true,true,{statusCode:404});
+  let missingError='';
+  try{await missing.login('ci@example.test','synthetic-password','123456')}
+  catch(e){missingError=e.message}
+  pass(missingError.includes('기업 전환 상태'),'STATUS_404_CANNOT_DOWNGRADE_AUTH');
+  pass(missingCalls.some(x=>x.path==='/api/logout'&&x.method==='POST')&&
+       missing._jwCsrf===''&&missing._jwServerUser===null,
+       'STATUS_404_REVOKES_LEGACY');
+
+  const {ctx:meDown,called:meDownCalls}=await scenario(true,true,{meFail:true});
+  let meError='';
+  try{await meDown.login('ci@example.test','synthetic-password','123456')}
+  catch(e){meError=e.message}
+  pass(meError==='synthetic-me-unavailable','ME_FAILURE_DENIES_LOGIN');
+  pass(meDownCalls.some(x=>x.path==='/api/logout'&&x.method==='POST')&&
+       meDown._jwCsrf===''&&meDown._jwServerUser===null,
+       'ME_FAILURE_REVOKES_LEGACY');
+
+  const {ctx:revokeDown,called:revokeDownCalls}=
+    await scenario(true,true,{statusCode:503,logoutFail:true});
+  let revokeError='';
+  try{await revokeDown.login('ci@example.test','synthetic-password','123456')}
+  catch(e){revokeError=e.message}
+  pass(revokeError.includes('세션 폐기를 확인하지 못했습니다'),
+       'REVOCATION_FAILURE_EXPLICIT_NOT_SUCCESS');
+  pass(revokeDownCalls.some(x=>x.path==='/api/logout'&&x.method==='POST')&&
+       revokeDown._jwCsrf===''&&revokeDown._jwServerUser===null,
+       'REVOCATION_FAILURE_NEVER_KEEPS_BROWSER_CREDENTIALS');
 
   console.log('PASS_V223_CINEMA_DUAL_UI_NODE checks='+checks+' failures=0 synthetic_only=true');
 })().catch(e=>{console.error(e.stack||e);process.exitCode=1});
