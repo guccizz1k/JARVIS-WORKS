@@ -129,6 +129,18 @@ class CutoverFront:
     async def _forward(self, app, scope, receive, send, cookie_name):
         token = _safe_cookie(scope, cookie_name)
         new_scope = _cookies_to_scope(scope, token)
+        # Preserve each store's independent CSRF. The additional front-end
+        # token is NEVER forwarded to the SQLite backend.
+        headers = [(k, v) for k, v in new_scope.get("headers", ())
+                   if k.lower() != b"x-jw-pg-csrf"]
+        pg_csrf = [v for k, v in new_scope.get("headers", ())
+                   if k.lower() == b"x-jw-pg-csrf"]
+        if cookie_name == PG_COOKIE and pg_csrf:
+            if len(pg_csrf) != 1 or not (16 <= len(pg_csrf[0]) <= 512):
+                raise CutoverRefused("invalid_pg_csrf", 403)
+            headers = [(k, v) for k, v in headers if k.lower() != b"x-csrf-token"]
+            headers.append((b"x-csrf-token", pg_csrf[0]))
+        new_scope["headers"] = headers
 
         async def wrapped_send(message):
             if message["type"] == "http.response.start":
@@ -307,6 +319,22 @@ class CutoverFront:
                     "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
                 })
                 return await response(scope, receive, send)
+            if path.startswith("/api/pg-stage/cutover/legacy/"):
+                if method != "GET":
+                    raise CutoverRefused("method_not_allowed", 405)
+                legacy_ident = await self._identity(scope, LEGACY_COOKIE, self.legacy_identity)
+                if legacy_ident.org_id not in self.enabled_orgs():
+                    raise CutoverRefused("pg_store_disabled_for_org")
+                legacy_target = "/api/" + path[len("/api/pg-stage/cutover/legacy/"):]
+                if legacy_target not in frozenset({
+                    "/api/customers", "/api/quotes", "/api/orders",
+                    "/api/invoices", "/api/audit", "/api/evidence/queue",
+                    "/api/dashboard",
+                }):
+                    raise CutoverRefused("unsupported_legacy_read", 404)
+                mapped_scope = {**scope, "path": legacy_target, "raw_path": legacy_target.encode("ascii")}
+                return await self._forward(self.legacy_app, mapped_scope, receive, send,
+                                           LEGACY_COOKIE)
             if path.startswith("/api/pg-stage/"):
                 return await self._forward(self.pg_app, scope, receive, send, PG_COOKIE)
             if not is_trade(path):
