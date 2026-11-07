@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - candidate/jw-v223-pg-backup-restore-20261106
+      - review/jw-v223-two-track-integration-20261107
   workflow_dispatch:
 permissions:
   contents: read

@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/jw-v223-p0-db-dr-claude-20261107
+      - review/jw-v223-two-track-integration-20261107
   workflow_dispatch:
 permissions:
   contents: read
