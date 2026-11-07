@@ -62,7 +62,7 @@ class Diagnostics(unittest.TestCase):
             run.assert_called_once()
 
     def test_psql_password_only_in_environment_and_hostname_verified(self):
-        mocked=subprocess.CompletedProcess([],0,stdout="jw_backup_ro|jw_backup_ro|postgres|170011\\n",stderr="")
+        mocked=subprocess.CompletedProcess([],0,stdout="jw_backup_ro|jw_backup_ro|postgres|170011\n",stderr="")
         with patch.object(d.subprocess,"run",return_value=mocked) as run:
             self.assertEqual(d.try_psql("private-password","192.0.2.1",5432),"PSQL_LIVE_LOGIN_OK")
         args,kwargs=run.call_args
