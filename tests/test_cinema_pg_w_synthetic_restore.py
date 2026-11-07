@@ -74,7 +74,7 @@ def main():
             c.execute("ALTER TABLE jw_dev.t01 ADD COLUMN company_name text NOT NULL DEFAULT 'Acme'")
             c.execute("ALTER TABLE jw_dev.t01 ADD CONSTRAINT "
                       "review_signup_requests_v151_company_name_check "
-                      "CHECK (length(company_name) >= 2 AND length(company_name) <= 120 "
+                      "CHECK ((length(company_name) >= 2 AND length(company_name) <= 120) "
                       "AND company_name = btrim(company_name))")
             for i in range(22):
                 c.execute("INSERT INTO jw_dev.t00 VALUES (%s,%s)",(i,"synthetic"+str(i)))
@@ -93,6 +93,15 @@ def main():
         LIVE_CHECK_MD5="72e0665493e1a02794f703dc7b24a0e5"
         if source_constraint[0][1]!=LIVE_CHECK_MD5:
             print("CHECK_SYNTHETIC_SOURCE_CANONICAL_DIFFERS_FROM_SUPABASE")
+            with psycopg.connect(dsn,dbname=name) as c:
+                detail=c.execute(
+                    "SELECT pg_get_constraintdef(k.oid) FROM pg_constraint k "
+                    "JOIN pg_class t ON t.oid=k.conrelid "
+                    "JOIN pg_namespace n ON n.oid=t.relnamespace "
+                    "WHERE n.nspname='jw_dev' AND t.relname='t01' AND "
+                    "k.conname='review_signup_requests_v151_company_name_check'"
+                ).fetchone()
+                print("SYNTHETIC_CHECK_TEXT="+str(detail[0] if detail else "MISSING"))
         else:
             print("CHECK_SYNTHETIC_SOURCE_CANONICAL_EQUALS_SUPABASE")
         if len(sig["tables"])!=62 or sum(v[0] for v in sig["rows"].values())!=22:
