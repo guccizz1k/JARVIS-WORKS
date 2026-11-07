@@ -341,7 +341,7 @@ def verify_restore():
                 c.execute("CREATE SCHEMA IF NOT EXISTS extensions")
                 c.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions")
             restore_status=run_restore_with_reason(
-                ["pg_restore","--no-owner","--exit-on-error","--dbname",db,str(plaintext)],
+                ["pg_restore","--exit-on-error","--dbname",db,str(plaintext)],
                 dsn,db=db,seconds=360)
             if restore_status!="PASS":
                 raise BackupError("BLOCKED_INDEPENDENT_RESTORE_"+restore_status)
