@@ -115,7 +115,8 @@ async function _jwCutoverCancelPartialLogin(){
     const r=await fetch('/api/logout',{method:'POST',credentials:'same-origin',
       cache:'no-store',headers});
     // Partial or failed revocation stays an error; never announce logout.
-    return r.ok;
+    const data=await r.json().catch(()=>null);
+    return r.ok&&data?.ok===true;
   }catch(e){return false}
 }
 

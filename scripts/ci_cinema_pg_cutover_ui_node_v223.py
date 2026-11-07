@@ -65,7 +65,8 @@ async function scenario(active,verifyOk=true,opts={}){
       if(path==='/api/quotes')return json({id:'pg-doc'});
       if(path==='/api/pg-stage/cinema-trade/partners')return json({id:'pg-ledger'});
       if(path==='/api/logout')return opts.logoutFail?
-        json({code:'synthetic-revocation-error'},503):json({ok:true});
+        json({code:'synthetic-revocation-error'},503):
+        opts.logoutFalseAck?json({ok:false}):json({ok:true});
       throw Error('unrecognized fetch '+path);
     },
     console,
@@ -155,6 +156,18 @@ async function scenario(active,verifyOk=true,opts={}){
   pass(revokeDownCalls.some(x=>x.path==='/api/logout'&&x.method==='POST')&&
        revokeDown._jwCsrf===''&&revokeDown._jwServerUser===null,
        'REVOCATION_FAILURE_NEVER_KEEPS_BROWSER_CREDENTIALS');
+
+
+  const {ctx:ackDown,called:ackDownCalls}=
+    await scenario(true,true,{statusCode:503,logoutFalseAck:true});
+  let ackError='';
+  try{await ackDown.login('ci@example.test','synthetic-password','123456')}
+  catch(e){ackError=e.message}
+  pass(ackError.includes('세션 폐기를 확인하지 못했습니다'),
+       'LOGOUT_HTTP_200_FALSE_ACK_IS_NOT_REVOCATION');
+  pass(ackDownCalls.some(x=>x.path==='/api/logout'&&x.method==='POST')&&
+       ackDown._jwCsrf===''&&ackDown._jwServerUser===null,
+       'LOGOUT_HTTP_200_FALSE_ACK_CLEARS_BROWSER_CREDENTIALS');
 
   console.log('PASS_V223_CINEMA_DUAL_UI_NODE checks='+checks+' failures=0 synthetic_only=true');
 })().catch(e=>{console.error(e.stack||e);process.exitCode=1});
