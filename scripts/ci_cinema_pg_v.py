@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.ci_cinema_pg_s import CERT_FILE, HOST, PORT, load_dashboard_ca, verify_tls
+from scripts.ci_cinema_pg_s import CERT_FILE, HOST, PORT, load_dashboard_ca
 from scripts.ci_cinema_pg_u import PROJECT_REF, ROLE, read_password_file
 
 
@@ -39,12 +39,15 @@ def probe_login() -> str:
         return "PSQL_CLIENT_UNAVAILABLE"
     password = read_password_file()
     load_dashboard_ca()
-    # No login attempt unless the trusted dashboard CA verifies this exact host.
-    if verify_tls(CERT_FILE.read_bytes()) != "CA_CHAIN_AND_HOST_VERIFIED":
-        return "TLS_NOT_VERIFIED"
+    # libpq/psql itself is the authoritative TLS verifier.  A redundant,
+    # one-off raw-socket TLS probe can fail on a different transient pooler
+    # connection and prevent libpq from ever reporting the actual cause.
+    # load_dashboard_ca() above still validates the local certificate first.
+    # PGSSLMODE=verify-full below enforces both chain and hostname verification.
     env = dict(os.environ)
     env.update({
         "PGPASSWORD": password, "PGSSLMODE": "verify-full",
+        "PGGSSENCMODE": "disable",
         "PGSSLROOTCERT": str(CERT_FILE), "PGCONNECT_TIMEOUT": "20",
         "PGHOST": HOST, "PGPORT": str(PORT), "PGDATABASE": "postgres",
         "PGUSER": ROLE + "." + PROJECT_REF,
