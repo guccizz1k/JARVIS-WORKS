@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
 import sys
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -98,6 +99,12 @@ def main():
     # Restore tool MUST recognize marked target and verify semantic parity.
     with psycopg.connect(dsn,autocommit=True) as c:
         verify_ephemeral_target(c,token)
+    # Simulate the real Codespaces pause observed during source-free restore.
+    # This is only the locally created, marker-verified ephemeral Docker DB.
+    stopped=subprocess.run(["docker","stop","-t","1","jw-v223-restore"],
+                            text=True,capture_output=True,timeout=15,check=False)
+    if stopped.returncode:
+        raise RuntimeError("synthetic stopped-container setup failed")
     result=w.verify_restore()
     if result!=0:
         raise RuntimeError("synthetic restore parity failed")
