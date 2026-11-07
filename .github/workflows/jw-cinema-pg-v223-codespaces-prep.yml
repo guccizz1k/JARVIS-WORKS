@@ -29,6 +29,7 @@ jobs:
           python -m py_compile scripts/ci_cinema_pg_u.py tests/test_cinema_pg_u.py
           python -m py_compile scripts/ci_cinema_pg_v.py tests/test_cinema_pg_v.py
           python -m py_compile scripts/ci_cinema_pg_w.py tests/test_cinema_pg_w.py
+          python -m py_compile scripts/ci_cinema_pg_y.py tests/test_cinema_pg_y.py tests/test_cinema_pg_y_synthetic_restore.py
           python -m py_compile scripts/ci_cinema_pg_z.py tests/test_cinema_pg_z.py
           python -m py_compile tests/test_cinema_pg_w_synthetic_restore.py
           python -m py_compile scripts/ci_cinema_pg_m.py tests/test_cinema_pg_m.py
@@ -62,6 +63,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_cinema_pg_u.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_v.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_w.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_y.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_z.py' -v
           set +e
           auth_out=$(CODESPACES=false python scripts/ci_cinema_pg_u.py 2>&1)
@@ -76,6 +78,7 @@ jobs:
           python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare
           printf '/jw-private-transfer/\n' >> .git/info/exclude
           python tests/test_cinema_pg_w_synthetic_restore.py
+          python tests/test_cinema_pg_y_synthetic_restore.py
 
           python - <<'PY'
           import secrets,subprocess
