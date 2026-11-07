@@ -7,6 +7,7 @@ This is NOT a migration of real customers and NOT native PG V8.5 login QA.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import secrets
 import tempfile
@@ -14,7 +15,7 @@ from datetime import date
 from pathlib import Path
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.testclient import TestClient
 
 from scripts import ci_cinema_pg_sql_gate as gate
@@ -78,6 +79,33 @@ def run() -> int:
                 return psycopg.connect(dbname=dbname, autocommit=False)
 
             pg = FastAPI(docs_url=None, openapi_url=None)
+            # CI-only PG logout endpoint backed by a REAL disposable PG17 session
+            # row. It tests cross-store session revocation; actual V8.5 role
+            # delegation is separately covered in the integrated TLS gate.
+            @pg.post("/api/pg-stage/v85/logout")
+            def pg_test_logout(request: Request, response: Response):
+                token = request.cookies.get(cut.UPSTREAM_COOKIE, "")
+                csrf = request.headers.get("X-CSRF-Token", "")
+                if len(token) < 30 or not csrf:
+                    raise HTTPException(401, "PG session required")
+                token_hash = hashlib.sha256(token.encode()).hexdigest()
+                with connect() as db:
+                    row = db.execute(
+                        "SELECT csrf_token FROM jw_dev.sessions WHERE token_hash=%s",
+                        (token_hash,)
+                    ).fetchone()
+                    if not row or not hmac.compare_digest(str(row[0]), csrf):
+                        raise HTTPException(403, "PG CSRF mismatch")
+                    deleted = db.execute(
+                        "DELETE FROM jw_dev.sessions WHERE token_hash=%s",
+                        (token_hash,)
+                    ).rowcount
+                    if deleted != 1:
+                        raise HTTPException(409, "PG session race detected")
+                response.delete_cookie(cut.UPSTREAM_COOKIE, path="/", secure=True,
+                                       httponly=True, samesite="strict")
+                return {"ok": True}
+
             pg.include_router(pg_api.create_legacy_router(
                 pg_api.WriterTx(connect), org_enabled=lambda org: org in enabled,
                 today=lambda: date.today()
@@ -222,6 +250,39 @@ def run() -> int:
                         (pg_id[3:],)
                     ).fetchone()[0]
                 check(count == 1, "PG_RECORD_PRESERVED")
+
+                # Revoke both actual independent sessions through the front.
+                # Missing PG CSRF and forged PG CSRF MUST NOT log out SQLite.
+                legacy_token = c.cookies.get(cut.LEGACY_COOKIE)
+                check(isinstance(legacy_token, str) and len(legacy_token) >= 30,
+                      "SQLITE_COOKIE_PRESENT_BEFORE_DUAL_LOGOUT")
+                no_pg_csrf = c.post("/api/logout", headers={
+                    "X-CSRF-Token": sqlite_csrf
+                })
+                check(no_pg_csrf.status_code == 409, "DUAL_LOGOUT_REQUIRES_PG_CSRF")
+                wrong_pg_csrf = c.post("/api/logout", headers={
+                    "X-CSRF-Token": sqlite_csrf, "X-JW-PG-CSRF": "forged"
+                })
+                check(wrong_pg_csrf.status_code == 403, "DUAL_LOGOUT_REJECTS_FORGED_PG_CSRF")
+                out = c.post("/api/logout", headers={
+                    "X-CSRF-Token": sqlite_csrf, "X-JW-PG-CSRF": pg_csrf
+                })
+                check(out.status_code == 200 and out.json().get("ok") is True,
+                      "BOTH_REALDB_SESSIONS_LOGOUT_SUCCEEDED")
+                with legacy.conn() as db:
+                    sqlite_sessions = db.execute(
+                        "SELECT count(*) FROM sessions WHERE token_hash=?",
+                        (hashlib.sha256(legacy_token.encode()).hexdigest(),)
+                    ).fetchone()[0]
+                check(sqlite_sessions == 0, "REAL_SQLITE_SESSION_ROW_REVOKED")
+                with connect() as db:
+                    pg_sessions = db.execute(
+                        "SELECT count(*) FROM jw_dev.sessions WHERE token_hash=%s",
+                        (hashlib.sha256(pg_token.encode()).hexdigest(),)
+                    ).fetchone()[0]
+                check(pg_sessions == 0, "REAL_PG17_SESSION_ROW_REVOKED")
+                check(cut.LEGACY_COOKIE not in c.cookies and cut.PG_COOKIE not in c.cookies,
+                      "BOTH_BROWSER_COOKIES_CLEARED")
             print(
                 "PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT "
                 f"checks={CHECKS} failures=0 synthetic_only=true",
