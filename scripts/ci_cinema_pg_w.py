@@ -33,7 +33,7 @@ PROJECT="rvymwwzclagvljnofyss"
 SCHEMA="jw_dev"
 FINGERPRINT="afd89e64e80ecbc8216af114e0682ee7"
 POSTAB_FINGERPRINT="d3e6284dfbd277b43041052ea8f927ca"
-POSTAB_STAGING=ROOT/"jw-private-transfer-postab"
+POSTAB_STAGING=STAGING  # reuse existing ignored upload folder; keep private archives separate
 POSTAB_PRIVATE=Path.home()/".local/share/jw-v223-restore/postab-input"
 POSTAB_TABLES=65
 # Independently confirmed in the live DEV catalog (read-only, 2026-11-07).
