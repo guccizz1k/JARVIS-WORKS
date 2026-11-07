@@ -137,7 +137,8 @@ def main():
         manifest={
             "real_source":True, "schema":w.SCHEMA, "project_ref":w.PROJECT,
             "server_major":17,"snapshot_consistent":True,
-            "tables":65, "table_row_total":22,\n            "post_ab_validated":True, "backup_profile":"JW_V223_POST_AB_65",
+            "tables":65, "table_row_total":22,
+            "post_ab_validated":True, "backup_profile":"JW_V223_POST_AB_65",
             "source_fingerprint":w.POSTAB_FINGERPRINT,
             "plain_sha256":enc["plain_sha256"],
             "cipher_sha256":enc["cipher_sha256"],
