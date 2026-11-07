@@ -22,6 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           python -I scripts/ci_cinema_pg_guard.py
+          python -m py_compile scripts/ci_cinema_pg_n.py tests/test_cinema_pg_n.py
           python -m py_compile scripts/ci_cinema_pg_m.py tests/test_cinema_pg_m.py
           python -m py_compile scripts/ci_cinema_pg_r.py tests/test_cinema_pg_r.py
           python -m py_compile scripts/ci_cinema_pg_v223_codespace_bootstrap.py
@@ -46,9 +47,16 @@ jobs:
           python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47'
           python -m unittest discover -s tests -p 'test_cinema_pg_r.py' -v
           python scripts/ci*pg_r.py
+          python -m unittest discover -s tests -p 'test_cinema_pg_n.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_m.py' -v
           python scripts/ci*pg_m.py
           python scripts/ci*pg_m.py
+          set +e
+          network_output=$(CODESPACES=false python scripts/ci*pg_n.py 2>&1)
+          network_status=$?
+          set -e
+          test "$network_status" -eq 2
+          grep -F "BLOCKED: diagnostic is restricted to the approved Codespace" <<< "$network_output"
           test "$(stat -c %a "$HOME/.local/share/jw-v223-restore/restore.sh")" = "600"
           test "$(docker inspect --format '{{ (index (index .NetworkSettings.Ports "5432/tcp") 0).HostIp }}' jw-v223-restore)" = "127.0.0.1"
           echo 'PASS: local disposable PG17 and idempotent marker verified, Supabase untouched, no real backup.'
