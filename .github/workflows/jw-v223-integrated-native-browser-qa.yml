@@ -1,0 +1,90 @@
+name: JW V22.3 integrated candidate real native Chrome UI QA
+on:
+  push:
+    branches:
+      - review/jw-v223-ab-cutover-integration-20261107
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integrated-real-chrome-v222-root:
+    name: Live native Chrome, login transition, routes, accessibility/perf + decoded H264
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+      JW_USE_SYSTEM_CHROME: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Read-only review safety and exact current integrated tree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          assert os.environ['JW_ENV']=='review'
+          assert not any(os.environ.get(k) for k in (
+              'JW_PG_STAGE_DSN','SUPABASE_SERVICE_ROLE_KEY','SUPABASE_DSN',
+              'DATABASE_URL','BOOTSTRAP_EMAIL','BOOTSTRAP_PASSWORD',
+              'JW_PG_CI_ROOT_DSN','JW_PG_CI_RESTORE_DSN'))
+          assert Path('scripts/ci_cinema_pg_v222_root_browser.py').is_file()
+          assert Path('app/deployment_safety_v78.py').is_file()
+          print('PASS_V223_INTEGRATED_BROWSER_REVIEW_ONLY_NO_DB_SECRETS')
+          PY
+      - name: Preinstalled Chrome and isolated test dependencies
+        run: |
+          set -euo pipefail
+          command -v google-chrome
+          google-chrome --version
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg
+          fi
+          python3 -m pip install --disable-pip-version-check -r requirements.txt \
+            'pytest>=8,<10' 'pytest-asyncio>=0.24,<2' 'httpx>=0.27,<1' \
+            'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' 'reportlab>=4,<5' 'pillow>=10'
+          python3 -m playwright install ffmpeg
+          python3 -c 'from playwright.sync_api import sync_playwright; print("PASS_REAL_CHROMIUM_AVAILABLE")'
+      - name: Real Chrome login-infinity-entry and business routes with measured timing
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v222_root_browser | tee native-browser.log
+          grep -F 'PASS_V222_ROOT_REAL_BROWSER' native-browser.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('artifacts/v222-root-browser/acceptance.json')
+          data=json.loads(p.read_text(encoding='utf-8'))
+          assert data['totals']['fail']==0, data['totals']
+          assert data['totals']['pass']>0, data['totals']
+          video=Path('artifacts/v222-root-browser/JARVIS_WORKS_V222_ROOT_REAL_BROWSER.mp4')
+          assert video.is_file() and video.stat().st_size>100000
+          print('PASS_V223_INTEGRATED_NATIVE_CHROME_MEASURED_UI_AND_VERIFIED_H264',
+                data['totals'])
+          print('SCOPE=ephemeral_FastAPI_SQLite_native_Chrome_no_live_Supabase_or_Render')
+          PY
+      - name: Preserve evidence and hashes even when checks fail
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v222-root-browser
+          find artifacts/v222-root-browser -type f ! -path '*/raw-video/*' -print0 | sort -z |
+            xargs -0 -r sha256sum > jw-v223-integrated-browser-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jw-v223-integrated-real-native-chrome-evidence
+          path: |
+            artifacts/v222-root-browser/
+            !artifacts/v222-root-browser/raw-video/
+            jw-v223-integrated-browser-sha256.txt
+          retention-days: 5
