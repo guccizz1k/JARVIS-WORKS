@@ -124,57 +124,54 @@ login=async function(email,password,otp){
   const payload={email,password,...(t?(t.length===32?{recovery_code:t}:{otp:t}):{})};
   _jwCutoverActive=false;
   _jwCutoverPgCsrf='';
+  // A successful SQLite login may create a session. Any later failure,
+  // including /api/me or cutover status, must attempt verified revocation.
   const first=await _jwCutoverOriginalRequest('/api/login','POST',payload);
-  if(typeof first.csrf_token!=='string'||!first.csrf_token)
-    throw new Error('SQLite 로그인 보안 토큰 검증 실패');
-  _jwCsrf=first.csrf_token;
-  _jwServerUser=await _jwCutoverOriginalRequest('/api/me');
-  let status;
   try{
-    const r=await fetch('/api/pg-stage/cutover/status',
-      {credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}});
-    status=r.status===404?{cutover_available:false,pg_required:false}:
-      r.ok?await r.json():null;
-  }catch(e){status=null}
-  if(!status||typeof status.pg_required!=='boolean')
-    throw new Error('기업 전환 상태를 확인할 수 없어 로그인을 중단했습니다.');
-  if(status.cutover_available&&status.pg_required){
+    if(typeof first.csrf_token!=='string'||!first.csrf_token)
+      throw new Error('SQLite 로그인 보안 토큰 검증 실패');
+    _jwCsrf=first.csrf_token;
+    _jwServerUser=await _jwCutoverOriginalRequest('/api/me');
+    let status=null;
     try{
+      const r=await fetch('/api/pg-stage/cutover/status',
+        {credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}});
+      if(r.ok)status=await r.json();
+    }catch(e){status=null}
+    // For an opt-in pilot, 404 is a misconfigured deployment, not
+    // evidence that an organization's PG authentication is optional.
+    if(!status||status.cutover_available!==true||
+       typeof status.pg_required!=='boolean')
+      throw new Error('기업 전환 상태를 확인할 수 없어 로그인을 중단했습니다.');
+    if(status.pg_required){
       const pg=await _jwCutoverHttp('/api/pg-stage/v85/login','POST',payload);
       if(typeof pg.csrf_token!=='string'||pg.csrf_token.length<16)
         throw new Error('PostgreSQL 보안 토큰 확인 실패');
       _jwCutoverPgCsrf=pg.csrf_token;
       const matched=await _jwCutoverHttp('/api/pg-stage/cutover/verify');
-      if(matched.identity_verified!==true)throw new Error('기업·사용자 신원이 일치하지 않습니다.');
+      if(matched.identity_verified!==true)
+        throw new Error('기업·사용자 신원이 일치하지 않습니다.');
       _jwCutoverActive=true;
       _jwV3Active=false;
       _jwV3ProbeAt=0;
       _jwCutoverProtectAggregateViews();
-    }catch(e){
-      const revoked=await _jwCutoverCancelPartialLogin();
-      _jwCutoverPgCsrf='';
-      _jwServerUser=null;
-      _jwCsrf='';
-      if(!revoked)throw new Error('이중 인증 중단 후 세션 폐기를 확인하지 못했습니다. 두 저장소에서 다시 로그아웃해야 합니다.');
-      throw e;
     }
-  }
-  try{
     _jwServerData=await _jwFetchSnapshot();
     _jwSeedReadOnly();
     restoreSession();
     return ME;
   }catch(e){
-    await _jwCutoverCancelPartialLogin();
+    const revoked=await _jwCutoverCancelPartialLogin();
     _jwCutoverActive=false;
     _jwCutoverPgCsrf='';
     _jwServerUser=null;
     _jwServerData=null;
     _jwCsrf='';
+    if(!revoked)
+      throw new Error('로그인 중단 후 세션 폐기를 확인하지 못했습니다. 다시 로그아웃한 뒤 재인증해야 합니다.');
     throw e;
   }
 };
-
 endSession=async function(reason){
   if(!_jwCutoverActive)return _jwCutoverOriginalEnd(reason);
   try{
