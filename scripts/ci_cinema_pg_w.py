@@ -152,6 +152,73 @@ def negatives(archive,key,wd):
         out["wrong_key_rejected"]=True
     return out
 
+def inspect_disposable_container():
+    """Verify identity of pre-existing local PG17 before allowing docker start.
+
+    Never create a container, replace credentials, or start any unexpected DB.
+    docker inspect returns sensitive env vars, so parse entirely in-process.
+    """
+    from scripts.ci_cinema_pg_r import CONTAINER
+    try:
+        p=subprocess.run(["docker", "container", "inspect", CONTAINER],
+                         capture_output=True, text=True, check=False, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        raise BackupError("BLOCKED_LOCAL_DOCKER_UNAVAILABLE") from None
+    if p.returncode or not p.stdout:
+        raise BackupError("BLOCKED_LOCAL_CONTAINER_NOT_FOUND")
+    try:
+        obj=json.loads(p.stdout)
+        if not isinstance(obj,list) or len(obj)!=1:
+            raise ValueError()
+        c=obj[0]
+        cfg=c["Config"]
+        host=c["HostConfig"]
+        state=c["State"]
+        bindings=host["PortBindings"]["5432/tcp"]
+        if (c["Name"]!="/"+CONTAINER or cfg["Image"]!="postgres:17" or
+            host.get("Privileged") is not False or
+            host.get("NetworkMode")!="default" and host.get("NetworkMode")!="bridge" or
+            host.get("RestartPolicy",{}).get("Name")!="no" or
+            len(bindings)!=1 or bindings[0].get("HostIp")!="127.0.0.1" or
+            str(bindings[0].get("HostPort"))!="55432" or
+            any(m.get("Type")=="bind" for m in c.get("Mounts",[]))):
+            raise ValueError()
+        return bool(state["Running"])
+    except (KeyError,TypeError,ValueError,IndexError):
+        raise BackupError("BLOCKED_LOCAL_CONTAINER_IDENTITY_UNVERIFIED") from None
+
+
+def ensure_local_target(dsn: str, token: str) -> str:
+    """Reconnect, or safely restart only the known stopped disposable container."""
+    import psycopg
+    try:
+        with psycopg.connect(dsn,autocommit=True,connect_timeout=5) as conn:
+            verify_ephemeral_target(conn,token)
+        return "RUNNING_MARKER_VERIFIED"
+    except psycopg.OperationalError:
+        # Transport failure only. A live but mismarked target is NOT restarted.
+        pass
+    running=inspect_disposable_container()
+    if running:
+        raise BackupError("BLOCKED_RUNNING_LOCAL_DB_UNREACHABLE")
+    try:
+        p=subprocess.run(["docker","start","jw-v223-restore"],
+                         capture_output=True,text=True,timeout=25,check=False)
+    except (OSError,subprocess.TimeoutExpired):
+        raise BackupError("BLOCKED_LOCAL_CONTAINER_RESTART_FAILED") from None
+    if p.returncode:
+        raise BackupError("BLOCKED_LOCAL_CONTAINER_RESTART_FAILED")
+    import time
+    for _ in range(12):
+        try:
+            with psycopg.connect(dsn,autocommit=True,connect_timeout=2) as conn:
+                verify_ephemeral_target(conn,token)
+            return "RESTARTED_MARKER_VERIFIED"
+        except psycopg.OperationalError:
+            time.sleep(1)
+    raise BackupError("BLOCKED_LOCAL_DB_UNREACHABLE_AFTER_RESTART")
+
+
 def verify_restore():
     if os.environ.get("CODESPACES")!="true" or Path.cwd().resolve()!=ROOT.resolve():
         raise BackupError("BLOCKED_APPROVED_CODESPACE_REQUIRED")
@@ -160,9 +227,11 @@ def verify_restore():
     config=read_private_target()
     dsn=config["JW_PG_TARGET_ADMIN_DSN"]
     token=config["JW_PG_TARGET_EPHEMERAL_TOKEN"]
-    # PROVE the disposable target is real before any destructive local action.
-    with psycopg.connect(dsn,autocommit=True,connect_timeout=6) as c:
-        verify_ephemeral_target(c,token)
+    # PROVE the disposable target is real before any private file transfer.
+    # If Codespaces suspended Docker, only the exact previously-approved
+    # stopped container may be restarted; never initialize another database.
+    target_status=ensure_local_target(dsn,token)
+    print("LOCAL_RESTORE_TARGET="+target_status)
     files=private_transfer(find_input())
     archive,manifest,keyfile=files
     key=read_key(keyfile)
