@@ -17,6 +17,7 @@ import os
 import re
 from pathlib import Path
 from fastapi.responses import HTMLResponse
+from .pg_cinema_cutover_ui_v223 import optional_bridge
 
 ROOT = Path(__file__).resolve().parent
 ROOT_UI_ENV = 'JW_ROOT_UI'
@@ -47,6 +48,7 @@ def cinema_main_response():
     bridge = preserved + (ROOT / 'cinema_bridge_v1.js').read_text(encoding='utf-8') + '\n' + (ROOT / 'cinema_bridge_v2.js').read_text(encoding='utf-8')
     # v3 (PostgreSQL trade ledger) is inert unless /api/pg-stage/cinema-trade answers for the signed-in user.
     bridge += '\n' + (ROOT / 'cinema_bridge_v3.js').read_text(encoding='utf-8')
+    bridge += '\n' + optional_bridge()
     needle = 'boot();\n})();'
     if original.count(needle) != 1 or '</script>' in bridge.lower():
         raise RuntimeError('CINEMA adapter insertion point rejected')
