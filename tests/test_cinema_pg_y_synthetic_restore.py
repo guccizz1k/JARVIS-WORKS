@@ -47,10 +47,10 @@ def main():
         with psycopg.connect(dsn,autocommit=True) as c:
             c.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(owner)))
             for role in acl_only:
-                c.execute(sql.SQL("DO $BEGIN IF NOT EXISTS "
-                                  "(SELECT 1 FROM pg_roles WHERE rolname={}) "
-                                  "THEN CREATE ROLE {} NOLOGIN; END IF; END$")
-                          .format(sql.Literal(role),sql.Identifier(role)))
+                if c.execute("SELECT 1 FROM pg_roles WHERE rolname=%s",
+                             (role,)).fetchone() is None:
+                    c.execute(sql.SQL("CREATE ROLE {} NOLOGIN")
+                              .format(sql.Identifier(role)))
             c.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
             created=True
         with psycopg.connect(dsn,dbname=name,autocommit=True) as c:
