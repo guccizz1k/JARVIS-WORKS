@@ -1,0 +1,47 @@
+name: JW V22.3 post-A/B 65-table backup preflight contract
+on:
+  push:
+    branches:
+      - review/jw-v223-ab-cutover-integration-20261107
+permissions:
+  contents: read
+jobs:
+  postab-readonly-contract:
+    name: Independent post-A/B source fingerprint + RLS + backup role fail-closed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      JW_ENV: review
+      JW_PG_SOURCE_DSN: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Original code protection and no live source credentials in CI
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
+          test -z "$JW_PG_SOURCE_DSN"
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install only crypto dependency and compile audit code
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check 'cryptography>=44,<47'
+          python3 -m py_compile scripts/ci_cinema_pg_v223_postab_profile.py tests/test_cinema_pg_v223_postab_profile.py
+      - name: Strict fail-closed 65-table backup preflight negative regressions
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -p test_cinema_pg_v223_postab_profile.py -v
+          # No credentials: live inspection MUST fail, not claim success.
+          if python3 -m scripts.ci_cinema_pg_v223_postab_profile > postab-ci.log 2>&1; then
+            echo "FAIL: live post-A/B source preflight succeeded without credentials"
+            exit 1
+          fi
+          grep -F 'POST_AB_SOURCE_GATE=BLOCKED' postab-ci.log
+          grep -F 'REASON=BLOCKED_SOURCE_CREDENTIALS_NOT_AVAILABLE' postab-ci.log
+          echo 'PASS_V223_POSTAB_SOURCE_PROFILE_FAIL_CLOSED_SYNTHETIC_ONLY'
