@@ -151,6 +151,78 @@ def check_manifest(m,encrypted):
         raise BackupError("BLOCKED_MANIFEST_ROLE_NAMES")
     return roles
 
+# An historical PG17 CHECK was represented as nested boolean AND on Supabase,
+# but current PG17 parser flattens the same three immutable, null-safe operands.
+# This is the ONLY allowed canonical-display equivalence. No general SQL
+# normalization, broad string rewriting, or checksum suppression is allowed.
+V151_CONSTRAINT_KEY = (
+    "review_signup_requests_v151."
+    "review_signup_requests_v151_company_name_check"
+)
+V151_SOURCE_DEF = (
+    "CHECK ((((length(company_name) >= 2) AND (length(company_name) <= 120)) "
+    "AND (company_name = btrim(company_name))))"
+)
+V151_RESTORED_DEF = (
+    "CHECK (((length(company_name) >= 2) AND (length(company_name) <= 120) "
+    "AND (company_name = btrim(company_name))))"
+)
+
+def verified_v151_semantic_equivalence(source_sig, target_sig, raw_mismatches, connection):
+    """Return accepted labels only after all exact source/target checks pass.
+
+    Both canonical expressions consist of the same three predicates joined by
+    associative SQL AND; length(text) and btrim(text) are immutable pg_catalog
+    functions. Both forms have the same SQL 3-valued logic for every text,
+    including NULL. A target different in any other way is never accepted.
+    """
+    if raw_mismatches != [f"constraints:{V151_CONSTRAINT_KEY}"]:
+        return []
+    def constraint_hash(sig):
+        rows=[row[1] for row in sig.get("constraints",[])
+              if isinstance(row,(list,tuple)) and len(row)==2 and row[0]==V151_CONSTRAINT_KEY]
+        return rows[0] if len(rows)==1 else None
+    expect_source=hashlib.md5(V151_SOURCE_DEF.encode("utf-8")).hexdigest()
+    expect_restored=hashlib.md5(V151_RESTORED_DEF.encode("utf-8")).hexdigest()
+    if (constraint_hash(source_sig)!=expect_source or
+        constraint_hash(target_sig)!=expect_restored):
+        return []
+    row=connection.execute(
+        "SELECT pg_get_constraintdef(k.oid), k.convalidated,k.connoinherit, "
+        "a.attnotnull, format_type(a.atttypid,a.atttypmod), "
+        "coll.collname, cn.nspname "
+        "FROM pg_constraint k "
+        "JOIN pg_class t ON t.oid=k.conrelid "
+        "JOIN pg_namespace n ON n.oid=t.relnamespace "
+        "JOIN pg_attribute a ON a.attrelid=t.oid AND a.attname='company_name' "
+        "JOIN pg_collation coll ON coll.oid=a.attcollation "
+        "JOIN pg_namespace cn ON cn.oid=coll.collnamespace "
+        "WHERE n.nspname='jw_dev' "
+        "AND t.relname='review_signup_requests_v151' "
+        "AND k.conname='review_signup_requests_v151_company_name_check'"
+    ).fetchone()
+    if row!=(V151_RESTORED_DEF,True,False,True,"text","default","pg_catalog"):
+        return []
+    # Integration proof of SQL 3VL behavior for boundary cases in real PG17.
+    # Mathematical equivalence comes from AND associativity; this runtime check
+    # is an extra fail-closed guard against unexpected type/operator behavior.
+    mismatch=connection.execute(
+        "WITH vals(company_name) AS (VALUES "
+        "(NULL::text),(''::text),('a'::text),('ab'::text),"
+        "(' a'::text),('a '::text),('한글'::text),"
+        "(repeat('a',120)),(repeat('a',121))) "
+        "SELECT count(*) FROM vals WHERE "
+        "(((length(company_name)>=2 AND length(company_name)<=120) "
+        "AND company_name=btrim(company_name))) "
+        "IS DISTINCT FROM "
+        "((length(company_name)>=2 AND length(company_name)<=120 "
+        "AND company_name=btrim(company_name)))"
+    ).fetchone()
+    if mismatch!=(0,):
+        return []
+    return [f"constraints:{V151_CONSTRAINT_KEY}"]
+
+
 def run_pg(args,dsn,db="postgres",seconds=120):
     d=parse_dsn(dsn)
     env=dict(os.environ)
@@ -347,7 +419,10 @@ def verify_restore():
                 raise BackupError("BLOCKED_INDEPENDENT_RESTORE_"+restore_status)
             with psycopg.connect(dsn,dbname=db,connect_timeout=6) as c:
                 actual=fetch_signature(c,SCHEMA)
-            mismatch=diff_signatures(m["signature"],actual)
+                raw_mismatch=diff_signatures(m["signature"],actual)
+                verified_equivalence=verified_v151_semantic_equivalence(
+                    m["signature"],actual,raw_mismatch,c)
+            mismatch=[item for item in raw_mismatch if item not in verified_equivalence]
             count=sum(int(r[0]) for r in actual.get("rows",{}).values())
             truncated=work/"truncated.dump"
             write_partial_restore_copy(plaintext,truncated)
@@ -371,10 +446,33 @@ def verify_restore():
                     "restore_signature_sha256":signature_digest(actual),
                     "table_count":len(actual.get("tables",[])),"row_count":count,
                     "mismatch_count":len(mismatch),"mismatch_labels":mismatch[:60],
+                    "raw_mismatch_count":len(raw_mismatch),
+                    "raw_mismatch_labels":raw_mismatch[:60],
+                    "verified_equivalence":verified_equivalence,
+                    "comparison_version":2,
                     "negative_tests":neg}
-            evidence=PRIVATE/(archive.name.removesuffix(".jwpgbk")+".restore-report.json")
-            if evidence.is_symlink():
+            base=archive.name.removesuffix(".jwpgbk")
+            legacy=PRIVATE/(base+".restore-report.json")
+            evidence=PRIVATE/(base+".restore-v2-report.json")
+            if legacy.is_symlink() or evidence.is_symlink():
                 raise BackupError("BLOCKED_RESTORE_REPORT_SYMLINK")
+            # Preserve the previous actual FAIL report as immutable historical
+            # evidence. Only create a *new versioned report* if that report is
+            # provably for exactly this archive and identical source/target
+            # raw signatures, counts and negative tests.
+            if legacy.exists():
+                try:
+                    old=json.loads(legacy.read_text(encoding="utf-8"))
+                except (OSError,ValueError,TypeError):
+                    raise BackupError("BLOCKED_LEGACY_RESTORE_REPORT_UNREADABLE") from None
+                same=("encrypted_archive_sha256","source_signature_sha256",
+                      "restore_signature_sha256","schema_fingerprint",
+                      "table_count","row_count","negative_tests")
+                if (not isinstance(old,dict) or
+                    any(old.get(k)!=report.get(k) for k in same) or
+                    old.get("mismatch_count")!=len(raw_mismatch) or
+                    old.get("mismatch_labels")!=raw_mismatch):
+                    raise BackupError("BLOCKED_LEGACY_RESTORE_REPORT_CONFLICT")
             if evidence.exists():
                 # Never silently overwrite an earlier verdict. Identical, verified
                 # reruns are safe, but altered/mismatched evidence is a hard block.
@@ -389,7 +487,8 @@ def verify_restore():
                 with evidence.open("x",encoding="utf-8") as f:
                     json.dump(report,f,sort_keys=True,indent=2)
                 evidence.chmod(0o600)
-            for name in ("verdict","table_count","row_count","mismatch_count","negative_tests"):
+            for name in ("verdict","table_count","row_count","mismatch_count",
+                         "raw_mismatch_count","verified_equivalence","negative_tests"):
                 print(name.upper()+"="+str(report[name]))
             print("LOCAL_REPORT_PRIVATE=PASS")
             print("SOURCE_DB_NEVER_CONTACTED=PASS")
