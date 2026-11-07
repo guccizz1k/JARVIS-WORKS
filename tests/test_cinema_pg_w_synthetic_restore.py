@@ -108,6 +108,12 @@ def main():
     result=w.verify_restore()
     if result!=0:
         raise RuntimeError("synthetic restore parity failed")
+    # A second full restore from protected HOME must pass without re-upload.
+    # Includes source-free signature and all four negative tests again.
+    repeated=w.verify_restore()
+    if repeated!=0:
+        raise RuntimeError("private archive replay verification failed")
+    print("PASS_PRIVATE_ENCRYPTED_BACKUP_REPEAT_WITHOUT_REUPLOAD")
     print("PASS_SYNTHETIC_PG17_ENCRYPTED_RESTORE_SIGNATURE_AND_NEGATIVE_TESTS")
     print("REAL_SUPABASE_DATA_NOT_USED_NOT_DR_PASS")
 
