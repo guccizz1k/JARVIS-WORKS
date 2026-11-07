@@ -190,6 +190,11 @@ def verify_restore():
                         c.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
                 c.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(db)))
                 created=True
+            # Mirror the source's non-business pgcrypto dependency in the
+            # DISPOSABLE restore DB only. The source has pgcrypto in extensions.
+            with psycopg.connect(dsn,dbname=db,connect_timeout=6,autocommit=True) as c:
+                c.execute("CREATE SCHEMA IF NOT EXISTS extensions")
+                c.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions")
             ok=run_pg(["pg_restore","--exit-on-error","--dbname",db,str(plaintext)],
                       dsn,db=db,seconds=360)
             if not ok:
