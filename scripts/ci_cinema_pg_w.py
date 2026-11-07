@@ -317,9 +317,22 @@ def verify_restore():
                     "mismatch_count":len(mismatch),"mismatch_labels":mismatch[:60],
                     "negative_tests":neg}
             evidence=PRIVATE/(archive.name.removesuffix(".jwpgbk")+".restore-report.json")
-            with evidence.open("x",encoding="utf-8") as f:
-                json.dump(report,f,sort_keys=True,indent=2)
-            evidence.chmod(0o600)
+            if evidence.is_symlink():
+                raise BackupError("BLOCKED_RESTORE_REPORT_SYMLINK")
+            if evidence.exists():
+                # Never silently overwrite an earlier verdict. Identical, verified
+                # reruns are safe, but altered/mismatched evidence is a hard block.
+                try:
+                    old=json.loads(evidence.read_text(encoding="utf-8"))
+                except (OSError,ValueError,TypeError):
+                    raise BackupError("BLOCKED_RESTORE_REPORT_INVALID") from None
+                if old!=report:
+                    raise BackupError("BLOCKED_RESTORE_REPORT_CONFLICT")
+                print("REUSED_IDENTICAL_PRIVATE_REPORT=PASS")
+            else:
+                with evidence.open("x",encoding="utf-8") as f:
+                    json.dump(report,f,sort_keys=True,indent=2)
+                evidence.chmod(0o600)
             for name in ("verdict","table_count","row_count","mismatch_count","negative_tests"):
                 print(name.upper()+"="+str(report[name]))
             print("LOCAL_REPORT_PRIVATE=PASS")
