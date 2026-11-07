@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import ci_cinema_pg_w as w
 from scripts.pg_backup_v223 import BackupError
 
-LABEL_PATTERN = re.compile(r"[A-Za-z0-9_:.?/-]{1,120}\\Z")
+LABEL_PATTERN = re.compile(r"[A-Za-z0-9_:.?/-]{1,120}\Z")
 
 def read_report() -> dict:
     if os.environ.get("CODESPACES") != "true" or Path.cwd().resolve()!=w.ROOT.resolve():
