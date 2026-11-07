@@ -47,7 +47,7 @@ jobs:
       - name: Tooling for the pure-Python parts (no database driver is needed)
         run: python3 -m pip install --quiet cryptography pytest
       - name: Static guards for the preflight SQL
-        run: python3 -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_preflight_readonly.py
+        run: python3 -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_preflight_readonly.py tests/test_cinema_pg_v223_backup_role_c_gate.py
       - name: Engine SQL gate (unchanged engine, must stay 222/222)
         run: python3 scripts/ci_cinema_pg_sql_gate.py --report engine-gate.json
       - name: Preflight gate (read-only proof, F2 parity, rollback visibility, apply-order trap)
@@ -56,3 +56,9 @@ jobs:
           python3 -m scripts.ci_cinema_pg_v223_preflight_gate | tee preflight-gate.log
           grep -E '^PASS: [0-9]+ checks, 0 failed' preflight-gate.log
           echo 'READ-ONLY EVIDENCE ONLY: a disposable database was used; nothing was applied to Supabase.'
+      - name: Change C alone gate (success, mid-failure, rollback, expiry, connection limit) with the Supabase privilege model
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v223_backup_role_c_gate | tee c-gate.log
+          grep -E '^PASS: [0-9]+ checks, 0 failed' c-gate.log
+          echo 'DISPOSABLE EVIDENCE ONLY: change C was applied to a throw-away PG17 here, never to Supabase.'
