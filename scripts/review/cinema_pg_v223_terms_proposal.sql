@@ -156,9 +156,9 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------- privileges
-RESET ROLE;
-REVOKE CREATE ON SCHEMA jw_dev FROM jw_cinema_owner;
-REVOKE jw_cinema_owner FROM CURRENT_USER;
+-- Important: run REVOKE as function OWNER (jw_cinema_owner), not Supabase's
+-- non-superuser postgres. The former script RESET ROLE before this DO block,
+-- silently retaining PUBLIC EXECUTE. Detected by live development-DB audit.
 DO $g$
 DECLARE f record;
 BEGIN
@@ -171,4 +171,25 @@ BEGIN
     EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO jw_cinema_owner, jw_cinema_writer', f.sig);
   END LOOP;
 END $g$;
+RESET ROLE;
+REVOKE CREATE ON SCHEMA jw_dev FROM jw_cinema_owner;
+REVOKE jw_cinema_owner FROM CURRENT_USER;
+DO $acl_guard$
+DECLARE n integer; safe integer;
+BEGIN
+ SELECT count(*), count(*) FILTER (
+   WHERE NOT has_function_privilege('public',p.oid,'EXECUTE')
+     AND NOT has_function_privilege('anon',p.oid,'EXECUTE')
+     AND NOT has_function_privilege('authenticated',p.oid,'EXECUTE')
+     AND has_function_privilege('jw_cinema_writer',p.oid,'EXECUTE')
+     AND pg_get_userbyid(p.proowner)='jw_cinema_owner'
+     AND p.prosecdef AND p.proconfig @> ARRAY['search_path=pg_catalog'])
+ INTO n,safe
+ FROM pg_proc p JOIN pg_namespace ns ON ns.oid=p.pronamespace
+ WHERE ns.nspname='jw_dev'
+ AND p.proname IN ('cinema_pg_order_terms_set','cinema_pg_invoice_terms_set','cinema_pg_payment_note_set');
+ IF n<>3 OR safe<>3 THEN
+   RAISE EXCEPTION 'V22.3 B security ACL verification failed; entire terms transaction rolled back';
+ END IF;
+END $acl_guard$;
 COMMIT;
