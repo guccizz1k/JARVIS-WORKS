@@ -282,6 +282,31 @@ class CutoverFront:
                 raise CutoverRefused("old_session_relogin_required", 401)
             path = scope.get("path", "")
             method = scope.get("method", "GET").upper()
+            if path == "/api/pg-stage/cutover/status":
+                if method != "GET":
+                    raise CutoverRefused("method_not_allowed", 405)
+                legacy_ident = await self._identity(scope, LEGACY_COOKIE, self.legacy_identity)
+                active = legacy_ident.org_id in self.enabled_orgs()
+                response = JSONResponse({
+                    "cutover_available": True, "pg_required": active,
+                    "aggregate_status": "blocked_until_verified" if active else "legacy_only",
+                }, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+                return await response(scope, receive, send)
+            if path == "/api/pg-stage/cutover/verify":
+                if method != "GET":
+                    raise CutoverRefused("method_not_allowed", 405)
+                legacy_ident = await self._identity(scope, LEGACY_COOKIE, self.legacy_identity)
+                if legacy_ident.org_id not in self.enabled_orgs():
+                    raise CutoverRefused("pg_store_disabled_for_org")
+                pg_ident = await self._identity(scope, PG_COOKIE, self.pg_identity)
+                if (pg_ident.org_id != legacy_ident.org_id
+                        or pg_ident.actor_id != legacy_ident.actor_id
+                        or pg_ident.role != legacy_ident.role):
+                    raise CutoverRefused("identity_mismatch", 403)
+                response = JSONResponse({"identity_verified": True}, headers={
+                    "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                })
+                return await response(scope, receive, send)
             if path.startswith("/api/pg-stage/"):
                 return await self._forward(self.pg_app, scope, receive, send, PG_COOKIE)
             if not is_trade(path):
