@@ -36,6 +36,9 @@ def main():
         verify_ephemeral_target(c,token)
     name="jw_ci_src_"+secrets.token_hex(4)
     owner="jw_ci_owner_"+secrets.token_hex(4)
+    # Reproduce verified source ACL-only grantees omitted by the old
+    # Windows manifest inventory: no table ACL or policy mentions them.
+    acl_only=w.SOURCE_VERIFIED_SCHEMA_FUNCTION_ONLY_GRANTEES
     label="20261107-114900Z-"+secrets.token_hex(3)
     os.umask(0o077)
     w.STAGING.mkdir(exist_ok=True)
@@ -43,11 +46,20 @@ def main():
     try:
         with psycopg.connect(dsn,autocommit=True) as c:
             c.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(owner)))
+            for role in acl_only:
+                c.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
             c.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
             created=True
         with psycopg.connect(dsn,dbname=name,autocommit=True) as c:
             c.execute("CREATE SCHEMA jw_dev")
             c.execute(sql.SQL("GRANT USAGE ON SCHEMA jw_dev TO {}").format(sql.Identifier(owner)))
+            for role in acl_only:
+                c.execute(sql.SQL("GRANT USAGE ON SCHEMA jw_dev TO {}").format(sql.Identifier(role)))
+            c.execute("CREATE FUNCTION jw_dev.synthetic_ping() RETURNS integer "
+                      "LANGUAGE SQL AS $ SELECT 1 $")
+            for role in acl_only:
+                c.execute(sql.SQL("GRANT EXECUTE ON FUNCTION jw_dev.synthetic_ping() TO {}")
+                          .format(sql.Identifier(role)))
             for i in range(62):
                 t=f"t{i:02d}"
                 c.execute(sql.SQL("CREATE TABLE jw_dev.{} (id integer PRIMARY KEY, note text)")
@@ -64,6 +76,8 @@ def main():
         with psycopg.connect(dsn,dbname=name) as c:
             sig=fetch_signature(c,"jw_dev")
             roles=roles_in_acl(c,"jw_dev")
+        if any(role in roles for role in acl_only):
+            raise RuntimeError("test fixture must expose missing schema/function-only roles")
         if len(sig["tables"])!=62 or sum(v[0] for v in sig["rows"].values())!=22:
             raise RuntimeError("synthetic source shape wrong")
         plaintext=w.STAGING/(label+".dump")
@@ -96,6 +110,10 @@ def main():
         if created:
             with psycopg.connect(dsn,autocommit=True) as c:
                 c.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+                # Force independent restore to reconstruct ACL-only role names:
+                # none may remain from the synthetic source setup.
+                for role in acl_only:
+                    c.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
     # Restore tool MUST recognize marked target and verify semantic parity.
     with psycopg.connect(dsn,autocommit=True) as c:
         verify_ephemeral_target(c,token)
