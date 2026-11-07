@@ -128,3 +128,74 @@ The real backup, encrypted restore and signature comparison of the development d
 SQL application A/B/C (BLOCKED: no approval); the migration gate in this environment (needs psycopg; its Actions run at `7018e131` is green); the real Supabase
 effect of C (`CREATE ROLE ... BYPASSRLS` by `postgres` is inferred from the PG16+ rule, not tested there); any HTTP route, UI
 or full-service E2E. Release stays NO-GO as the issue requires.
+
+## 8. Change C alone — conditional-approval package (2026-11-07 evening, KST)
+Status words: PASS / PARTIAL / FAIL / BLOCKED / NOT RUN / NOT MEASURED. **Nothing in this section was applied to Supabase. C is NOT applied.**
+
+### 8.1 What was proven before touching the real project
+`scripts/ci_cinema_pg_v223_backup_role_c_gate.py` (new, 16 checks, TCP + SCRAM, the Supabase privilege model: admin = LOGIN CREATEROLE BYPASSRLS NOSUPERUSER, owner of the tables
+`jw_cinema_owner` does not own, ADMIN-only member of `jw_cinema_owner`). Local PostgreSQL 16.15: **16/16 PASS**. PostgreSQL 17 (Actions run `42345026853`, commit `a2f3e48`, `postgres:17` service; the workflow's version step refuses anything but 17.x and the C gate step requires `PASS: 16 checks, 0 failed`): **all steps success**. The PG17 job log itself was not opened, only the step conclusions via the public API.
+| Check | Result |
+|---|---|
+| CG.02/03 C commits in one transaction; role = LOGIN, BYPASSRLS, no SUPERUSER/CREATEDB/CREATEROLE/REPLICATION, CONNECTION LIMIT 2, `default_transaction_read_only=on`, VALID UNTIL in the future, no password, no membership; the admin's temporary INHERIT membership is gone, its original ADMIN-only membership unchanged; the admin receives ADMIN-only on the new role | PASS (PG16, PG17) |
+| CG.04 the backup tool's own rules (`pb.ROLE_SQL` + `evaluate_source_privileges`) and the read-only preflight report `violations: []`; SELECT on every table and sequence | PASS (PG16, PG17) |
+| CG.05 no login without a password (SCRAM refuses); login after the owner sets one; writes denied even after `SET default_transaction_read_only = off` | PASS (PG16, PG17) |
+| CG.06/07 expiry blocks login and renewal restores it; a third concurrent session is refused (`too many connections`) | PASS (PG16, PG17) |
+| CG.08/10 rollback SQL returns the database to the pre-C fingerprint (catalog, ACL, roles, memberships, row counts), is idempotent, and a second apply/rollback cycle also ends pre-C | PASS (PG16, PG17) |
+| CG.09 apply twice fails cleanly (`already exists`) with no side effect | PASS (PG16, PG17) |
+| CG.11 an error injected AFTER the temporary grant rolls everything back (with and without `ON_ERROR_STOP`) | PASS (PG16, PG17) |
+| CG.12–14 an admin without ADMIN on `jw_cinema_owner`, without CREATEROLE, or without BYPASSRLS cannot apply C, and leaves nothing behind (the last one is exactly the PG rule that a creator must itself hold BYPASSRLS) | PASS (PG16, PG17) |
+| CG.15 C with `COMMIT` replaced by `ROLLBACK` shows the effect inside the transaction and leaves nothing (a dry run is possible) | PASS (PG16, PG17) |
+| CG.16 the SQL contains no password, DSN or secret; the expiry is a variable | PASS (PG16, PG17) |
+Negative controls: deleting the final `REVOKE jw_cinema_owner ...` line fails CG.03 and CG.09; making the role `SUPERUSER` fails CG.02/CG.03. Both were reverted (`git diff` clean).
+**Measured side effect of the rollback:** the 2 sequences that had no ACL (NULL) keep an explicit owner-only ACL afterwards (semantically identical, `pg_dump` prints no GRANT for it). The fingerprint in the gate normalises this; a raw ACL-text comparison would show it.
+
+### 8.2 Exact SQL for C alone
+Files, unchanged since the earlier review: `scripts/review/cinema_pg_v223_backup_role_proposal.sql` (apply) and `scripts/review/cinema_pg_v223_backup_role_rollback.sql` (undo). Applied by the project admin role, one transaction:
+```sql
+BEGIN;
+CREATE ROLE jw_backup_ro LOGIN BYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT 2 VALID UNTIL :'valid_until';
+ALTER ROLE jw_backup_ro SET default_transaction_read_only = on;
+GRANT jw_cinema_owner TO CURRENT_USER WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;   -- temporary: needed to grant on the 17 tables jw_cinema_owner owns
+GRANT USAGE ON SCHEMA jw_dev TO jw_backup_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA jw_dev TO jw_backup_ro;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA jw_dev TO jw_backup_ro;
+REVOKE jw_cinema_owner FROM CURRENT_USER GRANTED BY CURRENT_USER;                    -- the temporary membership never survives the commit
+COMMIT;
+```
+Run: `psql "<admin DSN, sslmode=verify-full>" -v ON_ERROR_STOP=1 -v valid_until='2026-11-09 00:00:00+09' -f cinema_pg_v223_backup_role_proposal.sql`, then, on the owner's own terminal only,
+`\password jw_backup_ro` with a random value of 32+ characters. **The password must never be typed into this conversation or passed through any tool I use.** If the SQL is run through the Supabase management tool instead, the expiry has to be inlined as a literal and
+whether that tool wraps the script in its own transaction is NOT VERIFIED; the owner's `psql` is the route that matches the gate.
+
+### 8.3 Read-only pre-checks already done on the real project (2026-11-07; SELECT only, nothing changed)
+Project `rvymwwzclagvljnofyss` (`jarvis-works-dev`, ap-northeast-2, ACTIVE_HEALTHY), PG 17.11, SSL on, `max_connections` 60 with 8 sessions in use, database `postgres`, admin role `postgres`.
+`jw_backup_ro` does not exist. `jw_dev`: 62 tables (61 FORCE RLS), 69 functions, 71 triggers, 22 rows in `cinema_pg_transitions`; only two table owners exist (`jw_cinema_owner` 17 tables + 1 sequence, `postgres` 45 + 1), so the single temporary membership is both needed and sufficient.
+No object outside `jw_dev` is readable by PUBLIC except 2 views in `extensions`, so a new BYPASSRLS login role with only `jw_dev` SELECT can read nothing else. `log_statement = ddl`; event triggers `pgrst_ddl_watch`, `ensure_rls`; no default ACLs in `jw_dev`.
+Schema fingerprint the backup tool expects (`IDENTITY_SQL` for `jw_dev`, taken through the management channel, independent of any DSN): `afd89e64e80ecbc8216af114e0682ee7` (tables 62, force_rls 61, functions 69, triggers 71). It is valid only while A and B are NOT applied; after A/B it must be recomputed.
+Other expectations for the tool: host `db.rvymwwzclagvljnofyss.supabase.co` (direct; IPv6-only reachability NOT verified, a session-mode pooler login `jw_backup_ro.rvymwwzclagvljnofyss` may be needed), port 5432, project ref `rvymwwzclagvljnofyss`, database `postgres`, role `jw_backup_ro`.
+
+### 8.4 Risks of applying C
+1. `log_statement = ddl`: the CREATE ROLE / GRANT statements are logged. A `\password` verifier can reach the log, so use a long random password and drop the role (rollback SQL) when the backups are done. (The password is never in the SQL file.)
+2. The role has BYPASSRLS: it reads every row of every `jw_dev` table. That is the reason for the 2-connection limit, the expiry, `default_transaction_read_only = on` and the absence of any write privilege (CG.05). It is not a substitute for keeping the DSN secret.
+3. Ordering trap: after A/B create new tables the role cannot read them until the documented re-grant (PF.20/PF.21) is run; the tool then refuses the role (`tables_unreadable`). Plan the re-grant before the second backup.
+4. DDL on the real project fires `pgrst_ddl_watch` (a PostgREST schema-cache reload notification for the GRANTs). Expected to be harmless; NOT MEASURED on the real project.
+5. The real effect of `CREATE ROLE ... BYPASSRLS` by the Supabase `postgres` role is proven by the gate for the same attribute set (CG.14 shows the rule), not yet on Supabase itself. The first real attempt is therefore the proof; it is atomic (CG.11–13), so a refusal leaves nothing behind.
+6. Supabase may restrict role management in ways a plain PostgreSQL does not; if the statement is refused, do not switch to a more privileged route without a new decision.
+
+### 8.5 Recovery
+* Failure during C: the transaction aborts; nothing remains (verified CG.11–14). Re-run the read-only preflight to confirm `backup_role: {"exists": false}` and an unchanged membership list.
+* After a successful C that must be undone: `cinema_pg_v223_backup_role_rollback.sql` (idempotent, one transaction; CG.08). Residual: 2 sequences carry an explicit owner-only ACL (no behavioural difference).
+* Credentials: if the password or DSN may have leaked, run `ALTER ROLE jw_backup_ro NOLOGIN` or the rollback immediately.
+* Before C there is no restorable copy of the development database (only the fingerprint). The data is schema + 22 seed rows equal to the engine SQL seed, so C itself (no business-data change) puts nothing at risk.
+
+### 8.6 Where the backup and the independent restore can run (assessment)
+| Environment | Verdict | Reason |
+|---|---|---|
+| This workspace | BLOCKED | no connection string, no psycopg, no PG17 client, no Docker daemon, no package installs, outbound limited; also a DSN/key would sit in a cloud session it should not be in |
+| Owner's PC (Docker + Python + `psycopg`, PG17 client) | READY once the owner supplies them | matches `docs/ops/V223_PG_BACKUP_RESTORE.md`: secrets stay local, restore target is a local PG17 container marked with `mark-target` |
+| GitHub Actions on the public repository | PARTIAL / not recommended as the default | possible only with an Environment holding the secrets behind a required reviewer, a session pooler (runners are IPv4), the Supabase CA file, `workflow_dispatch` from the review branch only and a non-public artifact policy; logs are public and the owner would have to create the secrets. NOT VERIFIED; no workflow was added |
+| Another approved isolated cloud (private runner / VM) | NOT MEASURED | needs the owner's decision; no new paid service was created |
+
+### 8.7 Conditions for the actual run, and current feasibility
+Approval needed from the owner, explicitly: (1) apply C alone to `jarvis-works-dev` (not production) with a stated expiry date; (2) who sets the password (owner, locally); (3) which environment runs the backup/restore.
+Current feasibility: C itself — **ready to run after approval**; the real backup → independent PG17 restore → comparison — **BLOCKED until the owner supplies the DSN/password/CA file in an environment from 8.6**; A/B — **NOT RUN and must not run before a real restore PASS**. P0-1 therefore remains BLOCKED, Gate 4 NOT RUN, Gate 5 BLOCKED.
