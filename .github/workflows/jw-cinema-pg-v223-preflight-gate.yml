@@ -1,0 +1,58 @@
+name: JW V22.3 Track B read-only preflight + backup-role order gate on a disposable PG17
+on:
+  push:
+    branches:
+      - review/jw-v223-p0-db-dr-claude-20261107
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v223-preflight-gate-pg17:
+    name: Read-only preflight, F2 parity with the backup tool, apply-order trap on PG17
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      preflight-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-preflight
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5435'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-v223-preflight
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard and server version
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'show server_version' | tee /dev/stderr | grep -E '^17\.'
+      - name: Tooling for the pure-Python parts (no database driver is needed)
+        run: python3 -m pip install --quiet cryptography pytest
+      - name: Static guards for the preflight SQL
+        run: python3 -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_preflight_readonly.py
+      - name: Engine SQL gate (unchanged engine, must stay 222/222)
+        run: python3 scripts/ci_cinema_pg_sql_gate.py --report engine-gate.json
+      - name: Preflight gate (read-only proof, F2 parity, rollback visibility, apply-order trap)
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v223_preflight_gate | tee preflight-gate.log
+          grep -E '^PASS: [0-9]+ checks, 0 failed' preflight-gate.log
+          echo 'READ-ONLY EVIDENCE ONLY: a disposable database was used; nothing was applied to Supabase.'
