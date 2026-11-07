@@ -37,6 +37,8 @@ async function scenario(active,verifyOk=true){
       if(path==='/api/login')return {csrf_token:'legacy-csrf-token'};
       if(path==='/api/me')return {org_id:'A',id:'actor',role:'admin'};
       if(path==='/api/quotes')return [{id:'sqlite-doc'}];
+      if(path==='/api/pg-stage/cutover/legacy/quotes')
+        return [{id:'sqlite-doc'}];
       if(path==='/api/logout')return {ok:true};
       throw Error('unrecognized original path: '+path);
     },
