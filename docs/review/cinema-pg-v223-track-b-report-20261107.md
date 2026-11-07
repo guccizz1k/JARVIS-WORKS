@@ -2,12 +2,12 @@
 
 **Branch (local, not pushed):** `review/jw-v223-p0-db-dr-claude-20261107` · **base SHA:** `fdf2bd25fde75f7a41edaeb54358e8d60fb433b7`
 **Date:** 2026-11-07 · **Status words:** PASS / PARTIAL / BLOCKED / NOT RUN as defined in `AGENTS.md`.
-**Nothing was applied to Supabase.** No role, table, constraint, grant or data was changed; no push, merge, PR or deploy.
+**Nothing was applied to Supabase.** No role, table, constraint, grant or data was changed; no merge, PR or deploy; the only push is this review branch (`main` untouched).
 Track A files, `app/main.py`, the CINEMA HTML/bridges, `main` and PR #139 were not touched.
 
 요약(한국어): 기존 SQL 제안·롤백·백업 도구를 재사용해 읽기 전용으로 검토했고, 실제 개발 DB에는 **조회만** 했습니다.
-새로 만든 것은 (1) 조회 전용 preflight SQL, (2) 이를 시험하는 게이트와 정적 테스트, (3) PG17 CI 워크플로(실행 전)입니다.
-PG17 실행은 이 환경에서 불가능해 **NOT RUN**이며, PG16.15 일회용 서버의 결과는 보조 증거일 뿐 PG17 PASS가 아닙니다.
+새로 만든 것은 (1) 조회 전용 preflight SQL, (2) 이를 시험하는 게이트와 정적 테스트, (3) PG17 CI 워크플로입니다.
+이 환경에는 PG17이 없어 로컬 결과는 PG16.15 보조 증거입니다. 푸시로 실행된 GitHub Actions의 PG17.11 결과(엔진 게이트 222/222, preflight 게이트 19/19, 가드 통과)가 PG17 증거이고, terms·마이그레이션 게이트의 PG17 실행은 **NOT RUN**입니다.
 개발 DB 변경(역할 생성·제약·부속 테이블)은 모두 사용자의 별도 승인이 필요합니다.
 
 ## 1. Files added (4 new + 1 workflow; no existing file edited)
@@ -16,7 +16,7 @@ PG17 실행은 이 환경에서 불가능해 **NOT RUN**이며, PG16.15 일회�
 | `scripts/review/cinema_pg_v223_preflight_readonly.sql` | ONE read-only SELECT → one JSON document (names, booleans, counts only) |
 | `scripts/ci_cinema_pg_v223_preflight_gate.py` | psql-only gate on a disposable server (19 checks) |
 | `tests/test_cinema_pg_v223_preflight_readonly.py` | static guards: single SELECT, no write/DDL verbs, rule names equal the backup tool's |
-| `.github/workflows/jw-cinema-pg-v223-preflight-gate.yml` | the same gates on PG17 — **NOT RUN** (no push) |
+| `.github/workflows/jw-cinema-pg-v223-preflight-gate.yml` | the same gates on PG17 — **PASS on PG17.11** (Actions run 42324804761 at `d6954d9`) |
 | this report | |
 
 ## 2. Evidence (what actually ran, where)
@@ -26,16 +26,17 @@ package installs are blocked. Raw logs were kept outside the repository (public 
 
 | item | status | evidence |
 |---|---|---|
-| Engine SQL gate (unchanged engine) | **PASS on PG16.15** (PG17: NOT RUN) | `scripts.ci_cinema_pg_sql_gate`: 222/222, socket and TCP+SCRAM |
+| Engine SQL gate (unchanged engine) | **PASS on PG16.15 and PG17.11** | `scripts.ci_cinema_pg_sql_gate`: 222/222 (PG16: socket and TCP+SCRAM; PG17.11: Actions run 42324804761) |
 | Terms side tables + two-person constraint gate | **PASS on PG16.15** (PG17: NOT RUN) | `scripts.ci_cinema_pg_terms_gate_v223`: 60 checks, 0 failed |
-| New preflight gate | **PASS on PG16.15** (PG17: NOT RUN) | 19/19, socket and TCP+SCRAM; 2 injected defects were caught by exactly PF.14 and PF.17 |
+| New preflight gate | **PASS on PG16.15 and PG17.11** | 19/19 (PG16: socket and TCP+SCRAM; PG17.11: Actions run 42324804761); 2 injected defects were caught by exactly PF.14 and PF.17 |
 | New static tests + related existing tests | **PASS** | 113 passed (`--noconftest`; `tests/conftest.py` needs fastapi) |
 | Backup/migration unit tests already in the repo | **PASS** | 131 passed (`--noconftest`) |
 | `ci_cinema_pg_v223_migration_gate` (needs PG17 or `--allow-pg16-local`, and psycopg) | **BLOCKED** | psycopg missing, installs blocked |
 | `ci_cinema_pg_v223_backup_synthetic` / `pg_backup_v223 run` (backup → encrypt → isolated restore → signature diff) | **BLOCKED** | needs psycopg and `pg_dump`/`pg_restore` ≥ 17 (the tool refuses 16 by design) |
 | Full pytest suite | **NOT RUN** | fastapi missing |
-| PG17 CI workflows (existing and the new one) | **NOT RUN** | nothing pushed |
-| `ci_cinema_pg_guard.py` | **NOT RUN** | shallow clone lacks the pinned baseline; the new paths were checked against its `classify_path` whitelist and are allowed |
+| New workflow on PG17.11 | **PASS** | run 42324804761 (`d6954d9`): guard, static tests, engine gate 222/222, preflight gate 19/19 |
+| Existing PG17 workflows (terms, migration, backup QA, ...) | **NOT RUN** | they trigger on other branches or manual dispatch; none was dispatched |
+| `ci_cinema_pg_guard.py` | **PASS in CI** (locally NOT RUN) | passed in Actions run 42324804761 with full history; the shallow local clone lacks the pinned baseline |
 
 ## 3. Independent QA findings
 1. **Apply-order trap (measured, PF.20/PF.21).** `GRANT SELECT ON ALL TABLES` covers only tables that exist at that moment. If
@@ -87,6 +88,6 @@ Before C is used: the owner sets the password locally (`\password jw_backup_ro`)
 PC need PG17 client tools and psycopg; nothing real was backed up and no data left the project.
 
 ## 6. Still blocked / not proven
-PG17 behaviour of all gates; the migration gate and the synthetic backup/restore run in this environment; the real Supabase
+PG17 behaviour of the terms and migration gates (the engine and preflight gates did run on PG17.11); the migration gate and the synthetic backup/restore run in this environment; the real Supabase
 effect of C (`CREATE ROLE ... BYPASSRLS` by `postgres` is inferred from the PG16+ rule, not tested there); any HTTP route, UI
 or full-service E2E. Release stays NO-GO as the issue requires.
