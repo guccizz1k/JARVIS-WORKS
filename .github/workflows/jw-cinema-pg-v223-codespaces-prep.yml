@@ -24,6 +24,7 @@ jobs:
           python -I scripts/ci_cinema_pg_guard.py
           python -m py_compile scripts/ci_cinema_pg_n.py tests/test_cinema_pg_n.py
           python -m py_compile scripts/ci_cinema_pg_p.py tests/test_cinema_pg_p.py
+          python -m py_compile scripts/ci_cinema_pg_s.py tests/test_cinema_pg_s.py
           python -m py_compile scripts/ci_cinema_pg_m.py tests/test_cinema_pg_m.py
           python -m py_compile scripts/ci_cinema_pg_r.py tests/test_cinema_pg_r.py
           python -m py_compile scripts/ci_cinema_pg_v223_codespace_bootstrap.py
@@ -50,6 +51,7 @@ jobs:
           python scripts/ci*pg_r.py
           python -m unittest discover -s tests -p 'test_cinema_pg_n.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_p.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_s.py' -v
           python -m unittest discover -s tests -p 'test_cinema_pg_m.py' -v
           python scripts/ci*pg_m.py
           python scripts/ci*pg_m.py
