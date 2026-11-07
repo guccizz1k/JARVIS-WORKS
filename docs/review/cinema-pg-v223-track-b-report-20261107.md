@@ -1,13 +1,13 @@
 # V22.3 Track B (issue #140) — dev-DB DR / migration preparation and independent QA: work report
 
-**Branch (local, not pushed):** `review/jw-v223-p0-db-dr-claude-20261107` · **base SHA:** `fdf2bd25fde75f7a41edaeb54358e8d60fb433b7`
+**Branch (pushed, review only):** `review/jw-v223-p0-db-dr-claude-20261107` · **base SHA:** `fdf2bd25fde75f7a41edaeb54358e8d60fb433b7` · the integration branch `review/jw-v223-two-track-integration-20261107` (`7018e131`) contains `a1e3364` of this branch; this report's section 6 (re-run of 2026-11-07 afternoon) is on top of it.
 **Date:** 2026-11-07 · **Status words:** PASS / PARTIAL / BLOCKED / NOT RUN as defined in `AGENTS.md`.
 **Nothing was applied to Supabase.** No role, table, constraint, grant or data was changed; no merge, PR or deploy; the only push is this review branch (`main` untouched).
 Track A files, `app/main.py`, the CINEMA HTML/bridges, `main` and PR #139 were not touched.
 
 요약(한국어): 기존 SQL 제안·롤백·백업 도구를 재사용해 읽기 전용으로 검토했고, 실제 개발 DB에는 **조회만** 했습니다.
 새로 만든 것은 (1) 조회 전용 preflight SQL, (2) 이를 시험하는 게이트와 정적 테스트, (3) PG17 CI 워크플로입니다.
-이 환경에는 PG17이 없어 로컬 결과는 PG16.15 보조 증거입니다. 푸시로 실행된 GitHub Actions의 PG17.11 결과(엔진 게이트 222/222, preflight 게이트 19/19, 가드 통과)가 PG17 증거이고, terms·마이그레이션 게이트의 PG17 실행은 **NOT RUN**입니다.
+이 환경에는 PG17이 없어 로컬 결과는 PG16.15 보조 증거입니다. GitHub Actions의 PG17.11 결과(엔진 222/222, preflight 19/19, terms 게이트, 합성 백업 복원)가 PG17 증거이며, 통합 SHA `7018e131`에서 9개 워크플로가 모두 success입니다. 단, 합성 데이터의 복원은 **실제 개발 DB 복원이 아닙니다**(6절 참조).
 개발 DB 변경(역할 생성·제약·부속 테이블)은 모두 사용자의 별도 승인이 필요합니다.
 
 ## 1. Files added (4 new + 1 workflow; no existing file edited)
@@ -27,7 +27,7 @@ package installs are blocked. Raw logs were kept outside the repository (public 
 | item | status | evidence |
 |---|---|---|
 | Engine SQL gate (unchanged engine) | **PASS on PG16.15 and PG17.11** | `scripts.ci_cinema_pg_sql_gate`: 222/222 (PG16: socket and TCP+SCRAM; PG17.11: Actions run 42324804761) |
-| Terms side tables + two-person constraint gate | **PASS on PG16.15** (PG17: NOT RUN) | `scripts.ci_cinema_pg_terms_gate_v223`: 60 checks, 0 failed |
+| Terms side tables + two-person constraint gate | **PASS on PG16.15 and PG17** | `scripts.ci_cinema_pg_terms_gate_v223`: 60 checks, 0 failed (PG16 local); PG17 job success in Actions run 42330382640 at `7018e131` (job-level result; log not read) |
 | New preflight gate | **PASS on PG16.15 and PG17.11** | 19/19 (PG16: socket and TCP+SCRAM; PG17.11: Actions run 42324804761); 2 injected defects were caught by exactly PF.14 and PF.17 |
 | New static tests + related existing tests | **PASS** | 113 passed (`--noconftest`; `tests/conftest.py` needs fastapi) |
 | Backup/migration unit tests already in the repo | **PASS** | 131 passed (`--noconftest`) |
@@ -87,7 +87,44 @@ Before C is used: the owner sets the password locally (`\password jw_backup_ro`)
 (expect `violations: []`, `tables_unreadable: 0`). Backup, encryption, isolated restore and signature comparison on the owner's
 PC need PG17 client tools and psycopg; nothing real was backed up and no data left the project.
 
-## 6. Still blocked / not proven
-PG17 behaviour of the terms and migration gates (the engine and preflight gates did run on PG17.11); the migration gate and the synthetic backup/restore run in this environment; the real Supabase
+## 6. Re-run for the V22.3 Track B priority order (2026-11-07 afternoon, KST)
+Remote state re-read first, nothing assumed from the earlier report: `origin/main` = `9760dad`; `origin/review/jw-v223-p0-db-dr-claude-20261107` = `a1e3364` (ancestor of the integration HEAD `7018e131`, which is not in `main`);
+Track A = `5177cc8`. At `7018e131` all 9 Actions workflows are `completed/success` (run ids 42330382508 ... 42330382703, read with the public GitHub API), among them
+the preflight gate (42330382590), the terms side tables on PG17 (42330382640) and the P0-1 *synthetic* backup restore on two real PG17 clusters (42330382525).
+That synthetic run proves the tool's mechanics (encrypt, decrypt, restore, signature compare, wrong key, bit flip, truncation, partial dump, wrong target, privilege rules)
+on invented data. Its own verdict is `NOT_P0_1_PASS` by design and it is **not** a restore of the development database.
+
+**New defect found by independent QA (fixed): `has_sequence_privilege` on a non-sequence.** While judging three existing login roles with the preflight's rules on the live
+project, the statement failed with `"v201_pending_source_unique" is not a sequence`. Cause: `FROM seq q WHERE has_sequence_privilege(r.oid, q.oid, ...)` — the qual can be
+planned before the `relkind = 'S'` filter of the inlined `seq` CTE, and the function raises for any other relation. The backup tool's own `ROLE_SQL` is safe (the call is an aggregate
+`FILTER` that only sees rows that passed `WHERE relkind = 'S'`). Fix: the preflight now uses `count(*) FILTER (WHERE has_sequence_privilege(...)) FROM seq`.
+Evidence: the same live query with the fix returned (read-only); a new static test fails on the old text and passes on the new one (negative control run); engine gate 222/222 and preflight gate 19/19
+were re-run from scratch on a fresh disposable PG16.15 cluster after the fix (PG17: see the Actions run for this commit).
+
+**Existing accounts against the backup tool's rules (live, SELECT only).** None of them can be the backup source today:
+| role | login / BYPASSRLS | reads all 62 tables | violations |
+|---|---|---|---|
+| `postgres` | yes / yes | yes (`pg_read_all_data`) | 8: createrole, createdb, replication, database_create, schema_create, settable_other_roles, tables_writable (45), sequences_writable |
+| `supabase_etl_admin` | yes / yes | yes | 3: replication, database_create, settable_other_roles |
+| `supabase_read_only_user` | yes / yes | yes, no write privilege | 1: `settable_other_roles` (it may `SET ROLE` to its built-in memberships `pg_monitor`, `pg_read_all_data`) |
+`supabase_read_only_user` is one membership option away from passing, but it is a Supabase-managed role: changing its grants and resetting its password is a change to the project's managed credentials,
+and Supabase may overwrite it. Not recommended; `jw_backup_ro` (change C) remains the proposed route. Nothing was changed.
+
+**Baseline before any change (read-only signature, no row values, no secrets).** Taken 2026-11-07 05:08 UTC from the live project and stored outside the repository:
+schema `jw_dev` 62 tables / 517 columns / 378 constraints / 159 indexes / 99 policies / 71 triggers / 69 functions / 2 sequences, 31 migrations (last `20261105021324`), database size 16.9 MB of which `jw_dev` relations 3.0 MB.
+Per-group md5 values (columns `c60b13dc...`, constraints `d73dca90...`, indexes `f2864e71...`, policies `cae9a187...`, triggers `51723a35...`, functions `16e5f024...`, tables/RLS/owner/ACL `a0b60503...`, the 22 seed rows `b2f53161...`) let the owner prove after A/B/C
+that only the intended objects changed and the 22 existing rows are byte-identical. This is a **fingerprint, not a restorable copy**, so it does not satisfy P0-1; it makes the later "existing data lossless" check possible.
+A safe restorable copy of the current state: not possible through any route available here (no connection string, no PG17 client, no psycopg, no docker daemon, outbound access limited to package registries and GitHub).
+The data is only schema plus 22 seed rows that equal the engine SQL's seed, so the loss risk of the changes below is low, but that is a judgement, not a proof.
+
+**Revised apply order (needs the owner's separate approval; nothing executed).** The priority order asks for a recoverable copy before any business-schema change, and a backup needs `jw_backup_ro`, so the role comes first:
+1. **C** `jw_backup_ro` on the existing 62 tables (no business-schema change; one temporary membership removed in the same transaction). Owner sets the password locally. Preflight as `jw_backup_ro` must show `violations: []`, `tables_unreadable: 0`.
+2. **P0-1 on the real development database** by the owner's PC (PG17 client tools + psycopg): encrypted dump, decrypt check, isolated PG17 restore, signature comparison. Only a PASS here unlocks step 3.
+3. **A** and **B** with VERIFY → REPEAT → ROLLBACK → RE-APPLY.
+4. Re-run the grant remedy from finding 1 (PF.21: clears `tables_unreadable` for the 3 new tables and restores the admin-only membership), then a second backup + restore. The earlier recommendation "B before C" stays valid for a single-pass apply; this order trades one extra grant for having a backup before A/B.
+
+## 7. Still blocked / not proven
+The real backup, encrypted restore and signature comparison of the development database (P0-1, BLOCKED: no `jw_backup_ro`, and this environment has no connection string, psycopg, PG17 client or docker daemon; the synthetic run on PG17 is not evidence for it);
+SQL application A/B/C (BLOCKED: no approval); the migration gate in this environment (needs psycopg; its Actions run at `7018e131` is green); the real Supabase
 effect of C (`CREATE ROLE ... BYPASSRLS` by `postgres` is inferred from the PG16+ rule, not tested there); any HTTP route, UI
 or full-service E2E. Release stays NO-GO as the issue requires.

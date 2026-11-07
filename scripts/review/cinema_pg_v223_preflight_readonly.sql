@@ -84,7 +84,9 @@ facts AS (
          (SELECT count(*) FROM tbl t WHERE has_table_privilege(r.oid, t.oid,
               'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')) AS tables_writable,
          (SELECT count(*) FROM tbl t WHERE t.relrowsecurity) AS rls_tables,
-         (SELECT count(*) FROM seq q WHERE has_sequence_privilege(r.oid, q.oid, 'UPDATE')) AS sequences_writable,
+         -- FILTER, not WHERE: a WHERE qual may be evaluated before the relkind = 'S' filter inside `seq` and
+         -- has_sequence_privilege() raises "is not a sequence" for any other relation. FILTER only sees seq rows.
+         (SELECT count(*) FILTER (WHERE has_sequence_privilege(r.oid, q.oid, 'UPDATE')) FROM seq q) AS sequences_writable,
          (SELECT coalesce(jsonb_agg(r2.rolname ORDER BY r2.rolname), '[]'::jsonb)
             FROM pg_auth_members am JOIN pg_roles r2 ON r2.oid = am.roleid WHERE am.member = r.oid) AS member_of
     FROM subj sj JOIN pg_roles r ON r.oid = sj.oid

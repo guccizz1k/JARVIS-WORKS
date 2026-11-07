@@ -91,6 +91,15 @@ def test_privileged_builtin_roles_equal_the_tool_list():
         assert f"'{role}'" in SQL
 
 
+def test_sequence_privilege_is_only_evaluated_on_rows_that_passed_the_relkind_filter():
+    # has_sequence_privilege() raises "is not a sequence" for any other relation. A plain WHERE qual may be planned
+    # before the relkind = 'S' filter inside the `seq` CTE (seen on the live project), so only FILTER is allowed.
+    code = code_only(SQL)
+    allowed = re.compile(r"FILTER\s*\(\s*WHERE\s+has_sequence_privilege", re.IGNORECASE)
+    assert allowed.search(code), "the sequence privilege check must be an aggregate FILTER"
+    assert "has_sequence_privilege" not in allowed.sub("", code), "a bare has_sequence_privilege() call is not allowed"
+
+
 def test_gate_expectation_list_has_no_duplicates_and_covers_order_trap():
     assert len(gate.EXPECTED) == len(set(gate.EXPECTED))
     assert {"PF.20", "PF.21"} <= set(gate.EXPECTED)
