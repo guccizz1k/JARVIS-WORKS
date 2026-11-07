@@ -16,13 +16,15 @@ class VerifiedCAGate(unittest.TestCase):
         self.assertEqual(s.PORT, 5432)
         self.assertEqual(s.SSL_REQUEST, bytes.fromhex("0000000804d2162f"))
 
-    def test_only_supabase_https_ca_candidates(self):
-        self.assertTrue(s.OFFICIAL_URLS)
-        self.assertTrue(all(x.startswith("https://supabase.com/") for x in s.OFFICIAL_URLS))
+    def test_missing_dashboard_ca_fails_closed(self):
+        with patch.object(s.CERT_FILE, "is_symlink", return_value=False), \\
+             patch.object(s.CERT_FILE, "is_file", return_value=False):
+            with self.assertRaises(ValueError):
+                s.load_dashboard_ca()
 
     def test_outside_codespaces_denied(self):
         with patch.dict(os.environ, {"CODESPACES": "false"}), \
-             patch.object(s, "existing_or_download") as f:
+             patch.object(s, "load_dashboard_ca") as f:
             self.assertEqual(s.main(), 2)
             f.assert_not_called()
 
@@ -36,7 +38,7 @@ class VerifiedCAGate(unittest.TestCase):
 
     def test_nothing_printed_from_secret_exception(self):
         with patch.dict(os.environ, {"CODESPACES": "true"}), \
-             patch.object(s, "existing_or_download", side_effect=ValueError("veryprivate")):
+             patch.object(s, "load_dashboard_ca", side_effect=ValueError("veryprivate")):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(s.main(), 2)
@@ -44,7 +46,7 @@ class VerifiedCAGate(unittest.TestCase):
 
     def test_tls_pass_is_network_only(self):
         with patch.dict(os.environ, {"CODESPACES": "true"}), \
-             patch.object(s, "existing_or_download", return_value=b"pem"), \
+             patch.object(s, "load_dashboard_ca", return_value=b"pem"), \
              patch.object(s, "verify_tls", return_value="CA_CHAIN_AND_HOST_VERIFIED"):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
@@ -54,7 +56,7 @@ class VerifiedCAGate(unittest.TestCase):
 
     def test_nonverified_tls_denies(self):
         with patch.dict(os.environ, {"CODESPACES": "true"}), \
-             patch.object(s, "existing_or_download", return_value=b"pem"), \
+             patch.object(s, "load_dashboard_ca", return_value=b"pem"), \
              patch.object(s, "verify_tls", return_value="CERT_CHAIN_STILL_INVALID"):
             self.assertEqual(s.main(), 2)
 
