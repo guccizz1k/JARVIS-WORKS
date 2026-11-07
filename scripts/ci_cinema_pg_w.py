@@ -155,6 +155,22 @@ def check_manifest(m,encrypted,expected_fingerprint=None,expected_tables=62,post
         len(sig.get("tables",[]))!=expected_tables or
         sum(int(v[0]) for v in sig.get("rows",{}).values())!=22):
         raise BackupError("BLOCKED_MANIFEST_SIGNATURE_COUNTS")
+    if postab:
+        needed_tables={"cinema_pg_quotes","cinema_pg_order_terms",
+                       "cinema_pg_invoice_terms","cinema_pg_payment_notes"}
+        actual_tables={row[0] for row in sig["tables"]
+                       if isinstance(row,(list,tuple)) and len(row)>=3}
+        if not needed_tables.issubset(actual_tables):
+            raise BackupError("BLOCKED_POSTAB_REQUIRED_TABLES_MISSING")
+        needed_funcs={
+            "jw_dev.cinema_pg_order_terms_set(text,text,date)",
+            "jw_dev.cinema_pg_invoice_terms_set(text,text,date)",
+            "jw_dev.cinema_pg_payment_note_set(text,text,text)",
+        }
+        actual_funcs={row[0] for row in sig.get("functions",[])
+                      if isinstance(row,(list,tuple)) and len(row)==2}
+        if not needed_funcs.issubset(actual_funcs):
+            raise BackupError("BLOCKED_POSTAB_REQUIRED_FUNCTIONS_MISSING")
     roles=m.get("roles")
     if (not isinstance(roles,list) or len(roles)>64 or
         len(set(roles))!=len(roles) or
