@@ -17,8 +17,8 @@ class VerifiedCAGate(unittest.TestCase):
         self.assertEqual(s.SSL_REQUEST, bytes.fromhex("0000000804d2162f"))
 
     def test_missing_dashboard_ca_fails_closed(self):
-        with patch.object(s.CERT_FILE, "is_symlink", return_value=False), \\
-             patch.object(s.CERT_FILE, "is_file", return_value=False):
+        with (patch.object(s.CERT_FILE, "is_symlink", return_value=False),
+              patch.object(s.CERT_FILE, "is_file", return_value=False)):
             with self.assertRaises(ValueError):
                 s.load_dashboard_ca()
 
