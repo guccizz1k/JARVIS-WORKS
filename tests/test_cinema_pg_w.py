@@ -130,6 +130,41 @@ class RestoreOnlySafety(unittest.TestCase):
                 self.assertEqual(w.find_or_import_archive(),triplet[:3])
                 move.assert_called_once()
 
+    def test_schema_function_only_grantees_are_source_verified(self):
+        self.assertEqual(
+            set(w.SOURCE_VERIFIED_SCHEMA_FUNCTION_ONLY_GRANTEES),
+            {"jw_auth_stage_v85", "jw_dev_import_review_executor_v201"})
+        self.assertTrue(all(name.startswith("jw_") for name in
+                            w.SOURCE_VERIFIED_SCHEMA_FUNCTION_ONLY_GRANTEES))
+
+    def test_pg_restore_error_is_redacted_to_stable_category(self):
+        import subprocess
+        dsn="postgresql://postgres:secret_pass@127.0.0.1:55432/postgres"
+        errors=[
+            ('pg_restore: ERROR: role "jw_auth_stage_v85" does not exist',
+             "MISSING_GRANTEE_ROLE"),
+            ('pg_restore: ERROR: permission denied for schema jw_dev',
+             "PERMISSION_DENIED"),
+            ('pg_restore: ERROR: function extensions.hmac(text,text,text) does not exist',
+             "FUNCTION_DEPENDENCY_MISSING"),
+            ('pg_restore: ERROR: secret-host result',
+             "OTHER_PG_RESTORE_ERROR"),
+        ]
+        for message,expected in errors:
+            proc=subprocess.CompletedProcess([],1,stdout="",stderr=message)
+            with patch.object(w.subprocess,"run",return_value=proc):
+                outcome=w.run_restore_with_reason(
+                    ["pg_restore","--exit-on-error"],dsn,db="postgres",seconds=10)
+            self.assertEqual(outcome,expected)
+            self.assertNotIn("jw_auth_stage",outcome)
+            self.assertNotIn("secret",outcome)
+
+    def test_diagnostic_does_not_allow_arbitrary_command(self):
+        from scripts.pg_backup_v223 import BackupError
+        with self.assertRaises(BackupError):
+            w.run_restore_with_reason(
+                ["psql","--exit-on-error"],"bad",db="postgres",seconds=10)
+
     def test_main_without_approved_codespace_never_opens_target(self):
         with patch.dict(os.environ,{"CODESPACES":"false"}), \
              patch.object(w,"read_private_target") as target:
