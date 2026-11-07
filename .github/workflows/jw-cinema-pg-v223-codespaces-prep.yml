@@ -22,6 +22,7 @@ jobs:
         run: |
           set -euo pipefail
           python -I scripts/ci_cinema_pg_guard.py
+          python -m py_compile scripts/ci_cinema_pg_r.py tests/test_cinema_pg_r.py
           python -m py_compile scripts/ci_cinema_pg_v223_codespace_bootstrap.py
           python -m py_compile scripts/ci_cinema_pg_v223_codespace_check.py tests/test_cinema_pg_v223_codespace_check.py
       - name: Fail-closed tools-only tests; NEVER touch database
@@ -35,3 +36,15 @@ jobs:
           test "$rc" -eq 2
           grep -F 'BLOCKED: only an approved GitHub Codespace may prepare the tools' <<< "$out"
           echo 'PASS: no database accessed; real backup NOT RUN.'
+      - name: Mobile short-command isolated PG17 exercise (synthetic, never Supabase)
+        env:
+          CODESPACES: "true"
+        run: |
+          set -euo pipefail
+          trap 'docker rm -f jw-v223-restore >/dev/null 2>&1 || true; rm -f "$HOME/.local/share/jw-v223-restore/restore.sh"' EXIT
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt
+          python -m unittest discover -s tests -p 'test_cinema_pg_r.py' -v
+          python scripts/ci*pg_r.py
+          test "$(stat -c %a "$HOME/.local/share/jw-v223-restore/restore.sh")" = "600"
+          test "$(docker inspect --format '{{ (index (index .NetworkSettings.Ports "5432/tcp") 0).HostIp }}' jw-v223-restore)" = "127.0.0.1"
+          echo 'PASS: local disposable PG17 only, Supabase untouched, no real backup.'
