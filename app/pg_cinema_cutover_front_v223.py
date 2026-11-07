@@ -136,15 +136,89 @@ class CutoverFront:
                 for key, value in message.get("headers", []):
                     if key.lower() == b"set-cookie" and value.startswith((UPSTREAM_COOKIE + "=").encode()):
                         attrs = {part.strip().lower() for part in value.split(b";")[1:]}
-                        if (b"secure" not in attrs or b"path=/" not in attrs
+                        if (b"path=/" not in attrs
                                 or any(part.startswith(b"domain=") for part in attrs)):
                             raise CutoverRefused("insecure_upstream_session", 503)
+                        if b"secure" not in attrs:
+                            # SQLite's historical logout deletes the cookie without Secure.
+                            # Permit ONLY the explicit empty, Max-Age=0 deletion and
+                            # upgrade it to a valid __Host- Secure deletion. Never
+                            # accept an insecure cookie that can create a session.
+                            raw_value = value.split(b";", 1)[0].split(b"=", 1)[1]
+                            if raw_value not in (b"", b'""') or b"max-age=0" not in attrs:
+                                raise CutoverRefused("insecure_upstream_session", 503)
+                            value += b"; Secure; HttpOnly"
                         value = (cookie_name + "=").encode() + value[len(UPSTREAM_COOKIE)+1:]
                     headers.append((key, value))
                 message = {**message, "headers": headers}
             await send(message)
 
         return await app(new_scope, receive, wrapped_send)
+
+    async def _dual_logout(self, scope, receive, send):
+        """Revoke both *independent* sessions; a partial failure is never success.
+
+        The browser must supply the SQLite CSRF in X-CSRF-Token and the separately
+        issued PG CSRF in X-JW-PG-CSRF. Neither password nor session is reused
+        across stores. PG revocation precedes SQLite; if SQLite fails, only
+        the PG cookie is cleared and a retry can still revoke SQLite.
+        """
+        request = Request(scope, receive=receive)
+        if request.headers.get("Sec-Fetch-Site") == "cross-site":
+            raise CutoverRefused("cross_site_logout_denied", 403)
+        origin = request.headers.get("Origin", "")
+        if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+            raise CutoverRefused("cross_site_logout_denied", 403)
+        pg_csrf = request.headers.get("X-JW-PG-CSRF", "")
+        legacy_csrf = request.headers.get("X-CSRF-Token", "")
+        if not pg_csrf:
+            raise CutoverRefused("pg_logout_required_first")
+        if not legacy_csrf:
+            raise CutoverRefused("dual_logout_csrf_required", 403)
+        pg_token = _safe_cookie(scope, PG_COOKIE)
+        legacy_token = _safe_cookie(scope, LEGACY_COOKIE)
+        if len(pg_token) < 30 or len(legacy_token) < 30:
+            raise CutoverRefused("reauthentication_required", 401)
+
+        async def revoke(app, path, token, csrf):
+            # Internal ASGI call uses the ORIGINAL upstream cookie name.
+            # Do not forward other cookies, credentials, Origin, or client
+            # authorization headers to the wrong credential store.
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="https://testserver", timeout=15
+            ) as client:
+                return await client.post(path, headers={
+                    "Cookie": f"{UPSTREAM_COOKIE}={token}", "X-CSRF-Token": csrf,
+                })
+
+        try:
+            pg = await revoke(self.pg_app, "/api/pg-stage/v85/logout", pg_token, pg_csrf)
+        except Exception as exc:
+            raise CutoverRefused("pg_logout_unavailable", 503) from exc
+        if pg.status_code != 200:
+            raise CutoverRefused("pg_logout_denied", 403 if pg.status_code in (401, 403) else 503)
+        try:
+            pg_result = pg.json()
+        except ValueError:
+            pg_result = {}
+        if pg_result.get("ok") is not True:
+            raise CutoverRefused("pg_logout_unverified", 503)
+        try:
+            legacy = await revoke(self.legacy_app, "/api/logout", legacy_token, legacy_csrf)
+            legacy_ok = legacy.status_code == 200 and legacy.json().get("ok") is True
+        except Exception:
+            legacy_ok = False
+
+        response = JSONResponse(
+            {"ok": True} if legacy_ok else {"code": "partial_logout_legacy_pending"},
+            status_code=200 if legacy_ok else 409,
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
+        response.delete_cookie(PG_COOKIE, path="/", secure=True, httponly=True, samesite="strict")
+        if legacy_ok:
+            response.delete_cookie(LEGACY_COOKIE, path="/", secure=True, httponly=True, samesite="strict")
+        await response(scope, receive, send)
 
     async def _identity(self, scope, cookie_name, resolver):
         token = _safe_cookie(scope, cookie_name)
@@ -212,7 +286,7 @@ class CutoverFront:
                 return await self._forward(self.pg_app, scope, receive, send, PG_COOKIE)
             if not is_trade(path):
                 if path == "/api/logout" and _safe_cookie(scope, PG_COOKIE):
-                    raise CutoverRefused("pg_logout_required_first")
+                    return await self._dual_logout(scope, receive, send)
                 if _ID_PART.search(path):
                     raise CutoverRefused("pg_document_feature_unsupported")
                 if path in ("/api/dashboard", "/api/order-analytics"):
