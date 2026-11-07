@@ -6,6 +6,8 @@ import io
 import os
 import ssl
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from scripts import ci_cinema_pg_s as s
@@ -17,8 +19,7 @@ class VerifiedCAGate(unittest.TestCase):
         self.assertEqual(s.SSL_REQUEST, bytes.fromhex("0000000804d2162f"))
 
     def test_missing_dashboard_ca_fails_closed(self):
-        with (patch.object(s.CERT_FILE, "is_symlink", return_value=False),
-              patch.object(s.CERT_FILE, "is_file", return_value=False)):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(s, "CERT_FILE", Path(tmp) / "missing.crt"):
             with self.assertRaises(ValueError):
                 s.load_dashboard_ca()
 
