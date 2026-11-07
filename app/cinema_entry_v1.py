@@ -17,7 +17,7 @@ import os
 import re
 from pathlib import Path
 from fastapi.responses import HTMLResponse
-from .pg_cinema_cutover_ui_v223 import optional_bridge
+from app.pg_cinema_cutover_ui_v223 import optional_bridge
 
 ROOT = Path(__file__).resolve().parent
 ROOT_UI_ENV = 'JW_ROOT_UI'
