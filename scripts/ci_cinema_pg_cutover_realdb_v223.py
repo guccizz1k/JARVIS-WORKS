@@ -269,6 +269,14 @@ def run() -> int:
                 legacy_token = c.cookies.get(cut.LEGACY_COOKIE)
                 check(isinstance(legacy_token, str) and len(legacy_token) >= 30,
                       "SQLITE_COOKIE_PRESENT_BEFORE_DUAL_LOGOUT")
+                get_attempt = c.get("/api/logout", headers={
+                    "X-CSRF-Token": sqlite_csrf, "X-JW-PG-CSRF": pg_csrf
+                })
+                check(get_attempt.status_code == 405, "GET_LOGOUT_NEVER_REVOKES")
+                head_attempt = c.head("/api/logout", headers={
+                    "X-CSRF-Token": sqlite_csrf, "X-JW-PG-CSRF": pg_csrf
+                })
+                check(head_attempt.status_code == 405, "HEAD_LOGOUT_NEVER_REVOKES")
                 no_pg_csrf = c.post("/api/logout", headers={
                     "X-CSRF-Token": sqlite_csrf
                 })
