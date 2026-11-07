@@ -43,26 +43,30 @@ class Diagnostics(unittest.TestCase):
             self.assertEqual(d.main(), 2)
         self.assertIn("SOURCE_PSQL_DIAGNOSTIC=PSQL_PROCESS_TIMEOUT", out.getvalue())
 
-    def test_network_tls_gate_before_process(self):
-        from unittest.mock import MagicMock
-        cert = MagicMock()
-        cert.read_bytes.return_value=b"pem"
+    def test_invalid_local_ca_blocks_before_libpq(self):
         with patch.object(d, "read_password_file", return_value="longsecret"), \
-             patch.object(d, "load_dashboard_ca"), \
-             patch.object(d, "CERT_FILE", cert), \
-             patch.object(d, "verify_tls", return_value="TLS_NOT_VERIFIED"), \
-             patch.object(d.shutil if hasattr(d,'shutil') else __import__('shutil'), "which", return_value="/usr/bin/psql"), \
+             patch.object(d, "load_dashboard_ca", side_effect=ValueError("invalid_CA_secret")), \
+             patch("shutil.which", return_value="/usr/bin/psql"), \
              patch.object(d.subprocess, "run") as run:
-            self.assertEqual(d.probe_login(), "TLS_NOT_VERIFIED")
+            with self.assertRaises(ValueError):
+                d.probe_login()
             run.assert_not_called()
+
+    def test_libpq_certificate_failure_classified(self):
+        import subprocess
+        fake = subprocess.CompletedProcess([], 2, stdout="",
+               stderr="SSL error: certificate verify failed [sensitive hostname]")
+        with patch.object(d, "read_password_file", return_value="private-password"), \
+             patch.object(d, "load_dashboard_ca"), \
+             patch("shutil.which", return_value="/usr/bin/psql"), \
+             patch.object(d.subprocess, "run", return_value=fake):
+            self.assertEqual(d.probe_login(), "TLS_VERIFICATION_FAILED")
 
     def test_process_environment_no_password_in_args(self):
         import subprocess
         fake=subprocess.CompletedProcess([],0,stdout="jw_backup_ro|jw_backup_ro|postgres|170011\n",stderr="")
         with patch.object(d,"read_password_file",return_value="private-password"), \
              patch.object(d,"load_dashboard_ca"), \
-             patch.object(d.CERT_FILE.__class__,"read_bytes",return_value=b"pem"), \
-             patch.object(d,"verify_tls",return_value="CA_CHAIN_AND_HOST_VERIFIED"), \
              patch("shutil.which",return_value="/usr/bin/psql"), \
              patch.object(d.subprocess,"run",return_value=fake) as run:
             self.assertEqual(d.probe_login(),"PSQL_LIVE_LOGIN_OK")
@@ -70,6 +74,8 @@ class Diagnostics(unittest.TestCase):
         self.assertNotIn("private-password", str(args))
         self.assertIn("private-password", str(kwargs["env"]["PGPASSWORD"]))
         self.assertEqual(kwargs["env"]["PGSSLMODE"],"verify-full")
+        self.assertEqual(kwargs["env"]["PGGSSENCMODE"],"disable")
+        self.assertTrue(kwargs["env"]["PGSSLROOTCERT"].endswith("/prod-ca-2021.crt"))
         self.assertEqual(kwargs["env"]["PGUSER"],"jw_backup_ro.rvymwwzclagvljnofyss")
         self.assertIn("ON_ERROR_STOP=1",args[0])
 
