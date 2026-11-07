@@ -52,7 +52,7 @@ class LocalRestoreGate(unittest.TestCase):
         body = Path(r.__file__).read_text()
         self.assertIn('"127.0.0.1:55432:5432", "postgres:17"', body)
         self.assertIn('os.O_EXCL', body)
-        self.assertIn('os.O_NOFOLLOW', body)
+        self.assertIn('getattr(os, "O_NOFOLLOW", 0)', body)
 
 
 if __name__ == "__main__":
