@@ -32,6 +32,16 @@ PRIVATE=Path.home()/".local/share/jw-v223-restore/real-backup-input"
 PROJECT="rvymwwzclagvljnofyss"
 SCHEMA="jw_dev"
 FINGERPRINT="afd89e64e80ecbc8216af114e0682ee7"
+# Independently confirmed in the live DEV catalog (read-only, 2026-11-07).
+# Windows exporter v1 inventories table ACL and policy grantees, but excludes
+# schema and function ACL grantees. pg_dump includes those GRANTs regardless.
+# Only locally created NOLOGIN placeholder roles are permitted on the disposable
+# restore cluster; the source Supabase role definitions are NEVER modified.
+SOURCE_VERIFIED_SCHEMA_FUNCTION_ONLY_GRANTEES = (
+    "jw_auth_stage_v85",
+    "jw_dev_import_review_executor_v201",
+)
+
 ARCHIVE_RE=re.compile(r"\d{8}-\d{6}Z-[0-9a-f]{6}\.jwpgbk\Z")
 ROLE_RE=re.compile(r"[a-z][a-z0-9_]{0,62}\Z")
 
@@ -154,6 +164,40 @@ def run_pg(args,dsn,db="postgres",seconds=120):
     except (OSError,subprocess.TimeoutExpired):
         return False
 
+def run_restore_with_reason(args,dsn,db,seconds):
+    """pg_restore only: report a fixed error class, never SQL/error contents."""
+    if not args or args[0]!="pg_restore" or "--exit-on-error" not in args:
+        raise BackupError("BLOCKED_RESTORE_COMMAND_GUARD")
+    d=parse_dsn(dsn)
+    env=dict(os.environ)
+    env.update(PGHOST="127.0.0.1",PGPORT="55432",PGUSER="postgres",
+               PGPASSWORD=d["password"],PGDATABASE=db,PGSSLMODE="disable",
+               PGCONNECT_TIMEOUT="6")
+    try:
+        p=subprocess.run(args,env=env,capture_output=True,text=True,
+                         check=False,timeout=seconds)
+    except subprocess.TimeoutExpired:
+        return "TIMEOUT"
+    except OSError:
+        return "CLIENT_UNAVAILABLE"
+    if p.returncode==0:
+        return "PASS"
+    error=p.stderr.lower()
+    if "role " in error and "does not exist" in error:
+        return "MISSING_GRANTEE_ROLE"
+    if "permission denied" in error:
+        return "PERMISSION_DENIED"
+    if "extension " in error and "does not exist" in error:
+        return "EXTENSION_MISSING"
+    if "function " in error and "does not exist" in error:
+        return "FUNCTION_DEPENDENCY_MISSING"
+    if "relation " in error and "does not exist" in error:
+        return "RELATION_DEPENDENCY_MISSING"
+    if "already exists" in error:
+        return "UNEXPECTED_TARGET_OBJECT_EXISTS"
+    return "OTHER_PG_RESTORE_ERROR"
+
+
 def negatives(archive,key,wd):
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     out={}
@@ -275,9 +319,20 @@ def verify_restore():
         try:
             with psycopg.connect(dsn,autocommit=True,connect_timeout=6) as c:
                 verify_ephemeral_target(c,token)
-                for role in roles:
-                    if not c.execute("SELECT 1 FROM pg_roles WHERE rolname=%s",(role,)).fetchone():
+                # The source manifest misses two schema/function-only grantees.
+                # Without them, pg_restore aborts when replaying source GRANTs.
+                all_roles=sorted(set(roles)|set(SOURCE_VERIFIED_SCHEMA_FUNCTION_ONLY_GRANTEES))
+                for role in all_roles:
+                    attributes=c.execute(
+                        "SELECT rolcanlogin,rolsuper,rolcreatedb,rolcreaterole,"
+                        "rolreplication,rolbypassrls FROM pg_roles WHERE rolname=%s",
+                        (role,)).fetchone()
+                    if attributes is None:
+                        if role=="postgres":
+                            raise BackupError("BLOCKED_LOCAL_POSTGRES_ADMIN_MISSING")
                         c.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
+                    elif role!="postgres" and any(attributes):
+                        raise BackupError("BLOCKED_LOCAL_GRANTEE_ROLE_NOT_RESTRICTED")
                 c.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(db)))
                 created=True
             # Mirror the source's non-business pgcrypto dependency in the
@@ -285,10 +340,11 @@ def verify_restore():
             with psycopg.connect(dsn,dbname=db,connect_timeout=6,autocommit=True) as c:
                 c.execute("CREATE SCHEMA IF NOT EXISTS extensions")
                 c.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions")
-            ok=run_pg(["pg_restore","--exit-on-error","--dbname",db,str(plaintext)],
-                      dsn,db=db,seconds=360)
-            if not ok:
-                raise BackupError("BLOCKED_INDEPENDENT_RESTORE_FAILED")
+            restore_status=run_restore_with_reason(
+                ["pg_restore","--no-owner","--exit-on-error","--dbname",db,str(plaintext)],
+                dsn,db=db,seconds=360)
+            if restore_status!="PASS":
+                raise BackupError("BLOCKED_INDEPENDENT_RESTORE_"+restore_status)
             with psycopg.connect(dsn,dbname=db,connect_timeout=6) as c:
                 actual=fetch_signature(c,SCHEMA)
             mismatch=diff_signatures(m["signature"],actual)
