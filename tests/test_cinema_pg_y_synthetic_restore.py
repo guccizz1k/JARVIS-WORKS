@@ -91,10 +91,10 @@ def main():
                       "CHECK (status NOT IN ('approved','ordered') OR "
                       "(submitted_by IS NOT NULL AND approved_by IS NOT NULL "
                       "AND approved_by IS DISTINCT FROM submitted_by))")
-            for name,args in (("cinema_pg_order_terms_set","text,text,date"),
+            for func_name,args in (("cinema_pg_order_terms_set","text,text,date"),
                               ("cinema_pg_invoice_terms_set","text,text,date"),
                               ("cinema_pg_payment_note_set","text,text,text")):
-                c.execute(f"CREATE FUNCTION jw_dev.{name}({args}) RETURNS integer "
+                c.execute(f"CREATE FUNCTION jw_dev.{func_name}({args}) RETURNS integer "
                           "LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog "
                           "AS 'SELECT 1'")
             for i in range(22):
