@@ -82,6 +82,16 @@ def run() -> int:
             # CI-only PG logout endpoint backed by a REAL disposable PG17 session
             # row. It tests cross-store session revocation; actual V8.5 role
             # delegation is separately covered in the integrated TLS gate.
+            @pg.post("/api/pg-stage/v85/login")
+            def pg_test_login(response: Response):
+                # Issue a real __Host cookie through HTTP response, not a
+                # manually inserted httpx cookie jar entry (which lacks the
+                # correct host-only domain and Secure attributes).
+                response.set_cookie(cut.UPSTREAM_COOKIE, pg_token,
+                                    path="/", secure=True, httponly=True,
+                                    samesite="strict")
+                return {"csrf_token": pg_csrf}
+
             @pg.post("/api/pg-stage/v85/logout")
             def pg_test_logout(request: Request, response: Response):
                 token = request.cookies.get(cut.UPSTREAM_COOKIE, "")
@@ -180,7 +190,10 @@ def run() -> int:
                         "VALUES (%s,%s,'ci-ua',(now()+interval '1 hour')::text,%s,now()::text)",
                         ("ci-cutover", hashlib.sha256(pg_token.encode()).hexdigest(), pg_csrf)
                     )
-                c.cookies.set(cut.PG_COOKIE, pg_token, path="/")
+                pg_login = c.post("/api/pg-stage/v85/login")
+                check(pg_login.status_code == 200 and cut.PG_COOKIE in c.cookies
+                      and cut.UPSTREAM_COOKIE not in c.cookies,
+                      "PG_BROWSER_COOKIE_ISSUED_VIA_HTTP")
                 enabled.add("ci-a")
                 bad_csrf = c.post("/api/customers", json={
                     "name": "PG Partner", "business_number": "8111111111"
