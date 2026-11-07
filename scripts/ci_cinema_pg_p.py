@@ -11,7 +11,10 @@ from __future__ import annotations
 import os
 import socket
 import ssl
+import sys
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.ci_cinema_pg_n import probe_tls
 
 # ap-northeast-2 from Supabase project metadata. The aws-0/aws-1 numbering
