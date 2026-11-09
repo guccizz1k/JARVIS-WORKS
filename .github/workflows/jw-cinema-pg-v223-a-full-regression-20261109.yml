@@ -1,0 +1,57 @@
+name: JW V22.3 Track A final-tree full Python regression
+on:
+  push:
+    branches:
+      - review/jw-v223-a-cookie-boundary-20261109
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v223-full-pytest:
+    name: New 19 tests plus protected full regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert protected original and exact patch scope
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD
+          # app/ and db/ stay byte-identical to the approved base EXCEPT three new files (PG compat request
+          # translation, response view, and the gated legacy-contract router, V22.3) and ONE modified file (the
+          # isolated PG review composition that registers that router behind its gate). Anything else fails.
+          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_(compat_v1|compat_view_v1|legacy_api_v1|cutover_front_v223)\.py$' | grep -Ev '^M[[:space:]]+app/(pg_review_integrated_v202|cinema_entry_v1)\.py$' | grep -Ev '^A[[:space:]]+app/pg_cinema_cutover_ui_v223\.py$' || true)"
+          test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
+          python3 -I scripts/ci_cinema_pg_guard.py
+      - name: Install full project test prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
+      - name: Execute new backup security tests and all application tests
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_legacy_fixture_v1.py
+          python3 -m pytest -q -ra -p no:cacheprovider --junitxml=v223-all-pytest.xml tests
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('v223-all-pytest.xml').getroot()
+          nodes=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          count={k:sum(int(n.get(k,0)) for n in nodes) for k in ('tests','failures','errors','skipped')}
+          assert count['tests']>=2904 and all(count[k]==0 for k in ('failures','errors','skipped')),count
+          print('PASS_V223_FULL_REGRESSION',count)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v223-a-cookie-full-regression-junit
+          path: v223-all-pytest.xml
+          retention-days: 5
