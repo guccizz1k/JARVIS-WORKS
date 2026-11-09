@@ -23,6 +23,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -57,6 +58,12 @@ PINNED_PATHS = (
     "scripts/ci_cinema_pg_q.py", "scripts/ci_cinema_pg_s.py", "scripts/ci_cinema_pg_u.py",
 )
 SHA_RE = re.compile(r"[0-9a-f]{40}")
+BACKUP_COMMAND = [sys.executable, "-m", "scripts.pg_backup_v223", "run"]   # the pinned engine; a gate may substitute a stand-in
+BACKUP_TIMEOUT_S = 3600
+ERROR_LOG = BACKUP_DIR.parent / "last_backup_error.log"                    # owner-only (0600) scrubbed diagnostic; never printed
+REVOKE_ATTEMPTS = 3
+RETRY_PAUSE_S = 5
+LOGIN_SSLMODE = "verify-full"
 
 
 class Blocked(Exception):
@@ -64,7 +71,55 @@ class Blocked(Exception):
 
 
 class Ambiguous(Blocked):
-    """The renewal may or may not have reached the database (timeout): the role must be closed again to be safe."""
+    """The renewal may or may not have reached the database: the role must be closed again to be safe."""
+
+
+def secret_values(environ: dict | None = None) -> list[str]:
+    """Every secret this procedure can hold, in raw and URL-quoted form, for scrubbing text that is not ours."""
+    from urllib.parse import quote
+    env = os.environ if environ is None else environ
+    found: set[str] = set()
+    for name in ("JW_PG_BACKUP_KEY", "JW_PG_TARGET_EPHEMERAL_TOKEN"):
+        if env.get(name):
+            found.add(env[name])
+    for name in ("JW_PG_ADMIN_DSN", "JW_PG_SOURCE_DSN", "JW_PG_TARGET_ADMIN_DSN"):
+        dsn = env.get(name, "")
+        if dsn:
+            found.add(dsn)
+            try:
+                found.add(parse_dsn(dsn)["password"])
+            except Exception:
+                pass
+    try:
+        found.add(json.loads(CREDS.read_text(encoding="utf-8"))["password"])
+    except Exception:
+        pass
+    found.update(quote(value, safe="") for value in list(found))
+    return sorted((v for v in found if len(v) >= 6), key=len, reverse=True)
+
+
+def scrub(text: str, environ: dict | None = None) -> str:
+    """Remove known secret values and any URL credentials / password settings from text that came from another program."""
+    out = text or ""
+    for value in secret_values(environ):
+        out = out.replace(value, "***")
+    out = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)[^/\s@]*@", r"\1***@", out)
+    out = re.sub(r"(?i)\b(password|passwd|pwd|key|token|secret)\s*[=:]\s*\S+", r"\1=***", out)
+    return out
+
+
+def classify_login_failure(exc: BaseException) -> str:
+    """``auth_rejected`` only when the SERVER answered the login with an authentication/authorization refusal.
+    DNS, TCP, TLS, timeouts and anything unrecognised are ``transport_or_unknown`` and prove nothing about the role."""
+    state = getattr(exc, "sqlstate", None)
+    if isinstance(state, str) and state.startswith("28"):
+        return "auth_rejected"
+    text = str(exc).lower()
+    if "fatal:" in text:
+        after = text.split("fatal:", 1)[1]
+        if any(mark in after for mark in ("not permitted to log in", "password authentication failed", "authentication failed")):
+            return "auth_rejected"
+    return "transport_or_unknown"
 
 
 def now() -> datetime:
@@ -186,15 +241,23 @@ def stage_target() -> dict:
     return {"restore_target": "up_marked_and_empty"}
 
 
-def stage_renew() -> dict:
-    value = renew_value()
+def stage_renew(on_attempt=None) -> dict:
+    """``on_attempt`` fires immediately BEFORE the privileged psql starts: from then on the server may have committed the change
+    even if the client reports a failure, so the caller must close the role whatever happens next."""
+    value = renew_value()                       # a Blocked here means nothing was sent to any database
+    if on_attempt is not None:
+        on_attempt()
     try:
         done = psql("JW_PG_ADMIN_DSN", RENEW_SQL, {"valid_until": value})
     except subprocess.TimeoutExpired:
         raise Ambiguous("renewal timed out, state unknown: the revoke stage will close the role")
+    except OSError:
+        raise Ambiguous("renewal could not be started, state unknown: the revoke stage will close the role")
     if done.returncode:
-        raise Blocked("renewal refused or failed: " + ("approval window closed" if "closed" in done.stderr else
-                      "limit rule" if "renewal window" in done.stderr else "database error"))
+        category = ("approval window closed" if "closed" in done.stderr else
+                    "limit rule" if "renewal window" in done.stderr else "database or connection error")
+        raise Ambiguous(f"renewal reported failure (exit {done.returncode}, {category}); the server may still have applied it, "
+                        "the revoke stage will close the role")
     return {"valid_until": value}
 
 
@@ -258,44 +321,86 @@ def evaluate_summary(summary: dict) -> list[str]:
     return failures
 
 
+def write_error_log(done: subprocess.CompletedProcess, environ: dict | None = None) -> str:
+    """Independently scrubbed diagnostic for the owner, mode 0600, never printed, never put into the summary."""
+    body = "\n".join(("exit_code=" + str(done.returncode), "--- stdout (tail) ---", scrub(done.stdout or "", environ)[-2000:],
+                      "--- stderr (tail) ---", scrub(done.stderr or "", environ)[-2000:]))
+    ERROR_LOG.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    ERROR_LOG.unlink(missing_ok=True)
+    fd = os.open(ERROR_LOG, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(body)
+    return str(ERROR_LOG)
+
+
 def stage_backup() -> dict:
-    done = subprocess.run([sys.executable, "-m", "scripts.pg_backup_v223", "run"], cwd=ROOT, env=backup_env(),
-                          capture_output=True, text=True, timeout=3600, check=False)
+    env = backup_env()
+    try:
+        done = subprocess.run(BACKUP_COMMAND, cwd=ROOT, env=env, capture_output=True, text=True,
+                              timeout=BACKUP_TIMEOUT_S, check=False)
+    except subprocess.TimeoutExpired:
+        raise Blocked("backup tool timed out")
     try:
         summary = json.loads(done.stdout)
+        if not isinstance(summary, dict):
+            raise ValueError
     except ValueError:
-        raise Blocked("backup tool produced no summary (exit " + str(done.returncode) + "): " + done.stderr.strip()[-160:])
+        # Nothing the child printed is trusted: the report carries only the exit code and a pointer to the scrubbed private log.
+        raise Blocked(f"backup tool produced no usable summary (exit code {done.returncode}); scrubbed owner-only log: {write_error_log(done, env)}")
     failed = evaluate_summary(summary)
     if done.returncode or failed:
-        raise Blocked("backup/restore verification failed: " + ", ".join(failed or ["exit_code"]))
+        detail = f"; scrubbed owner-only log: {write_error_log(done, env)}" if done.returncode else ""
+        raise Blocked("backup/restore verification failed: " + ", ".join(failed or ["exit_code"]) + detail)
     keep = {k: summary.get(k) for k in ("verdict", "tables", "signature_sha256", "timings_s", "server_version", "dump_bytes")}
     return {**keep, "archive_dir": str(BACKUP_DIR)}
 
 
 def stage_revoke() -> dict:
-    done = psql("JW_PG_ADMIN_DSN", REVOKE_SQL, {})
-    if done.returncode:
-        raise Blocked("REVOCATION FAILED: run the revoke SQL by hand now (NOLOGIN may or may not be in place)")
-    return {"revoke": "applied"}
+    """Idempotent: retried because the same outage that broke the renewal may also break the first revoke attempt."""
+    for attempt in range(1, REVOKE_ATTEMPTS + 1):
+        try:
+            if psql("JW_PG_ADMIN_DSN", REVOKE_SQL, {}).returncode == 0:
+                return {"revoke": "applied", "attempts": attempt}
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        if attempt < REVOKE_ATTEMPTS:
+            time.sleep(RETRY_PAUSE_S)
+    raise Blocked("REVOCATION FAILED: run the revoke SQL by hand now (NOLOGIN may or may not be in place)")
+
+
+def login_kwargs() -> dict:
+    kwargs = {"host": HOST, "port": PORT, "dbname": "postgres", "user": f"{ROLE}.{PROJECT_REF}", "password": read_password(),
+              "sslmode": LOGIN_SSLMODE, "connect_timeout": 8}
+    if LOGIN_SSLMODE == "verify-full":
+        kwargs["sslrootcert"] = str(CERT_FILE)
+    return kwargs
 
 
 def stage_prove_closed() -> dict:
-    """Measured, not assumed: a new login is refused and the admin sees zero sessions for the role."""
+    """Measured, not assumed. Closed needs ALL of: the server rejects a new login (an authentication refusal, not a DNS/TCP/TLS
+    failure), the admin sees ``rolcanlogin`` false, and zero sessions for the role."""
     import psycopg
-    try:
-        with psycopg.connect(host=HOST, port=PORT, dbname="postgres", user=f"{ROLE}.{PROJECT_REF}", password=read_password(),
-                             sslmode="verify-full", sslrootcert=str(CERT_FILE), connect_timeout=8):
-            raise Blocked("NEW LOGIN STILL WORKS after revocation")
-    except Blocked:
-        raise
-    except psycopg.Error:
-        refused = True
+    refusal, attempts = "none", 0
+    for attempts in range(1, REVOKE_ATTEMPTS + 1):
+        try:
+            with psycopg.connect(**login_kwargs()):
+                raise Blocked("NEW LOGIN STILL WORKS after revocation")
+        except Blocked:
+            raise
+        except psycopg.Error as exc:
+            refusal = classify_login_failure(exc)
+        if refusal == "auth_rejected":
+            break
+        time.sleep(RETRY_PAUSE_S)
     with psycopg.connect(os.environ["JW_PG_ADMIN_DSN"], connect_timeout=8, autocommit=True) as conn:
         sessions = conn.execute("SELECT count(*) FROM pg_stat_activity WHERE usename = %s", (ROLE,)).fetchone()[0]
         can_login = conn.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (ROLE,)).fetchone()[0]
-    if not refused or sessions != 0 or can_login:
+    if sessions != 0 or can_login:
         raise Blocked(f"role not closed: sessions={sessions} can_login={can_login}")
-    return {"new_login_refused": True, "active_sessions": 0, "rolcanlogin": False}
+    if refusal != "auth_rejected":
+        raise Blocked("new_login_refusal_not_verified: the login attempt failed for a network/TLS/unknown reason, not because the "
+                      f"server rejected the role ({attempts} attempts); the role looks closed from the admin side only")
+    return {"new_login_refused": True, "refusal": refusal, "active_sessions": 0, "rolcanlogin": False}
 
 
 def run_all(expect_sha: str) -> tuple[int, dict]:
@@ -306,7 +411,7 @@ def run_all(expect_sha: str) -> tuple[int, dict]:
         try:
             result["stages"][name] = {"status": "PASS", **fn()}
         except Blocked as exc:
-            result["stages"][name] = {"status": "BLOCKED", "reason": str(exc)}
+            result["stages"][name] = {"status": "BLOCKED", "reason": scrub(str(exc))}
             raise
         except Exception as exc:                   # the text of a driver error may hold a DSN: record the class only
             result["stages"][name] = {"status": "BLOCKED", "reason": "unexpected " + type(exc).__name__}
@@ -315,23 +420,23 @@ def run_all(expect_sha: str) -> tuple[int, dict]:
     try:
         result["verify"] = verify(expect_sha)
         stage("target_ready", stage_target)
-        try:
-            stage("renew", stage_renew)
-        except Ambiguous:
-            renewed = True        # a refused renewal changed nothing (one aborted transaction) and needs no revoke
-            raise
-        renewed = True
+
+        def mark_attempted() -> None:
+            nonlocal renewed
+            renewed = True        # set BEFORE the privileged subprocess: the server may commit and the client still report failure
+
+        stage("renew", lambda: stage_renew(mark_attempted))
         stage("live_login", stage_login)
         stage("backup_restore_compare", stage_backup)
     except Blocked as exc:
-        result["blocked"] = str(exc)
+        result["blocked"] = scrub(str(exc))
     finally:
         if renewed:
             for name, fn in (("revoke", stage_revoke), ("prove_closed", stage_prove_closed)):
                 try:
                     stage(name, fn)
                 except Blocked as exc:
-                    result["blocked"] = (result.get("blocked", "") + " | " + str(exc)).strip(" |")
+                    result["blocked"] = (result.get("blocked", "") + " | " + scrub(str(exc))).strip(" |")
     required = {"target_ready", "renew", "live_login", "backup_restore_compare", "revoke", "prove_closed"}
     passed = (not result.get("blocked") and required <= set(result["stages"])
               and all(v["status"] == "PASS" for v in result["stages"].values()))
@@ -367,7 +472,7 @@ def main(argv: list[str]) -> int:
         print("B2_B3_" + result["B2_B3"])
         return code
     except Blocked as exc:
-        print("BLOCKED: " + str(exc), file=sys.stderr)
+        print("BLOCKED: " + scrub(str(exc)), file=sys.stderr)
         print("NO_DATABASE_ACTION_TAKEN")      # every Blocked reaching here was raised before any stage ran
         return 2
 

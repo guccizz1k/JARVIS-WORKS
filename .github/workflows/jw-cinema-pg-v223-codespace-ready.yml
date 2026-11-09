@@ -92,3 +92,84 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           echo 'PASS: launcher verified at the exact SHA; 9 negative controls refused; no database contacted'
+
+  launcher-safety-gate-pg17:
+    name: Real psql + psycopg negative gate for the launcher's revoke, login-proof and secret-scrub rules on a disposable PG17
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      launcher-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-launcher
+          POSTGRES_DB: postgres
+        ports:
+          - 5437:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5437'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-v223-launcher
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard, server version and drivers
+        run: |
+          set -euo pipefail
+          python -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'show server_version' | tee /dev/stderr | grep -E '^17\.'
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47' 'pytest>=8,<10'
+          python -c 'import psycopg; print("psycopg", psycopg.__version__)'
+      - name: Launcher unit tests (fake drivers, including each reproduced defect)
+        run: python -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_codespace_run.py
+      - name: Real-driver gate (post-commit client failure, outage vs NOLOGIN rejection, secrets in child output, no window)
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_cinema_pg_v223_codespace_run_gate | tee launcher-gate.log
+          grep -E '^PASS: 7 checks, 0 failed, expected exactly 7' launcher-gate.log
+          echo 'DISPOSABLE EVIDENCE ONLY: a throw-away PG17 was used; nothing was sent to Supabase.'
+      - name: The same gate must FAIL when each safety rule is removed (mutation controls)
+        run: |
+          set -euo pipefail
+          cp scripts/ci_cinema_pg_v223_codespace_run.py "$RUNNER_TEMP/launcher.orig"
+          mutate() {   # name, python regex-free replacement script
+            python - "$1" <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("scripts/ci_cinema_pg_v223_codespace_run.py"); s = p.read_text(); name = sys.argv[1]
+          def swap(old, new):
+              global s
+              assert s.count(old) == 1, (name, old)
+              s = s.replace(old, new)
+          if name == "revoke_only_after_confirmed_renewal":
+              swap("            renewed = True        # set BEFORE", "            pass        # set BEFORE")
+              swap("        stage(\"renew\", lambda: stage_renew(mark_attempted))", "        stage(\"renew\", lambda: stage_renew(mark_attempted)); renewed = True")
+          elif name == "any_driver_error_is_a_refusal":
+              swap("    return \"transport_or_unknown\"\n\n\ndef now()", "    return \"auth_rejected\"\n\n\ndef now()")
+          elif name == "raw_child_output_in_message":
+              swap("(exit code {done.returncode}); scrubbed owner-only log: {write_error_log(done, env)}\")", "(exit code {done.returncode}): {done.stderr[-300:]}\")")
+          p.write_text(s)
+          PY
+          }
+          for m in revoke_only_after_confirmed_renewal any_driver_error_is_a_refusal raw_child_output_in_message; do
+            cp "$RUNNER_TEMP/launcher.orig" scripts/ci_cinema_pg_v223_codespace_run.py
+            mutate "$m"
+            if python -m scripts.ci_cinema_pg_v223_codespace_run_gate > "$RUNNER_TEMP/mut.log" 2>&1; then
+              echo "FAIL: mutation $m was NOT detected"; tail -20 "$RUNNER_TEMP/mut.log"; exit 1
+            fi
+            echo "PASS: mutation $m detected: $(grep -E '^FAIL' "$RUNNER_TEMP/mut.log" | head -3 | cut -c1-110 | tr '\n' ';')"
+          done
+          cp "$RUNNER_TEMP/launcher.orig" scripts/ci_cinema_pg_v223_codespace_run.py
+          git diff --exit-code -- scripts/ci_cinema_pg_v223_codespace_run.py

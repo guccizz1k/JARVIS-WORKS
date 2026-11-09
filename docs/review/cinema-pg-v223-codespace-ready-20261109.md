@@ -46,7 +46,13 @@ The last line is `B2_B3_PASS` or `B2_B3_BLOCKED_OR_FAIL`. The summary (stage nam
 
 ## Stages of `all` (fixed order)
 
-verify → restore target up, marked and empty → renew `VALID UNTIL` (expiry only, at most 23 hours and never after the limit) → restricted login and 65-table read-only privilege check → encrypted backup, negative tests, isolated PG17 restore, signature comparison (row counts and digests, RLS/FORCE RLS, policies, functions, triggers, constraints, ACLs) → revoke (`NOLOGIN`, sessions ended) → measured proof: a new login is refused, `rolcanlogin` is false, active sessions are 0. Once the renewal ran (or its outcome is unknown after a timeout) the revoke stage always runs, even when the backup failed.
+verify → restore target up, marked and empty → renew `VALID UNTIL` (expiry only, at most 23 hours and never after the limit) → restricted login and 65-table read-only privilege check → encrypted backup, negative tests, isolated PG17 restore, signature comparison (row counts and digests, RLS/FORCE RLS, policies, functions, triggers, constraints, ACLs) → revoke (`NOLOGIN`, sessions ended) → measured proof: a new login is refused, `rolcanlogin` is false, active sessions are 0. Once the privileged renewal command has been STARTED the revoke stage always runs, even when the backup failed, even when the renewal command reports failure or times out (the server can commit while the client reports an error), and even when the revoke itself needs retries (3 attempts). Only a failure before that command (for example no window left before the limit) leaves the database untouched and skips the revoke.
+
+### Safety rules added after the JARVIS review of the previous candidate (issue #140 comment 6732300737)
+1. **Revoke is unconditional after an attempted renewal.** The launcher marks the attempt before the privileged `psql` starts; a non-zero exit, timeout or crash afterwards is treated as "state unknown" and the role is closed and measured.
+2. **Network/TLS failures are not a login refusal.** `new_login_refused` is recorded only when the server itself answers with an authentication refusal (a `FATAL:` message such as *not permitted to log in*, or SQLSTATE class 28). DNS, refused connection, TLS/certificate problems, timeouts and anything unrecognised end the run with `new_login_refusal_not_verified` (BLOCKED). The role may then look closed from the admin side, but the run is **not** a PASS: re-run only the closure proof later or check the role by hand.
+3. **Child-process output never reaches the report.** The backup subprocess's stdout/stderr are never copied into the summary, the console or the stage text. A failed backup reports only its exit code and a pointer to `~/.local/share/jw-v223-restore/last_backup_error.log`: owner-only (0600), with every known secret, URL credential and `password=`/`key=` setting scrubbed. Do not paste that file anywhere without reading it first.
+
 
 ## Not claimed here
 

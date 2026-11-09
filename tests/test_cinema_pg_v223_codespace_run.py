@@ -4,8 +4,10 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
+from urllib.parse import quote
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -228,20 +230,24 @@ class Psql(unittest.TestCase):
 
 
 class Order(unittest.TestCase):
-    def fakes(self, calls, fail=None, ambiguous=False):
+    def fakes(self, calls, fail=None, ambiguous=False, attempted=True):
         def make(name, extra=None):
-            def fn():
+            def fn(on_attempt=None):
                 calls.append(name)
+                if name == "renew" and attempted and on_attempt and fail != name:
+                    on_attempt()              # the real stage marks the attempt just before psql runs
                 if fail == name:
+                    if name == "renew" and attempted and on_attempt:
+                        on_attempt()          # the privileged subprocess was started before it failed
                     raise (run.Ambiguous if ambiguous else run.Blocked)(name + " failed")
                 return extra or {}
             return fn
         return {"verify": lambda sha: calls.append("verify") or {}, "stage_target": make("target"), "stage_renew": make("renew"), "stage_login": make("login"),
                 "stage_backup": make("backup"), "stage_revoke": make("revoke"), "stage_prove_closed": make("prove")}
 
-    def drive(self, fail=None, ambiguous=False):
+    def drive(self, fail=None, ambiguous=False, attempted=True):
         calls: list[str] = []
-        with patch.multiple(run, **self.fakes(calls, fail, ambiguous)):
+        with patch.multiple(run, **self.fakes(calls, fail, ambiguous, attempted)):
             code, result = run.run_all(SHA)
         return calls, code, result
 
@@ -260,9 +266,15 @@ class Order(unittest.TestCase):
         self.assertEqual(calls, ["verify", "target", "renew", "login", "revoke", "prove"])
         self.assertEqual(code, 2)
 
-    def test_refused_renewal_changes_nothing_and_revokes_nothing(self):
-        calls, code, result = self.drive(fail="renew")
+    def test_failure_before_the_privileged_command_changes_nothing_and_revokes_nothing(self):
+        calls, code, result = self.drive(fail="renew", attempted=False)
         self.assertEqual(calls, ["verify", "target", "renew"])
+        self.assertEqual((code, result["B2_B3"]), (2, "BLOCKED_OR_FAIL"))
+
+    def test_nonzero_exit_after_the_privileged_command_started_is_still_closed(self):
+        # server committed, client reported exit 1 (plain Blocked, not Ambiguous): the role must still be revoked and measured
+        calls, code, result = self.drive(fail="renew", ambiguous=False, attempted=True)
+        self.assertEqual(calls, ["verify", "target", "renew", "revoke", "prove"])
         self.assertEqual((code, result["B2_B3"]), (2, "BLOCKED_OR_FAIL"))
 
     def test_ambiguous_renewal_is_closed_again(self):
@@ -299,6 +311,208 @@ class Order(unittest.TestCase):
             _, result = run.run_all(SHA)
         self.assertNotIn(PASSWORD, repr(result))
         self.assertEqual(result["stages"]["backup_restore_compare"]["status"], "BLOCKED")
+
+
+class RenewAttemptMarker(unittest.TestCase):
+    def test_marker_fires_before_psql_for_every_failure_mode(self):
+        for failure in (subprocess.CompletedProcess([], 1, "", "connection reset by peer"),
+                        subprocess.TimeoutExpired("psql", 120), OSError("psql vanished")):
+            events: list[str] = []
+
+            def fake(*args, _failure=failure, **kwargs):
+                events.append("psql")
+                if isinstance(_failure, BaseException):
+                    raise _failure
+                return _failure
+            with patch.object(run, "psql", side_effect=fake), patch.object(run, "renew_value", return_value="2026-11-10 09:00:00+09"):
+                with self.assertRaises(run.Ambiguous):
+                    run.stage_renew(lambda: events.append("attempt"))
+            self.assertEqual(events, ["attempt", "psql"], repr(failure))
+
+    def test_marker_does_not_fire_when_no_window_is_left(self):
+        events: list[str] = []
+        with patch.object(run, "psql", side_effect=lambda *a, **k: events.append("psql")):
+            with patch.object(run, "renew_value", side_effect=run.Blocked("no renewal window")):
+                with self.assertRaises(run.Blocked):
+                    run.stage_renew(lambda: events.append("attempt"))
+        self.assertEqual(events, [])
+
+    def test_stage_message_never_carries_the_psql_error_text(self):
+        failed = subprocess.CompletedProcess([], 1, "", f"connection reset {PASSWORD}")
+        with patch.object(run, "psql", return_value=failed), patch.object(run, "renew_value", return_value="x"):
+            with self.assertRaises(run.Ambiguous) as ctx:
+                run.stage_renew()
+        self.assertNotIn(PASSWORD, str(ctx.exception))
+
+
+class Revoke(unittest.TestCase):
+    def test_retries_until_applied(self):
+        replies = [subprocess.CompletedProcess([], 1, "", ""), subprocess.TimeoutExpired("psql", 120), subprocess.CompletedProcess([], 0, "", "")]
+
+        def fake(*args, **kwargs):
+            reply = replies.pop(0)
+            if isinstance(reply, BaseException):
+                raise reply
+            return reply
+        with patch.object(run, "psql", side_effect=fake), patch.object(run.time, "sleep"):
+            self.assertEqual(run.stage_revoke(), {"revoke": "applied", "attempts": 3})
+
+    def test_gives_up_loudly_after_the_last_attempt(self):
+        with patch.object(run, "psql", return_value=subprocess.CompletedProcess([], 1, "", "")) as call, patch.object(run.time, "sleep"):
+            with self.assertRaisesRegex(run.Blocked, "REVOCATION FAILED"):
+                run.stage_revoke()
+        self.assertEqual(call.call_count, run.REVOKE_ATTEMPTS)
+
+
+class FakeDriverError(Exception):
+    def __init__(self, text, sqlstate=None):
+        super().__init__(text)
+        self.sqlstate = sqlstate
+
+
+class LoginProof(unittest.TestCase):
+    PREFIX = 'connection failed: connection to server at "127.0.0.1", port 5432 failed: '
+
+    def test_classification(self):
+        cases = {
+            "auth_rejected": [FakeDriverError(self.PREFIX + 'FATAL:  role "jw_backup_ro" is not permitted to log in'),
+                              FakeDriverError(self.PREFIX + 'FATAL:  password authentication failed for user "x"'),
+                              FakeDriverError("anything", sqlstate="28000"), FakeDriverError("anything", sqlstate="28P01")],
+            "transport_or_unknown": [FakeDriverError(self.PREFIX + "Connection refused"),
+                                     FakeDriverError('connection failed: could not translate host name "h" to address'),
+                                     FakeDriverError(self.PREFIX + "server does not support SSL, but SSL was required"),
+                                     FakeDriverError("SSL error: certificate verify failed"),
+                                     FakeDriverError("connection failed: timeout expired"),
+                                     FakeDriverError(self.PREFIX + "FATAL:  too many connections for role"),
+                                     FakeDriverError("boom", sqlstate="08006"), FakeDriverError("boom")],
+        }
+        for expected, errors in cases.items():
+            for exc in errors:
+                self.assertEqual(run.classify_login_failure(exc), expected, str(exc))
+
+    def drive(self, login_errors, can_login=False, sessions=0):
+        """A stand-in psycopg: login attempts raise the given errors in turn (None = the login works); the admin connection answers."""
+        import sys
+        import types
+        errors = list(login_errors)
+        fake = types.ModuleType("psycopg")
+        fake.Error = FakeDriverError
+
+        class Conn:
+            def __init__(self, admin): self.admin = admin
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def execute(self, sql, params=None):
+                answer = (sessions,) if "pg_stat_activity" in sql else (can_login,)
+                return types.SimpleNamespace(fetchone=lambda: answer)
+
+        def connect(*args, **kwargs):
+            if args:                       # the admin DSN call
+                return Conn(True)
+            err = errors.pop(0) if errors else errors_last[0]
+            if err is None:
+                return Conn(False)
+            raise err
+        errors_last = [login_errors[-1]]
+        fake.connect = connect
+        with patch.dict(sys.modules, {"psycopg": fake}), patch.object(run, "login_kwargs", return_value={"host": "h"}), \
+                patch.object(run.time, "sleep"), patch.dict(os.environ, {"JW_PG_ADMIN_DSN": "postgresql://a:b@h/db"}):
+            return run.stage_prove_closed()
+
+    def test_deliberate_nologin_rejection_with_admin_proof_passes(self):
+        out = self.drive([FakeDriverError(self.PREFIX + 'FATAL:  role "r" is not permitted to log in')])
+        self.assertEqual((out["new_login_refused"], out["refusal"], out["rolcanlogin"]), (True, "auth_rejected", False))
+
+    def test_network_or_tls_outage_is_not_proof_even_when_the_admin_side_looks_closed(self):
+        for outage in (FakeDriverError(self.PREFIX + "Connection refused"), FakeDriverError("SSL error: certificate verify failed"),
+                       FakeDriverError('could not translate host name "h" to address'), FakeDriverError("connection failed: timeout expired")):
+            with self.assertRaisesRegex(run.Blocked, "new_login_refusal_not_verified"):
+                self.drive([outage])
+
+    def test_a_transient_outage_followed_by_a_real_rejection_passes(self):
+        out = self.drive([FakeDriverError("connection failed: timeout expired"),
+                          FakeDriverError(self.PREFIX + 'FATAL:  role "r" is not permitted to log in')])
+        self.assertEqual(out["refusal"], "auth_rejected")
+
+    def test_a_login_that_still_works_is_a_failure(self):
+        with self.assertRaisesRegex(run.Blocked, "STILL WORKS"):
+            self.drive([None])
+
+    def test_admin_side_must_agree(self):
+        reject = FakeDriverError(self.PREFIX + 'FATAL:  role "r" is not permitted to log in')
+        with self.assertRaisesRegex(run.Blocked, "role not closed"):
+            self.drive([reject], can_login=True)
+        with self.assertRaisesRegex(run.Blocked, "role not closed"):
+            self.drive([reject], sessions=1)
+
+
+class SecretsInChildOutput(unittest.TestCase):
+    PW = "p@ss/w0rd+SECRET9"
+    KEY = "K" * 43 + "="
+    LEAK = (f"psycopg.OperationalError: connection to postgresql://jw_backup_ro.ref:{PW.replace('@', '%40').replace('/', '%2F')}@h:5432/postgres "
+            f"failed; raw {PW}; key={KEY}; also postgresql://other:unlisted-secret-77@x/y password=hunter2hunter2")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.log = Path(self.tmp.name) / "private" / "last_backup_error.log"
+        self.env = {"JW_PG_BACKUP_KEY": self.KEY,
+                    "JW_PG_SOURCE_DSN": f"postgresql://jw_backup_ro.ref:{PASSWORD}@h:5432/postgres?sslmode=verify-full&sslrootcert=/c",
+                    "JW_PG_TARGET_ADMIN_DSN": f"postgresql://postgres:{quote(self.PW, safe='')}@127.0.0.1:55432/postgres"}
+        script = "import sys; sys.stderr.write(%r); sys.stdout.write('not json at all ' + %r); sys.exit(1)" % (self.LEAK, self.LEAK)
+        for patcher in (patch.object(run, "BACKUP_COMMAND", [sys.executable, "-c", script]),
+                        patch.object(run, "backup_env", return_value={**os.environ, **self.env}),
+                        patch.object(run, "ERROR_LOG", self.log), patch.object(run, "CREDS", Path(self.tmp.name) / "none")):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def assertClean(self, text):
+        for needle in (self.PW, self.KEY, PASSWORD, "unlisted-secret-77", "hunter2hunter2", "%40", "w0rd%2B"):
+            self.assertNotIn(needle, text, needle)
+
+    def test_blocked_message_and_summary_carry_no_child_output(self):
+        with self.assertRaises(run.Blocked) as ctx:
+            run.stage_backup()
+        self.assertClean(str(ctx.exception))
+        self.assertIn("exit code 1", str(ctx.exception))
+        self.assertNotIn("psycopg", str(ctx.exception))
+
+    def test_private_log_is_scrubbed_owner_only_and_never_a_symlink_target(self):
+        with self.assertRaises(run.Blocked):
+            run.stage_backup()
+        body = self.log.read_text()
+        self.assertClean(body)
+        self.assertIn("exit_code=1", body)
+        self.assertEqual(stat.S_IMODE(self.log.stat().st_mode), 0o600)
+
+    def test_whole_run_report_stdout_and_summary_file_are_clean(self):
+        import contextlib
+        import io
+        summary_file = Path(self.tmp.name) / "private" / "last_run_summary.json"
+        fakes = {"verify": lambda sha: {}, "stage_target": lambda: {}, "stage_renew": lambda on_attempt=None: (on_attempt and on_attempt(), {})[1],
+                 "stage_login": lambda: {}, "stage_revoke": lambda: {}, "stage_prove_closed": lambda: {}, "SUMMARY_FILE": summary_file}
+        out, err = io.StringIO(), io.StringIO()
+        with patch.multiple(run, **fakes), patch.dict(os.environ, self.env), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = run.main(["all", "--expect-sha", SHA, "--confirm-approval", "6729950127", "--confirm-no-charge"])
+        self.assertEqual(code, 2)
+        self.assertNotIn("B2_B3_PASS", out.getvalue())
+        for text in (out.getvalue(), err.getvalue(), summary_file.read_text()):
+            self.assertClean(text)
+        self.assertIn("BLOCKED_OR_FAIL", out.getvalue())
+
+    def test_scrub_removes_listed_secrets_url_credentials_and_password_settings(self):
+        cleaned = run.scrub(self.LEAK, self.env)
+        self.assertClean(cleaned)
+        self.assertIn("://***@", cleaned)
+
+    def test_a_valid_summary_with_nonzero_exit_still_leaks_nothing(self):
+        script = "import sys,json; sys.stderr.write(%r); print(json.dumps({'verdict':'FAIL: x','tables':65,'signature_mismatches':['t']})); sys.exit(1)" % self.LEAK
+        with patch.object(run, "BACKUP_COMMAND", [sys.executable, "-c", script]):
+            with self.assertRaises(run.Blocked) as ctx:
+                run.stage_backup()
+        self.assertClean(str(ctx.exception))
+        self.assertClean(self.log.read_text())
 
 
 class Main(unittest.TestCase):
