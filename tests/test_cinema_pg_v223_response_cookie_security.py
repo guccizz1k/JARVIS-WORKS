@@ -123,3 +123,45 @@ async def test_historical_insecure_legacy_deletion_is_normalized(store):
     assert "secure" in raw and "httponly" in raw
     expected = cut.LEGACY_COOKIE if store == "legacy" else cut.PG_COOKIE
     assert raw.startswith(expected.lower() + "=")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", ["legacy", "pg"])
+@pytest.mark.parametrize("attrs", [
+    "Path=/; Path=/account; Secure; HttpOnly; SameSite=Strict",
+    "Path=/; Path=/; Secure; HttpOnly; SameSite=Strict",
+    "Path=/; Secure; HttpOnly; SameSite=Strict; SameSite=None",
+    "Path=/; Secure; HttpOnly; SameSite=Lax; SameSite=Strict",
+    "Path=/; Secure; Secure; HttpOnly; SameSite=Strict",
+    "Path=/; Secure; HttpOnly; HttpOnly; SameSite=Strict",
+    "Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=3600; Max-Age=0",
+    "Path=/; Secure; HttpOnly; SameSite=Strict; Domain=evil.invalid; Domain=second.invalid",
+])
+async def test_conflicting_browser_cookie_attributes_fail_closed(store, attrs):
+    # A set() of attributes used to accept "SameSite=Strict; SameSite=None"
+    # and "Path=/; Path=/account" as secure. Browsers can honor the last one.
+    response, saved = await request(make_front([session(attrs=attrs)]), store)
+    assert response.status_code == 503
+    assert response.json() == {"code": "ambiguous_upstream_cookie_attributes"}
+    assert not saved
+    assert not response.headers.get_list("set-cookie")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", ["legacy", "pg"])
+@pytest.mark.parametrize("header, code", [
+    (f" {NAME}={TOKEN}; Path=/; Secure; HttpOnly; SameSite=Strict",
+     "insecure_upstream_session"),
+    (f"{NAME} ={TOKEN}; Path=/; Secure; HttpOnly; SameSite=Strict",
+     "insecure_upstream_session"),
+    (f" {cut.PG_COOKIE}={'P'*48}; Path=/; Secure; HttpOnly; SameSite=Strict",
+     "upstream_cookie_namespace_collision"),
+    (f"{cut.LEGACY_COOKIE} ={'L'*48}; Path=/; Secure; HttpOnly; SameSite=Strict",
+     "upstream_cookie_namespace_collision"),
+])
+async def test_whitespace_cookie_name_aliases_never_issued_to_browser(store, header, code):
+    response, saved = await request(make_front([header]), store)
+    assert response.status_code == 503
+    assert response.json() == {"code": code}
+    assert not saved
+    assert not response.headers.get_list("set-cookie")
