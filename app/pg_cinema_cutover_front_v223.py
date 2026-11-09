@@ -23,6 +23,9 @@ UPSTREAM_COOKIE = "__Host-jw_session"
 OPT_IN = "ISOLATED_DEV_DUAL_SESSION_PILOT"
 FRONT_FLAG = "JW_PG_CINEMA_CUTOVER_FRONT_V223"
 _PG_ID = re.compile(r"pg_[0-9a-f]{32}\Z")
+# Legacy and PG session issuers both use secrets.token_urlsafe (RFC 4648 URL-safe alphabet).
+# Reject cookie delimiters/control/ambiguous values before forwarding to either backend.
+_SESSION_TOKEN = re.compile(r"[A-Za-z0-9_-]{30,512}\Z")
 _ID_PART = re.compile(r"(?:^|/)pg_[^/]*")
 _LISTS = frozenset({"/api/customers", "/api/quotes", "/api/orders", "/api/invoices"})
 _COLLECTION = {"/api/quotes", "/api/customers"}
@@ -86,7 +89,7 @@ def _cookies_to_scope(scope: dict, upstream_token: str) -> dict:
 
 def _safe_cookie(scope: dict, cookie_name: str) -> str:
     value = Request(scope).cookies.get(cookie_name, "")
-    if value and (len(value) > 512 or not value.isascii()):
+    if value and not _SESSION_TOKEN.fullmatch(value):
         raise CutoverRefused("invalid_session_cookie", 401)
     return value
 
