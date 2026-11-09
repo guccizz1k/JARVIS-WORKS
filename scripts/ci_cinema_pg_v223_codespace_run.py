@@ -196,6 +196,14 @@ def check_private_inputs(environ: dict | None = None) -> dict:
     # the privileged connection, not a separate arbitrary trust root.
     if dsn["sslrootcert"] != str(CERT_FILE):
         raise Blocked("JW_PG_ADMIN_DSN must bind sslrootcert to the approved owner-only CA file")
+    # psql is driven from the parsed fields above, but the closure proof hands the RAW URL to psycopg/libpq: a query parameter such as
+    # host=, hostaddr=, port=, user=, dbname=, options= or a repeated sslmode= would let the connection differ from what was validated.
+    from urllib.parse import parse_qs, urlsplit
+    params = parse_qs(urlsplit(env["JW_PG_ADMIN_DSN"]).query, keep_blank_values=True)
+    if set(params) != {"sslmode", "sslrootcert"} or any(len(values) != 1 for values in params.values()):
+        raise Blocked("JW_PG_ADMIN_DSN may carry exactly one sslmode and one sslrootcert parameter and nothing else")
+    if not dsn["password"]:
+        raise Blocked("JW_PG_ADMIN_DSN must carry the admin password in the URL")
     # Exact endpoint binding is mandatory BEFORE the privileged renew SQL.
     # A substring match on the project ref can be forged by a hostile host or
     # username; neither DNS/TLS nor a matching ref fragment proves DB identity.

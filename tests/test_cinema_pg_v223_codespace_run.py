@@ -192,6 +192,22 @@ class PrivateInputs(unittest.TestCase):
                                               + f"?sslmode=verify-full&sslrootcert={self.files['cert']}"})
                 self.assertNotIn(PASSWORD, str(ctx.exception))
 
+    def test_query_parameters_that_could_redirect_the_raw_url_are_rejected(self):
+        base = self.env["JW_PG_ADMIN_DSN"]
+        for extra in ("host=attacker.example", "hostaddr=203.0.113.9", "port=6543", "user=other", "dbname=other",
+                      "options=-c%20role%3Dother", "service=x", "sslmode=disable", "sslrootcert=/tmp/other.crt"):
+            with self.subTest(extra=extra):
+                with self.assertRaises(run.Blocked) as ctx:      # repeated sslmode/sslrootcert may already fail an earlier TLS/CA rule
+                    run.check_private_inputs({**self.env, "JW_PG_ADMIN_DSN": base + "&" + extra})
+                if not extra.startswith("ssl"):
+                    self.assertIn("exactly one sslmode and one sslrootcert", str(ctx.exception))
+                self.assertNotIn(PASSWORD, str(ctx.exception))
+
+    def test_admin_dsn_without_a_password_is_rejected(self):
+        dsn = self.env["JW_PG_ADMIN_DSN"].replace(f":{PASSWORD}@", "@")
+        with self.assertRaisesRegex(run.Blocked, "admin password"):
+            run.check_private_inputs({**self.env, "JW_PG_ADMIN_DSN": dsn})
+
     def test_admin_dsn_must_use_the_same_approved_owner_only_ca(self):
         bad_dsn = self.env["JW_PG_ADMIN_DSN"].replace(
             str(self.files["cert"]), "/tmp/arbitrary-root-ca.crt")

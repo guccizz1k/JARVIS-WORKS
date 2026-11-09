@@ -4,6 +4,7 @@ on:
     branches:
       - review/jw-v223-codespace-ready-b-20261109
       - review/jw-v223-b-exact-admin-dsn-20261109
+      - review/jw-v223-b-exact-admin-dsn-claude-20261109
   workflow_dispatch:
 permissions:
   contents: read
