@@ -6,6 +6,7 @@ on:
       - review/jw-v223-two-track-integration-20261107
       - review/jw-v223-ab-cutover-integration-20261107
       - review/jw-v223-ab-final-tree-qa-20261109
+      - review/jw-v223-a-disposable-livepath-20261109
   workflow_dispatch:
 permissions:
   contents: read

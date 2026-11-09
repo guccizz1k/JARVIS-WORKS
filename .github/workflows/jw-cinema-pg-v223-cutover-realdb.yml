@@ -5,6 +5,7 @@ on:
       - candidate/jw-v223-pg-backup-restore-20261106
       - review/jw-v223-two-track-integration-20261107
       - review/jw-v223-ab-cutover-integration-20261107
+      - review/jw-v223-a-disposable-livepath-20261109
   workflow_dispatch:
 permissions:
   contents: read
@@ -54,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee cutover-realdb.log
-          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=30 failures=0 synthetic_only=true' cutover-realdb.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=41 failures=0 synthetic_only=true' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_GET_LOGOUT_NEVER_REVOKES' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_HEAD_LOGOUT_NEVER_REVOKES' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_PG_BROWSER_COOKIE_ISSUED_VIA_HTTP' cutover-realdb.log
@@ -63,4 +64,9 @@ jobs:
           grep -F 'PASS_V223_REALDB_FRONT_DUAL_LOGOUT_REJECTS_FORGED_PG_CSRF' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_CROSS_ORG_SESSION_REJECTED' cutover-realdb.log
           grep -F 'PASS_V223_REALDB_FRONT_SQLITE_ORIGINAL_RECORD_PRESERVED' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_MERGED_LIST_DROPS_UNTRUSTED_HEADERS' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_B_POSITIVE_QUOTE_CREATE' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_B_CANNOT_USE_A_PARTNER' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_B_DENIED_A_QUOTE_BY_RLS' cutover-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_A_MERGED_LIST_EXCLUDES_B_QUOTE' cutover-realdb.log
           echo 'DISPOSABLE SQLITE & PG17 ONLY; native PG login, live Supabase, browser and public HTTPS NOT tested here. Actual PG17 and SQLite session rows are revoked in this disposable test.'
