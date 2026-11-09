@@ -252,8 +252,10 @@ class CutoverFront:
         return ident
 
     async def _merged(self, scope, send):
-        headers = {k.decode("latin1"): v.decode("latin1") for k, v in scope.get("headers", [])
-                   if k.lower() not in (b"cookie", b"host")}
+        # A merged GET reaches TWO independently authorized services. Forward
+        # neither client-supplied credentials nor tenant/CSRF/proxy headers to
+        # the other service; each receives only its own validated session cookie.
+        headers = {"accept": "application/json"}
         path = scope["path"]
         qs = scope.get("query_string", b"").decode("ascii", "strict")
         results = []
