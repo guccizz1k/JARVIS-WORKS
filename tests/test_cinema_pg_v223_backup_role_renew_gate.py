@@ -20,7 +20,7 @@ def code(text: str) -> str:
 
 
 def test_gate_expectations_are_unique_and_complete():
-    assert len(rg.EXPECTED) == len(set(rg.EXPECTED)) == 8
+    assert len(rg.EXPECTED) == len(set(rg.EXPECTED)) == 9
 
 
 def test_renewal_changes_exactly_one_attribute_in_one_transaction():
@@ -33,9 +33,19 @@ def test_renewal_changes_exactly_one_attribute_in_one_transaction():
 
 
 def test_renewal_guard_refuses_past_far_future_and_missing_role():
-    for needle in ("<= now()", "interval ''7 days''", "does not exist", "renewal window"):
+    for needle in ("<= now()", "interval ''24 hours''", "does not exist", "renewal window", "now() >= "):
         assert needle in RENEW, needle
+    assert "interval ''7 days''" not in RENEW
     assert "\\gexec" in RENEW and RENEW.index("\\gexec") < RENEW.index("ALTER ROLE jw_backup_ro")
+
+
+def test_approved_absolute_limit_is_hard_coded_once_in_code_and_in_every_documented_example():
+    assert rg.APPROVED_LIMIT == "2026-11-10 09:00:00+09"
+    assert code(RENEW).count(rg.APPROVED_LIMIT) == 1                      # a literal in the SQL, never a variable
+    assert "approved_limit" not in RENEW.lower().replace("approved limit", "")
+    assert RENEW.count("-v valid_until='2026-11-10 09:00:00+09'") == 1    # the documented command
+    assert not re.search(r"\b2026-11-1[0-9] (?!09:00:00\+09)\d\d:\d\d:\d\d\+09", RENEW)   # no other example time
+    assert "12:00:00+09" not in RENEW and "7 days" not in RENEW
 
 
 def test_revoke_never_drops_or_grants_and_ends_sessions():

@@ -1,0 +1,117 @@
+name: JW V22.3 Codespaces DR preparation safety tests
+on:
+  push:
+    branches:
+      - review/jw-v223-codespaces-dr-prep-20261107
+      - review/jw-v223-codespace-ready-b-20261109
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prep-only-no-data:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protected-source guard and new tools compile
+        run: |
+          set -euo pipefail
+          python -I scripts/ci_cinema_pg_guard.py
+          python -m py_compile scripts/ci_cinema_pg_n.py tests/test_cinema_pg_n.py
+          python -m py_compile scripts/ci_cinema_pg_p.py tests/test_cinema_pg_p.py
+          python -m py_compile scripts/ci_cinema_pg_s.py tests/test_cinema_pg_s.py
+          python -m py_compile scripts/ci_cinema_pg_q.py tests/test_cinema_pg_q.py
+          python -m py_compile scripts/ci_cinema_pg_u.py tests/test_cinema_pg_u.py
+          python -m py_compile scripts/ci_cinema_pg_v.py tests/test_cinema_pg_v.py
+          python -m py_compile scripts/ci_cinema_pg_w.py tests/test_cinema_pg_w.py
+          python -m py_compile scripts/ci_cinema_pg_y.py tests/test_cinema_pg_y.py tests/test_cinema_pg_y_synthetic_restore.py
+          python -m py_compile scripts/ci_cinema_pg_z.py tests/test_cinema_pg_z.py
+          python -m py_compile tests/test_cinema_pg_w_synthetic_restore.py
+          python -m py_compile scripts/ci_cinema_pg_m.py tests/test_cinema_pg_m.py
+          python -m py_compile scripts/ci_cinema_pg_r.py tests/test_cinema_pg_r.py
+          python -m py_compile scripts/ci_cinema_pg_v223_codespace_bootstrap.py
+          python -m py_compile scripts/ci_cinema_pg_v223_codespace_check.py tests/test_cinema_pg_v223_codespace_check.py
+      - name: Fail-closed tools-only tests; NEVER touch database
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_cinema_pg_v223_codespace_check.py' -v
+          set +e
+          out=$(python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare 2>&1)
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -F 'BLOCKED: only an approved GitHub Codespace may prepare the tools' <<< "$out"
+          echo 'PASS: no database accessed; real backup NOT RUN.'
+      - name: Mobile short-command isolated PG17 exercise (synthetic, never Supabase)
+        env:
+          CODESPACES: "true"
+        run: |
+          set -euo pipefail
+          trap 'docker rm -f jw-v223-restore >/dev/null 2>&1 || true; rm -f "$HOME/.local/share/jw-v223-restore/restore.sh"' EXIT
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47'
+          python -m unittest discover -s tests -p 'test_cinema_pg_r.py' -v
+          python scripts/ci*pg_r.py
+          python -m unittest discover -s tests -p 'test_cinema_pg_n.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_p.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_s.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_q.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_u.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_v.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_w.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_y.py' -v
+          python -m unittest discover -s tests -p 'test_cinema_pg_z.py' -v
+          set +e
+          auth_out=$(CODESPACES=false python scripts/ci_cinema_pg_u.py 2>&1)
+          auth_rc=$?
+          set -e
+          test "$auth_rc" -eq 2
+          grep -F "BLOCKED: use the approved Codespace only" <<< "$auth_out"
+          python -m unittest discover -s tests -p 'test_cinema_pg_m.py' -v
+          python scripts/ci*pg_m.py
+          python scripts/ci*pg_m.py
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare
+          printf '/jw-private-transfer/\n' >> .git/info/exclude
+          python tests/test_cinema_pg_w_synthetic_restore.py
+          python tests/test_cinema_pg_y_synthetic_restore.py
+
+          python - <<'PY'
+          import secrets,subprocess
+          import psycopg
+          from scripts.ci_cinema_pg_q import make_verifier
+          password = secrets.token_hex(32)
+          verifier = make_verifier(password)
+          result = subprocess.run([
+              "docker","exec","jw-v223-restore","psql","-U","postgres","-d","postgres",
+              "-v","ON_ERROR_STOP=1","-c","CREATE ROLE jw_ci_scram_v223 LOGIN PASSWORD '"+verifier+"';",
+          ],capture_output=True,text=True,timeout=20,check=False)
+          if result.returncode != 0:
+              raise SystemExit("FAIL: synthetic PG17 SCRAM verifier role creation")
+          with psycopg.connect("host=127.0.0.1 port=55432 dbname=postgres user=jw_ci_scram_v223 sslmode=disable",
+                               password=password,connect_timeout=5) as conn:
+              assert conn.execute("SELECT current_user").fetchone() == ("jw_ci_scram_v223",)
+          print("PASS: synthetic PG17 login using locally derived SCRAM verifier")
+          PY
+
+          set +e
+          network_output=$(CODESPACES=false python scripts/ci*pg_n.py 2>&1)
+          network_status=$?
+          set -e
+          test "$network_status" -eq 2
+          grep -F "BLOCKED: diagnostic is restricted to the approved Codespace" <<< "$network_output"
+          set +e
+          pooler_output=$(CODESPACES=false python scripts/ci*pg_p.py 2>&1)
+          pooler_rc=$?
+          set -e
+          test "$pooler_rc" -eq 2
+          grep -F "BLOCKED: check only in approved Codespaces" <<< "$pooler_output"
+          test "$(stat -c %a "$HOME/.local/share/jw-v223-restore/restore.sh")" = "600"
+          test "$(docker inspect --format '{{ (index (index .NetworkSettings.Ports "5432/tcp") 0).HostIp }}' jw-v223-restore)" = "127.0.0.1"
+          echo 'PASS: local disposable PG17 and idempotent marker verified, Supabase untouched, no real backup.'
+
