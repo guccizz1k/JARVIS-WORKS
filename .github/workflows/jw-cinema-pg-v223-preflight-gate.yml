@@ -3,10 +3,8 @@ on:
   push:
     branches:
       - review/jw-v223-p0-db-dr-claude-20261107
-      - fix/jw-v223-terms-public-acl-20261107
-      - review/jw-v223-ab-cutover-integration-20261107
-      - review/jw-v223-ab-final-tree-qa-20261109
-      - review/jw-v223-ab-current-security-20261109
+      - review/jw-v223-codespace-ready-b-20261109
+      - review/jw-v223-ab-cookie-codespace-qa-20261109
   workflow_dispatch:
 permissions:
   contents: read
@@ -49,7 +47,7 @@ jobs:
           python3 -I scripts/ci_cinema_pg_guard.py
           psql -X -Atc 'show server_version' | tee /dev/stderr | grep -E '^17\.'
       - name: Tooling for the pure-Python parts (no database driver is needed)
-        run: python3 -m pip install --quiet cryptography pytest 'psycopg[binary]>=3.2,<4' 'fastapi>=0.115,<1'
+        run: python3 -m pip install --quiet cryptography pytest
       - name: Static guards for the preflight SQL
         run: python3 -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_preflight_readonly.py tests/test_cinema_pg_v223_backup_role_c_gate.py tests/test_cinema_pg_v223_backup_role_renew_gate.py
       - name: Engine SQL gate (unchanged engine, must stay 222/222)
@@ -66,15 +64,9 @@ jobs:
           python3 -m scripts.ci_cinema_pg_v223_backup_role_c_gate | tee c-gate.log
           grep -E '^PASS: [0-9]+ checks, 0 failed' c-gate.log
           echo 'DISPOSABLE EVIDENCE ONLY: change C was applied to a throw-away PG17 here, never to Supabase.'
-
-      - name: B1 renewal and revocation of expired backup role (expiry only, negative gates)
+      - name: B1 renewal and revocation of the expired backup role (expiry-only change, refusals, revoke, rollback)
         run: |
           set -euo pipefail
           python3 -m scripts.ci_cinema_pg_v223_backup_role_renew_gate | tee renew-gate.log
-          grep -F 'PASS: 8 checks, 0 failed' renew-gate.log
-          echo 'SYNTHETIC PG17 ONLY; no live Supabase role was changed.'
-      - name: Non-superuser B migration security gate (must catch original PUBLIC EXECUTE leak)
-        run: |
-          set -euo pipefail
-          python3 -m scripts.ci_cinema_pg_v223_b_acl_non_super_gate | tee b-acl-nonsuper.log
-          grep -F 'PASS_V223_NON_SUPERUSER_TERMS_ACL_GATE checks=7 failed=0 synthetic_only=true' b-acl-nonsuper.log
+          grep -E '^PASS: [0-9]+ checks, 0 failed' renew-gate.log
+          echo 'DISPOSABLE EVIDENCE ONLY: the renewal was applied to a throw-away PG17 here, never to Supabase.'

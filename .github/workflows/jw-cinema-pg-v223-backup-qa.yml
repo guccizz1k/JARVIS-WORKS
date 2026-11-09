@@ -3,8 +3,8 @@ on:
   push:
     branches:
       - candidate/jw-v223-pg-backup-restore-20261106
-      - review/jw-v223-two-track-integration-20261107
-      - review/jw-v223-ab-cutover-integration-20261107
+      - review/jw-v223-codespace-ready-b-20261109
+      - review/jw-v223-ab-cookie-codespace-qa-20261109
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,7 +29,7 @@ jobs:
           # app/ and db/ stay byte-identical to the approved base EXCEPT three new files (PG compat request
           # translation, response view, and the gated legacy-contract router, V22.3) and ONE modified file (the
           # isolated PG review composition that registers that router behind its gate). Anything else fails.
-          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_(compat_v1|compat_view_v1|legacy_api_v1|cutover_front_v223)\.py$' | grep -Ev '^M[[:space:]]+app/(pg_review_integrated_v202|cinema_entry_v1)\.py$' | grep -Ev '^A[[:space:]]+app/pg_cinema_cutover_ui_v223\.py$' || true)"
+          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_(compat_v1|compat_view_v1|legacy_api_v1|cutover_front_v223)\.py$' | grep -Ev '^M[[:space:]]+app/pg_review_integrated_v202\.py$' || true)"
           test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
           python3 -I scripts/ci_cinema_pg_guard.py
       - name: Install full project test prerequisites
@@ -108,7 +108,7 @@ jobs:
           # app/ and db/ stay byte-identical to the approved base EXCEPT three new files (PG compat request
           # translation, response view, and the gated legacy-contract router, V22.3) and ONE modified file (the
           # isolated PG review composition that registers that router behind its gate). Anything else fails.
-          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_(compat_v1|compat_view_v1|legacy_api_v1|cutover_front_v223)\.py$' | grep -Ev '^M[[:space:]]+app/(pg_review_integrated_v202|cinema_entry_v1)\.py$' | grep -Ev '^A[[:space:]]+app/pg_cinema_cutover_ui_v223\.py$' || true)"
+          bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_(compat_v1|compat_view_v1|legacy_api_v1|cutover_front_v223)\.py$' | grep -Ev '^M[[:space:]]+app/pg_review_integrated_v202\.py$' || true)"
           test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
           python3 -I scripts/ci_cinema_pg_guard.py
           docker ps --filter ancestor=postgres:17 --format '{{.ID}}|{{.Ports}}'

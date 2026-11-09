@@ -9,7 +9,8 @@ What is proven (on the server it ran on; PG17 is the target, PG16 is supplementa
   * an expired role cannot log in; the renew file, run by the Supabase-shaped admin, restores login with the SAME password;
   * renewal changes ONLY the expiry: role attributes, password verifier, connection limit, role settings, memberships and
     every table/sequence ACL are identical before and after; the backup tool's rules and the preflight still accept the role;
-  * the renew file refuses a past window, a window beyond 7 days, a missing variable and a missing role, each without any change;
+  * the renew file refuses a past window, a window beyond 24 hours, a window beyond the approved absolute limit
+    (2026-11-10 09:00:00+09), any execution after that limit, a missing variable and a missing role, each without any change;
   * the revoke file stops new logins at once and ends open sessions; a later renewal does NOT silently re-enable LOGIN;
   * the existing rollback SQL still removes a renewed role and returns the database to the pre-C fingerprint.
 """
@@ -21,7 +22,9 @@ import re
 import secrets
 import subprocess
 import sys
+import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +36,8 @@ from scripts import ci_cinema_pg_v223_preflight_gate as pf  # noqa: E402
 RENEW = ROOT / "scripts" / "review" / "cinema_pg_v223_backup_role_renew_proposal.sql"
 REVOKE = ROOT / "scripts" / "review" / "cinema_pg_v223_backup_role_revoke.sql"
 ADMIN = pf.SIM_ADMIN
-EXPECTED = [f"RN.0{i}" for i in range(1, 9)]
+EXPECTED = [f"RN.0{i}" for i in range(1, 10)]
+APPROVED_LIMIT = "2026-11-10 09:00:00+09"      # owner-approved absolute upper bound, hard-coded in the renew file
 results: list[tuple[str, bool, str]] = []
 
 # everything about the role except its expiry; the password verifier is compared, never printed
@@ -63,6 +67,22 @@ def renew(db: str, valid_until: str | None, *, file: Path = RENEW) -> subprocess
     return cg.run_c(db, ADMIN, file=file, valid_until=valid_until)
 
 
+def stamp(delta: timedelta) -> str:
+    """A UTC timestamp relative to the moment of the call (the gate must not depend on the date it runs on)."""
+    return (datetime.now(timezone.utc) + delta).strftime("%Y-%m-%d %H:%M:%S+00")
+
+
+def with_limit(limit: str) -> Path:
+    """The real renew file with ONLY the approved absolute limit replaced, so the limit branches can be exercised on any day."""
+    text = RENEW.read_text()
+    body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("--"))
+    if body.count(APPROVED_LIMIT) != 1:
+        raise SystemExit("BLOCKED: the approved limit literal must appear exactly once in the renew SQL code")
+    out = Path(tempfile.mkdtemp(prefix="jwrenew_")) / RENEW.name
+    out.write_text(text.replace(APPROVED_LIMIT, limit))
+    return out
+
+
 def main_phase() -> None:
     db = None
     try:
@@ -79,7 +99,8 @@ def main_phase() -> None:
             applied.returncode == 0 and expired.returncode != 0 and "authentication failed" in expired.stderr
             and pf.scalar(db, "SELECT rolvaliduntil < now() FROM pg_roles WHERE rolname='jw_backup_ro'") == "t", expired.stderr[-120:])
 
-        done = renew(db, cg.until(2))
+        win = with_limit(stamp(timedelta(hours=48)))   # limit far away: only the 24 h rule is in play here
+        done = renew(db, stamp(timedelta(hours=2)), file=win)
         back = cg.login_ok(db, "jw_backup_ro", "SHOW default_transaction_read_only")
         rec("RN.02_renew_file_restores_login_with_the_same_password_and_stays_read_only",
             done.returncode == 0 and back.returncode == 0 and back.stdout.strip() == "on"
@@ -97,13 +118,13 @@ def main_phase() -> None:
 
         # refusals: each leaves the expiry and everything else exactly as it was
         keep_until, keep_state = pf.scalar(db, VALID_UNTIL), state(db)
-        refusals = {"past": renew(db, "2000-01-01 00:00:00+00"),
-                    "too_far": renew(db, cg.until(30)),
-                    "missing_variable": renew(db, None)}
+        refusals = {"past": renew(db, "2000-01-01 00:00:00+00", file=win),
+                    "too_far": renew(db, stamp(timedelta(hours=30)), file=win),
+                    "missing_variable": renew(db, None, file=win)}
         unchanged = pf.scalar(db, VALID_UNTIL) == keep_until and state(db) == keep_state
         pf.psql(db, user=ADMIN, file=cg.ROLLBACK_SQL)
-        no_role = renew(db, cg.until(2))
-        rec("RN.05_refuses_past_window_beyond_seven_days_missing_variable_and_missing_role_without_any_change",
+        no_role = renew(db, stamp(timedelta(hours=2)), file=win)
+        rec("RN.05_refuses_past_window_beyond_24_hours_missing_variable_and_missing_role_without_any_change",
             all(p.returncode != 0 for p in refusals.values()) and unchanged
             and "renewal window" in refusals["past"].stderr and "renewal window" in refusals["too_far"].stderr
             and no_role.returncode != 0 and "does not exist" in no_role.stderr
@@ -135,7 +156,7 @@ def main_phase() -> None:
         rec("RN.07_revoke_stops_new_logins_and_ends_open_sessions_and_renewal_does_not_reenable_login",
             int(opened) >= 1 and rv.returncode == 0 and gone == "0" and blocked.returncode != 0
             and "not permitted to log in" in blocked.stderr
-            and renew(db, cg.until(2)).returncode == 0 and cg.login_ok(db, "jw_backup_ro").returncode != 0
+            and renew(db, stamp(timedelta(hours=2)), file=win).returncode == 0 and cg.login_ok(db, "jw_backup_ro").returncode != 0
             and pf.psql(db, user=ADMIN, sql="ALTER ROLE jw_backup_ro LOGIN").returncode == 0
             and cg.login_ok(db, "jw_backup_ro").returncode == 0,
             f"opened={opened} gone={gone} rc={rv.returncode} {rv.stderr[-100:]} {blocked.stderr[-80:]}")
@@ -147,6 +168,29 @@ def main_phase() -> None:
                              "+(SELECT count(*) FROM pg_shdepend d JOIN pg_roles r ON r.oid=d.refobjid WHERE r.rolname='jw_backup_ro')")
         rec("RN.08_existing_rollback_sql_removes_the_renewed_role_and_restores_the_pre_C_fingerprint",
             rb.returncode == 0 and left == "0" and pf.scalar(db, cg.FP) == base_fp, f"{rb.stderr[-120:]} left={left}")
+
+        # RN.09: the owner-approved absolute limit. Fresh C, then only the limit moves (a copy of the real file).
+        cg.run_c(db, ADMIN)
+        pf.psql(db, user=ADMIN, sql="ALTER ROLE jw_backup_ro VALID UNTIL '2000-01-01 00:00:00+00'")
+        keep_u, keep_s = pf.scalar(db, VALID_UNTIL), state(db)
+        near = with_limit(stamp(timedelta(hours=6)))
+        over = renew(db, stamp(timedelta(hours=7)), file=near)               # inside 24 h, beyond the limit
+        closed = renew(db, stamp(timedelta(hours=1)), file=with_limit(stamp(timedelta(hours=-1))))   # now is past the limit
+        real_after = renew(db, "2026-11-10 09:01:00+09")                     # the unmodified file: never accepts beyond the real limit
+        real_two_days = renew(db, stamp(timedelta(hours=49)))
+        refused_ok = (over.returncode != 0 and "approved limit" in over.stderr
+                      and closed.returncode != 0 and "renewal window closed" in closed.stderr
+                      and real_after.returncode != 0 and real_two_days.returncode != 0
+                      and pf.scalar(db, VALID_UNTIL) == keep_u and state(db) == keep_s)
+        inside = renew(db, stamp(timedelta(hours=5)), file=near)
+        exact_stamp = stamp(timedelta(hours=6))
+        edge = renew(db, exact_stamp, file=with_limit(exact_stamp))          # exactly the limit is allowed
+        now_ok = pf.scalar(db, "SELECT rolvaliduntil > now() FROM pg_roles WHERE rolname='jw_backup_ro'") == "t"
+        pf.psql(db, user=ADMIN, file=cg.ROLLBACK_SQL)
+        rec("RN.09_refuses_beyond_approved_absolute_limit_and_after_it_and_accepts_inside_and_exactly_at_it",
+            refused_ok and inside.returncode == 0 and edge.returncode == 0 and now_ok
+            and pf.scalar(db, cg.FP) == base_fp,
+            f"over={over.stderr[-90:]} closed={closed.stderr[-90:]} real_after={real_after.returncode} two_days={real_two_days.returncode}")
     finally:
         pf.psql("postgres", sql=f"REVOKE pg_signal_backend FROM {ADMIN}")
         cg.drop_everything()

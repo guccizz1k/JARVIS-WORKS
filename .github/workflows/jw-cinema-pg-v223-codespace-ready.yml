@@ -1,0 +1,176 @@
+name: JW V22.3 Track B Codespace-ready candidate (no secrets, no real database)
+on:
+  push:
+    branches:
+      - review/jw-v223-codespace-ready-b-20261109
+      - review/jw-v223-ab-cookie-codespace-qa-20261109
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  codespace-run-negative:
+    name: Guard, unit tests, PG17 tooling, launcher verify and negative controls at this exact SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CODESPACES: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protected-source guard, compile and unit tests (launcher, preflight, renewal static)
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python -I scripts/ci_cinema_pg_guard.py
+          python -m py_compile scripts/ci_cinema_pg_v223_codespace_run.py scripts/ci_cinema_pg_v223_codespace_bootstrap.py scripts/ci_cinema_pg_v223_codespace_check.py scripts/ci_cinema_pg_u.py
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47' 'pytest>=8,<10'
+          python -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_codespace_run.py tests/test_cinema_pg_v223_codespace_check.py tests/test_cinema_pg_v223_backup_role_renew_gate.py tests/test_cinema_pg_u.py
+      - name: PG17 client tooling through the existing bootstrap (no database)
+        run: |
+          set -euo pipefail
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare | tee "$RUNNER_TEMP/bootstrap.log"
+          grep -F 'TOOLS_READY_ONLY' "$RUNNER_TEMP/bootstrap.log"
+          echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
+      - name: Launcher verify passes only for the exact reported SHA, then every negative control refuses
+        run: |
+          set -euo pipefail
+          RUN="python -m scripts.ci_cinema_pg_v223_codespace_run"
+          expect_block() {   # name, expected text, command...
+            local name="$1" pattern="$2"; shift 2
+            set +e; out="$("$@" 2>&1)"; rc=$?; set -e
+            test "$rc" -eq 2 || { echo "FAIL $name: exit $rc"; echo "$out" | tail -6; exit 1; }
+            grep -qF -- "$pattern" <<< "$out" || { echo "FAIL $name: text '$pattern' missing"; echo "$out" | tail -6; exit 1; }
+            echo "PASS negative: $name"
+          }
+          # positive: exact SHA, clean tree, pins consistent, PG17 + Docker + psycopg + cryptography
+          $RUN verify --expect-sha "$GITHUB_SHA" | tee "$RUNNER_TEMP/verify.log"
+          grep -F 'VERIFY_ONLY_PASS' "$RUNNER_TEMP/verify.log"
+          # wrong SHA / malformed SHA
+          expect_block "other commit refused" "not the reported final commit" $RUN verify --expect-sha c0aaf68493d5d56b0eda55b125d9d2115c4c14b9
+          expect_block "malformed SHA refused" "40-hex" $RUN verify --expect-sha 25e73fe
+          # the single run needs both explicit confirmations before anything happens
+          expect_block "no confirmations" "--confirm-approval" $RUN all --expect-sha "$GITHUB_SHA"
+          # secrets absent: verify stops before any database stage; the output proves no stage ran
+          expect_block "secrets missing" "JW_PG_ADMIN_DSN" $RUN all --expect-sha "$GITHUB_SHA" --confirm-approval 6729950127 --confirm-no-charge
+          python - <<'PY'
+          import json, os
+          summary = json.load(open(os.path.expanduser("~/.local/share/jw-v223-restore/last_run_summary.json")))
+          assert summary["stages"] == {} and summary["B2_B3"] == "BLOCKED_OR_FAIL", summary
+          print("PASS negative: blocked run recorded zero database stages")
+          PY
+          # PG16 only (a shim reporting 16 first in PATH) and an unreachable Docker daemon
+          mkdir -p "$RUNNER_TEMP/pg16shim"
+          for tool in pg_dump pg_restore psql; do printf '#!/bin/sh\necho "%s (PostgreSQL) 16.4"\n' "$tool" > "$RUNNER_TEMP/pg16shim/$tool"; chmod +x "$RUNNER_TEMP/pg16shim/$tool"; done
+          PATH="$RUNNER_TEMP/pg16shim:$PATH" expect_block "PG16 clients refused" "pg_dump_17_plus" $RUN verify --expect-sha "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/nodockershim"
+          printf '#!/bin/sh\necho "Cannot connect to the Docker daemon" >&2\nexit 1\n' > "$RUNNER_TEMP/nodockershim/docker"; chmod +x "$RUNNER_TEMP/nodockershim/docker"
+          PATH="$RUNNER_TEMP/nodockershim:$PATH" expect_block "no Docker daemon refused" "docker_disposable_target_capable" $RUN verify --expect-sha "$GITHUB_SHA"
+          # tool-hash / pin mismatch: a committed edit of the backup tool no longer matches the guard's pins
+          git config user.email ci@example.invalid; git config user.name ci
+          echo '# tamper' >> scripts/pg_backup_v223.py
+          git commit -qam tamper-backup-tool
+          expect_block "backup tool hash mismatch" "guard pin mismatch" $RUN verify --expect-sha "$(git rev-parse HEAD)"
+          git reset -q --hard "$GITHUB_SHA"
+          # a renewal SQL that widens the window or moves the approved limit
+          sed -i "s/interval ''24 hours''/interval ''7 days''/" scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql
+          git commit -qam widen-window
+          expect_block "wider window refused" "approved absolute limit" $RUN verify --expect-sha "$(git rev-parse HEAD)"
+          git reset -q --hard "$GITHUB_SHA"
+          sed -i "s/2026-11-10 09:00:00+09'/2026-11-17 09:00:00+09'/" scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql
+          git commit -qam move-limit
+          expect_block "moved limit refused" "approved absolute limit" $RUN verify --expect-sha "$(git rev-parse HEAD)"
+          git reset -q --hard "$GITHUB_SHA"
+          # dirty tree
+          echo x >> docs/review/cinema-pg-v223-codespace-ready-20261109.md   # a file the launcher does not import
+          expect_block "dirty tree refused" "uncommitted" $RUN verify --expect-sha "$GITHUB_SHA"
+          git checkout -q -- docs/review/cinema-pg-v223-codespace-ready-20261109.md
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          echo 'PASS: launcher verified at the exact SHA; 9 negative controls refused; no database contacted'
+
+  launcher-safety-gate-pg17:
+    name: Real psql + psycopg negative gate for the launcher's revoke, login-proof and secret-scrub rules on a disposable PG17
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      launcher-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-launcher
+          POSTGRES_DB: postgres
+        ports:
+          - 5437:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5437'
+      PGUSER: postgres
+      PGPASSWORD: ci-only-v223-launcher
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard, server version and drivers
+        run: |
+          set -euo pipefail
+          python -I scripts/ci_cinema_pg_guard.py
+          psql -X -Atc 'show server_version' | tee /dev/stderr | grep -E '^17\.'
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47' 'pytest>=8,<10'
+          python -c 'import psycopg; print("psycopg", psycopg.__version__)'
+      - name: Launcher unit tests (fake drivers, including each reproduced defect)
+        run: python -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_codespace_run.py
+      - name: Real-driver gate (post-commit client failure, outage vs NOLOGIN rejection, secrets in child output, no window)
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_cinema_pg_v223_codespace_run_gate | tee launcher-gate.log
+          grep -E '^PASS: 7 checks, 0 failed, expected exactly 7' launcher-gate.log
+          echo 'DISPOSABLE EVIDENCE ONLY: a throw-away PG17 was used; nothing was sent to Supabase.'
+      - name: The same gate must FAIL when each safety rule is removed (mutation controls)
+        run: |
+          set -euo pipefail
+          cp scripts/ci_cinema_pg_v223_codespace_run.py "$RUNNER_TEMP/launcher.orig"
+          mutate() {   # name, python regex-free replacement script
+            python - "$1" <<'PY'
+          import sys
+          from pathlib import Path
+          p = Path("scripts/ci_cinema_pg_v223_codespace_run.py"); s = p.read_text(); name = sys.argv[1]
+          def swap(old, new):
+              global s
+              assert s.count(old) == 1, (name, old)
+              s = s.replace(old, new)
+          if name == "revoke_only_after_confirmed_renewal":
+              swap("            renewed = True        # set BEFORE", "            pass        # set BEFORE")
+              swap("        stage(\"renew\", lambda: stage_renew(mark_attempted))", "        stage(\"renew\", lambda: stage_renew(mark_attempted)); renewed = True")
+          elif name == "any_driver_error_is_a_refusal":
+              swap("    return \"transport_or_unknown\"\n\n\ndef now()", "    return \"auth_rejected\"\n\n\ndef now()")
+          elif name == "raw_child_output_in_message":
+              swap("(exit code {done.returncode}); scrubbed owner-only log: {write_error_log(done, env)}\")", "(exit code {done.returncode}): {done.stderr[-300:]}\")")
+          p.write_text(s)
+          PY
+          }
+          for m in revoke_only_after_confirmed_renewal any_driver_error_is_a_refusal raw_child_output_in_message; do
+            cp "$RUNNER_TEMP/launcher.orig" scripts/ci_cinema_pg_v223_codespace_run.py
+            mutate "$m"
+            if python -m scripts.ci_cinema_pg_v223_codespace_run_gate > "$RUNNER_TEMP/mut.log" 2>&1; then
+              echo "FAIL: mutation $m was NOT detected"; tail -20 "$RUNNER_TEMP/mut.log"; exit 1
+            fi
+            echo "PASS: mutation $m detected: $(grep -E '^FAIL' "$RUNNER_TEMP/mut.log" | head -3 | cut -c1-110 | tr '\n' ';')"
+          done
+          cp "$RUNNER_TEMP/launcher.orig" scripts/ci_cinema_pg_v223_codespace_run.py
+          git diff --exit-code -- scripts/ci_cinema_pg_v223_codespace_run.py
