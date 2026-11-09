@@ -179,22 +179,37 @@ class CutoverFront:
         async def wrapped_send(message):
             if message["type"] == "http.response.start":
                 headers = []
+                session_count = 0
+                upstream_name = (UPSTREAM_COOKIE + "=").encode("ascii")
+                virtual_names = ((LEGACY_COOKIE + "=").encode("ascii"),
+                                 (PG_COOKIE + "=").encode("ascii"))
                 for key, value in message.get("headers", []):
-                    if key.lower() == b"set-cookie" and value.startswith((UPSTREAM_COOKIE + "=").encode()):
-                        attrs = {part.strip().lower() for part in value.split(b";")[1:]}
-                        if (b"path=/" not in attrs
-                                or any(part.startswith(b"domain=") for part in attrs)):
-                            raise CutoverRefused("insecure_upstream_session", 503)
-                        if b"secure" not in attrs:
-                            # SQLite's historical logout deletes the cookie without Secure.
-                            # Permit ONLY the explicit empty, Max-Age=0 deletion and
-                            # upgrade it to a valid __Host- Secure deletion. Never
-                            # accept an insecure cookie that can create a session.
+                    if key.lower() == b"set-cookie":
+                        # Only the proxy may mint virtualized store-cookie names.
+                        if value.startswith(virtual_names):
+                            raise CutoverRefused("upstream_cookie_namespace_collision", 503)
+                        if value.startswith(upstream_name):
+                            session_count += 1
+                            if session_count > 1:
+                                raise CutoverRefused("duplicate_upstream_session", 503)
+                            attrs = {part.strip().lower() for part in value.split(b";")[1:]}
                             raw_value = value.split(b";", 1)[0].split(b"=", 1)[1]
-                            if raw_value not in (b"", b'""') or b"max-age=0" not in attrs:
+                            is_delete = raw_value in (b"", b'""') and b"max-age=0" in attrs
+                            if (b"path=/" not in attrs
+                                    or any(part.startswith(b"domain=") for part in attrs)):
                                 raise CutoverRefused("insecure_upstream_session", 503)
-                            value += b"; Secure; HttpOnly"
-                        value = (cookie_name + "=").encode() + value[len(UPSTREAM_COOKIE)+1:]
+                            if is_delete:
+                                # Keep the historical SQLite logout compatible,
+                                # but never emit an unsafe __Host- deletion.
+                                if b"secure" not in attrs:
+                                    value += b"; Secure"
+                                if b"httponly" not in attrs:
+                                    value += b"; HttpOnly"
+                            elif (b"secure" not in attrs or b"httponly" not in attrs
+                                  or not ({b"samesite=lax", b"samesite=strict"} & attrs)
+                                  or not _SESSION_TOKEN.fullmatch(raw_value.decode("latin1"))):
+                                raise CutoverRefused("insecure_upstream_session", 503)
+                            value = (cookie_name + "=").encode() + value[len(upstream_name):]
                     headers.append((key, value))
                 message = {**message, "headers": headers}
             await send(message)

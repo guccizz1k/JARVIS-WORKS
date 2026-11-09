@@ -7,7 +7,7 @@ on:
       - review/jw-v223-a-disposable-livepath-20261109
       - review/jw-v223-a-route-header-isolation-20261109
       - review/jw-v223-a-cookie-dup-transport-20261109
-      - review/jw-v223-ab-current-security-20261109
+      - review/jw-v223-a-response-cookie-guard-20261109
   workflow_dispatch:
 permissions:
   contents: read
