@@ -1,0 +1,56 @@
+name: JW V22.3 Track A cookie-boundary isolated regression
+on:
+  push:
+    branches:
+      - review/jw-v223-a-cookie-boundary-20261109
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-cookie-and-cutover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      JW_ENV: test
+      JW_PG_CINEMA_CUTOVER_FRONT_V223: ISOLATED_DEV_DUAL_SESSION_PILOT
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protected original guard and exact checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m py_compile app/pg_cinema_cutover_front_v223.py tests/test_cinema_pg_v223_cookie_boundary.py
+      - name: Install existing review-test dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Existing cutover plus new negative cookie regression, no database
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q --strict-markers --junitxml="$RUNNER_TEMP/cookie-suite.xml" \
+            tests/test_cinema_pg_v223_cookie_boundary.py \
+            tests/test_cinema_pg_cutover_front_v223.py \
+            tests/test_cinema_pg_cutover_logout_v223.py \
+            tests/test_cinema_pg_cutover_ui_v223.py
+          python3 - "$RUNNER_TEMP/cookie-suite.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          cases = root.findall('.//testcase')
+          failures = sum(len(c.findall('failure')) for c in cases)
+          errors = sum(len(c.findall('error')) for c in cases)
+          skips = sum(len(c.findall('skipped')) for c in cases)
+          print(f"TRACK_A_COOKIE_ACTUAL_SOURCE_TESTS={len(cases)} failures={failures} errors={errors} skips={skips}")
+          assert len(cases) >= 55 and not (failures or errors or skips)
+          PY
+      - name: Final tree review guard
+        run: |
+          python3 -I scripts/ci_cinema_pg_guard.py
