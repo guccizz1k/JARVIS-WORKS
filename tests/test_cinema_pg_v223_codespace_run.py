@@ -168,6 +168,30 @@ class PrivateInputs(unittest.TestCase):
         with self.assertRaisesRegex(run.Blocked, "approved project"):
             run.check_private_inputs(env)
 
+    def test_approved_pooler_admin_connection_passes(self):
+        dsn = (f"postgresql://postgres.{run.PROJECT_REF}:{PASSWORD}@{run.HOST}:{run.PORT}/postgres"
+               "?sslmode=verify-full&sslrootcert=/tmp/ca.crt")
+        self.assertEqual(run.check_private_inputs({**self.env, "JW_PG_ADMIN_DSN": dsn})["files_ok"], 3)
+
+    def test_host_fragment_user_fragment_and_wrong_admin_targets_are_rejected(self):
+        approved_host = f"db.{run.PROJECT_REF}.supabase.co"
+        attack_dsns = {
+            "hostname_prefix_suffix": f"postgresql://postgres:{PASSWORD}@{approved_host}.attacker.example:5432/postgres",
+            "project_ref_in_unsupported_hostname": f"postgresql://postgres:{PASSWORD}@fake.{run.PROJECT_REF}.example:5432/postgres",
+            "project_ref_only_in_username": f"postgresql://postgres.{run.PROJECT_REF}:{PASSWORD}@attacker.example:5432/postgres",
+            "wrong_direct_role": f"postgresql://other-admin:{PASSWORD}@{approved_host}:5432/postgres",
+            "wrong_pooler_role": f"postgresql://other-admin.{run.PROJECT_REF}:{PASSWORD}@{run.HOST}:5432/postgres",
+            "wrong_port": f"postgresql://postgres:{PASSWORD}@{approved_host}:15432/postgres",
+            "wrong_database": f"postgresql://postgres:{PASSWORD}@{approved_host}:5432/otherdb",
+            "wrong_pooler_port": f"postgresql://postgres.{run.PROJECT_REF}:{PASSWORD}@{run.HOST}:6543/postgres",
+        }
+        for name, url in attack_dsns.items():
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(run.Blocked, "exactly match") as ctx:
+                    run.check_private_inputs({**self.env, "JW_PG_ADMIN_DSN": url
+                                              + "?sslmode=verify-full&sslrootcert=/tmp/ca.crt"})
+                self.assertNotIn(PASSWORD, str(ctx.exception))
+
     def test_world_readable_credential_file_is_refused(self):
         self.files["creds"].chmod(0o644)
         with self.assertRaisesRegex(run.Blocked, "backup_role_auth_file_permissions"):
