@@ -86,9 +86,9 @@ jobs:
           expect_block "moved limit refused" "approved absolute limit" $RUN verify --expect-sha "$(git rev-parse HEAD)"
           git reset -q --hard "$GITHUB_SHA"
           # dirty tree
-          echo x >> scripts/pg_backup_v223.py
+          echo x >> docs/review/cinema-pg-v223-codespace-ready-20261109.md   # a file the launcher does not import
           expect_block "dirty tree refused" "uncommitted" $RUN verify --expect-sha "$GITHUB_SHA"
-          git checkout -q -- scripts/pg_backup_v223.py
+          git checkout -q -- docs/review/cinema-pg-v223-codespace-ready-20261109.md
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           echo 'PASS: launcher verified at the exact SHA; 9 negative controls refused; no database contacted'
