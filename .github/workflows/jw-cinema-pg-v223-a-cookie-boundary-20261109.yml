@@ -8,6 +8,7 @@ on:
       - review/jw-v223-a-cookie-dup-transport-20261109
       - review/jw-v223-a-response-cookie-guard-20261109
       - review/jw-v223-ab-cookie-codespace-qa-20261109
+      - review/jw-v223-ab-cookie-attr-ambiguity-20261109
   workflow_dispatch:
 permissions:
   contents: read
@@ -58,7 +59,7 @@ jobs:
           errors = sum(len(c.findall('error')) for c in cases)
           skips = sum(len(c.findall('skipped')) for c in cases)
           print(f"TRACK_A_COOKIE_ACTUAL_SOURCE_TESTS={len(cases)} failures={failures} errors={errors} skips={skips}")
-          assert len(cases) >= 104 and not (failures or errors or skips)
+          assert len(cases) >= 128 and not (failures or errors or skips)
           PY
       - name: Final tree review guard
         run: |
