@@ -79,6 +79,18 @@ def run() -> int:
                 return psycopg.connect(dbname=dbname, autocommit=False)
 
             pg = FastAPI(docs_url=None, openapi_url=None)
+            # Verify what the real disposable PG17 receives through the dual
+            # backend proxy, without printing credential/header values.
+            pg_list_headers = []
+
+            @pg.middleware("http")
+            async def record_merged_pg_headers(request: Request, call_next):
+                if request.method == "GET" and request.url.path == "/api/quotes":
+                    pg_list_headers.append({
+                        name.lower(): value for name, value in request.headers.items()
+                    })
+                return await call_next(request)
+
             # CI-only PG logout endpoint backed by a REAL disposable PG17 session
             # row. It tests cross-store session revocation; actual V8.5 role
             # delegation is separately covered in the integrated TLS gate.
@@ -217,8 +229,25 @@ def run() -> int:
                 pg_id = pg_quote.json().get("id", "")
                 check(pg_id.startswith("pg_"), "PG_QUOTE_HOME_PREFIX")
 
-                merged = c.get("/api/quotes")
+                merged = c.get("/api/quotes", headers={
+                    "Authorization": "Bearer ci-synthetic-attacker",
+                    "Proxy-Authorization": "Basic ci-synthetic-attacker",
+                    "X-Api-Key": "ci-synthetic-attacker",
+                    "X-CSRF-Token": sqlite_csrf,
+                    "X-JW-PG-CSRF": pg_csrf,
+                    "X-Tenant-ID": "ci-b",
+                    "X-Org-ID": "ci-b",
+                    "X-Forwarded-Proto": "http",
+                    "X-Forwarded-Host": "attacker.invalid",
+                })
                 check(merged.status_code == 200, "DUAL_HOME_READ")
+                check(bool(pg_list_headers) and all(not any(
+                    key in headers for key in (
+                        "authorization", "proxy-authorization", "x-api-key",
+                        "x-csrf-token", "x-jw-pg-csrf", "x-tenant-id",
+                        "x-org-id", "x-forwarded-proto", "x-forwarded-host"
+                    )) for headers in pg_list_headers),
+                    "REAL_PG17_MERGED_LIST_DROPS_UNTRUSTED_HEADERS")
                 by_id = {row["id"]: row["source"] for row in merged.json()}
                 check(by_id.get(legacy_id) == "legacy" and by_id.get(pg_id) == "pg",
                       "DUAL_HOME_SOURCE_TAGS")
@@ -226,6 +255,70 @@ def run() -> int:
                       "OLD_DOCUMENT_STAYS_SQLITE")
                 check(c.get("/api/quotes/" + pg_id).status_code == 200,
                       "NEW_DOCUMENT_IN_PG")
+
+                # Tenant B is a valid independent PG session with its own
+                # user and CSRF, not a forged principal or mock store.
+                b_token = secrets.token_urlsafe(40)
+                b_csrf = secrets.token_urlsafe(24)
+                with psycopg.connect(dbname=dbname, autocommit=True) as db:
+                    db.execute(
+                        "INSERT INTO jw_dev.sessions"
+                        "(id, token_hash, user_id, expires_at, csrf_token, created_at)"
+                        " VALUES (%s,%s,'ci-ub',(now()+interval '1 hour')::text,%s,now()::text)",
+                        ("ci-cutover-b", hashlib.sha256(b_token.encode()).hexdigest(), b_csrf)
+                    )
+                enabled.add("ci-b")
+                b_headers = {
+                    "Cookie": f"{cut.UPSTREAM_COOKIE}={b_token}",
+                    "X-CSRF-Token": b_csrf,
+                }
+                with TestClient(pg, base_url="https://testserver") as b_client:
+                    b_empty = b_client.get("/api/quotes", headers=b_headers)
+                    check(b_empty.status_code == 200 and b_empty.json() == [],
+                          "REAL_PG17_B_SESSION_SEES_NO_A_QUOTE")
+                    b_forbidden = b_client.get("/api/quotes/" + pg_id,
+                                               headers=b_headers)
+                    check(b_forbidden.status_code == 404,
+                          "REAL_PG17_B_DENIED_A_QUOTE_BY_RLS")
+                    b_mismatch = b_client.post("/api/quotes", json={
+                        "customer_id": new_customer_id, "title": "Cross-org attack",
+                        "vat_mode": "taxable",
+                        "items": [{"name": "Not permitted", "quantity": 1, "unit_price": 1}]
+                    }, headers=b_headers)
+                    check(b_mismatch.status_code in (403, 404, 409, 422),
+                          "REAL_PG17_B_CANNOT_USE_A_PARTNER")
+                    b_partner = b_client.post("/api/customers", json={
+                        "name": "Company B Partner", "business_number": "8222222222"
+                    }, headers=b_headers)
+                    check(b_partner.status_code == 201,
+                          "REAL_PG17_B_POSITIVE_PARTNER_CREATE")
+                    b_partner_id = b_partner.json()["id"]
+                    b_quote = b_client.post("/api/quotes", json={
+                        "customer_id": b_partner_id, "title": "Company B Quote",
+                        "vat_mode": "taxable",
+                        "items": [{"name": "B Widget", "quantity": 1, "unit_price": 200}]
+                    }, headers=b_headers)
+                    check(b_quote.status_code == 201,
+                          "REAL_PG17_B_POSITIVE_QUOTE_CREATE")
+                    b_quote_id = b_quote.json()["id"]
+                    check(b_quote_id.startswith("pg_") and b_quote_id != pg_id,
+                          "REAL_PG17_B_QUOTE_OWN_HOME")
+                    b_list = b_client.get("/api/quotes", headers=b_headers)
+                    check(b_list.status_code == 200 and
+                          [row["id"] for row in b_list.json()] == [b_quote_id],
+                          "REAL_PG17_B_LIST_ONLY_OWN_QUOTE")
+                    b_update = b_client.put("/api/quotes/" + pg_id, json={
+                        "title": "Illicit update", "version": 1,
+                    }, headers=b_headers)
+                    check(b_update.status_code in (403, 404, 409),
+                          "REAL_PG17_B_CANNOT_UPDATE_A_QUOTE")
+                a_list = c.get("/api/quotes")
+                check(a_list.status_code == 200 and
+                      b_quote_id not in {row["id"] for row in a_list.json()},
+                      "REAL_PG17_A_MERGED_LIST_EXCLUDES_B_QUOTE")
+                a_wrong = c.get("/api/quotes/" + b_quote_id)
+                check(a_wrong.status_code == 404,
+                      "REAL_PG17_A_CANNOT_READ_B_QUOTE")
 
                 enabled.clear()
                 off = c.get("/api/quotes")
