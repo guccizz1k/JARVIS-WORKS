@@ -181,26 +181,40 @@ class CutoverFront:
                 headers = []
                 session_count = 0
                 upstream_name = (UPSTREAM_COOKIE + "=").encode("ascii")
-                virtual_names = ((LEGACY_COOKIE + "=").encode("ascii"),
-                                 (PG_COOKIE + "=").encode("ascii"))
+                upstream_raw_name = UPSTREAM_COOKIE.encode("ascii")
+                virtual_names = (LEGACY_COOKIE.encode("ascii"), PG_COOKIE.encode("ascii"))
                 for key, value in message.get("headers", []):
                     if key.lower() == b"set-cookie":
-                        # Only the proxy may mint virtualized store-cookie names.
-                        if value.startswith(virtual_names):
+                        raw_name, sep, raw_value = value.split(b";", 1)[0].partition(b"=")
+                        name = raw_name.strip()
+                        # Cookie names may have surrounding whitespace. Never
+                        # let an upstream backend set the other store's virtual
+                        # session or leak its own unvirtualized session.
+                        if name in virtual_names:
                             raise CutoverRefused("upstream_cookie_namespace_collision", 503)
-                        if value.startswith(upstream_name):
+                        if name == upstream_raw_name:
+                            if raw_name != upstream_raw_name or not sep:
+                                raise CutoverRefused("insecure_upstream_session", 503)
                             session_count += 1
                             if session_count > 1:
                                 raise CutoverRefused("duplicate_upstream_session", 503)
-                            attrs = {part.strip().lower() for part in value.split(b";")[1:]}
-                            raw_value = value.split(b";", 1)[0].split(b"=", 1)[1]
+                            attr_parts = [part.strip().lower() for part in value.split(b";")[1:] if part.strip()]
+                            attrs = set(attr_parts)
+                            attr_names = [part.partition(b"=")[0].strip() for part in attr_parts]
+                            # Browsers can resolve duplicate Path and SameSite
+                            # attributes differently. Reject ambiguity rather
+                            # than accepting Strict/Path=/ while a later
+                            # attribute overrides it in the browser.
+                            for protected in (b"path", b"domain", b"secure", b"httponly", b"samesite", b"max-age"):
+                                if attr_names.count(protected) > 1:
+                                    raise CutoverRefused("ambiguous_upstream_cookie_attributes", 503)
                             is_delete = raw_value in (b"", b'""') and b"max-age=0" in attrs
                             if (b"path=/" not in attrs
-                                    or any(part.startswith(b"domain=") for part in attrs)):
+                                    or b"domain" in attr_names):
                                 raise CutoverRefused("insecure_upstream_session", 503)
                             if is_delete:
-                                # Keep the historical SQLite logout compatible,
-                                # but never emit an unsafe __Host- deletion.
+                                # Historical SQLite logout omits Secure. Only a
+                                # deletion may be upgraded, never new sessions.
                                 if b"secure" not in attrs:
                                     value += b"; Secure"
                                 if b"httponly" not in attrs:
