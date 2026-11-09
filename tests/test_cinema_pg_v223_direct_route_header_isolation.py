@@ -127,12 +127,12 @@ async def test_pg_write_keeps_only_pg_csrf_and_idempotency_key():
                                      headers={
                                          **INJECTED,
                                          "X-CSRF-Token": "legacy-csrf",
-                                         "X-JW-PG-CSRF": "pg-csrf-value",
+                                         "X-JW-PG-CSRF": "pg-csrf-value-20261109",
                                          "Idempotency-Key": "repeat-key-1",
                                      })
     assert response.status_code == 200, response.text
     h = response.json()["headers"]
-    assert h["x-csrf-token"] == "pg-csrf-value"
+    assert h["x-csrf-token"] == "pg-csrf-value-20261109"
     assert h["idempotency-key"] == "repeat-key-1"
     assert h["content-type"] == "application/json"
     assert "x-jw-pg-csrf" not in h
@@ -155,7 +155,7 @@ async def test_legacy_write_preserves_legacy_csrf_but_never_pg_csrf():
                                      headers={
                                          **INJECTED,
                                          "X-CSRF-Token": "legacy-csrf",
-                                         "X-JW-PG-CSRF": "pg-csrf-value",
+                                         "X-JW-PG-CSRF": "pg-csrf-value-20261109",
                                      })
     assert response.status_code == 200, response.text
     h = response.json()["headers"]
