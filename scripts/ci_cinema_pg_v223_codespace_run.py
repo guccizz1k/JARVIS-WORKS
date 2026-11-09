@@ -192,6 +192,10 @@ def check_private_inputs(environ: dict | None = None) -> dict:
     dsn = parse_dsn(env["JW_PG_ADMIN_DSN"])
     if dsn["sslmode"] != "verify-full" or not dsn["sslrootcert"]:
         raise Blocked("JW_PG_ADMIN_DSN must use sslmode=verify-full with sslrootcert")
+    # The checked, owner-only CA file must also be the CA actually used by
+    # the privileged connection, not a separate arbitrary trust root.
+    if dsn["sslrootcert"] != str(CERT_FILE):
+        raise Blocked("JW_PG_ADMIN_DSN must bind sslrootcert to the approved owner-only CA file")
     # Exact endpoint binding is mandatory BEFORE the privileged renew SQL.
     # A substring match on the project ref can be forged by a hostile host or
     # username; neither DNS/TLS nor a matching ref fragment proves DB identity.
