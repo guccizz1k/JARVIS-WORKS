@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -843,6 +844,18 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     return summary
 
 
+def install_termination_handlers() -> None:
+    """SIGTERM/SIGHUP must unwind through run()'s ``finally`` so a plaintext dump, the decrypted copy and the
+    temporary restore database are removed; the default action ends the process without any cleanup.
+    A second signal during that cleanup is ignored so the cleanup cannot be cut short."""
+    def _handler(signum, _frame):
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, signal.SIG_IGN)
+        raise BackupError("FAIL_V223_INTERRUPTED_BY_SIGNAL")
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, _handler)
+
+
 def mark_target() -> int:
     """``mark-target``: plant the ephemeral marker in the disposable restore cluster."""
     target, token = os.environ.get("JW_PG_TARGET_ADMIN_DSN", ""), os.environ.get(EPHEMERAL_TOKEN_ENV, "")
@@ -871,6 +884,7 @@ def main(argv: list[str]) -> int:
         return 2
     source, target = os.environ.get("JW_PG_SOURCE_DSN", ""), os.environ.get("JW_PG_TARGET_ADMIN_DSN", "")
     secrets = [parse_dsn(d)["password"] for d in (source, target) if d]
+    install_termination_handlers()
     try:
         summary = run(source, target, os.environ.get("JW_PG_SCHEMA", "jw_dev"),
                       real_source=os.environ.get("JW_PG_REAL_SOURCE") == "1")

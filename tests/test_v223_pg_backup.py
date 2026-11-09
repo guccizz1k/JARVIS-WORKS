@@ -754,3 +754,20 @@ def test_negative_artifact_fail_closed_no_unsafe_overwrite(tmp_path, key):
     with pytest.raises(pb.BackupError, match="OUTPUT_EXISTS"):
         pb.write_partial_restore_copy(src, existing)
     assert existing.read_bytes() == b"preserve"
+
+
+def test_sigterm_unwinds_instead_of_killing_the_process_without_cleanup():
+    """SIGTERM must raise BackupError (so run()'s finally removes the plaintext dump) and ignore a second signal."""
+    import signal
+    old = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
+    try:
+        pb.install_termination_handlers()
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler) and handler is not signal.SIG_DFL
+        with pytest.raises(pb.BackupError, match="FAIL_V223_INTERRUPTED_BY_SIGNAL"):
+            handler(signal.SIGTERM, None)
+        assert signal.getsignal(signal.SIGTERM) == signal.SIG_IGN   # cleanup cannot be cut short
+        assert signal.getsignal(signal.SIGHUP) == signal.SIG_IGN
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)

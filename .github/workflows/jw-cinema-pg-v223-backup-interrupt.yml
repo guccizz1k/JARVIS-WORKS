@@ -1,0 +1,168 @@
+name: JW V22.3 Track B backup interruption and negative tests on disposable synthetic PG17
+on:
+  push:
+    branches:
+      - review/jw-v223-p0-db-dr-claude-20261107
+      - review/jw-v223-ab-current-security-20261109
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  v223-backup-negative-pg17:
+    name: Wrong key, tamper, partial dump, wrong restore target (existing synthetic gate) at this SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      source-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-source
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      restore-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-restore
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_SYNTHETIC: '1'
+      JW_PG_SOURCE_DSN: postgresql://postgres:ci-only-v223-source@127.0.0.1:5432/postgres
+      JW_PG_TARGET_ADMIN_DSN: postgresql://postgres:ci-only-v223-restore@127.0.0.1:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python dependencies
+        run: python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=44,<47' 'pytest>=8,<10'
+      - name: PostgreSQL 17 client tools (native package, else the official image)
+        run: |
+          set -euo pipefail
+          if sudo apt-get update -qq >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql-client-17 >/dev/null 2>&1 && [ -x /usr/lib/postgresql/17/bin/pg_dump ]; then
+            echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+            echo "native postgresql-client-17"
+          else
+            mkdir -p "$RUNNER_TEMP/v223-pg17-bin"
+            for tool in pg_dump pg_restore; do
+              cat > "$RUNNER_TEMP/v223-pg17-bin/$tool" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host --user "\$(id -u):\$(id -g)" \
+            -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD \
+            -e PGDATABASE -e PGSSLMODE -e PGSSLROOTCERT postgres:17 $tool "\$@"
+          EOF
+              chmod 0700 "$RUNNER_TEMP/v223-pg17-bin/$tool"
+            done
+            echo "$RUNNER_TEMP/v223-pg17-bin" >> "$GITHUB_PATH"
+            echo "docker postgres:17 client wrapper"
+          fi
+      - name: Guard and tool versions
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          pg_dump --version | tee /dev/stderr | grep -E '\) 17\.'
+          pg_restore --version | tee /dev/stderr | grep -E '\) 17\.'
+      - name: Existing synthetic gate (wrong key, tampered file, truncated archive, partial real restore, wrong restore targets)
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v223_backup_synthetic | tee negative-gate.log
+          grep -E '^PASS_V223_SYNTHETIC_DOUBLE_PG17_BACKUP_ENCRYPT_RESTORE_AND_NEGATIVE_TESTS' negative-gate.log
+          echo 'DISPOSABLE EVIDENCE ONLY: synthetic PG17 service containers, never the Supabase development database.'
+  v223-backup-interrupt-pg17:
+    name: Forced termination of dump and restore connections, SIGTERM, residue checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      source-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-source
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      restore-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-restore
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_SYNTHETIC: '1'
+      JW_PG_SOURCE_DSN: postgresql://postgres:ci-only-v223-source@127.0.0.1:5432/postgres
+      JW_PG_TARGET_ADMIN_DSN: postgresql://postgres:ci-only-v223-restore@127.0.0.1:5433/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python dependencies
+        run: python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=44,<47' 'pytest>=8,<10'
+      - name: PostgreSQL 17 client tools (native package, else the official image)
+        run: |
+          set -euo pipefail
+          if sudo apt-get update -qq >/dev/null 2>&1 && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq postgresql-client-17 >/dev/null 2>&1 && [ -x /usr/lib/postgresql/17/bin/pg_dump ]; then
+            echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+            echo "native postgresql-client-17"
+          else
+            mkdir -p "$RUNNER_TEMP/v223-pg17-bin"
+            for tool in pg_dump pg_restore; do
+              cat > "$RUNNER_TEMP/v223-pg17-bin/$tool" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host --user "\$(id -u):\$(id -g)" \
+            -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD \
+            -e PGDATABASE -e PGSSLMODE -e PGSSLROOTCERT postgres:17 $tool "\$@"
+          EOF
+              chmod 0700 "$RUNNER_TEMP/v223-pg17-bin/$tool"
+            done
+            echo "$RUNNER_TEMP/v223-pg17-bin" >> "$GITHUB_PATH"
+            echo "docker postgres:17 client wrapper"
+          fi
+      - name: Guard and tool versions
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          pg_dump --version | tee /dev/stderr | grep -E '\) 17\.'
+          pg_restore --version | tee /dev/stderr | grep -E '\) 17\.'
+      - name: Interruption gate (terminate dump / snapshot / restore backends, SIGTERM) on synthetic PG17
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v223_backup_interrupt | tee interrupt-gate.log
+          grep -E '^PASS_V223_SYNTHETIC_INTERRUPTION_NEGATIVE_TESTS' interrupt-gate.log
+          echo 'DISPOSABLE EVIDENCE ONLY: only the two postgres:17 service containers were interrupted; no Supabase connection was touched.'

@@ -6,6 +6,7 @@ on:
       - fix/jw-v223-terms-public-acl-20261107
       - review/jw-v223-ab-cutover-integration-20261107
       - review/jw-v223-ab-final-tree-qa-20261109
+      - review/jw-v223-ab-current-security-20261109
   workflow_dispatch:
 permissions:
   contents: read
