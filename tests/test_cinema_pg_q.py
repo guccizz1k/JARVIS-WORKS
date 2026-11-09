@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import io
+from datetime import timedelta
 import os
 import stat
 import tempfile
@@ -63,18 +64,28 @@ class ScramSafety(unittest.TestCase):
             with self.assertRaises(ValueError):
                 q.load_or_create(link)
 
+    def test_no_credential_is_generated_at_or_after_the_approved_expiry(self):
+        for offset in (timedelta(0), timedelta(hours=1), timedelta(days=30)):
+            with patch.dict(os.environ, {"CODESPACES": "true"}), patch.object(q, "datetime") as clock, \
+                 patch.object(q, "load_or_create") as f:
+                clock.now.return_value = q.EXPIRY + offset
+                self.assertEqual(q.main(), 2)
+                f.assert_not_called()
+
     def test_outside_codespace_no_secret_generation(self):
         with patch.dict(os.environ, {"CODESPACES": "false"}), patch.object(q, "load_or_create") as f:
             self.assertEqual(q.main(), 2)
             f.assert_not_called()
 
     def test_password_not_printed(self):
+        # The clock is frozen one hour before the approved expiry: this test must not depend on the date it runs on.
         with patch.dict(os.environ, {"CODESPACES": "true"}), \
+             patch.object(q, "datetime") as clock, \
              patch.object(q, "load_or_create", return_value={"verifier": q.make_verifier("ab"*32), "password": "ab"*32}):
+            clock.now.return_value = q.EXPIRY - timedelta(hours=1)
             out = io.StringIO()
             with redirect_stdout(out):
                 result=q.main()
-            # Test controls time with patch when relevant, actual date is before approved expiry.
             self.assertEqual(result, 0)
             self.assertNotIn("ab"*32, out.getvalue())
             self.assertIn("ALTER ROLE jw_backup_ro PASSWORD 'SCRAM-SHA-256$",out.getvalue())

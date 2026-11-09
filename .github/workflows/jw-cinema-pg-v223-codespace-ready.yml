@@ -67,7 +67,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/pg16shim"
           for tool in pg_dump pg_restore psql; do printf '#!/bin/sh\necho "%s (PostgreSQL) 16.4"\n' "$tool" > "$RUNNER_TEMP/pg16shim/$tool"; chmod +x "$RUNNER_TEMP/pg16shim/$tool"; done
           PATH="$RUNNER_TEMP/pg16shim:$PATH" expect_block "PG16 clients refused" "pg_dump_17_plus" $RUN verify --expect-sha "$GITHUB_SHA"
-          DOCKER_HOST=unix:///nonexistent.sock expect_block "no Docker daemon refused" "docker_disposable_target_capable" $RUN verify --expect-sha "$GITHUB_SHA"
+          mkdir -p "$RUNNER_TEMP/nodockershim"
+          printf '#!/bin/sh\necho "Cannot connect to the Docker daemon" >&2\nexit 1\n' > "$RUNNER_TEMP/nodockershim/docker"; chmod +x "$RUNNER_TEMP/nodockershim/docker"
+          PATH="$RUNNER_TEMP/nodockershim:$PATH" expect_block "no Docker daemon refused" "docker_disposable_target_capable" $RUN verify --expect-sha "$GITHUB_SHA"
           # tool-hash / pin mismatch: a committed edit of the backup tool no longer matches the guard's pins
           git config user.email ci@example.invalid; git config user.name ci
           echo '# tamper' >> scripts/pg_backup_v223.py
