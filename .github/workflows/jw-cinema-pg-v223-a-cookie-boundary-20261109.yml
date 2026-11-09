@@ -37,6 +37,7 @@ jobs:
           set -euo pipefail
           python3 -m pytest -q --strict-markers --junitxml="$RUNNER_TEMP/cookie-suite.xml" \
             tests/test_cinema_pg_v223_cookie_boundary.py \
+            tests/test_cinema_pg_cutover_merged_header_boundary_v223.py \
             tests/test_cinema_pg_cutover_front_v223.py \
             tests/test_cinema_pg_cutover_logout_v223.py \
             tests/test_cinema_pg_cutover_ui_v223.py
@@ -49,7 +50,7 @@ jobs:
           errors = sum(len(c.findall('error')) for c in cases)
           skips = sum(len(c.findall('skipped')) for c in cases)
           print(f"TRACK_A_COOKIE_ACTUAL_SOURCE_TESTS={len(cases)} failures={failures} errors={errors} skips={skips}")
-          assert len(cases) >= 55 and not (failures or errors or skips)
+          assert len(cases) >= 65 and not (failures or errors or skips)
           PY
       - name: Final tree review guard
         run: |
