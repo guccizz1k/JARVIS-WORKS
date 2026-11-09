@@ -26,6 +26,22 @@ _PG_ID = re.compile(r"pg_[0-9a-f]{32}\Z")
 # Legacy and PG session issuers both use secrets.token_urlsafe (RFC 4648 URL-safe alphabet).
 # Reject cookie delimiters/control/ambiguous values before forwarding to either backend.
 _SESSION_TOKEN = re.compile(r"[A-Za-z0-9_-]{30,512}\Z")
+_UNTRUSTED_UPSTREAM_HEADERS = frozenset({
+    b"authorization", b"proxy-authorization", b"x-api-key",
+    b"x-jw-stage-key", b"x-tenant-id", b"x-org-id",
+    b"x-acting-user", b"x-user-id", b"x-real-ip",
+    b"forwarded", b"x-original-url", b"x-rewrite-url",
+    b"x-http-method-override", b"x-method-override",
+})
+
+
+def _forwardable_header(key: bytes) -> bool:
+    """Never route client-controlled identity, proxy or gateway headers to a store."""
+    name = key.lower()
+    return (name != b"cookie" and name not in _UNTRUSTED_UPSTREAM_HEADERS
+            and not name.startswith(b"x-forwarded-"))
+
+
 _ID_PART = re.compile(r"(?:^|/)pg_[^/]*")
 _LISTS = frozenset({"/api/customers", "/api/quotes", "/api/orders", "/api/invoices"})
 _COLLECTION = {"/api/quotes", "/api/customers"}
@@ -80,7 +96,11 @@ def route_home(path: str, method: str, body: Any = None) -> str:
 
 def _cookies_to_scope(scope: dict, upstream_token: str) -> dict:
     new = dict(scope)
-    headers = [(k, v) for k, v in scope.get("headers", ()) if k.lower() != b"cookie"]
+    # Applies to both direct ASGI routing and identity resolution. Session
+    # tokens are recreated per-store below; client identity/proxy overrides
+    # must not become backend-trusted assertions.
+    headers = [(k, v) for k, v in scope.get("headers", ())
+               if _forwardable_header(k)]
     if upstream_token:
         headers.append((b"cookie", f"{UPSTREAM_COOKIE}={upstream_token}".encode("ascii")))
     new["headers"] = headers
