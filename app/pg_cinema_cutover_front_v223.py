@@ -108,6 +108,17 @@ def _cookies_to_scope(scope: dict, upstream_token: str) -> dict:
 
 
 def _safe_cookie(scope: dict, cookie_name: str) -> str:
+    # Starlette's cookie parser retains one value if the same cookie appears
+    # twice. Reject ambiguity instead of authenticating whichever value wins.
+    expected = cookie_name.encode("ascii")
+    occurrences = sum(
+        1 for key, raw in scope.get("headers", ())
+        if key.lower() == b"cookie"
+        for part in raw.split(b";")
+        if part.partition(b"=")[0].strip() == expected
+    )
+    if occurrences > 1:
+        raise CutoverRefused("duplicate_session_cookie", 401)
     value = Request(scope).cookies.get(cookie_name, "")
     if value and not _SESSION_TOKEN.fullmatch(value):
         raise CutoverRefused("invalid_session_cookie", 401)
@@ -277,16 +288,24 @@ class CutoverFront:
         # the other service; each receives only its own validated session cookie.
         headers = {"accept": "application/json"}
         path = scope["path"]
-        qs = scope.get("query_string", b"").decode("ascii", "strict")
+        try:
+            qs = scope.get("query_string", b"").decode("ascii", "strict")
+        except UnicodeError as exc:
+            raise CutoverRefused("invalid_list_query_encoding", 400) from exc
         results = []
         for app, cookie in ((self.legacy_app, LEGACY_COOKIE), (self.pg_app, PG_COOKIE)):
             cookie_val = _safe_cookie(scope, cookie)
             h = {**headers, "cookie": f"{UPSTREAM_COOKIE}={cookie_val}"}
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="https://testserver", timeout=15
-            ) as client:
-                response = await client.get(path+("?" + qs if qs else ""), headers=h)
+            try:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="https://testserver", timeout=15
+                ) as client:
+                    response = await client.get(path+("?" + qs if qs else ""), headers=h)
+            except httpx.RequestError as exc:
+                # Never return only the successful store's records when the
+                # other store cannot be reached; merged views are atomic.
+                raise CutoverRefused("dual_home_listing_unavailable", 503) from exc
             if response.status_code != 200:
                 raise CutoverRefused("dual_home_listing_failed", 503)
             try:
