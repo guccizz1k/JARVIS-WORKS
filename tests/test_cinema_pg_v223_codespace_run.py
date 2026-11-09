@@ -144,7 +144,7 @@ class PrivateInputs(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.env = {"JW_PG_ADMIN_DSN": f"postgresql://postgres:{PASSWORD}@db.{run.PROJECT_REF}.supabase.co:5432/postgres"
-                                       "?sslmode=verify-full&sslrootcert={self.files['cert']}",
+                                       f"?sslmode=verify-full&sslrootcert={self.files['cert']}",
                     "JW_PG_BACKUP_KEY": "k" * 44}
 
     def test_complete_inputs_pass(self):
@@ -170,7 +170,7 @@ class PrivateInputs(unittest.TestCase):
 
     def test_approved_pooler_admin_connection_passes(self):
         dsn = (f"postgresql://postgres.{run.PROJECT_REF}:{PASSWORD}@{run.HOST}:{run.PORT}/postgres"
-               "?sslmode=verify-full&sslrootcert={self.files['cert']}")
+               f"?sslmode=verify-full&sslrootcert={self.files['cert']}")
         self.assertEqual(run.check_private_inputs({**self.env, "JW_PG_ADMIN_DSN": dsn})["files_ok"], 3)
 
     def test_host_fragment_user_fragment_and_wrong_admin_targets_are_rejected(self):
@@ -189,7 +189,7 @@ class PrivateInputs(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(run.Blocked, "exactly match") as ctx:
                     run.check_private_inputs({**self.env, "JW_PG_ADMIN_DSN": url
-                                              + "?sslmode=verify-full&sslrootcert={self.files['cert']}"})
+                                              + f"?sslmode=verify-full&sslrootcert={self.files['cert']}"})
                 self.assertNotIn(PASSWORD, str(ctx.exception))
 
     def test_admin_dsn_must_use_the_same_approved_owner_only_ca(self):
