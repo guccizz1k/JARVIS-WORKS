@@ -192,8 +192,16 @@ def check_private_inputs(environ: dict | None = None) -> dict:
     dsn = parse_dsn(env["JW_PG_ADMIN_DSN"])
     if dsn["sslmode"] != "verify-full" or not dsn["sslrootcert"]:
         raise Blocked("JW_PG_ADMIN_DSN must use sslmode=verify-full with sslrootcert")
-    if PROJECT_REF not in (dsn["host"] + "." + dsn["user"]):
-        raise Blocked("JW_PG_ADMIN_DSN does not name the approved project")
+    # Exact endpoint binding is mandatory BEFORE the privileged renew SQL.
+    # A substring match on the project ref can be forged by a hostile host or
+    # username; neither DNS/TLS nor a matching ref fragment proves DB identity.
+    direct = (dsn["host"] == f"db.{PROJECT_REF}.supabase.co"
+              and dsn["user"] == "postgres")
+    pooler = (dsn["host"] == HOST
+              and dsn["user"] == f"postgres.{PROJECT_REF}")
+    if (not (direct or pooler) or dsn["port"] != str(PORT)
+            or dsn["dbname"] != "postgres"):
+        raise Blocked("JW_PG_ADMIN_DSN does not exactly match approved project host, port, database and admin role")
     return {"secret_names_present": list(SECRET_ENV), "files_ok": 3}
 
 
