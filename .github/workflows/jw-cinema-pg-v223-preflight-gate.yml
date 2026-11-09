@@ -5,6 +5,7 @@ on:
       - review/jw-v223-p0-db-dr-claude-20261107
       - fix/jw-v223-terms-public-acl-20261107
       - review/jw-v223-ab-cutover-integration-20261107
+      - review/jw-v223-ab-final-tree-qa-20261109
   workflow_dispatch:
 permissions:
   contents: read
@@ -49,7 +50,7 @@ jobs:
       - name: Tooling for the pure-Python parts (no database driver is needed)
         run: python3 -m pip install --quiet cryptography pytest 'psycopg[binary]>=3.2,<4' 'fastapi>=0.115,<1'
       - name: Static guards for the preflight SQL
-        run: python3 -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_preflight_readonly.py tests/test_cinema_pg_v223_backup_role_c_gate.py
+        run: python3 -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_preflight_readonly.py tests/test_cinema_pg_v223_backup_role_c_gate.py tests/test_cinema_pg_v223_backup_role_renew_gate.py
       - name: Engine SQL gate (unchanged engine, must stay 222/222)
         run: python3 scripts/ci_cinema_pg_sql_gate.py --report engine-gate.json
       - name: Preflight gate (read-only proof, F2 parity, rollback visibility, apply-order trap)
@@ -65,6 +66,12 @@ jobs:
           grep -E '^PASS: [0-9]+ checks, 0 failed' c-gate.log
           echo 'DISPOSABLE EVIDENCE ONLY: change C was applied to a throw-away PG17 here, never to Supabase.'
 
+      - name: B1 renewal and revocation of expired backup role (expiry only, negative gates)
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v223_backup_role_renew_gate | tee renew-gate.log
+          grep -F 'PASS: 8 checks, 0 failed' renew-gate.log
+          echo 'SYNTHETIC PG17 ONLY; no live Supabase role was changed.'
       - name: Non-superuser B migration security gate (must catch original PUBLIC EXECUTE leak)
         run: |
           set -euo pipefail
