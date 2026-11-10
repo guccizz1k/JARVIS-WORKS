@@ -109,7 +109,8 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
     return lines
 
 def main() -> int:
-    print("DIAG ERROR_LOG_" + ("AVAILABLE" if safe_read(ERROR) else "UNAVAILABLE"))\n    for line in diagnose(safe_read(SUMMARY), safe_read(ERROR)):
+    print("DIAG ERROR_LOG_" + ("AVAILABLE" if safe_read(ERROR) else "UNAVAILABLE"))
+    for line in diagnose(safe_read(SUMMARY), safe_read(ERROR)):
         print(line)
     print("DIAG READ_ONLY_NO_DB_CONTACT")
     return 0
