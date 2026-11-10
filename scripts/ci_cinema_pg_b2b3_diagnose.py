@@ -93,6 +93,19 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
         lines.append("DIAG BACKUP_FAILURE_VERDICT")
     else:
         lines.append("DIAG BACKUP_FAILURE_OTHER")
+    # Runner's verdict failure names are a fixed allowlist, never raw SQL/data.
+    verdict_fields = ("verdict", "tables_not_65", "signature_mismatches",
+                      "restore_verified", "source_identity_verified", "source_role_least_privilege",
+                      "snapshot_consistent", "target_proven_ephemeral", "wrong_key_rejected",
+                      "decrypt_sha256_matches", "partial_dump_restore_rejected",
+                      "tamper_rejected", "truncation_rejected", "not_real_source", "exit_code")
+    if "backup/restore verification failed:" in reason:
+        raw = reason.split("backup/restore verification failed:", 1)[1].split(";", 1)[0]
+        names = set(raw.replace(" ", "").split(","))
+        for field in verdict_fields:
+            if field in names:
+                lines.append("DIAG VERDICT_FIELD_" + field.upper() + "_FAILED")
+    # Never print the error log itself, which may contain sensitive DB content.
     if not error_text.strip():
         lines.append("DIAG PRIVATE_ERROR_LOG_EMPTY_OR_UNAVAILABLE")
     proof = stages.get("prove_closed", {})
