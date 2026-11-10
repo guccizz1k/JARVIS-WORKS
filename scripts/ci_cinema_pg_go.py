@@ -26,7 +26,6 @@ UPSTREAM = "refs/remotes/origin/review/jw-v223-b-renew-20261110"
 PINNED_BASE = "6a1e993194e1fbe1f9cbb5f1571bc7bf85157b32"
 SAFE_UNTRACKED = frozenset({".github/supabase-root-2021.cer"})
 MAX_SECONDS = 160
-LIVE_SECONDS = 4000
 CONTAINER = "jw-v223-restore"
 
 
@@ -217,11 +216,18 @@ def inner(expect_sha: str, *, execute_live: bool = False) -> int:
         return 2
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            old_stamp = runner.SUMMARY_FILE.stat().st_mtime_ns if runner.SUMMARY_FILE.exists() else -1
             code = runner.main([
                 "all", "--expect-sha", expect_sha,
                 "--confirm-approval", "6755130318", "--confirm-no-charge"
             ])
+        # Never accept a prior run's report if a new run failed before writing.
+        new_stamp = runner.SUMMARY_FILE.stat().st_mtime_ns
+        if new_stamp <= old_stamp:
+            raise ValueError("no current report")
         report = json.loads(runner.SUMMARY_FILE.read_text(encoding="utf-8"))
+        if report.get("expect_sha") != expect_sha or (code and report.get("B2_B3") == "PASS"):
+            raise ValueError("stale/mismatched run report")
     except Exception:
         print("BLOCKED OWNER_RUNNER_UNEXPECTED_FAILURE")
         print("VERIFY_ROLE_REVOCATION_MANUALLY")
@@ -277,7 +283,7 @@ def outer(*, execute_live: bool = False) -> int:
             [sys.executable, "-m", "scripts.ci_cinema_pg_go",
              "_inner_run" if execute_live else "_inner", head],
             cwd=parent, env=env, text=True, capture_output=True, check=False,
-            timeout=LIVE_SECONDS if execute_live else MAX_SECONDS
+            timeout=None if execute_live else MAX_SECONDS
         )
         # The inner process outputs an allowlisted set of constant state labels
         # only. Do not echo arbitrary subprocess stderr.
@@ -291,6 +297,8 @@ def outer(*, execute_live: bool = False) -> int:
         return 0 if check.returncode == 0 else 2
     except (OSError, subprocess.TimeoutExpired):
         print("BLOCKED TEMPORARY_CHECK_FAILURE")
+        if execute_live:
+            print("URGENT_ROLE_REVOCATION_NOT_VERIFIED")
         return 2
     finally:
         if linked:
