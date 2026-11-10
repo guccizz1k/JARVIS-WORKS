@@ -45,6 +45,7 @@ PROJECT_REF = "rvymwwzclagvljnofyss"
 EXPECTED_TABLES = 65
 POSTAB_FINGERPRINT_DEFAULT = "d3e6284dfbd277b43041052ea8f927ca"   # scripts/ci_cinema_pg_w.py POSTAB_FINGERPRINT; env overrides
 RENEW_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql"
+TEMP_LOGIN_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_temporary_login_20261111.sql"
 REVOKE_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_revoke.sql"
 SECRET_ENV = ("JW_PG_ADMIN_DSN", "JW_PG_BACKUP_KEY")  # Codespaces secrets; names only are ever printed
 BACKUP_DIR = Path.home() / ".local" / "share" / "jw-v223-restore" / "backups"
@@ -54,6 +55,7 @@ PINNED_PATHS = (
     "scripts/pg_backup_v223.py", "tests/test_v223_pg_backup.py", "scripts/ci_cinema_pg_guard.py",
     "scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql", "scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql",
     "scripts/review/cinema_pg_v223_backup_role_revoke.sql",
+    "scripts/review/cinema_pg_v223_backup_role_temporary_login_20261111.sql",
     "scripts/ci_cinema_pg_v223_codespace_bootstrap.py", "scripts/ci_cinema_pg_v223_codespace_check.py",
     "scripts/ci_cinema_pg_v223_codespace_run.py", "scripts/ci_cinema_pg_r.py", "scripts/ci_cinema_pg_m.py",
     "scripts/ci_cinema_pg_q.py", "scripts/ci_cinema_pg_s.py", "scripts/ci_cinema_pg_u.py",
@@ -269,7 +271,7 @@ def stage_renew(on_attempt=None) -> dict:
     if on_attempt is not None:
         on_attempt()
     try:
-        done = psql("JW_PG_ADMIN_DSN", RENEW_SQL, {"valid_until": value})
+        done = psql("JW_PG_ADMIN_DSN", TEMP_LOGIN_SQL, {"valid_until": value})
     except subprocess.TimeoutExpired:
         raise Ambiguous("renewal timed out, state unknown: the revoke stage will close the role")
     except OSError:
