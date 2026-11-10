@@ -60,6 +60,20 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
     combined = (reason + "\n" + error_text).lower()
     found = [code for code, words in CAUSE_PATTERNS if any(word in combined for word in words)]
     lines.append("DIAG BACKUP_CAUSE_" + (found[0] if found else "UNKNOWN"))
+    # The runner already records only the names of failed identity checks.
+    # Extract names from its allowlist, never arbitrary error text or DSNs.
+    identity_names = ("host", "port", "project_ref", "dbname", "role", "server_major", "schema_fingerprint")
+    if "BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED:" in combined.upper():
+        tail = combined.upper().split("BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED:", 1)[1]
+        token = re.match(r"[a-z_,]+", tail.lower())
+        failed = set(token.group(0).split(",")) if token else set()
+        for name in identity_names:
+            if name in failed:
+                lines.append("DIAG IDENTITY_CHECK_" + name.upper() + "_FAILED")
+    elif "source identity" in combined or "source_identity" in combined:
+        lines.append("DIAG IDENTITY_CHECK_UNSPECIFIED")
+    # An unknown identity error must never be presented as an established fingerprint mismatch.
+
     code_match = re.search(r"(?<![a-z0-9_])(?:BLOCKED_V223_|FAIL_V223_)[A-Z0-9_]{3,80}", error_text)
     if code_match:
         lines.append("DIAG ENGINE_CODE_" + code_match.group(0))
