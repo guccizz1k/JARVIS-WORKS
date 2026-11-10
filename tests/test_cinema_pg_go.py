@@ -116,3 +116,25 @@ def test_docker_service_restarted_only_in_codespace_when_missing():
     with patch.dict(os.environ, {"CODESPACES": ""}), patch.object(go, "command", side_effect=fake):
         assert go.ensure_local_docker_daemon() is None
     assert calls == []
+
+
+def test_live_mode_needs_explicit_owner_tty_and_never_opens_a_worktree_without_it():
+    with patch.object(go, "validate_owner_checkout", return_value="a" * 40), \
+         patch.object(go.sys.stdin, "isatty", return_value=False), \
+         patch.object(go, "git", side_effect=AssertionError("must not run git")):
+        assert go.outer(execute_live=True) == 2
+
+
+def test_live_source_connection_is_never_attempted_without_no_charge_confirmation():
+    with patch.dict(os.environ, {"JW_OWNER_NO_CHARGE_VERIFIED": "", "JW_PG_ADMIN_DSN": "unused"}):
+        assert go.check_live_admin_login() is False
+
+
+def test_live_entrypoint_must_delegate_to_original_approved_runner():
+    import inspect
+    source = inspect.getsource(go.inner)
+    assert "runner.main([" in source
+    assert '"--confirm-approval", "6755130318"' in source
+    assert '"--confirm-no-charge"' in source
+    assert "runner.run_all(" not in source
+    assert 'print("URGENT_ROLE_REVOCATION_NOT_VERIFIED")' in source
