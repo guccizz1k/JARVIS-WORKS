@@ -371,6 +371,23 @@ def stage_backup() -> dict:
         # Nothing the child printed is trusted: the report carries only the exit code and a pointer to the scrubbed private log.
         raise Blocked(f"backup tool produced no usable summary (exit code {done.returncode}); scrubbed owner-only log: {write_error_log(done, env)}")
     failed = evaluate_summary(summary)
+    if "signature_mismatches" in failed:
+        # Expose only fixed mismatch categories, not object names, row data or ACL contents.
+        categories = ("tables", "policies", "functions", "triggers", "indexes",
+                      "constraints", "acl", "rows", "schema")
+        raw = summary.get("signature_mismatches")
+        if isinstance(raw, list):
+            present = set()
+            for item in raw[:10000]:
+                if isinstance(item, str):
+                    category = item.split(":", 1)[0]
+                    if category in categories:
+                        present.add(category)
+            failed.extend("signature_category_" + c for c in categories if c in present)
+            if not present:
+                failed.append("signature_category_unknown")
+        else:
+            failed.append("signature_category_unavailable")
     if done.returncode or failed:
         detail = f"; scrubbed owner-only log: {write_error_log(done, env)}" if done.returncode else ""
         raise Blocked("backup/restore verification failed: " + ", ".join(failed or ["exit_code"]) + detail)
