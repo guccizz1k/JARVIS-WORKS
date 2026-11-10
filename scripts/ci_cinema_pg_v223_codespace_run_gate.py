@@ -51,7 +51,7 @@ results: list[tuple[str, bool, str]] = []
 SHIM = r'''#!/usr/bin/env python3
 import os, subprocess, sys
 args = sys.argv[1:]
-kind = "renew" if any("renew_proposal" in a for a in args) else "revoke" if any("backup_role_revoke" in a for a in args) else "other"
+kind = "renew" if any("temporary-login.sql" in a or "backup_role_temporary_login_" in a for a in args) else "revoke" if any("backup_role_revoke" in a for a in args) else "other"
 with open(os.environ["JW_SHIM_LOG"], "a") as log:
     log.write(kind + "\n")
 mode = os.environ.get("JW_SHIM_MODE", "")
@@ -87,8 +87,8 @@ def role_facts(db: str) -> dict:
 
 
 def reset_role(db: str, password: str) -> None:
-    """The live starting point: LOGIN role, known password, expired."""
-    pf.psql(db, sql=f"ALTER ROLE {ROLE} LOGIN PASSWORD '{password}' VALID UNTIL '2000-01-01 00:00:00+00'")
+    """The live starting point: NOLOGIN role, known password, expired."""
+    pf.psql(db, sql=f"ALTER ROLE {ROLE} NOLOGIN PASSWORD '{password}' VALID UNTIL '2000-01-01 00:00:00+00'")
 
 
 class Env:
@@ -107,7 +107,9 @@ class Env:
         return {**base, **override}
 
     def __enter__(self):
-        win = rg.with_limit(rg.stamp(timedelta(hours=48)))     # the real renew file; only the absolute limit moved so any day works
+        limit = rg.stamp(timedelta(hours=48))
+        win = self.workdir / "temporary-login.sql"
+        win.write_text(run.TEMP_LOGIN_SQL.read_text(encoding="utf-8").replace("2026-11-11 09:00:00+09", limit), encoding="utf-8")
         creds = self.workdir / "backup_role_auth.json"
         creds.write_text(json.dumps({"role": ROLE, "password": self.password, "verifier": "x"}))
         shim_dir = self.workdir / "shim"
@@ -121,7 +123,7 @@ class Env:
                                       "JW_REAL_PSQL": real, "JW_SHIM_LOG": str(self.log), "JW_SHIM_MODE": "",
                                       "JW_SHIM_LEAK": "leak-never-" + secrets.token_hex(6)}))
         enter(patch.object(run, "APPROVED_LIMIT", datetime.now(ZoneInfo("Asia/Seoul")) + timedelta(hours=48)))
-        enter(patch.object(run, "RENEW_SQL", win))
+        enter(patch.object(run, "TEMP_LOGIN_SQL", win))
         enter(patch.object(run, "CREDS", creds))
         enter(patch.object(run, "login_kwargs", lambda: self.login_kwargs()))
         enter(patch.object(run, "RETRY_PAUSE_S", 0))
