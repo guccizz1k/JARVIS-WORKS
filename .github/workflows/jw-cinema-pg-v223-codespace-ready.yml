@@ -5,6 +5,7 @@ on:
       - review/jw-v223-codespace-ready-b-20261109
       - review/jw-v223-b-exact-admin-dsn-20261109
       - review/jw-v223-b-exact-admin-dsn-claude-20261109
+      - review/jw-v223-b-renew-20261110
   workflow_dispatch:
 permissions:
   contents: read
@@ -58,7 +59,7 @@ jobs:
           # the single run needs both explicit confirmations before anything happens
           expect_block "no confirmations" "--confirm-approval" $RUN all --expect-sha "$GITHUB_SHA"
           # secrets absent: verify stops before any database stage; the output proves no stage ran
-          expect_block "secrets missing" "JW_PG_ADMIN_DSN" $RUN all --expect-sha "$GITHUB_SHA" --confirm-approval 6729950127 --confirm-no-charge
+          expect_block "secrets missing" "JW_PG_ADMIN_DSN" $RUN all --expect-sha "$GITHUB_SHA" --confirm-approval 6755130318 --confirm-no-charge
           python - <<'PY'
           import json, os
           summary = json.load(open(os.path.expanduser("~/.local/share/jw-v223-restore/last_run_summary.json")))
@@ -79,11 +80,11 @@ jobs:
           expect_block "backup tool hash mismatch" "guard pin mismatch" $RUN verify --expect-sha "$(git rev-parse HEAD)"
           git reset -q --hard "$GITHUB_SHA"
           # a renewal SQL that widens the window or moves the approved limit
-          sed -i "s/interval ''24 hours''/interval ''7 days''/" scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql
+          sed -i "s/interval ''24 hours''/interval ''7 days''/" scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql
           git commit -qam widen-window
           expect_block "wider window refused" "approved absolute limit" $RUN verify --expect-sha "$(git rev-parse HEAD)"
           git reset -q --hard "$GITHUB_SHA"
-          sed -i "s/2026-11-10 09:00:00+09'/2026-11-17 09:00:00+09'/" scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql
+          sed -i "s/2026-11-11 09:00:00+09'/2026-11-18 09:00:00+09'/" scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql
           git commit -qam move-limit
           expect_block "moved limit refused" "approved absolute limit" $RUN verify --expect-sha "$(git rev-parse HEAD)"
           git reset -q --hard "$GITHUB_SHA"
