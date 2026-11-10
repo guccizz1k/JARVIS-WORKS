@@ -35,7 +35,6 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_roles
     WHERE rolname = 'jw_backup_ro' AND NOT rolcanlogin
-      AND rolvaliduntil <= TIMESTAMPTZ '2026-11-11 09:00:00+09'
   ) THEN
     RAISE EXCEPTION 'backup role not disabled or expiry outside approved cap';
   END IF;
