@@ -26,6 +26,7 @@ UPSTREAM = "refs/remotes/origin/review/jw-v223-b-renew-20261110"
 PINNED_BASE = "6a1e993194e1fbe1f9cbb5f1571bc7bf85157b32"
 SAFE_UNTRACKED = frozenset({".github/supabase-root-2021.cer"})
 MAX_SECONDS = 160
+LIVE_SECONDS = 4000
 CONTAINER = "jw-v223-restore"
 
 
@@ -110,7 +111,26 @@ def start_verified_disposable() -> bool:
     return False
 
 
-def inner(expect_sha: str) -> int:
+def check_live_admin_login() -> bool:
+    """Read-only, authenticated source identity check before any renewal attempt."""
+    if os.environ.get("JW_OWNER_NO_CHARGE_VERIFIED") != "1":
+        return False
+    try:
+        import psycopg
+        with psycopg.connect(os.environ["JW_PG_ADMIN_DSN"], connect_timeout=10) as conn:
+            row = conn.execute(
+                "SELECT current_user, current_database(), "
+                "current_setting('server_version_num')::int, "
+                "(SELECT rolvaliduntil < now() FROM pg_roles WHERE rolname='jw_backup_ro')"
+            ).fetchone()
+            return bool(row and row[0] == "postgres" and row[1] == "postgres"
+                        and 170000 <= row[2] < 180000 and row[3] is True)
+    except Exception:
+        # No exception text can reach the user's terminal.
+        return False
+
+
+def inner(expect_sha: str, *, execute_live: bool = False) -> int:
     """Runs only inside the verified isolated checkout; does not contact Supabase."""
     from scripts import ci_cinema_pg_v223_codespace_run as runner
     from scripts import ci_cinema_pg_m as target
@@ -175,11 +195,38 @@ def inner(expect_sha: str) -> int:
     if blocked:
         print("PRIVATE_READINESS_BLOCKED")
         return 2
-    print("PRIVATE_READINESS_PASS; billing and live-source authentication NOT VERIFIED")
-    return 0
+    print("PRIVATE_READINESS_PASS")
+    if not execute_live:
+        print("BILLING_AND_LIVE_SOURCE_AUTH_NOT_VERIFIED")
+        return 0
+
+    # TTY confirmation in the parent is required; never infer free usage from
+    # a free Render service or from this repository's Actions usage.
+    if not check_live_admin_login():
+        print("BLOCKED LIVE_ADMIN_READONLY_AUTH_OR_ROLE_STATE")
+        print("B2_B3_NOT_RUN; NO_SUPABASE_DB_CHANGE")
+        return 2
+    print("PASS LIVE_ADMIN_READONLY_AUTH_AND_EXPIRED_ROLE")
+    try:
+        code, report = runner.run_all(expect_sha)
+        runner.write_summary(report)
+    except Exception:
+        print("BLOCKED OWNER_RUNNER_UNEXPECTED_FAILURE")
+        print("VERIFY_ROLE_REVOCATION_MANUALLY")
+        return 2
+    for label, details in report.get("stages", {}).items():
+        if label in {"target_ready", "renew", "live_login", "backup_restore_compare", "revoke", "prove_closed"}:
+            print("STAGE " + label + " " + str(details.get("status", "NOT_RUN")))
+    if report.get("stages", {}).get("renew", {}).get("status") == "PASS":
+        closed = (report.get("stages", {}).get("revoke", {}).get("status") == "PASS"
+                  and report.get("stages", {}).get("prove_closed", {}).get("status") == "PASS")
+        if not closed:
+            print("URGENT_ROLE_REVOCATION_NOT_VERIFIED")
+    print("B2_B3_" + str(report.get("B2_B3", "BLOCKED_OR_FAIL")))
+    return code
 
 
-def outer() -> int:
+def outer(*, execute_live: bool = False) -> int:
     """Isolate the owner's untracked certificate without deleting or ignoring it."""
     try:
         head = validate_owner_checkout()
@@ -188,6 +235,19 @@ def outer() -> int:
         print("BLOCKED " + code)
         print("B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION")
         return 2
+
+    if execute_live:
+        # A dedicated action, separate from owner approval of DB changes, is
+        # required to attest that the current Codespaces session remains
+        # inside the owner's no-charge quota.
+        if not sys.stdin.isatty():
+            print("BLOCKED BILLING_CONFIRMATION_REQUIRES_OWNER_TTY")
+            return 2
+        print("Check your GitHub Codespaces billing usage. Type YES only if the")
+        print("current session will incur NO charge; otherwise enter anything else.")
+        if input("No-charge verified? YES: ").strip() != "YES":
+            print("BLOCKED NO_CHARGE_NOT_CONFIRMED")
+            return 2
 
     branch = "jw-b-audit-" + secrets.token_hex(6)
     parent = Path(tempfile.mkdtemp(prefix="jw-b-verify-", dir="/tmp"))
@@ -198,12 +258,21 @@ def outer() -> int:
             print("BLOCKED CANNOT_MAKE_ISOLATED_WORKTREE")
             return 2
         linked = True
-        check = command(sys.executable, "-m", "scripts.ci_cinema_pg_go", "_inner", head,
-                        cwd=parent, timeout=MAX_SECONDS)
+        env = dict(os.environ)
+        if execute_live:
+            env["JW_OWNER_NO_CHARGE_VERIFIED"] = "1"
+        check = subprocess.run(
+            [sys.executable, "-m", "scripts.ci_cinema_pg_go",
+             "_inner_run" if execute_live else "_inner", head],
+            cwd=parent, env=env, text=True, capture_output=True, check=False,
+            timeout=LIVE_SECONDS if execute_live else MAX_SECONDS
+        )
         # The inner process outputs an allowlisted set of constant state labels
         # only. Do not echo arbitrary subprocess stderr.
         for line in check.stdout.splitlines():
-            if line.startswith(("PASS ", "BLOCKED ", "PRIVATE_READINESS_", "B2_B3_NOT_RUN;")):
+            if line.startswith(("PASS ", "BLOCKED ", "PRIVATE_READINESS_", "B2_B3_NOT_RUN;",
+                                "B2_B3_", "STAGE ", "URGENT_", "VERIFY_ROLE_",
+                                "BILLING_AND_")):
                 print(line)
         if check.returncode and not any(line.startswith("BLOCKED ") for line in check.stdout.splitlines()):
             print("BLOCKED PRIVATE_PREFLIGHT_PROCESS")
@@ -230,8 +299,10 @@ def outer() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) == 2 and argv[0] == "_inner" and len(argv[1]) == 40:
-        return inner(argv[1])
+    if len(argv) == 2 and argv[0] in ("_inner", "_inner_run") and len(argv[1]) == 40:
+        return inner(argv[1], execute_live=argv[0] == "_inner_run")
+    if argv == ["run"]:
+        return outer(execute_live=True)
     if argv:
         print("BLOCKED UNKNOWN_ARGUMENTS")
         return 2
