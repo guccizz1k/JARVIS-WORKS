@@ -160,6 +160,13 @@ def inner(expect_sha: str) -> int:
     # Only the owner's LOCAL disposable database is queried, no Supabase.
     if start_verified_disposable():
         print("PASS LOCAL_PG17_READY")
+        try:
+            runner.stage_target()  # verifies marker/emptiness, or marks only an empty disposable DB
+        except Exception:
+            print("BLOCKED LOCAL_PG17_MARKER_OR_EMPTY")
+            blocked = True
+        else:
+            print("PASS LOCAL_PG17_MARKER_VERIFIED")
     else:
         print("BLOCKED LOCAL_PG17_NOT_READY")
         blocked = True
