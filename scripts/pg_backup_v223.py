@@ -340,7 +340,8 @@ SIGNATURE_QUERIES = {
                            ELSE a.grantee::regrole::text END,
                       a.privilege_type, a.is_grantable)
                       ORDER BY a.privilege_type, a.is_grantable,
-                        a.grantor::regrole::text, a.grantee::regrole::text)::text
+                        CASE WHEN a.grantor=c.relowner THEN 'OWNER' ELSE a.grantor::regrole::text END,
+                        CASE WHEN a.grantee=0 THEN 'PUBLIC' WHEN a.grantee=c.relowner THEN 'OWNER' ELSE a.grantee::regrole::text END)::text
                     FROM aclexplode(coalesce(c.relacl,
                       acldefault((CASE c.relkind WHEN 'S' THEN 's'
                         ELSE 'r' END)::"char", c.relowner))) a
