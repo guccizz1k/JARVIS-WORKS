@@ -216,3 +216,23 @@ def test_private_diagnosis_never_echoes_connection_secret(capsys):
     assert "TOPSECRET" not in repr(result)
     assert "example.invalid" not in repr(result)
     assert capsys.readouterr().out == ""
+
+
+
+def test_unsupported_and_incomplete_admin_urls_are_classified_without_secret_leaks():
+    from scripts import ci_cinema_pg_v223_codespace_run as runner
+    from scripts import pg_backup_v223
+    env = {"JW_PG_ADMIN_DSN": "https://postgres:SECRET@example.com/postgres"}
+    assert "ADMIN_DSN_SCHEME" in go.private_blocker_codes(env)
+    env["JW_PG_ADMIN_DSN"] = "postgresql:///postgres"
+    assert "ADMIN_DSN_HOST_MISSING" in go.private_blocker_codes(env)
+    env["JW_PG_ADMIN_DSN"] = "postgresql://postgres:SECRET@[broken/postgres"
+    assert "ADMIN_DSN_URL_MALFORMED" in go.private_blocker_codes(env)
+    env["JW_PG_ADMIN_DSN"] = ("postgresql://postgres:SECRET@"
+                              + runner.HOST + ":5432/postgres?sslmode=verify-full")
+    with patch.object(pg_backup_v223, "parse_dsn",
+                      side_effect=pg_backup_v223.BackupError("secret must never print")):
+        codes = go.private_blocker_codes(env)
+    assert "ADMIN_DSN_STRUCTURE_REJECTED" in codes
+    assert "SECRET" not in repr(codes)
+    assert "secret must never print" not in repr(codes)
