@@ -119,7 +119,11 @@ def diagnose_live_admin_login() -> str:
             row = conn.execute(
                 "SELECT current_user, current_database(), "
                 "current_setting('server_version_num')::int, "
-                "(SELECT rolvaliduntil < now() FROM pg_roles WHERE rolname='jw_backup_ro')"
+                "(SELECT (NOT rolcanlogin) AND rolvaliduntil <= " 
+                "TIMESTAMPTZ '2026-11-11 09:00:00+09' "
+                "AND NOT EXISTS (SELECT 1 FROM pg_stat_activity "
+                "WHERE usename='jw_backup_ro') FROM pg_roles "
+                "WHERE rolname='jw_backup_ro')"
             ).fetchone()
         if not row:
             return "EMPTY_IDENTITY_RESULT"
@@ -130,9 +134,9 @@ def diagnose_live_admin_login() -> str:
         if not 170000 <= row[2] < 180000:
             return "WRONG_PG_VERSION"
         if row[3] is None:
-            return "BACKUP_ROLE_NOT_FOUND_OR_NO_EXPIRY"
+            return "BACKUP_ROLE_NOT_FOUND_OR_UNSAFE_STATE"
         if row[3] is not True:
-            return "BACKUP_ROLE_NOT_EXPIRED"
+            return "BACKUP_ROLE_ACTIVE_OR_OUTSIDE_APPROVAL"
         return "PASS"
     except KeyError:
         return "ADMIN_DSN_MISSING"
@@ -343,7 +347,7 @@ def inner(expect_sha: str, *, execute_live: bool = False) -> int:
         print("BLOCKED LIVE_CAUSE_" + live_result)
         print("B2_B3_NOT_RUN; NO_SUPABASE_DB_CHANGE")
         return 2
-    print("PASS LIVE_ADMIN_READONLY_AUTH_AND_EXPIRED_ROLE")
+    print("PASS LIVE_ADMIN_READONLY_AUTH_AND_DISABLED_ROLE")
     # Invoke the EXISTING hardened public entrypoint, including its two
     # confirmation gates. The runner writes only its owner-protected summary.
     import contextlib
