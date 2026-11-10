@@ -98,3 +98,21 @@ def test_known_local_pg17_is_safe_to_restart_without_recreating():
         assert go.start_verified_disposable()
     assert sum("start" in a for a in calls) == 1
     assert not any("run" in a or "rm" in a for a in calls)
+
+
+def test_docker_service_restarted_only_in_codespace_when_missing():
+    calls = []
+    def fake(*args, **kwargs):
+        calls.append(args)
+        if args[:2] == ("docker", "info"):
+            return done(1)
+        if args[:4] == ("sudo", "-n", "service", "docker"):
+            return done()
+        raise AssertionError(args)
+    with patch.dict(os.environ, {"CODESPACES": "true"}), patch.object(go, "command", side_effect=fake):
+        assert go.ensure_local_docker_daemon() is None
+    assert len(calls) == 2
+    calls.clear()
+    with patch.dict(os.environ, {"CODESPACES": ""}), patch.object(go, "command", side_effect=fake):
+        assert go.ensure_local_docker_daemon() is None
+    assert calls == []
