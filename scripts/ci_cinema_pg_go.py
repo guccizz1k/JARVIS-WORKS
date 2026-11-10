@@ -191,12 +191,13 @@ def inner(expect_sha: str, *, execute_live: bool = False) -> int:
         print("BLOCKED LOCAL_PG17_NOT_READY")
         blocked = True
 
-    print("B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION")
     if blocked:
+        print("B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION")
         print("PRIVATE_READINESS_BLOCKED")
         return 2
     print("PRIVATE_READINESS_PASS")
     if not execute_live:
+        print("B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION")
         print("BILLING_AND_LIVE_SOURCE_AUTH_NOT_VERIFIED")
         return 0
 
@@ -207,9 +208,20 @@ def inner(expect_sha: str, *, execute_live: bool = False) -> int:
         print("B2_B3_NOT_RUN; NO_SUPABASE_DB_CHANGE")
         return 2
     print("PASS LIVE_ADMIN_READONLY_AUTH_AND_EXPIRED_ROLE")
+    # Invoke the EXISTING hardened public entrypoint, including its two
+    # confirmation gates. The runner writes only its owner-protected summary.
+    import contextlib
+    import io
+    if runner.APPROVAL_COMMENT != "6755130318":
+        print("BLOCKED APPROVAL_PIN_MISMATCH")
+        return 2
     try:
-        code, report = runner.run_all(expect_sha)
-        runner.write_summary(report)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = runner.main([
+                "all", "--expect-sha", expect_sha,
+                "--confirm-approval", "6755130318", "--confirm-no-charge"
+            ])
+        report = json.loads(runner.SUMMARY_FILE.read_text(encoding="utf-8"))
     except Exception:
         print("BLOCKED OWNER_RUNNER_UNEXPECTED_FAILURE")
         print("VERIFY_ROLE_REVOCATION_MANUALLY")
