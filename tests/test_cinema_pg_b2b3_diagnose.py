@@ -51,3 +51,10 @@ def test_absent_log_is_not_misreported_as_identity_failure():
     out = diagnose(report("backup tool produced no usable summary"), "")
     assert "DIAG PRIVATE_ERROR_LOG_EMPTY_OR_UNAVAILABLE" in out
     assert "DIAG ENGINE_CODE_UNAVAILABLE" in out
+
+def test_verdict_failure_fields_are_allowlisted_and_precise():
+    reason = "backup/restore verification failed: verdict, source_identity_verified, restore_verified; scrubbed owner-only log: /private/path"
+    lines = diagnose(report(reason), "exit_code=1")
+    assert "DIAG VERDICT_FIELD_SOURCE_IDENTITY_VERIFIED_FAILED" in lines
+    assert "DIAG VERDICT_FIELD_RESTORE_VERIFIED_FAILED" in lines
+    assert not any("/private/path" in line for line in lines)
