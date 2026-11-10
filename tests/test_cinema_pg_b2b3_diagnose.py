@@ -39,3 +39,15 @@ def test_identity_failure_names_are_allowlisted():
     assert "DIAG IDENTITY_CHECK_ROLE_FAILED" in output
     assert "DIAG IDENTITY_CHECK_SCHEMA_FINGERPRINT_FAILED" in output
     assert not any("PASSWORD" in line for line in output)
+
+def test_no_json_error_and_exception_are_distinguished():
+    msg = report("backup tool produced no usable summary (exit code 1)")
+    out = diagnose(msg, "FAIL_V223_UNEXPECTED_OperationalError")
+    assert "DIAG BACKUP_FAILURE_NO_JSON_SUMMARY" in out
+    assert "DIAG ENGINE_EXCEPTION_OperationalError" in out
+    assert "DIAG ENGINE_CODE_UNAVAILABLE" in out or any(x.startswith("DIAG ENGINE_CODE_FAIL_V223_") for x in out)
+
+def test_absent_log_is_not_misreported_as_identity_failure():
+    out = diagnose(report("backup tool produced no usable summary"), "")
+    assert "DIAG PRIVATE_ERROR_LOG_EMPTY_OR_UNAVAILABLE" in out
+    assert "DIAG ENGINE_CODE_UNAVAILABLE" in out
