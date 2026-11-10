@@ -282,11 +282,12 @@ def test_live_diagnosis_fixed_labels_and_no_secret_output(capsys):
 
 def test_renew_sql_has_atomic_login_and_closure_guard():
     from scripts import ci_cinema_pg_v223_codespace_run as runner
-    sql = runner.RENEW_SQL.read_text(encoding="utf-8")
+    sql = runner.TEMP_LOGIN_SQL.read_text(encoding="utf-8")
     assert "NOT rolcanlogin" in sql
     assert "pg_stat_activity" in sql
     assert "ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN;" in sql
     assert "BEGIN;" in sql and "COMMIT;" in sql
+    assert " LOGIN;" not in runner.RENEW_SQL.read_text(encoding="utf-8")
     revoke = runner.REVOKE_SQL.read_text(encoding="utf-8")
     assert "ALTER ROLE jw_backup_ro NOLOGIN;" in revoke
 
