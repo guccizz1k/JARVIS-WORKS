@@ -58,7 +58,7 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
     if not isinstance(reason, str):
         reason = ""
     combined = (reason + "\n" + error_text).lower()
-    found = [code for code, words in CAUSE_PATTERNS if any(word in combined for word in words)]
+    # Classify only engine stderr for root cause; the summary can mention identity generically.\n    found = [code for code, words in CAUSE_PATTERNS if any(word in error_text.lower() for word in words)]
     lines.append("DIAG BACKUP_CAUSE_" + (found[0] if found else "UNKNOWN"))
     # The runner already records only the names of failed identity checks.
     # Extract names from its allowlist, never arbitrary error text or DSNs.
@@ -70,11 +70,11 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
         for name in identity_names:
             if name in failed:
                 lines.append("DIAG IDENTITY_CHECK_" + name.upper() + "_FAILED")
-    elif "source identity" in combined or "source_identity" in combined:
+    elif "source identity" in error_text.lower() or "source_identity" in error_text.lower():
         lines.append("DIAG IDENTITY_CHECK_UNSPECIFIED")
     # An unknown identity error must never be presented as an established fingerprint mismatch.
 
-    code_match = re.search(r"(?<![a-z0-9_])(?:BLOCKED_V223_|FAIL_V223_)[A-Z0-9_]{3,80}", error_text)
+    code_match = re.search(r"(?<![a-z0-9_])(?:BLOCKED_V223_|FAIL_V223_)[A-Z0-9_]{3,80}", error_text + "\\n" + reason)
     if code_match:
         lines.append("DIAG ENGINE_CODE_" + code_match.group(0))
     proof = stages.get("prove_closed", {})
@@ -92,7 +92,7 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
     return lines
 
 def main() -> int:
-    for line in diagnose(safe_read(SUMMARY), safe_read(ERROR)):
+    print("DIAG ERROR_LOG_" + ("AVAILABLE" if safe_read(ERROR) else "UNAVAILABLE"))\n    for line in diagnose(safe_read(SUMMARY), safe_read(ERROR)):
         print(line)
     print("DIAG READ_ONLY_NO_DB_CONTACT")
     return 0
