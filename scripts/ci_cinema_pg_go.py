@@ -102,9 +102,19 @@ def start_verified_disposable() -> bool:
     if not obj["State"].get("Running", False):
         if command("sudo", "-n", "docker", "start", CONTAINER, timeout=30).returncode:
             return False
-    for _ in range(7):
+    # PostgreSQL 17 may need time for initdb and its first server restart.
+    # Never interpret a running Docker daemon as a healthy PostgreSQL server.
+    # The container must already exist with the exact approved local identity.
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
         if command("pg_isready", "-h", "127.0.0.1", "-p", "55432", timeout=6).returncode == 0:
             return True
+        state = command("sudo", "-n", "docker", "inspect", "--format",
+                        "{{.State.Running}}", CONTAINER, timeout=8)
+        # An exited container cannot become ready by waiting. Fail closed;
+        # preserve its filesystem/volume and do not attempt replacement.
+        if state.returncode or state.stdout.strip().lower() != "true":
+            return False
         time.sleep(1)
     return False
 
