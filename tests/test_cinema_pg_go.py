@@ -236,3 +236,45 @@ def test_unsupported_and_incomplete_admin_urls_are_classified_without_secret_lea
     assert "ADMIN_DSN_STRUCTURE_REJECTED" in codes
     assert "SECRET" not in repr(codes)
     assert "secret must never print" not in repr(codes)
+
+
+def test_live_diagnosis_without_approval_never_connects():
+    with patch.dict(os.environ, {"JW_OWNER_NO_CHARGE_VERIFIED": ""}):
+        assert go.diagnose_live_admin_login() == "NO_CHARGE_NOT_CONFIRMED"
+
+
+def test_live_diagnosis_fixed_labels_and_no_secret_output(capsys):
+    import sys
+    import types
+    class FakeConn:
+        def __init__(self, row): self.row = row
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def execute(self, sql): return self
+        def fetchone(self): return self.row
+    class DBError(Exception):
+        def __init__(self, state):
+            super().__init__("SECRET_DSN_MUST_NOT_LEAK")
+            self.sqlstate = state
+    rows = [
+        (("postgres", "postgres", 170011, True), "PASS"),
+        (("postgres.bad", "postgres", 170011, True), "WRONG_ADMIN_ROLE"),
+        (("postgres", "other", 170011, True), "WRONG_DATABASE"),
+        (("postgres", "postgres", 160011, True), "WRONG_PG_VERSION"),
+        (("postgres", "postgres", 170011, None), "BACKUP_ROLE_NOT_FOUND_OR_NO_EXPIRY"),
+        (("postgres", "postgres", 170011, False), "BACKUP_ROLE_NOT_EXPIRED"),
+    ]
+    with patch.dict(os.environ, {"JW_OWNER_NO_CHARGE_VERIFIED": "1", "JW_PG_ADMIN_DSN": "SYNTHETIC_SECRET"}):
+        for row, expected in rows:
+            with patch.dict(sys.modules, {"psycopg": types.SimpleNamespace(connect=lambda *a, **kw: FakeConn(row))}):
+                assert go.diagnose_live_admin_login() == expected
+        for state, expected in [("28P01", "PASSWORD_AUTH_REJECTED"),
+                                ("28000", "ROLE_AUTH_REJECTED"),
+                                ("42501", "INSUFFICIENT_PRIVILEGE"),
+                                ("08001", "CONNECTION_REJECTED"),
+                                ("XXXXX", "DB_CONNECT_OR_QUERY_FAILURE")]:
+            def fail(*a, **kw): raise DBError(state)
+            with patch.dict(sys.modules, {"psycopg": types.SimpleNamespace(connect=fail)}):
+                assert go.diagnose_live_admin_login() == expected
+    output = capsys.readouterr().out
+    assert "SECRET" not in output
