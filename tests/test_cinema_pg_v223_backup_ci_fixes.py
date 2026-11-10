@@ -56,4 +56,9 @@ def test_roles_in_acl_never_explodes_an_empty_literal_array():
 
 def test_signature_compares_effective_acl():
     acl = pb.SIGNATURE_QUERIES["acl"]
-    assert "coalesce(c.relacl, acldefault(" in acl and '::"char", c.relowner))::text' in acl
+    assert "aclexplode(coalesce(c.relacl," in acl
+    assert "acldefault(" in acl
+    assert "a.privilege_type" in acl and "a.is_grantable" in acl
+    assert "a.grantor=c.relowner" in acl and "a.grantee=c.relowner" in acl
+    assert "jsonb_agg" in acl and "ORDER BY" in acl
+    assert "c.relacl)::text" not in acl
