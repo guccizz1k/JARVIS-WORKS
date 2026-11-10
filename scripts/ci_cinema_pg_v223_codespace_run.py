@@ -7,7 +7,7 @@ prints a secret, and no stage touches a database before every check has passed.
 
   python3 -m scripts.ci_cinema_pg_v223_codespace_run verify --expect-sha <40-hex>        # no secrets, no database
   python3 -m scripts.ci_cinema_pg_v223_codespace_run all    --expect-sha <40-hex> \
-          --confirm-approval 6729950127 --confirm-no-charge                               # the single approved run
+          --confirm-approval 6755130318 --confirm-no-charge                               # the single approved run
 
 Stages of ``all`` (strict order; any failure stops the next stage, and the revoke stage ALWAYS runs once the renewal started):
   verify -> disposable restore target ready -> renew (VALID UNTIL, expiry only) -> live restricted login -> encrypted backup -> isolated PG17 restore + signature
@@ -38,13 +38,13 @@ from scripts.ci_cinema_pg_r import SECRET_FILE  # noqa: E402
 from scripts.ci_cinema_pg_s import CERT_FILE, HOST, PORT  # noqa: E402
 from scripts.pg_backup_v223 import parse_dsn, pg_env  # noqa: E402
 
-APPROVAL_COMMENT = "6729950127"                       # issue #140 conditional approval the owner confirms on the command line
-APPROVED_LIMIT = datetime(2026, 11, 10, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+APPROVAL_COMMENT = "6755130318"                       # issue #140 conditional approval the owner confirms on the command line
+APPROVED_LIMIT = datetime(2026, 11, 11, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
 MAX_WINDOW = timedelta(hours=23)                       # below the renew SQL's own 24 h rule: Python's clock runs before the server's
 PROJECT_REF = "rvymwwzclagvljnofyss"
 EXPECTED_TABLES = 65
 POSTAB_FINGERPRINT_DEFAULT = "d3e6284dfbd277b43041052ea8f927ca"   # scripts/ci_cinema_pg_w.py POSTAB_FINGERPRINT; env overrides
-RENEW_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql"
+RENEW_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql"
 REVOKE_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_revoke.sql"
 SECRET_ENV = ("JW_PG_ADMIN_DSN", "JW_PG_BACKUP_KEY")  # Codespaces secrets; names only are ever printed
 BACKUP_DIR = Path.home() / ".local" / "share" / "jw-v223-restore" / "backups"
@@ -52,7 +52,8 @@ SUMMARY_FILE = BACKUP_DIR.parent / "last_run_summary.json"
 # Everything that must be byte-identical to the checked-out commit (and, for the backup tool and its test, to the guard's pins).
 PINNED_PATHS = (
     "scripts/pg_backup_v223.py", "tests/test_v223_pg_backup.py", "scripts/ci_cinema_pg_guard.py",
-    "scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql", "scripts/review/cinema_pg_v223_backup_role_revoke.sql",
+    "scripts/review/cinema_pg_v223_backup_role_renew_proposal.sql", "scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql",
+    "scripts/review/cinema_pg_v223_backup_role_revoke.sql",
     "scripts/ci_cinema_pg_v223_codespace_bootstrap.py", "scripts/ci_cinema_pg_v223_codespace_check.py",
     "scripts/ci_cinema_pg_v223_codespace_run.py", "scripts/ci_cinema_pg_r.py", "scripts/ci_cinema_pg_m.py",
     "scripts/ci_cinema_pg_q.py", "scripts/ci_cinema_pg_s.py", "scripts/ci_cinema_pg_u.py",
@@ -154,7 +155,7 @@ def check_pins() -> dict:
         if (ROOT / path).is_file() and git("hash-object", path) != pinned:
             raise Blocked("guard pin mismatch (the guard and the file come from different commits): " + path)
     code = "\n".join(line for line in RENEW_SQL.read_text().splitlines() if not line.lstrip().startswith("--"))
-    if code.count("2026-11-10 09:00:00+09") != 1 or "7 days" in code:
+    if code.count("2026-11-11 09:00:00+09") != 1 or "7 days" in code:
         raise Blocked("renew SQL does not carry the approved absolute limit exactly once")
     done = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/ci_cinema_pg_guard.py")], cwd=ROOT,
                           capture_output=True, text=True, timeout=120, check=False)
@@ -174,7 +175,7 @@ def check_tools() -> dict:
 def check_window(at: datetime | None = None) -> dict:
     at = at or now()
     if at >= APPROVED_LIMIT:
-        raise Blocked("the owner approval ended at 2026-11-10 09:00:00+09; ask for a new approval, never extend")
+        raise Blocked("the owner approval ended at 2026-11-11 09:00:00+09; ask for a new approval, never extend")
     return {"now_kst": at.astimezone(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S"),
             "minutes_left": int((APPROVED_LIMIT - at).total_seconds() // 60)}
 
@@ -233,7 +234,7 @@ def renew_value(at: datetime | None = None) -> str:
     at = at or now()
     until = min(APPROVED_LIMIT, at + MAX_WINDOW)
     if until <= at:
-        raise Blocked("no renewal window is left before 2026-11-10 09:00:00+09")
+        raise Blocked("no renewal window is left before 2026-11-11 09:00:00+09")
     return until.astimezone(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S+09")
 
 
