@@ -28,19 +28,5 @@ SELECT format('DO $g$ BEGIN '
               'OR %1$L::timestamptz > %2$L::timestamptz THEN '
               'RAISE EXCEPTION ''jw_backup_ro renewal window must be after now(), at most 24 hours ahead and not later than the approved limit''; END IF; '
               'END $g$', :'valid_until', '2026-11-11 09:00:00+09') \gexec
--- Enable LOGIN only inside the existing short-lived backup window.
--- Fail closed if the account is already enabled, has sessions, or exceeds the approval cap.
-DO $guard$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_roles
-    WHERE rolname = 'jw_backup_ro' AND NOT rolcanlogin
-  ) THEN
-    RAISE EXCEPTION 'backup role not disabled or expiry outside approved cap';
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_stat_activity WHERE usename = 'jw_backup_ro') THEN
-    RAISE EXCEPTION 'backup role has active sessions';
-  END IF;
-END $guard$;
-ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN;
+ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until';
 COMMIT;
