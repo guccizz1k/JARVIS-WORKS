@@ -139,7 +139,7 @@ def private_blocker_codes(environ: dict | None = None) -> list[str]:
     import stat
     from urllib.parse import parse_qs, urlsplit
     from scripts import ci_cinema_pg_v223_codespace_run as runner
-    from scripts.pg_backup_v223 import parse_dsn
+    from scripts.pg_backup_v223 import BackupError, parse_dsn
 
     env = os.environ if environ is None else environ
     codes: list[str] = []
@@ -179,9 +179,26 @@ def private_blocker_codes(environ: dict | None = None) -> list[str]:
         return codes
     if pieces.fragment:
         codes.append("ADMIN_DSN_UNENCODED_HASH")
+    # The shared parser raises its own BackupError on unsupported scheme or
+    # absent hostname. Do not misreport these predictable input errors as an
+    # unexpected parser crash; inspect only structural fields, never values.
+    if pieces.scheme not in ("postgresql", "postgres"):
+        codes.append("ADMIN_DSN_SCHEME")
+        return codes
+    try:
+        hostname = pieces.hostname
+    except (ValueError, TypeError):
+        codes.append("ADMIN_DSN_URL_MALFORMED")
+        return codes
+    if not hostname:
+        codes.append("ADMIN_DSN_HOST_MISSING")
+        return codes
     try:
         parsed = parse_dsn(raw)
         qs = parse_qs(pieces.query, keep_blank_values=True)
+    except BackupError:
+        codes.append("ADMIN_DSN_STRUCTURE_REJECTED")
+        return codes
     except (TypeError, ValueError, UnicodeError, KeyError, IndexError):
         codes.append("ADMIN_DSN_URL_MALFORMED")
         return codes
