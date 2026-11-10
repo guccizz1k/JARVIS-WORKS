@@ -81,9 +81,8 @@ def ensure_local_docker_daemon() -> None:
 
 def start_verified_disposable() -> bool:
     """May start ONLY the already-created, localhost-only, known PG17 container."""
-    ready = command("pg_isready", "-h", "127.0.0.1", "-p", "55432", timeout=6)
-    if ready.returncode == 0:
-        return True
+    # Never accept an unrelated process on port 55432 as the approved target.
+    # Validate Docker identity first even if pg_isready reports ready.
     # Never create, delete, reconfigure or publish a container. Stop if its
     # identity/port binding cannot be proven from read-only docker inspect.
     inspect = command("sudo", "-n", "docker", "inspect", CONTAINER, timeout=15)
