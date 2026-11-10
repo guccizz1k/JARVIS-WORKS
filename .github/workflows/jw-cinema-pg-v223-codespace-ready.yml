@@ -29,9 +29,9 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python -I scripts/ci_cinema_pg_guard.py
-          python -m py_compile scripts/ci_cinema_pg_v223_codespace_run.py scripts/ci_cinema_pg_v223_codespace_bootstrap.py scripts/ci_cinema_pg_v223_codespace_check.py scripts/ci_cinema_pg_u.py
+          python -m py_compile scripts/ci_cinema_pg_v223_codespace_run.py scripts/ci_cinema_pg_v223_codespace_bootstrap.py scripts/ci_cinema_pg_v223_codespace_check.py scripts/ci_cinema_pg_u.py scripts/ci_cinema_pg_go.py tests/test_cinema_pg_go.py
           python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47' 'pytest>=8,<10'
-          python -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_codespace_run.py tests/test_cinema_pg_v223_codespace_check.py tests/test_cinema_pg_v223_backup_role_renew_gate.py tests/test_cinema_pg_u.py
+          python -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_codespace_run.py tests/test_cinema_pg_v223_codespace_check.py tests/test_cinema_pg_v223_backup_role_renew_gate.py tests/test_cinema_pg_u.py tests/test_cinema_pg_go.py
       - name: PG17 client tooling through the existing bootstrap (no database)
         run: |
           set -euo pipefail
@@ -39,6 +39,18 @@ jobs:
           python -m scripts.ci_cinema_pg_v223_codespace_bootstrap --prepare | tee "$RUNNER_TEMP/bootstrap.log"
           grep -F 'TOOLS_READY_ONLY' "$RUNNER_TEMP/bootstrap.log"
           echo '/usr/lib/postgresql/17/bin' >> "$GITHUB_PATH"
+      - name: Mobile readiness helper must stay no-live-DB and refuse missing secrets
+        run: |
+          set -euo pipefail
+          set +e
+          python -m scripts.ci_cinema_pg_go _inner "$GITHUB_SHA" > "$RUNNER_TEMP/jw-mobile.txt"
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -Fx "PASS EXACT_SHA_PROTECTED_GUARD_AND_TOOLS" "$RUNNER_TEMP/jw-mobile.txt"
+          grep -Fx "BLOCKED PRIVATE_FILES_AND_ADMIN_DSN" "$RUNNER_TEMP/jw-mobile.txt"
+          grep -Fx "B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION" "$RUNNER_TEMP/jw-mobile.txt"
+          echo "PASS: new mobile readiness helper fails closed without owner secrets"
       - name: Launcher verify passes only for the exact reported SHA, then every negative control refuses
         run: |
           set -euo pipefail
