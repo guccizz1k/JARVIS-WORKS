@@ -98,7 +98,13 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
                       "restore_verified", "source_identity_verified", "source_role_least_privilege",
                       "snapshot_consistent", "target_proven_ephemeral", "wrong_key_rejected",
                       "decrypt_sha256_matches", "partial_dump_restore_rejected",
-                      "tamper_rejected", "truncation_rejected", "not_real_source", "exit_code")
+                      "tamper_rejected", "truncation_rejected", "not_real_source", "exit_code",
+                      "signature_category_tables", "signature_category_policies",
+                      "signature_category_functions", "signature_category_triggers",
+                      "signature_category_indexes", "signature_category_constraints",
+                      "signature_category_acl", "signature_category_rows",
+                      "signature_category_schema", "signature_category_unknown",
+                      "signature_category_unavailable")
     if "backup/restore verification failed:" in reason:
         raw = reason.split("backup/restore verification failed:", 1)[1].split(";", 1)[0]
         names = set(raw.replace(" ", "").split(","))
