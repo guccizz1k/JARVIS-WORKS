@@ -425,6 +425,28 @@ def diff_signatures(source: dict, restored: dict) -> list[str]:
     return problems
 
 
+def diagnose_signature_mismatches(source: dict, restored: dict) -> dict:
+    """Bounded, content-free comparison evidence; never change the PASS gate.
+
+    Classify missing objects separately from differing signatures. ACL values
+    and constraint definitions are deliberately not exposed to logs.
+    """
+    result = {}
+    for category in ("constraints", "acl"):
+        a = {row[0]: row[1:] for row in source.get(category, [])}
+        b = {row[0]: row[1:] for row in restored.get(category, [])}
+        common = set(a) & set(b)
+        changed = {name for name in common if a[name] != b[name]}
+        result[category] = {
+            "source_objects": len(a),
+            "restored_objects": len(b),
+            "missing_in_restore": len(set(a) - set(b)),
+            "unexpected_in_restore": len(set(b) - set(a)),
+            "different_definition_or_grants": len(changed),
+        }
+    return result
+
+
 def signature_digest(sig: dict) -> str:
     return hashlib.sha256(json.dumps(sig, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -827,6 +849,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
         with psycopg.connect(restore_dsn) as tconn:
             restored_sig = fetch_signature(tconn, schema)
         summary["signature_mismatches"] = diff_signatures(src_sig, restored_sig)
+        summary["signature_mismatch_diagnostics"] = diagnose_signature_mismatches(src_sig, restored_sig)
         summary["restore_verified"] = not summary["signature_mismatches"]
         summary["tables"] = len(src_sig["tables"])
         summary["signature_sha256"] = signature_digest(src_sig)
