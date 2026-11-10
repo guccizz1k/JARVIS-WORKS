@@ -33,3 +33,9 @@ def test_symlink_and_oversize_private_files_are_not_followed(tmp_path):
     link.symlink_to(private)
     assert safe_read(link) == ""
     assert safe_read(private, limit=1) == ""
+
+def test_identity_failure_names_are_allowlisted():
+    output = diagnose(report(), "BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED:role,schema_fingerprint")
+    assert "DIAG IDENTITY_CHECK_ROLE_FAILED" in output
+    assert "DIAG IDENTITY_CHECK_SCHEMA_FINGERPRINT_FAILED" in output
+    assert not any("PASSWORD" in line for line in output)
