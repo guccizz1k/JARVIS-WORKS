@@ -58,3 +58,11 @@ def test_verdict_failure_fields_are_allowlisted_and_precise():
     assert "DIAG VERDICT_FIELD_SOURCE_IDENTITY_VERIFIED_FAILED" in lines
     assert "DIAG VERDICT_FIELD_RESTORE_VERIFIED_FAILED" in lines
     assert not any("/private/path" in line for line in lines)
+
+def test_signature_category_diagnostics_never_expose_object_names():
+    reason = ("backup/restore verification failed: verdict, signature_mismatches, "
+              "restore_verified, signature_category_acl, signature_category_rows")
+    out = diagnose(report(reason), "exit_code=0")
+    assert "DIAG VERDICT_FIELD_SIGNATURE_CATEGORY_ACL_FAILED" in out
+    assert "DIAG VERDICT_FIELD_SIGNATURE_CATEGORY_ROWS_FAILED" in out
+    assert not any("customer_table" in line for line in out)
