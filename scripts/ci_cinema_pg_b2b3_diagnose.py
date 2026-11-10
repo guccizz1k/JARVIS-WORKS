@@ -77,6 +77,23 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
     code_match = re.search(r"(?<![a-z0-9_])(?:BLOCKED_V223_|FAIL_V223_)[A-Z0-9_]{3,80}", error_text + "\\n" + reason)
     if code_match:
         lines.append("DIAG ENGINE_CODE_" + code_match.group(0))
+    else:
+        lines.append("DIAG ENGINE_CODE_UNAVAILABLE")
+    if "FAIL_V223_UNEXPECTED_" in error_text:
+        kind = re.search(r"FAIL_V223_UNEXPECTED_([A-Za-z]{3,40})", error_text)
+        if kind:
+            allowed = {"OperationalError", "ProgrammingError", "InsufficientPrivilege", "UndefinedTable",
+                       "UndefinedFunction", "InvalidTextRepresentation", "KeyError", "ValueError",
+                       "TypeError", "AttributeError", "OSError", "TimeoutExpired"}
+            lines.append("DIAG ENGINE_EXCEPTION_" + (kind.group(1) if kind.group(1) in allowed else "OTHER"))
+    if "backup tool produced no usable summary" in reason:
+        lines.append("DIAG BACKUP_FAILURE_NO_JSON_SUMMARY")
+    elif "backup/restore verification failed" in reason:
+        lines.append("DIAG BACKUP_FAILURE_VERDICT")
+    else:
+        lines.append("DIAG BACKUP_FAILURE_OTHER")
+    if not error_text.strip():
+        lines.append("DIAG PRIVATE_ERROR_LOG_EMPTY_OR_UNAVAILABLE")
     proof = stages.get("prove_closed", {})
     proof_reason = proof.get("reason", "") if isinstance(proof, dict) else ""
     if not isinstance(proof_reason, str):
