@@ -389,6 +389,21 @@ def stage_backup() -> dict:
         else:
             failed.append("signature_category_unavailable")
     if done.returncode or failed:
+        # Bounded counts only: no table names, grants, constraint definitions,
+        # customer rows, DSNs or keys. Never alter the verification verdict.
+        diagnosis = summary.get("signature_mismatch_diagnostics", {})
+        counts = []
+        if isinstance(diagnosis, dict):
+            for category in ("acl", "constraints"):
+                part = diagnosis.get(category)
+                if isinstance(part, dict):
+                    for field in ("missing_in_restore", "unexpected_in_restore",
+                                  "different_definition_or_grants"):
+                        value = part.get(field)
+                        if type(value) is int and 0 <= value <= 100000:
+                            counts.append(f"{category}_{field}={value}")
+        if counts:
+            failed.extend(counts)
         detail = f"; scrubbed owner-only log: {write_error_log(done, env)}" if done.returncode else ""
         raise Blocked("backup/restore verification failed: " + ", ".join(failed or ["exit_code"]) + detail)
     keep = {k: summary.get(k) for k in ("verdict", "tables", "signature_sha256", "timings_s", "server_version", "dump_bytes")}
