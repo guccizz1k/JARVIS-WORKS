@@ -29,12 +29,12 @@ GOOD_SUMMARY = {
 
 class Window(unittest.TestCase):
     def test_renewal_value_is_capped_at_the_approved_limit_not_extended(self):
-        at = datetime(2026, 11, 9, 12, 30, tzinfo=KST)
-        self.assertEqual(run.renew_value(at), "2026-11-10 09:00:00+09")
+        at = datetime(2026, 11, 10, 12, 30, tzinfo=KST)
+        self.assertEqual(run.renew_value(at), "2026-11-11 09:00:00+09")
 
     def test_renewal_value_is_shorter_than_24_hours_when_the_limit_is_far(self):
-        at = datetime(2026, 11, 9, 5, 0, tzinfo=KST)
-        self.assertEqual(run.renew_value(at), "2026-11-10 04:00:00+09")
+        at = datetime(2026, 11, 10, 5, 0, tzinfo=KST)
+        self.assertEqual(run.renew_value(at), "2026-11-11 04:00:00+09")
 
     def test_nothing_is_renewed_at_or_after_the_limit(self):
         for at in (run.APPROVED_LIMIT, run.APPROVED_LIMIT + timedelta(seconds=1), run.APPROVED_LIMIT + timedelta(days=3)):
@@ -44,7 +44,7 @@ class Window(unittest.TestCase):
                 run.check_window(at)
 
     def test_window_report_before_the_limit(self):
-        report = run.check_window(datetime(2026, 11, 9, 12, 0, tzinfo=KST))
+        report = run.check_window(datetime(2026, 11, 10, 12, 0, tzinfo=KST))
         self.assertEqual(report["minutes_left"], 21 * 60)
 
 
@@ -86,7 +86,7 @@ class Pins(unittest.TestCase):
     def test_renew_sql_with_a_wider_window_or_missing_limit_is_refused(self):
         original = run.RENEW_SQL.read_text()
         for broken in (original.replace("interval ''24 hours''", "interval ''7 days''"),
-                       original.replace("2026-11-10 09:00:00+09'", "2026-11-17 09:00:00+09'")):
+                       original.replace("2026-11-11 09:00:00+09'", "2026-11-17 09:00:00+09'")):
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / "renew.sql"
                 path.write_text(broken)
@@ -257,9 +257,9 @@ class Psql(unittest.TestCase):
             return subprocess.CompletedProcess(cmd, 0, "", "")
         dsn = f"postgresql://postgres:{PASSWORD}@db.{run.PROJECT_REF}.supabase.co:5432/postgres?sslmode=verify-full&sslrootcert=/tmp/ca.crt"
         with patch.dict(os.environ, {"JW_PG_ADMIN_DSN": dsn}), patch.object(run.subprocess, "run", side_effect=fake):
-            run.psql("JW_PG_ADMIN_DSN", run.RENEW_SQL, {"valid_until": "2026-11-10 09:00:00+09"})
+            run.psql("JW_PG_ADMIN_DSN", run.RENEW_SQL, {"valid_until": "2026-11-11 09:00:00+09"})
         self.assertNotIn(PASSWORD, " ".join(seen["cmd"]))
-        self.assertIn("valid_until=2026-11-10 09:00:00+09", seen["cmd"])
+        self.assertIn("valid_until=2026-11-11 09:00:00+09", seen["cmd"])
         self.assertEqual(seen["env"]["PGPASSWORD"], PASSWORD)
         self.assertEqual(seen["env"]["PGSSLMODE"], "verify-full")
 
@@ -371,7 +371,7 @@ class RenewAttemptMarker(unittest.TestCase):
                 if isinstance(_failure, BaseException):
                     raise _failure
                 return _failure
-            with patch.object(run, "psql", side_effect=fake), patch.object(run, "renew_value", return_value="2026-11-10 09:00:00+09"):
+            with patch.object(run, "psql", side_effect=fake), patch.object(run, "renew_value", return_value="2026-11-11 09:00:00+09"):
                 with self.assertRaises(run.Ambiguous):
                     run.stage_renew(lambda: events.append("attempt"))
             self.assertEqual(events, ["attempt", "psql"], repr(failure))
@@ -541,7 +541,7 @@ class SecretsInChildOutput(unittest.TestCase):
         out, err = io.StringIO(), io.StringIO()
         with patch.multiple(run, **fakes), patch.dict(os.environ, self.env), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = run.main(["all", "--expect-sha", SHA, "--confirm-approval", "6729950127", "--confirm-no-charge"])
+            code = run.main(["all", "--expect-sha", SHA, "--confirm-approval", "6755130318", "--confirm-no-charge"])
         self.assertEqual(code, 2)
         self.assertNotIn("B2_B3_PASS", out.getvalue())
         for text in (out.getvalue(), err.getvalue(), summary_file.read_text()):
@@ -564,7 +564,7 @@ class SecretsInChildOutput(unittest.TestCase):
 
 class Main(unittest.TestCase):
     def test_all_needs_both_explicit_confirmations_before_anything_runs(self):
-        for extra in ([], ["--confirm-approval", "6729950127"], ["--confirm-no-charge"], ["--confirm-approval", "1", "--confirm-no-charge"]):
+        for extra in ([], ["--confirm-approval", "6755130318"], ["--confirm-no-charge"], ["--confirm-approval", "1", "--confirm-no-charge"]):
             with patch.object(run, "run_all") as stage_runner:
                 self.assertEqual(run.main(["all", "--expect-sha", SHA, *extra]), 2)
                 stage_runner.assert_not_called()
