@@ -739,6 +739,15 @@ def roles_in_acl(connection, schema: str) -> list[str]:
                       LATERAL aclexplode(c.relacl) a
                       WHERE n.nspname=%(s)s AND c.relacl IS NOT NULL
                         AND (a.grantee=r.oid OR a.grantor=r.oid))
+              OR EXISTS (SELECT 1 FROM pg_namespace n,
+                      LATERAL aclexplode(n.nspacl) a
+                         WHERE n.nspname=%(s)s AND n.nspacl IS NOT NULL
+                           AND (a.grantee=r.oid OR a.grantor=r.oid))
+              OR EXISTS (SELECT 1 FROM pg_default_acl d
+                         JOIN pg_namespace n ON n.oid=d.defaclnamespace,
+                         LATERAL aclexplode(d.defaclacl) a
+                         WHERE n.nspname=%(s)s
+                           AND (d.defaclrole=r.oid OR a.grantee=r.oid OR a.grantor=r.oid))
               OR EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname=%(s)s
                          AND r.rolname = ANY(p.roles))) ORDER BY 1""", {"s": schema})
         return [row[0] for row in cur.fetchall()]
