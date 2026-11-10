@@ -298,3 +298,25 @@ def test_precheck_requires_disabled_role_and_no_sessions():
     assert "NOT rolcanlogin" in source
     assert "pg_stat_activity" in source
     assert "2026-11-11 09:00:00+09" in source
+
+
+def test_exited_postgres_container_fails_fast_without_destroying_volume():
+    """An uninitialized PG17 must not be misdiagnosed as merely slow."""
+    valid = [{"Name": "/jw-v223-restore", "Config": {"Image": "postgres:17"},
+              "HostConfig": {"PortBindings": {"5432/tcp": [
+                  {"HostIp": "127.0.0.1", "HostPort": "55432"}]}},
+              "State": {"Running": True}}]
+    calls = []
+    def fake(*args, **kwargs):
+        calls.append(args)
+        if "inspect" in args and "--format" not in args:
+            return done(output=json.dumps(valid))
+        if args[0] == "pg_isready":
+            return done(2)
+        if "inspect" in args and "--format" in args:
+            return done(output="false\\n")
+        raise AssertionError(args)
+    with patch.object(go, "command", side_effect=fake), \
+         patch.object(go.time, "sleep", side_effect=AssertionError("exited container must fail fast")):
+        assert go.start_verified_disposable() is False
+    assert not any("rm" in a or "run" in a or "rename" in a for a in calls)
