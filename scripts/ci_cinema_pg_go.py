@@ -69,6 +69,16 @@ def validate_owner_checkout() -> str:
     return head.stdout.strip()
 
 
+def ensure_local_docker_daemon() -> None:
+    """Codespace-local Docker service only; never touch remote services."""
+    if os.environ.get("CODESPACES") != "true":
+        return
+    if command("docker", "info", "--format", "{{.ServerVersion}}", timeout=8).returncode == 0:
+        return
+    # Idempotent service start, no apt installs, no new Docker containers.
+    command("sudo", "-n", "service", "docker", "start", timeout=40)
+
+
 def start_verified_disposable() -> bool:
     """May start ONLY the already-created, localhost-only, known PG17 container."""
     ready = command("pg_isready", "-h", "127.0.0.1", "-p", "55432", timeout=6)
@@ -108,6 +118,7 @@ def inner(expect_sha: str) -> int:
     from scripts import ci_cinema_pg_s as ca
     from scripts.pg_backup_v223 import load_key
 
+    ensure_local_docker_daemon()
     try:
         runner.verify(expect_sha, need_private=False)
     except Exception:
@@ -198,8 +209,11 @@ def outer() -> int:
             removed = git("worktree", "remove", str(parent))
             if removed.returncode:
                 print("BLOCKED TEMPORARY_WORKTREE_CLEANUP")
-            else:
-                git("branch", "-D", branch)
+                return 2
+            branch_cleanup = git("branch", "-D", branch)
+            if branch_cleanup.returncode:
+                print("BLOCKED TEMPORARY_BRANCH_CLEANUP")
+                return 2
         if not parent.exists() or not any(parent.iterdir()):
             try:
                 parent.rmdir()
