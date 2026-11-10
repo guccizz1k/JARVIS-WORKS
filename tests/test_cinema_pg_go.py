@@ -153,3 +153,66 @@ def test_port_answering_is_not_proof_of_container_identity():
         raise AssertionError(args)
     with patch.object(go, "command", side_effect=fake_command):
         assert go.start_verified_disposable() is False
+
+
+
+def test_private_blocker_codes_are_secret_free_and_precise(tmp_path):
+    from scripts import ci_cinema_pg_v223_codespace_run as runner
+    local_files = [tmp_path / name for name in ("auth.json", "ca.crt", "restore.sh")]
+    for item in local_files:
+        item.write_text("TEST ONLY", encoding="utf-8")
+        item.chmod(0o600)
+    host = runner.HOST
+    ref = runner.PROJECT_REF
+    good = (f"postgresql://postgres.{ref}:SYNTHETIC_VALUE"
+            f"@{host}:5432/postgres?sslmode=verify-full"
+            f"&sslrootcert={local_files[1]}")
+    env = {"JW_PG_ADMIN_DSN": good, "JW_PG_BACKUP_KEY": "FAKE"}
+    with patch.object(runner, "CREDS", local_files[0]), \
+         patch.object(runner, "CERT_FILE", local_files[1]), \
+         patch.object(runner, "SECRET_FILE", local_files[2]):
+        assert go.private_blocker_codes(env) == []
+        fail = go.private_blocker_codes({
+            **env,
+            "JW_PG_ADMIN_DSN": good.replace("sslmode=verify-full", "sslmode=require"),
+        })
+        assert fail == ["ADMIN_DSN_SSLMODE"]
+        fail = go.private_blocker_codes({
+            **env,
+            "JW_PG_ADMIN_DSN": good.replace(str(local_files[1]), "/wrong/ca"),
+        })
+        assert fail == ["ADMIN_DSN_CA_PATH"]
+        fail = go.private_blocker_codes({
+            **env,
+            "JW_PG_ADMIN_DSN": good.replace(host, "hostile.invalid"),
+        })
+        assert "ADMIN_DSN_HOST" in fail
+        fail = go.private_blocker_codes({
+            **env,
+            "JW_PG_ADMIN_DSN": good.replace(":SYNTHETIC_VALUE@", ":[YOUR-PASSWORD]@"),
+        })
+        assert "ADMIN_DSN_PASSWORD_MISSING_OR_PLACEHOLDER" in fail
+        fail = go.private_blocker_codes({
+            **env,
+            "JW_PG_ADMIN_DSN": good + "&hostaddr=127.0.0.1",
+        })
+        assert fail == ["ADMIN_DSN_QUERY_PARAMS"]
+        fail = go.private_blocker_codes({
+            **env,
+            "JW_PG_ADMIN_DSN": good.replace(":SYNTHETIC_VALUE@", ":SYNTHE#TIC@"),
+        })
+        assert "ADMIN_DSN_UNENCODED_HASH" in fail
+        local_files[0].chmod(0o644)
+        fail = go.private_blocker_codes(env)
+        assert "BACKUP_AUTH_FILE_PERMISSIONS" in fail
+        assert all("SYNTHETIC_VALUE" not in label and host not in label
+                   for label in fail)
+
+
+def test_private_diagnosis_never_echoes_connection_secret(capsys):
+    fake = "postgresql://postgres:TOPSECRET@example.invalid/postgres"
+    result = go.private_blocker_codes({"JW_PG_ADMIN_DSN": fake})
+    assert result
+    assert "TOPSECRET" not in repr(result)
+    assert "example.invalid" not in repr(result)
+    assert capsys.readouterr().out == ""
