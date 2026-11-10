@@ -138,3 +138,18 @@ def test_live_entrypoint_must_delegate_to_original_approved_runner():
     assert '"--confirm-no-charge"' in source
     assert "runner.run_all(" not in source
     assert 'print("URGENT_ROLE_REVOCATION_NOT_VERIFIED")' in source
+
+
+def test_port_answering_is_not_proof_of_container_identity():
+    wrong = [{"Name": "/other-container", "Config": {"Image": "postgres:17"},
+              "HostConfig": {"PortBindings": {"5432/tcp": [
+                  {"HostIp": "127.0.0.1", "HostPort": "55432"}]}},
+              "State": {"Running": True}}]
+    def fake_command(*args, **kwargs):
+        if "inspect" in args:
+            return done(output=json.dumps(wrong))
+        if args[0] == "pg_isready":
+            raise AssertionError("Never trust port alone; inspect identity first")
+        raise AssertionError(args)
+    with patch.object(go, "command", side_effect=fake_command):
+        assert go.start_verified_disposable() is False
