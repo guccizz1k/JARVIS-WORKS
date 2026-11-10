@@ -327,12 +327,35 @@ SIGNATURE_QUERIES = {
                       FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
                       JOIN pg_namespace n ON n.oid=c.relnamespace
                       WHERE n.nspname=%(s)s ORDER BY 1""",
-    # NULL relacl means "owner default"; an explicit ACL equal to that default (left behind by
-    # GRANT ... then REVOKE/DROP OWNED) is not dumped by pg_dump, so compare the EFFECTIVE ACL.
-    "acl": """SELECT c.relname, coalesce(c.relacl, acldefault((CASE c.relkind WHEN 'S' THEN 's'
-                     ELSE 'r' END)::"char", c.relowner))::text FROM pg_class c
-              JOIN pg_namespace n ON n.oid=c.relnamespace
-              WHERE n.nspname=%(s)s AND c.relkind IN ('r','p','S','v') ORDER BY 1""",
+    # Canonicalize *effective* grants by role name, and map the per-object owner to
+    # OWNER. pg_restore --no-owner changes numeric owner OIDs on the disposable
+    # cluster; comparing raw aclitem text yields false mismatches. Preserve grantor,
+    # grantee, privilege and grant option: do not weaken authorization verification.
+    "acl": """SELECT c.relname,
+                     coalesce((
+                       SELECT jsonb_agg(jsonb_build_array(
+                         CASE WHEN a.grantor=c.relowner THEN 'OWNER'
+                              ELSE a.grantor::regrole::text END,
+                         CASE WHEN a.grantee=0 THEN 'PUBLIC'
+                              WHEN a.grantee=c.relowner THEN 'OWNER'
+                              ELSE a.grantee::regrole::text END,
+                         a.privilege_type, a.is_grantable)
+                         ORDER BY
+                         CASE WHEN a.grantor=c.relowner THEN 'OWNER'
+                              ELSE a.grantor::regrole::text END,
+                         CASE WHEN a.grantee=0 THEN 'PUBLIC'
+                              WHEN a.grantee=c.relowner THEN 'OWNER'
+                              ELSE a.grantee::regrole::text END,
+                         a.privilege_type, a.is_grantable)::text,
+                       '[]')
+                     FROM pg_class c
+                     JOIN pg_namespace n ON n.oid=c.relnamespace
+                     LEFT JOIN LATERAL aclexplode(coalesce(c.relacl,
+                       acldefault((CASE c.relkind WHEN 'S' THEN 's'
+                         ELSE 'r' END)::"char", c.relowner))) a ON true
+                     WHERE n.nspname=%(s)s AND c.relkind IN ('r','p','S','v')
+                     GROUP BY c.oid,c.relname ORDER BY c.relname""",
+
 }
 
 
