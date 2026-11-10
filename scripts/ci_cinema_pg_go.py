@@ -128,6 +128,83 @@ def check_live_admin_login() -> bool:
         return False
 
 
+
+def private_blocker_codes(environ: dict | None = None) -> list[str]:
+    """Identify private preflight blockers without ever printing secret values.
+
+    Only emits fixed identifiers. Does NOT connect to a database, mutate files,
+    echo credentials or log a traceback. This is diagnostic only and must NEVER
+    replace the launcher's fail-closed check_private_inputs() enforcement.
+    """
+    import stat
+    from urllib.parse import parse_qs, urlsplit
+    from scripts import ci_cinema_pg_v223_codespace_run as runner
+    from scripts.pg_backup_v223 import parse_dsn
+
+    env = os.environ if environ is None else environ
+    codes: list[str] = []
+    for name in runner.SECRET_ENV:
+        if not env.get(name):
+            codes.append("MISSING_" + name)
+
+    for name, file in (
+        ("BACKUP_AUTH", runner.CREDS),
+        ("APPROVED_CA", runner.CERT_FILE),
+        ("LOCAL_TARGET", runner.SECRET_FILE),
+    ):
+        try:
+            if file.is_symlink() or not file.is_file():
+                codes.append(name + "_FILE_MISSING_OR_LINK")
+            elif file.stat().st_uid != os.getuid() or file.stat().st_mode & (
+                stat.S_IRWXG | stat.S_IRWXO
+            ):
+                codes.append(name + "_FILE_PERMISSIONS")
+        except (OSError, ValueError):
+            codes.append(name + "_FILE_UNREADABLE")
+
+    raw = env.get("JW_PG_ADMIN_DSN", "")
+    if not raw:
+        return codes
+    try:
+        pieces = urlsplit(raw)
+        parsed = parse_dsn(raw)
+        qs = parse_qs(pieces.query, keep_blank_values=True)
+    except (TypeError, ValueError, UnicodeError, KeyError, IndexError):
+        codes.append("ADMIN_DSN_URL_MALFORMED")
+        return codes
+    except Exception:
+        # Unexpected decoder failure; do not expose exception text.
+        codes.append("ADMIN_DSN_PARSE_UNEXPECTED")
+        return codes
+
+    if pieces.fragment:
+        codes.append("ADMIN_DSN_UNENCODED_HASH")
+    if parsed["sslmode"] != "verify-full":
+        codes.append("ADMIN_DSN_SSLMODE")
+    if parsed["sslrootcert"] != str(runner.CERT_FILE):
+        codes.append("ADMIN_DSN_CA_PATH")
+    if set(qs) != {"sslmode", "sslrootcert"} or any(len(v) != 1 for v in qs.values()):
+        codes.append("ADMIN_DSN_QUERY_PARAMS")
+    if not parsed["password"] or parsed["password"] in (
+        "[YOUR-PASSWORD]", "[YOUR_PASSWORD]", "[YOUR-DB-PASSWORD]"
+    ):
+        codes.append("ADMIN_DSN_PASSWORD_MISSING_OR_PLACEHOLDER")
+
+    approved_direct = parsed["host"] == f"db.{runner.PROJECT_REF}.supabase.co"
+    approved_pooler = parsed["host"] == runner.HOST
+    if not (approved_direct or approved_pooler):
+        codes.append("ADMIN_DSN_HOST")
+    expected_user = "postgres" if approved_direct else f"postgres.{runner.PROJECT_REF}"
+    if parsed["user"] != expected_user:
+        codes.append("ADMIN_DSN_USER")
+    if parsed["port"] != str(runner.PORT):
+        codes.append("ADMIN_DSN_PORT")
+    if parsed["dbname"] != "postgres":
+        codes.append("ADMIN_DSN_DATABASE")
+
+    return list(dict.fromkeys(codes))
+
+
 def inner(expect_sha: str, *, execute_live: bool = False) -> int:
     """Runs only inside the verified isolated checkout; does not contact Supabase."""
     from scripts import ci_cinema_pg_v223_codespace_run as runner
@@ -156,6 +233,9 @@ def inner(expect_sha: str, *, execute_live: bool = False) -> int:
             func()
         except Exception:
             print("BLOCKED " + label)
+            if label == "PRIVATE_FILES_AND_ADMIN_DSN":
+                for code in private_blocker_codes() or ["PRIVATE_INPUTS_UNCLASSIFIED"]:
+                    print("BLOCKED PRIVATE_CAUSE_" + code)
             blocked = True
         else:
             print("PASS " + label)
