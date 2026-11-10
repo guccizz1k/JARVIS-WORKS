@@ -167,6 +167,12 @@ def private_blocker_codes(environ: dict | None = None) -> list[str]:
         return codes
     try:
         pieces = urlsplit(raw)
+    except (TypeError, ValueError, UnicodeError):
+        codes.append("ADMIN_DSN_URL_MALFORMED")
+        return codes
+    if pieces.fragment:
+        codes.append("ADMIN_DSN_UNENCODED_HASH")
+    try:
         parsed = parse_dsn(raw)
         qs = parse_qs(pieces.query, keep_blank_values=True)
     except (TypeError, ValueError, UnicodeError, KeyError, IndexError):
@@ -176,9 +182,6 @@ def private_blocker_codes(environ: dict | None = None) -> list[str]:
         # Unexpected decoder failure; do not expose exception text.
         codes.append("ADMIN_DSN_PARSE_UNEXPECTED")
         return codes
-
-    if pieces.fragment:
-        codes.append("ADMIN_DSN_UNENCODED_HASH")
     if parsed["sslmode"] != "verify-full":
         codes.append("ADMIN_DSN_SSLMODE")
     if parsed["sslrootcert"] != str(runner.CERT_FILE):
