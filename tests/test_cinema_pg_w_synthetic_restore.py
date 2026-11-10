@@ -101,8 +101,9 @@ def main():
         normalized_sig=json.loads(json.dumps(sig))
         synthetic_row[0][1]=expected_source
         print("SYNTHETIC_HISTORICAL_CHECK_PARENTHESES_DIFF_INJECTED=PASS")
-        if any(role in roles for role in acl_only):
-            raise RuntimeError("test fixture must expose missing schema/function-only roles")
+        missing_roles = sorted(set(acl_only) - set(roles))
+        if missing_roles:
+            raise RuntimeError("schema/function-only ACL grantees missing from role inventory")
         if len(sig["tables"])!=62 or sum(v[0] for v in sig["rows"].values())!=22:
             raise RuntimeError("synthetic source shape wrong")
         plaintext=w.STAGING/(label+".dump")
