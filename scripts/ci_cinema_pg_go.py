@@ -165,6 +165,13 @@ def private_blocker_codes(environ: dict | None = None) -> list[str]:
     raw = env.get("JW_PG_ADMIN_DSN", "")
     if not raw:
         return codes
+    # A literal placeholder may contain square brackets, which urlsplit can
+    # reject before it reaches credential parsing. Classify it first.
+    if any(marker in raw for marker in (
+        "[YOUR-PASSWORD]", "[YOUR_PASSWORD]", "[YOUR-DB-PASSWORD]"
+    )):
+        codes.append("ADMIN_DSN_PASSWORD_MISSING_OR_PLACEHOLDER")
+        return codes
     try:
         pieces = urlsplit(raw)
     except (TypeError, ValueError, UnicodeError):
