@@ -261,8 +261,8 @@ def test_live_diagnosis_fixed_labels_and_no_secret_output(capsys):
         (("postgres.bad", "postgres", 170011, True), "WRONG_ADMIN_ROLE"),
         (("postgres", "other", 170011, True), "WRONG_DATABASE"),
         (("postgres", "postgres", 160011, True), "WRONG_PG_VERSION"),
-        (("postgres", "postgres", 170011, None), "BACKUP_ROLE_NOT_FOUND_OR_NO_EXPIRY"),
-        (("postgres", "postgres", 170011, False), "BACKUP_ROLE_NOT_EXPIRED"),
+        (("postgres", "postgres", 170011, None), "BACKUP_ROLE_NOT_FOUND_OR_UNSAFE_STATE"),
+        (("postgres", "postgres", 170011, False), "BACKUP_ROLE_ACTIVE_OR_OUTSIDE_APPROVAL"),
     ]
     with patch.dict(os.environ, {"JW_OWNER_NO_CHARGE_VERIFIED": "1", "JW_PG_ADMIN_DSN": "SYNTHETIC_SECRET"}):
         for row, expected in rows:
@@ -278,3 +278,22 @@ def test_live_diagnosis_fixed_labels_and_no_secret_output(capsys):
                 assert go.diagnose_live_admin_login() == expected
     output = capsys.readouterr().out
     assert "SECRET" not in output
+
+
+def test_renew_sql_has_atomic_login_and_closure_guard():
+    from scripts import ci_cinema_pg_v223_codespace_run as runner
+    sql = runner.RENEW_SQL.read_text(encoding="utf-8")
+    assert "NOT rolcanlogin" in sql
+    assert "pg_stat_activity" in sql
+    assert "ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN;" in sql
+    assert "BEGIN;" in sql and "COMMIT;" in sql
+    revoke = runner.REVOKE_SQL.read_text(encoding="utf-8")
+    assert "ALTER ROLE jw_backup_ro NOLOGIN;" in revoke
+
+
+def test_precheck_requires_disabled_role_and_no_sessions():
+    import inspect
+    source = inspect.getsource(go.diagnose_live_admin_login)
+    assert "NOT rolcanlogin" in source
+    assert "pg_stat_activity" in source
+    assert "2026-11-11 09:00:00+09" in source
