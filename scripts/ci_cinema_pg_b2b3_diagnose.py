@@ -58,7 +58,8 @@ def diagnose(summary_text: str, error_text: str) -> list[str]:
     if not isinstance(reason, str):
         reason = ""
     combined = (reason + "\n" + error_text).lower()
-    # Classify only engine stderr for root cause; the summary can mention identity generically.\n    found = [code for code, words in CAUSE_PATTERNS if any(word in error_text.lower() for word in words)]
+    # Classify only engine stderr for root cause; summary may mention identity generically.
+    found = [code for code, words in CAUSE_PATTERNS if any(word in error_text.lower() for word in words)]
     lines.append("DIAG BACKUP_CAUSE_" + (found[0] if found else "UNKNOWN"))
     # The runner already records only the names of failed identity checks.
     # Extract names from its allowlist, never arbitrary error text or DSNs.
