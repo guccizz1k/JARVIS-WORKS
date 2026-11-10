@@ -109,10 +109,10 @@ def start_verified_disposable() -> bool:
     return False
 
 
-def check_live_admin_login() -> bool:
-    """Read-only, authenticated source identity check before any renewal attempt."""
+def diagnose_live_admin_login() -> str:
+    """Read-only source check. Return fixed codes, never raw DB errors or secrets."""
     if os.environ.get("JW_OWNER_NO_CHARGE_VERIFIED") != "1":
-        return False
+        return "NO_CHARGE_NOT_CONFIRMED"
     try:
         import psycopg
         with psycopg.connect(os.environ["JW_PG_ADMIN_DSN"], connect_timeout=10) as conn:
@@ -121,12 +121,41 @@ def check_live_admin_login() -> bool:
                 "current_setting('server_version_num')::int, "
                 "(SELECT rolvaliduntil < now() FROM pg_roles WHERE rolname='jw_backup_ro')"
             ).fetchone()
-            return bool(row and row[0] == "postgres" and row[1] == "postgres"
-                        and 170000 <= row[2] < 180000 and row[3] is True)
-    except Exception:
-        # No exception text can reach the user's terminal.
-        return False
+        if not row:
+            return "EMPTY_IDENTITY_RESULT"
+        if row[0] != "postgres":
+            return "WRONG_ADMIN_ROLE"
+        if row[1] != "postgres":
+            return "WRONG_DATABASE"
+        if not 170000 <= row[2] < 180000:
+            return "WRONG_PG_VERSION"
+        if row[3] is None:
+            return "BACKUP_ROLE_NOT_FOUND_OR_NO_EXPIRY"
+        if row[3] is not True:
+            return "BACKUP_ROLE_NOT_EXPIRED"
+        return "PASS"
+    except KeyError:
+        return "ADMIN_DSN_MISSING"
+    except Exception as exc:
+        # SQLSTATE is a bounded protocol identifier, not an error message.
+        state = getattr(exc, "sqlstate", None)
+        if state == "28P01":
+            return "PASSWORD_AUTH_REJECTED"
+        if state == "28000":
+            return "ROLE_AUTH_REJECTED"
+        if state == "42501":
+            return "INSUFFICIENT_PRIVILEGE"
+        if state in ("3D000", "42P01", "42703"):
+            return "DATABASE_SCHEMA_MISMATCH"
+        if state in ("08001", "08006", "08004", "08000"):
+            return "CONNECTION_REJECTED"
+        if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+            return "NETWORK_OR_TLS_FAILURE"
+        return "DB_CONNECT_OR_QUERY_FAILURE"
 
+
+def check_live_admin_login() -> bool:
+    return diagnose_live_admin_login() == "PASS"
 
 
 def private_blocker_codes(environ: dict | None = None) -> list[str]:
@@ -308,8 +337,10 @@ def inner(expect_sha: str, *, execute_live: bool = False) -> int:
 
     # TTY confirmation in the parent is required; never infer free usage from
     # a free Render service or from this repository's Actions usage.
-    if not check_live_admin_login():
+    live_result = diagnose_live_admin_login()
+    if live_result != "PASS":
         print("BLOCKED LIVE_ADMIN_READONLY_AUTH_OR_ROLE_STATE")
+        print("BLOCKED LIVE_CAUSE_" + live_result)
         print("B2_B3_NOT_RUN; NO_SUPABASE_DB_CHANGE")
         return 2
     print("PASS LIVE_ADMIN_READONLY_AUTH_AND_EXPIRED_ROLE")
