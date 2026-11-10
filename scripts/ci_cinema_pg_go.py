@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""Owner Codespace B2/B3 readiness: ONE safe mobile command, NO live source writes.
+
+    python3 -m scripts.ci_cinema_pg_go
+
+The owner has an untracked .github/supabase-root-2021.cer. Preserve it and the
+strict original launcher guard: run the exact-HEAD checks in a fresh, temporary
+Git worktree on a new local branch. This entry point NEVER renews the role,
+contacts the live Supabase database or starts the backup. It never prints a
+password, DSN, encryption key, or protected file contents.
+"""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+UPSTREAM = "refs/remotes/origin/review/jw-v223-b-renew-20261110"
+PINNED_BASE = "6a1e993194e1fbe1f9cbb5f1571bc7bf85157b32"
+SAFE_UNTRACKED = frozenset({".github/supabase-root-2021.cer"})
+MAX_SECONDS = 160
+CONTAINER = "jw-v223-restore"
+
+
+def command(*argv: str, cwd: Path = ROOT, timeout: int = 40) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False)
+
+
+def git(*args: str, cwd: Path = ROOT) -> subprocess.CompletedProcess:
+    return command("git", *args, cwd=cwd)
+
+
+def classify_checkout_status(lines: str) -> str:
+    """No ignored/tracked changes or unexpected untracked code, ever."""
+    for entry in lines.splitlines():
+        if entry.startswith("?? ") and entry[3:] in SAFE_UNTRACKED:
+            continue
+        return "UNEXPECTED_WORKTREE_CHANGE"
+    return "OK"
+
+
+def validate_owner_checkout() -> str:
+    if os.environ.get("CODESPACES") != "true":
+        raise ValueError("CODESPACE_REQUIRED")
+    top = git("rev-parse", "--show-toplevel")
+    if top.returncode or Path(top.stdout.strip()).resolve() != ROOT.resolve():
+        raise ValueError("WRONG_REPOSITORY")
+    st = git("status", "--porcelain", "--untracked-files=all")
+    if st.returncode or classify_checkout_status(st.stdout) != "OK":
+        raise ValueError("UNEXPECTED_WORKTREE_CHANGE")
+    head = git("rev-parse", "HEAD")
+    remote = git("rev-parse", UPSTREAM)
+    branch = git("branch", "--show-current")
+    if head.returncode or remote.returncode or branch.returncode:
+        raise ValueError("GIT_REFERENCE_MISSING")
+    if branch.stdout.strip() != "jwb":
+        raise ValueError("WRONG_LOCAL_BRANCH")
+    if head.stdout.strip() != remote.stdout.strip():
+        raise ValueError("UPDATE_NEEDED_GIT_PULL_FF_ONLY")
+    if git("merge-base", "--is-ancestor", PINNED_BASE, "HEAD").returncode:
+        raise ValueError("PROTECTED_BASELINE_MISSING")
+    return head.stdout.strip()
+
+
+def start_verified_disposable() -> bool:
+    """May start ONLY the already-created, localhost-only, known PG17 container."""
+    ready = command("pg_isready", "-h", "127.0.0.1", "-p", "55432", timeout=6)
+    if ready.returncode == 0:
+        return True
+    # Never create, delete, reconfigure or publish a container. Stop if its
+    # identity/port binding cannot be proven from read-only docker inspect.
+    inspect = command("sudo", "-n", "docker", "inspect", CONTAINER, timeout=15)
+    if inspect.returncode:
+        return False
+    try:
+        found = json.loads(inspect.stdout)
+        if len(found) != 1:
+            return False
+        obj = found[0]
+        bindings = obj["HostConfig"]["PortBindings"]["5432/tcp"]
+        if (obj["Name"] != "/" + CONTAINER or obj["Config"]["Image"] != "postgres:17"
+                or bindings != [{"HostIp": "127.0.0.1", "HostPort": "55432"}]):
+            return False
+    except (KeyError, TypeError, ValueError, IndexError):
+        return False
+    if not obj["State"].get("Running", False):
+        if command("sudo", "-n", "docker", "start", CONTAINER, timeout=30).returncode:
+            return False
+    for _ in range(7):
+        if command("pg_isready", "-h", "127.0.0.1", "-p", "55432", timeout=6).returncode == 0:
+            return True
+        time.sleep(1)
+    return False
+
+
+def inner(expect_sha: str) -> int:
+    """Runs only inside the verified isolated checkout; does not contact Supabase."""
+    from scripts import ci_cinema_pg_v223_codespace_run as runner
+    from scripts import ci_cinema_pg_m as target
+    from scripts import ci_cinema_pg_q as credentials
+    from scripts import ci_cinema_pg_s as ca
+    from scripts.pg_backup_v223 import load_key
+
+    try:
+        runner.verify(expect_sha, need_private=False)
+    except Exception:
+        print("BLOCKED SHA_GUARD_TOOLS_OR_APPROVAL_WINDOW")
+        return 2
+    print("PASS EXACT_SHA_PROTECTED_GUARD_AND_TOOLS")
+
+    checks = (
+        ("PRIVATE_FILES_AND_ADMIN_DSN", runner.check_private_inputs),
+        ("AES_256_GCM_KEY_LENGTH", load_key),
+        ("TARGET_CONFIG_LOCAL_ONLY", target.read_private_target),
+        ("SIGNED_SUPABASE_CA", ca.load_dashboard_ca),
+    )
+    blocked = False
+    for label, func in checks:
+        try:
+            func()
+        except Exception:
+            print("BLOCKED " + label)
+            blocked = True
+        else:
+            print("PASS " + label)
+
+    try:
+        obj = json.loads(credentials.CREDS.read_text(encoding="utf-8"))
+        if set(obj) != {"role", "password", "verifier"} or obj["role"] != credentials.ROLE:
+            raise ValueError("credential structure mismatch")
+        if not secrets.compare_digest(
+            obj["verifier"],
+            credentials.make_verifier(obj["password"], credentials.decode_salt(obj["verifier"]))
+        ):
+            raise ValueError("credential verification mismatch")
+    except Exception:
+        print("BLOCKED BACKUP_ROLE_AUTH_VERIFIER")
+        blocked = True
+    else:
+        print("PASS BACKUP_ROLE_AUTH_VERIFIER")
+
+    # Only the owner's LOCAL disposable database is queried, no Supabase.
+    if start_verified_disposable():
+        print("PASS LOCAL_PG17_READY")
+    else:
+        print("BLOCKED LOCAL_PG17_NOT_READY")
+        blocked = True
+
+    print("B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION")
+    if blocked:
+        print("PRIVATE_READINESS_BLOCKED")
+        return 2
+    print("PRIVATE_READINESS_PASS; billing and live-source authentication NOT VERIFIED")
+    return 0
+
+
+def outer() -> int:
+    """Isolate the owner's untracked certificate without deleting or ignoring it."""
+    try:
+        head = validate_owner_checkout()
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        code = str(exc) if isinstance(exc, ValueError) else "LOCAL_GIT_UNAVAILABLE"
+        print("BLOCKED " + code)
+        print("B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION")
+        return 2
+
+    branch = "jw-b-audit-" + secrets.token_hex(6)
+    parent = Path(tempfile.mkdtemp(prefix="jw-b-verify-", dir="/tmp"))
+    linked = False
+    try:
+        created = git("worktree", "add", "--quiet", "-b", branch, str(parent), head)
+        if created.returncode:
+            print("BLOCKED CANNOT_MAKE_ISOLATED_WORKTREE")
+            return 2
+        linked = True
+        check = command(sys.executable, "-m", "scripts.ci_cinema_pg_go", "_inner", head,
+                        cwd=parent, timeout=MAX_SECONDS)
+        # The inner process outputs an allowlisted set of constant state labels
+        # only. Do not echo arbitrary subprocess stderr.
+        for line in check.stdout.splitlines():
+            if line.startswith(("PASS ", "BLOCKED ", "PRIVATE_READINESS_", "B2_B3_NOT_RUN;")):
+                print(line)
+        if check.returncode and not any(line.startswith("BLOCKED ") for line in check.stdout.splitlines()):
+            print("BLOCKED PRIVATE_PREFLIGHT_PROCESS")
+        return 0 if check.returncode == 0 else 2
+    except (OSError, subprocess.TimeoutExpired):
+        print("BLOCKED TEMPORARY_CHECK_FAILURE")
+        return 2
+    finally:
+        if linked:
+            removed = git("worktree", "remove", str(parent))
+            if removed.returncode:
+                print("BLOCKED TEMPORARY_WORKTREE_CLEANUP")
+            else:
+                git("branch", "-D", branch)
+        if not parent.exists() or not any(parent.iterdir()):
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) == 2 and argv[0] == "_inner" and len(argv[1]) == 40:
+        return inner(argv[1])
+    if argv:
+        print("BLOCKED UNKNOWN_ARGUMENTS")
+        return 2
+    return outer()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
