@@ -5,6 +5,7 @@ on:
       - review/jw-v223-codespaces-dr-prep-20261107
       - review/jw-v223-codespace-ready-b-20261109
       - review/jw-v223-b-exact-admin-dsn-claude-20261109
+      - review/jw-v223-b-renew-20261110
   workflow_dispatch:
 permissions:
   contents: read
