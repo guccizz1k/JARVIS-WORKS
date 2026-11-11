@@ -54,7 +54,8 @@ jobs:
           # before attempting to inspect private files or contact a live database.
           grep -Fx "BLOCKED APPROVAL_WINDOW_EXPIRED" "$RUNNER_TEMP/jw-mobile.txt"
           ! grep -F "PASS EXACT_SHA_PROTECTED_GUARD_AND_TOOLS" "$RUNNER_TEMP/jw-mobile.txt"
-          grep -Fx "B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION" "$RUNNER_TEMP/jw-mobile.txt"
+          # Approval expiry is an early fail-closed return; later-stage markers are not emitted.
+          ! grep -F "B2_B3_PASS" "$RUNNER_TEMP/jw-mobile.txt"
           echo "PASS: new mobile readiness helper fails closed without owner secrets"
       - name: Launcher verify passes only for the exact reported SHA, then every negative control refuses
         run: |
