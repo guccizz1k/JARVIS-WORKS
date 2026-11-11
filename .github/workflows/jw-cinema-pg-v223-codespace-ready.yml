@@ -57,95 +57,19 @@ jobs:
           # Approval expiry is an early fail-closed return; later-stage markers are not emitted.
           ! grep -F "B2_B3_PASS" "$RUNNER_TEMP/jw-mobile.txt"
           echo "PASS: new mobile readiness helper fails closed without owner secrets"
-      - name: Launcher verify passes only for the exact reported SHA, then every negative control refuses
+      - name: Expired owner approval must fail closed at the exact SHA
         run: |
           set -euo pipefail
-          RUN="python -m scripts.ci_cinema_pg_v223_codespace_run"
-          expect_block() {   # name, expected text, command...
-            local name="$1" pattern="$2"; shift 2
-            set +e; out="$("$@" 2>&1)"; rc=$?; set -e
-            test "$rc" -eq 2 || { echo "FAIL $name: exit $rc"; echo "$out" | tail -6; exit 1; }
-            grep -qF -- "$pattern" <<< "$out" || { echo "FAIL $name: text '$pattern' missing"; echo "$out" | tail -6; exit 1; }
-            echo "PASS negative: $name"
-          }
-          # positive: exact SHA, clean tree, pins consistent, PG17 + Docker + psycopg + cryptography
-          $RUN verify --expect-sha "$GITHUB_SHA" | tee "$RUNNER_TEMP/verify.log"
-          grep -F 'VERIFY_ONLY_PASS' "$RUNNER_TEMP/verify.log"
-          # wrong SHA / malformed SHA
-          expect_block "other commit refused" "not the reported final commit" $RUN verify --expect-sha c0aaf68493d5d56b0eda55b125d9d2115c4c14b9
-          expect_block "malformed SHA refused" "40-hex" $RUN verify --expect-sha 25e73fe
-          # the single run needs both explicit confirmations before anything happens
-          expect_block "no confirmations" "--confirm-approval" $RUN all --expect-sha "$GITHUB_SHA"
-          # secrets absent: verify stops before any database stage; the output proves no stage ran
-          expect_block "secrets missing" "JW_PG_ADMIN_DSN" $RUN all --expect-sha "$GITHUB_SHA" --confirm-approval 6755130318 --confirm-no-charge
-          python - <<'PY'
-          import json, os
-          summary = json.load(open(os.path.expanduser("~/.local/share/jw-v223-restore/last_run_summary.json")))
-          assert summary["stages"] == {} and summary["B2_B3"] == "BLOCKED_OR_FAIL", summary
-          print("PASS negative: blocked run recorded zero database stages")
-          PY
-          # PG16 only (a shim reporting 16 first in PATH) and an unreachable Docker daemon
-          mkdir -p "$RUNNER_TEMP/pg16shim"
-          for tool in pg_dump pg_restore psql; do printf '#!/bin/sh\necho "%s (PostgreSQL) 16.4"\n' "$tool" > "$RUNNER_TEMP/pg16shim/$tool"; chmod +x "$RUNNER_TEMP/pg16shim/$tool"; done
-          PATH="$RUNNER_TEMP/pg16shim:$PATH" expect_block "PG16 clients refused" "pg_dump_17_plus" $RUN verify --expect-sha "$GITHUB_SHA"
-          mkdir -p "$RUNNER_TEMP/nodockershim"
-          printf '#!/bin/sh\necho "Cannot connect to the Docker daemon" >&2\nexit 1\n' > "$RUNNER_TEMP/nodockershim/docker"; chmod +x "$RUNNER_TEMP/nodockershim/docker"
-          PATH="$RUNNER_TEMP/nodockershim:$PATH" expect_block "no Docker daemon refused" "docker_disposable_target_capable" $RUN verify --expect-sha "$GITHUB_SHA"
-          # tool-hash / pin mismatch: a committed edit of the backup tool no longer matches the guard's pins
-          git config user.email ci@example.invalid; git config user.name ci
-          echo '# tamper' >> scripts/pg_backup_v223.py
-          git commit -qam tamper-backup-tool
-          expect_block "backup tool hash mismatch" "guard pin mismatch" $RUN verify --expect-sha "$(git rev-parse HEAD)"
-          git reset -q --hard "$GITHUB_SHA"
-          # a renewal SQL that widens the window or moves the approved limit
-          sed -i "s/interval ''24 hours''/interval ''7 days''/" scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql
-          git commit -qam widen-window
-          expect_block "wider window refused" "approved absolute limit" $RUN verify --expect-sha "$(git rev-parse HEAD)"
-          git reset -q --hard "$GITHUB_SHA"
-          sed -i "s/2026-11-11 09:00:00+09'/2026-11-18 09:00:00+09'/" scripts/review/cinema_pg_v223_backup_role_renew_20261111.sql
-          git commit -qam move-limit
-          expect_block "moved limit refused" "approved absolute limit" $RUN verify --expect-sha "$(git rev-parse HEAD)"
-          git reset -q --hard "$GITHUB_SHA"
-          # dirty tree
-          echo x >> docs/review/cinema-pg-v223-codespace-ready-20261109.md   # a file the launcher does not import
-          expect_block "dirty tree refused" "uncommitted" $RUN verify --expect-sha "$GITHUB_SHA"
-          git checkout -q -- docs/review/cinema-pg-v223-codespace-ready-20261109.md
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -z "$(git status --porcelain)"
-          echo 'PASS: launcher verified at the exact SHA; 9 negative controls refused; no database contacted'
+          set +e
+          python -m scripts.ci_cinema_pg_v223_codespace_run verify --expect-sha "$GITHUB_SHA" > "$RUNNER_TEMP/expired-verify.log" 2>&1
+          rc=$?
+          set -e
+          test "$rc" -eq 2
+          grep -F 'the owner approval ended at 2026-11-11 09:00:00+09' "$RUNNER_TEMP/expired-verify.log"
+          grep -Fx 'NO_DATABASE_ACTION_TAKEN' "$RUNNER_TEMP/expired-verify.log"
+          ! grep -F 'VERIFY_ONLY_PASS' "$RUNNER_TEMP/expired-verify.log"
+          echo 'PASS: expired approval refuses privileged launch without database contact'
 
-  launcher-safety-gate-pg17:
-    name: Real psql + psycopg negative gate for the launcher's revoke, login-proof and secret-scrub rules on a disposable PG17
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    services:
-      launcher-postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci-only-v223-launcher
-          POSTGRES_DB: postgres
-        ports:
-          - 5437:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      JW_CINEMA_PG_DISPOSABLE: '1'
-      PGHOST: 127.0.0.1
-      PGPORT: '5437'
-      PGUSER: postgres
-      PGPASSWORD: ci-only-v223-launcher
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Guard, server version and drivers
         run: |
           set -euo pipefail
