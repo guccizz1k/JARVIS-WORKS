@@ -286,6 +286,18 @@ def inner(expect_sha: str, *, execute_live: bool = False) -> int:
     ensure_local_docker_daemon()
     try:
         runner.verify(expect_sha, need_private=False)
+    except runner.Blocked as exc:
+        # Classify known fail-closed conditions without exposing secrets or exception text.
+        reason = str(exc)
+        if reason.startswith("the owner approval ended at "):
+            print("BLOCKED APPROVAL_WINDOW_EXPIRED")
+        elif reason.startswith("tooling not ready:"):
+            print("BLOCKED REQUIRED_TOOLS_MISSING")
+        elif reason.startswith(("pinned file missing", "guard pin mismatch", "renew SQL does not carry", "protected-source guard failed")):
+            print("BLOCKED PROTECTED_SOURCE_PIN_OR_GUARD")
+        else:
+            print("BLOCKED SHA_GUARD_TOOLS_OR_APPROVAL_WINDOW")
+        return 2
     except Exception:
         print("BLOCKED SHA_GUARD_TOOLS_OR_APPROVAL_WINDOW")
         return 2
