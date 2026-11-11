@@ -83,7 +83,7 @@ jobs:
       - name: Real-driver gate (post-commit client failure, outage vs NOLOGIN rejection, secrets in child output, no window)
         run: |
           set -euo pipefail
-          python -m scripts.ci_cinema_pg_v223_codespace_run_gate | tee launcher-gate.log
+          JW_CINEMA_PG_DISPOSABLE=1 python -m scripts.ci_cinema_pg_v223_codespace_run_gate | tee launcher-gate.log
           grep -E '^PASS: 7 checks, 0 failed, expected exactly 7' launcher-gate.log
           echo 'DISPOSABLE EVIDENCE ONLY: a throw-away PG17 was used; nothing was sent to Supabase.'
       - name: The same gate must FAIL when each safety rule is removed (mutation controls)
