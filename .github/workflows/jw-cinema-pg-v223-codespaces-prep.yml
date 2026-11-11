@@ -7,6 +7,7 @@ on:
       - review/jw-v223-b-exact-admin-dsn-claude-20261109
       - review/jw-v223-b-renew-20261110
       - review/jw-v223-qa-all-20261111
+      - review/jw-v223-qa-e2e-20261111
   workflow_dispatch:
 permissions:
   contents: read
