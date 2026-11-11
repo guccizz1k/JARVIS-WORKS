@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 22
     env:
       JW_ENV: review
+      JW_ROOT_UI: v222
     steps:
       - uses: actions/checkout@v4
         with:
