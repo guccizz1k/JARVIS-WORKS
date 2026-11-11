@@ -47,8 +47,10 @@ jobs:
           rc=$?
           set -e
           test "$rc" -eq 2
-          grep -Fx "PASS EXACT_SHA_PROTECTED_GUARD_AND_TOOLS" "$RUNNER_TEMP/jw-mobile.txt"
-          grep -Fx "BLOCKED PRIVATE_FILES_AND_ADMIN_DSN" "$RUNNER_TEMP/jw-mobile.txt"
+          # The historical owner window has expired. The launcher must fail closed
+          # before attempting to inspect private files or contact a live database.
+          grep -Fx "BLOCKED APPROVAL_WINDOW_EXPIRED" "$RUNNER_TEMP/jw-mobile.txt"
+          ! grep -F "PASS EXACT_SHA_PROTECTED_GUARD_AND_TOOLS" "$RUNNER_TEMP/jw-mobile.txt"
           grep -Fx "B2_B3_NOT_RUN; NO_SUPABASE_DB_ACTION" "$RUNNER_TEMP/jw-mobile.txt"
           echo "PASS: new mobile readiness helper fails closed without owner secrets"
       - name: Launcher verify passes only for the exact reported SHA, then every negative control refuses
