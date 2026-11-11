@@ -74,7 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           python -I scripts/ci_cinema_pg_guard.py
-          psql -X -Atc 'show server_version' | tee /dev/stderr | grep -E '^17\.'
+          # This runner has PG17 client tools, not a local server. Server-level PG17 checks run in disposable-DB workflows.
+          psql --version | grep -E 'PostgreSQL\) 17\.'
           python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47' 'pytest>=8,<10'
           python -c 'import psycopg; print("psycopg", psycopg.__version__)'
       - name: Launcher unit tests (fake drivers, including each reproduced defect)
