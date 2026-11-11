@@ -271,7 +271,10 @@ class Psql(unittest.TestCase):
         self.assertNotIn(PASSWORD, str(ctx.exception))
 
     def test_renewal_timeout_is_ambiguous_and_closes_the_role(self):
-        with patch.object(run, "psql", side_effect=subprocess.TimeoutExpired("psql", 120)):
+        # The timeout test must exercise psql, not fail first on an expired historical approval.
+        approved_time = run.APPROVED_LIMIT - run.MAX_WINDOW / 2
+        with patch.object(run, "now", return_value=approved_time), \
+             patch.object(run, "psql", side_effect=subprocess.TimeoutExpired("psql", 120)):
             with self.assertRaises(run.Ambiguous):
                 run.stage_renew()
 
