@@ -46,6 +46,9 @@ jobs:
           python -m scripts.ci_cinema_pg_go _inner "$GITHUB_SHA" > "$RUNNER_TEMP/jw-mobile.txt"
           rc=$?
           set -e
+          # Only expose allowlisted status lines; never dump private files or raw exceptions.
+          grep -E "^(PASS |BLOCKED |B2_B3_NOT_RUN;|TOOLS_READY_ONLY)" "$RUNNER_TEMP/jw-mobile.txt" || true
+          echo "mobile_readiness_exit_code=$rc"
           test "$rc" -eq 2
           # The historical owner window has expired. The launcher must fail closed
           # before attempting to inspect private files or contact a live database.
