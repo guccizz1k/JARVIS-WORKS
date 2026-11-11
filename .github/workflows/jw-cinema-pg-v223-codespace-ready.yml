@@ -6,6 +6,7 @@ on:
       - review/jw-v223-b-exact-admin-dsn-20261109
       - review/jw-v223-b-exact-admin-dsn-claude-20261109
       - review/jw-v223-b-renew-20261110
+      - review/jw-v223-ci-disposable-realdriver-20261111
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,8 +15,28 @@ jobs:
     name: Guard, unit tests, PG17 tooling, launcher verify and negative controls at this exact SHA
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # Real-driver negative tests use disposable PG17 only; never a user or Supabase database.
+    services:
+      disposable-postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-v223-driver
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       CODESPACES: "true"
+      JW_CINEMA_PG_DISPOSABLE: "1"
+      PGHOST: 127.0.0.1
+      PGPORT: "5435"
+      PGUSER: postgres
+      PGPASSWORD: ci-only-v223-driver
     steps:
       - uses: actions/checkout@v4
         with:
