@@ -5,6 +5,7 @@ on:
       - candidate/jw-v223-pg-backup-restore-20261106
       - review/jw-v223-qa-e2e-20261111
       - review/jw-v223-five-hour-cap-20261111
+      - review/jw-v223-chromium-ui-qa-20261111
   workflow_dispatch:
 permissions:
   contents: read

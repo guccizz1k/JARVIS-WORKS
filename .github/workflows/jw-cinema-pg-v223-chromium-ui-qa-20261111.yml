@@ -1,0 +1,72 @@
+name: JW V22.3 isolated real Chromium cinematic UI verification (no external DB)
+on:
+  push:
+    branches:
+      - review/jw-v223-chromium-ui-qa-20261111
+permissions:
+  contents: read
+jobs:
+  actual-local-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    env:
+      JW_ENV: review
+      JW_ROOT_UI: v222
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Protect code and compile original Chromium recorder
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 -m py_compile scripts/ci_v223_real_browser_recording.py
+      - name: Install isolated browser and Korean document preview dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python3 -m pip install --disable-pip-version-check -r requirements.txt 'playwright>=1.50,<2' 'PyMuPDF>=1.25,<2' reportlab
+          python3 -m playwright install --with-deps chromium
+      - name: Real Chromium login, transition, mouse wheel, file upload, business navigation and logout
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_v223_real_browser_recording | tee chromium-ui.log
+          grep -F 'PASS_V223_REAL_CHROMIUM_LOGIN_WHEEL_CLICK_UPLOAD_LOGOUT' chromium-ui.log
+      - name: Verify event evidence and full H264 decode (synthetic/local ONLY)
+        run: |
+          set -euo pipefail
+          D=artifacts/v223-real-ui-video
+          test -s "$D/JARVIS_WORKS_V222_REAL_BROWSER_RAW.webm"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('artifacts/v223-real-ui-video/REAL_INTERACTION_PROOF.json')
+          d=json.loads(p.read_text())
+          assert d['source']=='CONTINUOUS_REAL_CHROMIUM_PLAYWRIGHT_VIDEO_NOT_STILL_SLIDES'
+          assert d['local_server']=='isolated FastAPI + temporary SQLite + synthetic demo user'
+          assert d['actual_business_route_clicks']==9
+          assert d['wheel_3d_scenes']==3
+          assert d['api_preview_pending'] is True and d['actual_logout'] is True
+          assert not d['page_errors'] and not d['http_5xx']
+          print('PASS_V223_REAL_LOCAL_BROWSER_INTERACTION_EVIDENCE')
+          PY
+          ffmpeg -hide_banner -loglevel error -nostdin -y -i "$D/JARVIS_WORKS_V222_REAL_BROWSER_RAW.webm" \
+            -vf "fps=24,scale=854:480:flags=lanczos" -c:v libx264 -preset fast -crf 29 \
+            -pix_fmt yuv420p -profile:v main -level 3.1 -movflags +faststart -an \
+            "$RUNNER_TEMP/jw-v223-local-proof.mp4"
+          ffprobe -v error -show_entries stream=codec_name,pix_fmt \
+            -of default=noprint_wrappers=1 "$RUNNER_TEMP/jw-v223-local-proof.mp4" |
+            grep -F 'codec_name=h264'
+          ffprobe -v error -show_entries stream=pix_fmt \
+            -of default=noprint_wrappers=1 "$RUNNER_TEMP/jw-v223-local-proof.mp4" |
+            grep -F 'pix_fmt=yuv420p'
+          ffmpeg -hide_banner -loglevel error -nostdin \
+            -i "$RUNNER_TEMP/jw-v223-local-proof.mp4" -f null -
+          echo 'PASS_V223_REAL_CHROMIUM_H264_FULL_DECODE'
+          echo 'SYNTHETIC LOCAL EVIDENCE ONLY: no external Render deployment, real user or private database.'
