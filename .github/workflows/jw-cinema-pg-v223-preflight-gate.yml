@@ -8,6 +8,7 @@ on:
       - review/jw-v223-b-renew-20261110
       - review/jw-v223-qa-all-20261111
       - review/jw-v223-qa-e2e-20261111
+      - review/jw-v223-five-hour-cap-20261111
   workflow_dispatch:
 permissions:
   contents: read
@@ -73,3 +74,9 @@ jobs:
           python3 -m scripts.ci_cinema_pg_v223_backup_role_renew_gate | tee renew-gate.log
           grep -E '^PASS: [0-9]+ checks, 0 failed' renew-gate.log
           echo 'DISPOSABLE EVIDENCE ONLY: the renewal was applied to a throw-away PG17 here, never to Supabase.'
+      - name: Enforce owner five-hour cap on real disposable PostgreSQL 17 SQL paths
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_v223_5h_server_gate | tee five-hour-limit.log
+          grep -F 'PASS_V223_5H_DB_SERVER_LIMIT checks=12 failures=0 synthetic_only=true' five-hour-limit.log
+          echo 'DISPOSABLE TEST ONLY: no Supabase role or real user was accessed.'

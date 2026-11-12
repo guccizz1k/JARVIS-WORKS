@@ -30,11 +30,11 @@ GOOD_SUMMARY = {
 class Window(unittest.TestCase):
     def test_renewal_value_is_capped_at_the_approved_limit_not_extended(self):
         at = datetime(2026, 11, 10, 12, 30, tzinfo=KST)
-        self.assertEqual(run.renew_value(at), "2026-11-11 09:00:00+09")
+        self.assertEqual(run.renew_value(at), "2026-11-10 17:29:00+09")
 
-    def test_renewal_value_is_shorter_than_24_hours_when_the_limit_is_far(self):
+    def test_renewal_value_is_below_five_hours_when_the_limit_is_far(self):
         at = datetime(2026, 11, 10, 5, 0, tzinfo=KST)
-        self.assertEqual(run.renew_value(at), "2026-11-11 04:00:00+09")
+        self.assertEqual(run.renew_value(at), "2026-11-10 09:59:00+09")
 
     def test_nothing_is_renewed_at_or_after_the_limit(self):
         for at in (run.APPROVED_LIMIT, run.APPROVED_LIMIT + timedelta(seconds=1), run.APPROVED_LIMIT + timedelta(days=3)):
@@ -85,7 +85,8 @@ class Pins(unittest.TestCase):
 
     def test_renew_sql_with_a_wider_window_or_missing_limit_is_refused(self):
         original = run.RENEW_SQL.read_text()
-        for broken in (original.replace("interval ''24 hours''", "interval ''7 days''"),
+        for broken in (original.replace("interval ''5 hours''", "interval ''7 days''"),
+                       original.replace("interval ''5 hours''", "interval ''24 hours''"),
                        original.replace("2026-11-11 09:00:00+09'", "2026-11-17 09:00:00+09'")):
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / "renew.sql"
