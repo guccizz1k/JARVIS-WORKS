@@ -44,7 +44,7 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(report["untracked_count"], 1)
         self.assertEqual(report["issue142_untracked_evidence_count"], 1)
         self.assertEqual(report["issue142_evidence_extensions"], {".json": 1})
-        self.assertFalse(report["legacy_go_launcher_compatible"])
+        self.assertFalse(report["legacy_go_launcher_worktree_prereqs_only"])
         self.assertNotIn("SECRET", json.dumps(report))
         self.assertNotIn("do-not-read", json.dumps(report))
         self.assertEqual(p.read_text(), '{"SECRET":"do-not-read"}')
@@ -55,11 +55,11 @@ class InventoryTest(unittest.TestCase):
         safe.parent.mkdir(parents=True)
         safe.write_text("not-a-real-cert")
         safe.chmod(0o600)
-        self.assertTrue(audit.collect(self.repo)["legacy_go_launcher_compatible"])
+        self.assertTrue(audit.collect(self.repo)["legacy_go_launcher_worktree_prereqs_only"])
         x = self.repo / "docs/review/issue142-new.txt"
         x.parent.mkdir(parents=True)
         x.write_text("synthetic")
-        self.assertFalse(audit.collect(self.repo)["legacy_go_launcher_compatible"])
+        self.assertFalse(audit.collect(self.repo)["legacy_go_launcher_worktree_prereqs_only"])
 
     def test_detect_symlink_and_insecure_mode_without_opening(self):
         x = self.repo / "docs/review/issue142-insecure.txt"
