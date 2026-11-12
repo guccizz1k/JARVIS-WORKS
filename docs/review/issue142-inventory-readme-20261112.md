@@ -26,7 +26,7 @@ Fetching updates Git fetch metadata but does not checkout or modify tracked work
 python3 -m unittest discover -s tests -p 'test_issue142_local_inventory_20261112.py' -v
 ```
 
-Eight tests cover unchanged Git index and worktree, strict prior launcher compatibility, untracked counts, symlinks and permissions, malformed Git status, NUL/rename parsing, commit identifiers and absence of synthetic secret leakage.
+Eight tests cover unchanged Git index and worktree, limited prior launcher worktree prerequisites (not SHA, credentials or full authorization), untracked counts, symlinks and permissions, malformed Git status, NUL/rename parsing, commit identifiers and absence of synthetic secret leakage.
 
 ## Acceptance boundary
 
