@@ -105,7 +105,7 @@ def collect(repo: Path) -> dict:
         "untracked_group_or_world_permission_count": unsafe_permissions,
         "untracked_missing_at_check_count": missing,
         "candidate_commits_present": objects,
-        "legacy_go_launcher_compatible": legacy_allowed,
+        "legacy_go_launcher_worktree_prereqs_only": legacy_allowed,
         "codespaces_archive_offsite_proven": False,
         "independent_recovery_key_proven": False,
         "privacy": "No file contents, env, credentials, archive bytes, DSNs or database connections accessed",
