@@ -72,10 +72,12 @@ try:
             time.sleep(.4)
         else:
             raise RuntimeError('ISOLATED_PG17_NOT_READY')
-        assert sql('SHOW server_version').startswith('17.'), 'PG_VERSION_MISMATCH'
-        for role in sorted(roles):
+        assert sql('SHOW server_version', db='postgres').startswith('17.'), 'PG_VERSION_MISMATCH'
+        for role in sorted(roles | {'jw_auth_stage_v85','jw_dev_import_review_executor_v201'}):
             sql('CREATE ROLE "'+role+'" NOLOGIN',db='postgres')
         run(['docker','exec',NAME,'createdb','-U','postgres','restore'],timeout=30)
+        sql('CREATE SCHEMA IF NOT EXISTS extensions')
+        sql('CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions')
         run(['docker','exec','-i',NAME,'pg_restore','--no-owner','--exit-on-error','-U','postgres','-d','restore'],data=dump.read_bytes(),timeout=180)
         ns="n.nspname='jw_dev'"
         tables=int(sql("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid WHERE "+ns+" AND c.relkind='r'"))
