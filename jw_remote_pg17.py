@@ -15,7 +15,25 @@ NAME='jw-remote-verify-'+secrets.token_hex(5)
 def run(cmd, *, data=None, timeout=90):
     r=subprocess.run(cmd, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
     if r.returncode:
-        raise RuntimeError('COMMAND_FAILED: '+cmd[0]+' '+cmd[1] if len(cmd)>1 else 'COMMAND_FAILED: '+cmd[0])
+        # Classify failure without printing SQL, credentials, or private stderr.
+        err=r.stderr.decode('utf-8','replace').lower()
+        if 'does not exist' in err and 'database ' in err:
+            reason='DATABASE_NOT_CREATED'
+        elif 'does not exist' in err and 'role ' in err:
+            reason='ROLE_MISSING'
+        elif 'already exists' in err:
+            reason='OBJECT_ALREADY_EXISTS'
+        elif 'permission denied' in err or 'must be owner' in err:
+            reason='PERMISSION_OR_OWNER'
+        elif 'extension ' in err:
+            reason='EXTENSION_DEPENDENCY'
+        elif 'no space left on device' in err:
+            reason='OUT_OF_SPACE'
+        elif 'could not connect' in err or 'connection refused' in err:
+            reason='CONNECTIVITY'
+        else:
+            reason='UNCLASSIFIED'
+        raise RuntimeError('COMMAND_FAILED: '+cmd[0]+' '+cmd[1]+' EXIT='+str(r.returncode)+' CLASS='+reason)
     return r.stdout.decode().strip()
 
 
