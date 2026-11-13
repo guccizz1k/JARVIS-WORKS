@@ -48,6 +48,11 @@ def sql(statement, db='restore'):
     return run(['docker','exec',NAME,'psql','-X','-A','-t','-v','ON_ERROR_STOP=1','-U','postgres','-d',db,'-c',statement],timeout=60)
 
 
+# The previous dict-based adapter dropped a duplicate 'coalesce' column.
+# Regression: order and all three values must survive a duplicate JSON key.
+assert json.loads('{"count":22,"coalesce":"11","coalesce":"22"}',
+                  object_pairs_hook=lambda pairs:[v for _,v in pairs]) == [22,"11","22"]
+
 class PsqlCursorAdapter:
     """Read-only DB-API subset for the existing signature implementation.
 
@@ -75,7 +80,12 @@ class PsqlCursorAdapter:
         assert '%(s)s' not in q and '%s' not in q
         wrapped='SELECT row_to_json(q) FROM ('+q+') AS q'
         output=sql(wrapped)
-        self.rows=[list(json.loads(line).values()) for line in output.splitlines()]
+        # row_to_json emits duplicate labels for the two coalesce columns in
+        # the streamed row digest query. A normal dict silently drops one.
+        # Preserve values by position, including repeated JSON object keys.
+        self.rows=[json.loads(line, object_pairs_hook=lambda pairs:
+                              [value for _, value in pairs])
+                   for line in output.splitlines()]
     def fetchall(self): return self.rows
     def fetchone(self): return self.rows[0]
 
