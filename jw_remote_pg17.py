@@ -3,6 +3,13 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from scripts.pg_backup_v223 import decrypt_file
 
+from scripts.pg_backup_v223 import fetch_signature, signature_digest, MAX_TABLE_ROWS
+
+# Prior independently recorded PG17 restored-catalog signature (2026-11-11).
+# This is not the source signature; one approved V151 semantic difference
+# existed in the historic raw source-vs-restored comparison.
+HISTORICAL_RESTORED_RAW_SHA='dc048c8e7e1dd1525cd637aa5e167a9c6a92db699491a178be3392fccf184dc0'
+
 REPO='guccizz1k/jw-backup-vault-261111'
 REL='archives/2026-11-13/jw-v223-rotated-757ea54caec464bf.jwpgbk'
 SHA='84304f6d785b2f49f16c826118fac8580b8bcfe5ec30290f625b9a3e70661d7e'
@@ -40,6 +47,40 @@ def run(cmd, *, data=None, timeout=90):
 def sql(statement, db='restore'):
     return run(['docker','exec',NAME,'psql','-X','-A','-t','-v','ON_ERROR_STOP=1','-U','postgres','-d',db,'-c',statement],timeout=60)
 
+
+class PsqlCursorAdapter:
+    """Read-only DB-API subset for the existing signature implementation.
+
+    Executes the original deterministic SELECT queries inside the ephemeral
+    network-isolated container. Returns typed JSON row values matching psycopg's
+    simple scalar mappings (text, bool, int). Never prints private row content.
+    """
+    def __enter__(self): return self
+    def __exit__(self, exc_type, exc_value, traceback): return False
+    def execute(self, query, params=None):
+        q=query.strip().rstrip(';')
+        if q.startswith("SELECT set_config('statement_timeout'"):
+            assert params==('300s',)
+            self.rows=[]
+            return
+        if isinstance(params,dict):
+            assert params=={'s':'jw_dev'}
+            q=q.replace('%(s)s', "'jw_dev'")
+        elif isinstance(params,tuple):
+            assert params==(MAX_TABLE_ROWS+1,)
+            q=q.replace('%s',str(MAX_TABLE_ROWS+1))
+        else:
+            assert params is None
+        assert q.lstrip().startswith('SELECT '), 'BLOCKED_NON_SELECT_SIGNATURE_QUERY'
+        assert '%(s)s' not in q and '%s' not in q
+        wrapped='SELECT row_to_json(q) FROM ('+q+') AS q'
+        output=sql(wrapped)
+        self.rows=[list(json.loads(line).values()) for line in output.splitlines()]
+    def fetchall(self): return self.rows
+    def fetchone(self): return self.rows[0]
+
+class PsqlConnectionAdapter:
+    def cursor(self): return PsqlCursorAdapter()
 
 assert KEY.is_file() and not KEY.is_symlink()
 assert stat.S_IMODE(KEY.stat().st_mode)==0o600
@@ -108,6 +149,12 @@ try:
         rows=int(sql('SELECT sum(n) FROM ('+union+') q'))
         counts={'tables':tables,'force_rls':force_rls,'rows':rows,'functions':funcs,'triggers':triggers}
         assert counts=={'tables':65,'force_rls':64,'rows':22,'functions':72,'triggers':74}, 'RESTORE_COUNT_MISMATCH'
+        restored=fetch_signature(PsqlConnectionAdapter(),'jw_dev')
+        assert len(restored['tables'])==65
+        assert sum(record[0] for record in restored['rows'].values())==22
+        restored_digest=signature_digest(restored)
+        assert restored_digest==HISTORICAL_RESTORED_RAW_SHA, 'HISTORICAL_FULL_RESTORED_SIGNATURE_MISMATCH'
+
 finally:
     if created:
         subprocess.run(['docker','rm','-f',NAME],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=40)
@@ -118,4 +165,5 @@ print('NEW_REMOTE_PG17_REAL_RESTORE_PASS')
 print('RESTORE_COUNTS_PASS: tables=65 force_rls=64 rows=22 functions=72 triggers=74')
 print('EXISTING_DB_AND_VOLUMES_UNTOUCHED')
 print('TEMP_AND_CONTAINER_CLEANED')
-print('FULL_INDEPENDENT_SCHEMA_DIGEST_NOT_RUN')
+print('HISTORICAL_RESTORED_FULL_SCHEMA_ROW_DIGEST_PASS')
+print('SOURCE_RAW_SIGNATURE_EQUIVALENCE_NOT_REASSERTED')
