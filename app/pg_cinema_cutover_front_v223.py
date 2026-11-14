@@ -158,11 +158,15 @@ class CutoverFront:
                    if k.lower() != b"x-jw-pg-csrf"]
         pg_csrf = [v for k, v in new_scope.get("headers", ())
                    if k.lower() == b"x-jw-pg-csrf"]
-        if cookie_name == PG_COOKIE and pg_csrf:
-            if len(pg_csrf) != 1 or not (16 <= len(pg_csrf[0]) <= 512):
-                raise CutoverRefused("invalid_pg_csrf", 403)
+        if cookie_name == PG_COOKIE:
+            # Never present SQLite's CSRF token to the PG trust boundary,
+            # even when a PG-specific token was not sent. The PG backend
+            # remains responsible for rejecting unsafe tokenless requests.
             headers = [(k, v) for k, v in headers if k.lower() != b"x-csrf-token"]
-            headers.append((b"x-csrf-token", pg_csrf[0]))
+            if pg_csrf:
+                if len(pg_csrf) != 1 or not (16 <= len(pg_csrf[0]) <= 512):
+                    raise CutoverRefused("invalid_pg_csrf", 403)
+                headers.append((b"x-csrf-token", pg_csrf[0]))
         new_scope["headers"] = headers
 
         async def wrapped_send(message):
