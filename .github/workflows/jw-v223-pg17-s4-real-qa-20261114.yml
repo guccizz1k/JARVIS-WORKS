@@ -1,0 +1,92 @@
+name: JW V22.3 disposable PG17 S4 reviewed and atomic gates
+on:
+  push:
+    branches:
+      - review/jw-v223-cookie-resilience-20261114
+    paths:
+      - scripts/ci_cinema_pg_s4_reviewed_gate.py
+      - scripts/ci_cinema_pg_s4_atomic_gate.py
+      - scripts/ci_cinema_pg_sql_gate.py
+      - scripts/review/cinema_pg_s4_reviewed_links_gate.sql
+      - scripts/review/cinema_pg_s4_reviewed_links_test.sql
+      - scripts/review/cinema_pg_s4_atomic_gate.sql
+      - scripts/review/cinema_pg_s4_atomic_gate_test.sql
+      - scripts/review/cinema_pg_write_engine.sql
+      - .github/workflows/jw-v223-pg17-s4-real-qa-20261114.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-disposable-s4-pg17-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  disposable-pg17-s4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-local-s4-review-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5437:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5437'
+      PGUSER: postgres
+      PGPASSWORD: ci-local-s4-review-only
+      JW_ENV: test
+    steps:
+      - name: Checkout exact review source without stored credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Confirm local disposable PG17 server and source protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I scripts/ci_cinema_pg_guard.py
+          test "$(psql -X -Atc 'show server_version_num' | cut -c1-2)" = "17"
+          psql -X -Atc 'select current_database()' | grep -Fx 'postgres'
+          python3 -m py_compile scripts/ci_cinema_pg_s4_reviewed_gate.py scripts/ci_cinema_pg_s4_atomic_gate.py
+      - name: Run real PG17 reviewed-link SQL audit with exact 23 checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_s4_reviewed_gate | tee s4-reviewed.log
+          grep -F 'PASS: 23/23 S4 reviewed-link SQL tests; missing=0 extra=0 duplicates=0' s4-reviewed.log
+          python3 - <<'PY'
+          import json
+          d=json.load(open('jw-cinema-s4-reviewed-pg17.json'))
+          assert d['overall']=='PASS' and d['actual_pg17'] is True
+          assert d['tests']==23 and d['passed']==23 and d['failures']==[]
+          assert not d['duplicate']
+          print('PG17_REVIEWED_S4_23_OF_23_PASS')
+          PY
+      - name: Run disposable PG17 S4 atomic multi-connection concurrent claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_s4_atomic_gate | tee s4-atomic.log
+          python3 - <<'PY'
+          import json
+          d=json.load(open('jw-cinema-s4-atomic-pg17.json'))
+          assert d['overall']=='PASS',d
+          assert d['total']>=32 and d['failed']==[] and d['duplicate_names']==[],d
+          assert all(t['status']=='PASS' for t in d['tests'])
+          print(f"PG17_ATOMIC_S4_{d['total']}_OF_{d['total']}_PASS")
+          PY
+      - name: Safety statement
+        run: echo "PASS means disposable Docker PostgreSQL 17 with fabricated data only; Supabase/Render/customer production/database migrations untouched."
