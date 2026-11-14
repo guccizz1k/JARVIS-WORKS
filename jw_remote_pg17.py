@@ -146,13 +146,36 @@ try:
         inspection=json.loads(run(['docker','inspect',NAME,'--format','{{json .Mounts}}']))
         assert not any(m.get('Type') in ('bind','volume') for m in inspection), 'BLOCKED_NON_TMPFS_MOUNT'
         assert run(['docker','inspect',NAME,'--format','{{.HostConfig.NetworkMode}}'])=='none', 'BLOCKED_NETWORK'
-        for i in range(50):
-            if subprocess.run(['docker','exec',NAME,'pg_isready','-U','postgres'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
-                break
-            time.sleep(.4)
-        else:
-            raise RuntimeError('ISOLATED_PG17_NOT_READY')
-        assert sql('SHOW server_version', db='postgres').startswith('17.'), 'PG_VERSION_MISMATCH'
+        # On first initialization, the official postgres image starts a
+        # temporary server which may answer pg_isready, then shuts it down
+        # before exec'ing the permanent server. Do not race that transition.
+        # /proc/1/comm becomes "postgres" only after final entrypoint exec.
+        ready=False
+        phase='ENTRYPOINT_INITIALIZING'
+        for i in range(120):
+            p=subprocess.run(['docker','exec',NAME,'cat','/proc/1/comm'],
+                             stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                             timeout=8)
+            if p.returncode==0 and p.stdout.strip()==b'postgres':
+                phase='FINAL_SERVER_CONNECTING'
+                try:
+                    version=sql('SHOW server_version', db='postgres')
+                    if version.startswith('17.'):
+                        ready=True
+                        break
+                    raise RuntimeError('PG_VERSION_MISMATCH')
+                except RuntimeError as e:
+                    if str(e)=='PG_VERSION_MISMATCH':
+                        raise
+            time.sleep(.5)
+        if not ready:
+            # Only lifecycle metadata; no SQL output, credentials, or logs.
+            state=subprocess.run(
+                ['docker','inspect',NAME,'--format',
+                 '{{.State.Status}}|{{.State.ExitCode}}|{{.State.OOMKilled}}'],
+                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=10)
+            status=state.stdout.decode().strip() if state.returncode==0 else 'INSPECT_UNAVAILABLE'
+            raise RuntimeError('ISOLATED_PG17_FINAL_SERVER_NOT_READY: '+phase+' STATUS='+status)
         for role in sorted(roles | {'jw_auth_stage_v85','jw_dev_import_review_executor_v201'}):
             sql('CREATE ROLE "'+role+'" NOLOGIN',db='postgres')
         run(['docker','exec',NAME,'createdb','-U','postgres','restore'],timeout=30)
