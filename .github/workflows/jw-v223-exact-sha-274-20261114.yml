@@ -1,0 +1,166 @@
+name: JW V22.3 integrated exact SHA 274 A S4 cookie PG17 SQLite gate
+on:
+  push:
+    branches:
+      - review/jw-v223-cookie-resilience-20261114
+    paths:
+      - scripts/ci_cinema_pg_s4_reviewed_gate.py
+      - scripts/ci_cinema_pg_s4_atomic_gate.py
+      - scripts/ci_cinema_pg_cutover_realdb_v223.py
+      - scripts/ci_cinema_pg_sql_gate.py
+      - scripts/review/cinema_pg_s4_reviewed_links_gate.sql
+      - scripts/review/cinema_pg_s4_reviewed_links_test.sql
+      - scripts/review/cinema_pg_s4_atomic_gate.sql
+      - scripts/review/cinema_pg_s4_atomic_gate_test.sql
+      - scripts/review/cinema_pg_write_engine.sql
+      - .github/workflows/jw-v223-exact-sha-274-20261114.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-exact-sha-274-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  disposable-pg17-s4:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-local-s4-review-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5437:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5437'
+      PGUSER: postgres
+      PGPASSWORD: ci-local-s4-review-only
+      JW_ENV: test
+    steps:
+      - name: Checkout exact review source without stored credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pinned originals and isolated review-diff guard (not global baseline whitelist)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          def git(*args):
+              return subprocess.check_output(("git", *args), text=True).strip()
+          baseline="08ea29867e962d4ac5be0e942fc1488528494428"
+          parent="e6a1ce84694812451964732ef6101c9155bf28a1"
+          assert git("branch","--show-current") == "review/jw-v223-cookie-resilience-20261114"
+          assert subprocess.run(("git","merge-base","--is-ancestor",baseline,"HEAD")).returncode == 0
+          protected={
+              "app/static/cinema/JARVIS_WORKS_CINEMA.html":"9bedf97fe718a94f07861e23670685af00619ca8",
+              "app/main.py":"775f500c8a7549d434ce196a8e0763aea33e1c67",
+              "app/static/cinematic_v222.css":"c7c5e796688582d27ab4322f0dd5cfd25b16226a",
+              "scripts/pg_backup_v223.py":"b4f350029d7a8b7abd357c8949bb6d5129485bad",
+              "tests/test_v223_pg_backup.py":"5fd569823f38ad83b8780bf9c9bd2782b3eaf916",
+              "docs/ops/V223_PG_BACKUP_RESTORE.md":"6ce80a02d7ef7676f3dc68270b2e5abfcd922c8a",
+              "docs/ops/V223_SYNTHETIC_CI.md":"5649d0a127cf516d994752dc8804bad7a0af46f2",
+              "tests/test_installer_v75.py":"d8b274a5455a74cced64579e2146c34837a72e0f",
+              "tests/test_installer_v79.py":"2f498ec592d315e2791f5d5915af691b4371068c",
+              "tests/test_pg_auth_v85.py":"c7df1d7bb6a749a064ea8b8611ae7df19132a046",
+          }
+          for path,expected in protected.items():
+              assert git("hash-object","--",path)==expected, f"protected hash mismatch: {path}"
+          def static_else(rev):
+              out=git("ls-tree","-r",rev,"--","app/static")
+              return sorted(x for x in out.splitlines() if not x.endswith("\tapp/static/cinematic_v222.css"))
+          assert static_else(baseline)==static_else("HEAD"), "protected static tree drift"
+          changed=set(git("diff","--name-only",parent,"HEAD").splitlines())
+          allowed={
+              "app/pg_cinema_cutover_front_v223.py",
+              "scripts/ci_cinema_pg_cutover_realdb_v223.py",
+              "tests/test_cinema_pg_v223_cookie_boundary.py",
+              "tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py",
+              "tests/test_cinema_pg_v223_response_cookie_security.py",
+              "docs/review/issue142-cookie-red-green-20261114.md",
+              ".github/workflows/jw-v223-cookie-resilience-20261114.yml",
+              ".github/workflows/jw-v223-a-s4-cookie-unified-20261114.yml",
+              ".github/workflows/jw-v223-pg17-s4-real-qa-20261114.yml",
+              ".github/workflows/jw-v223-exact-sha-274-20261114.yml",
+          }
+          assert changed and changed<=allowed, f"scope mismatch: {sorted(changed-allowed)}"
+          assert not git("status","--porcelain"), "working tree not clean"
+          print("PASS_PINNED_PROTECTED_BLOBS_AND_ISOLATED_REVIEW_SCOPE",len(protected),len(changed))
+          PY
+          test "$(psql -X -Atc 'show server_version_num' | cut -c1-2)" = "17"
+          psql -X -Atc 'select current_database()' | grep -Fx 'postgres'
+          python3 -m py_compile scripts/ci_cinema_pg_s4_reviewed_gate.py scripts/ci_cinema_pg_s4_atomic_gate.py
+      - name: Run real PG17 reviewed-link SQL audit with exact 23 checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_s4_reviewed_gate | tee s4-reviewed.log
+          grep -F 'PASS: 23/23 S4 reviewed-link SQL tests; missing=0 extra=0 duplicates=0' s4-reviewed.log
+          python3 - <<'PY'
+          import json
+          d=json.load(open('jw-cinema-s4-reviewed-pg17.json'))
+          assert d['overall']=='PASS' and d['actual_pg17'] is True
+          assert d['tests']==23 and d['passed']==23 and d['failures']==[]
+          assert not d['duplicate']
+          print('PG17_REVIEWED_S4_23_OF_23_PASS')
+          PY
+      - name: Run disposable PG17 S4 atomic multi-connection concurrent claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_s4_atomic_gate | tee s4-atomic.log
+          python3 - <<'PY'
+          import json
+          d=json.load(open('jw-cinema-s4-atomic-pg17.json'))
+          assert d['overall']=='PASS',d
+          assert d['total']>=32 and d['failed']==[] and d['duplicate_names']==[],d
+          assert all(t['status']=='PASS' for t in d['tests'])
+          print(f"PG17_ATOMIC_S4_{d['total']}_OF_{d['total']}_PASS")
+          PY
+      - name: Install existing isolated dual-store E2E dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Run full 189 Python security, cookie and immutable S4 regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile app/pg_cinema_cutover_front_v223.py app/pg_cinema_s4_reconciliation_v1.py tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py tests/test_cinema_pg_s4_reconciliation.py tests/test_cinema_pg_s4_snapshot_integrity_20261114.py tests/test_cinema_pg_v223_trade_auth_integration_20261114.py tests/test_cinema_pg_v223_cookie_boundary.py tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py tests/test_cinema_pg_v223_response_cookie_security.py
+          python3 -m pytest -q -ra -p no:cacheprovider --noconftest --junitxml=unified-a-s4-cookie.xml tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py tests/test_cinema_pg_s4_reconciliation.py tests/test_cinema_pg_s4_snapshot_integrity_20261114.py tests/test_cinema_pg_v223_trade_auth_integration_20261114.py tests/test_cinema_pg_v223_cookie_boundary.py tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py tests/test_cinema_pg_v223_response_cookie_security.py
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('unified-a-s4-cookie.xml').getroot()
+          suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          actual={k:sum(int(s.get(k,'0')) for s in suites) for k in ('tests','failures','errors','skipped')}
+          assert actual=={'tests':189,'failures':0,'errors':0,'skipped':0}, actual
+          print('EXACT_SHA_PY_SECURITY_S4_COOKIE_189_OF_189_PASS')
+          PY
+      - name: Run original real SQLite and disposable PG17 dual-session 30-case E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee dual-store-realdb.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=30 failures=0 synthetic_only=true' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_SESSION_ROW_REVOKED' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_SQLITE_SESSION_ROW_REVOKED' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_DUAL_LOGOUT_REJECTS_FORGED_PG_CSRF' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_CROSS_ORG_SESSION_REJECTED' dual-store-realdb.log
+          echo 'PASS_DISPOSABLE_SQLITE_PG17_30_CASE_DUAL_STORE_E2E'
+      - name: Safety statement
+        run: echo "PASS means disposable Docker PostgreSQL 17 and SQLite with synthetic data only; Supabase/Render/customer production/database migrations untouched."
