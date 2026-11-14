@@ -60,3 +60,26 @@ Only six files changed relative to prior review branch: one proxy app module, th
 - **Honest boundary:** the historic `scripts/ci_cinema_pg_guard.py` whole-branch changed-file whitelist is still not PASS for this aggregated review branch; the new pinned scoped guard is independent, not an assertion that the historic guard passed.
 - Neither workflow makes Codex-only local `faa97d10c89853faa1bea3d1e272c41ee8c3faac` available. That commit remains absent from GitHub and from accessible conversation/library files. Latest Render deployments still correspond to prior November 3 and October 25 sources; no deployment occurred.
 - Final approved HTML `jarvis-works-v2.html` was not compared with this hosted frontend bundle in this pipeline. Physical GPU, real device, hosted Supavisor credentials, production backup/restore, latest Render HTTPS E2E, independent release QA and overall 5-Gate ALL PASS remain BLOCKED/NOT RUN/NOT VERIFIED according to their own evidence.
+
+
+## 2026-11-14 — Full modern Python product suite and isolated TLS/HTTPS reviewed E2E
+
+### Modern full Python PASS — exact review SHA
+- Workflow: `.github/workflows/jw-v223-full-python-review-20261114.yml`.
+- Initial run `43595257777` failed **before tests**, because the V8.9 baseline overlay constructor was run against modern V22.3 `app/main.py`. Root cause: immutable historical builder requires the original historical app file SHA, not a modern file.
+- Fixed **without bypass or changing tests**: use `git worktree add --detach ../jw-v89-historical-fixture a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338` and execute the unchanged overlay builder with that historical checkout as working directory. The output is created outside the modern worktree in the exact shared-parent overlay location expected by the old installer tests.
+- GitHub Actions run `43595539499`, exact SHA `e0e007b41b9994518f4109f5662cc5d62a377f82`: `3185 passed, 3 warnings, 19 subtests passed`; JUnit confirmed 3185 unique cases, 0 failures/errors/skips, J1–J6 acceptance audit included 43 J6 cases. Source and immutable V8.9 fixture digests all PASS.
+  https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43595539499
+- Three non-failing pytest deprecation/runtime warnings are still present. Do not report warning count as zero or disable the warnings.
+
+### Disposable PostgreSQL 17 HTTPS/TLS 74-case PASS
+- Workflow `.github/workflows/jw-v223-tls-74-20261114.yml` reuses the original isolated TLS test driver, never user or Supabase certificates. Creates disposable `postgres:17`, self-signed CI-only CA and separate restricted auth/business roles.
+- First run `43596006227` failed due to generated shell quoting error at the version check; corrected. Second run `43596162050` proved the real 74 HTTP cases passed on first execution but the workflow had accidentally duplicated TLS and business test steps, causing the second execution to fail on a duplicate *synthetic* role. Removed redundant step blocks rather than weakening test conditions.
+- Final run `43596334397` on SHA `79e031b66d962bd4ce299c4c11359ec61f0fe7c8`: **74/74 PASS**, GitHub Job SUCCESS. Evidence includes separate TLS auth role, validated certificate, invalid trust rejection, real local HTTPS transactions, and fail-closed shared-DSN and non-TLS attempts.
+  https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43596334397
+- GitHub comparison of `e0e007b41...` full-Python PASS and `79e031b66...` TLS PASS confirmed that **only the TLS CI workflow changed** between the two checked-out source versions; backend, static UI, SQL, tests and original backup content are identical.
+
+### Release boundaries remain
+- This verifies the *remote review branch*, **not Codex-only** `faa97d10c89853faa1bea3d1e272c41ee8c3faac`, which is not found in accessible GitHub commits.
+- The original historical whole-branch containment guard is still NOT PASSED on this combined branch; the independent scoped/pinned guard did pass, and production source remains hash-verified.
+- Supavisor live authentication, real development DB B2/B3 encrypted backup with independent restore proof, latest Render HTTPS deployment, final approved `jarvis-works-v2.html` API integration, physical GPU/mobile and independent product release QA are still BLOCKED / NOT VERIFIED. **ALL PASS release is NOT claimed.**
