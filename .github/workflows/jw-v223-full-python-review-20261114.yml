@@ -1,0 +1,81 @@
+name: JW V22.3 expanded full Python regression exact review SHA
+on:
+  push:
+    branches:
+      - review/jw-v223-cookie-resilience-20261114
+    paths:
+      - .github/workflows/jw-v223-full-python-review-20261114.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-full-python-qa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  full-python-reviewed-product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      JW_ENV: review
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout exact review candidate with protected history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check original protected blobs and exact review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = review/jw-v223-cookie-resilience-20261114
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = 9bedf97fe718a94f07861e23670685af00619ca8
+          git merge-base --is-ancestor 08ea29867e962d4ac5be0e942fc1488528494428 HEAD
+          python -m compileall -q app scripts
+          git diff --exit-code
+      - name: Install regression system and Python prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pip install --disable-pip-version-check 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+      - name: Rebuild pinned historical fixtures without changing repo
+        run: python scripts/ci_rebuild_v79_overlay.py
+      - name: Execute entire checked-out Python tests tree, no exclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v223-full
+          python -m pytest -q -ra -p no:cacheprovider tests --junitxml=artifacts/v223-full/all-tests.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          p=Path('artifacts/v223-full/all-tests.xml')
+          root=ET.parse(p).getroot()
+          cases=list(root.iter('testcase'))
+          assert cases, 'No pytest cases observed'
+          failed=[x for x in cases if any(x.find(k) is not None for k in ('failure','error','skipped'))]
+          names=[f"{x.get('classname','')}.{x.get('name','')}" for x in cases]
+          assert len(names)==len(set(names)), 'Duplicate JUnit case identities detected'
+          assert not failed, f"{len(failed)} failures/errors/skips in {len(cases)} cases"
+          assert len(cases)>=2000, f"Regression coverage unexpectedly low: {len(cases)}"
+          print(f'FULL_PYTHON_EXACT_SHA_PASS_{len(cases)}_ZERO_FAIL_ERROR_SKIP')
+          PY
+          python -m scripts.jw_integrated_acceptance --junit artifacts/v223-full/all-tests.xml
+          git diff --exit-code
+      - name: Store bounded actual JUnit evidence even on failing run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-full-python-junit
+          path: artifacts/v223-full/all-tests.xml
+          if-no-files-found: ignore
+          retention-days: 3
