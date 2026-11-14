@@ -1,4 +1,4 @@
-import os, re, json, base64, hashlib, tempfile, subprocess, secrets, time, stat
+import os, re, json, base64, hashlib, tempfile, subprocess, secrets, time, stat, sys
 from pathlib import Path
 from urllib.request import Request, urlopen
 from scripts.pg_backup_v223 import decrypt_file
@@ -11,8 +11,14 @@ from scripts.pg_backup_v223 import fetch_signature, signature_digest, MAX_TABLE_
 HISTORICAL_RESTORED_RAW_SHA='dc048c8e7e1dd1525cd637aa5e167a9c6a92db699491a178be3392fccf184dc0'
 
 REPO='guccizz1k/jw-backup-vault-261111'
-REL='archives/2026-11-13/jw-v223-rotated-757ea54caec464bf.jwpgbk'
-SHA='84304f6d785b2f49f16c826118fac8580b8bcfe5ec30290f625b9a3e70661d7e'
+MODE = 'legacy' if sys.argv[1:] == ['--legacy'] else 'rotated'
+assert sys.argv[1:] in ([], ['--legacy']), 'EXPECTED_ONLY_OPTION_--legacy'
+if MODE == 'legacy':
+    REL='archives/2026-11-11/8af9b9cf32.jwpgbk'
+    SHA='dfe012b2521b7331564467c371356db27357275aff37a8d7d016e70193652d10'
+else:
+    REL='archives/2026-11-13/jw-v223-rotated-757ea54caec464bf.jwpgbk'
+    SHA='84304f6d785b2f49f16c826118fac8580b8bcfe5ec30290f625b9a3e70661d7e'
 PLAIN='c9566b8bd2202e822ad520c706b4dd7023eaa95610ec81eb7e01c30efef39da3'
 IMAGE='sha256:ff87138949ad9a46f32ff23bd6852b52ce024a13dffe9b4087be98292cdd3b4f'
 KEY=Path('/dev/shm/jw-new-key-tb_yiu9h')
@@ -92,9 +98,14 @@ class PsqlCursorAdapter:
 class PsqlConnectionAdapter:
     def cursor(self): return PsqlCursorAdapter()
 
-assert KEY.is_file() and not KEY.is_symlink()
-assert stat.S_IMODE(KEY.stat().st_mode)==0o600
-key=base64.urlsafe_b64decode(KEY.read_bytes())
+if MODE == 'legacy':
+    # The original archive must remain recoverable after temporary re-key file loss.
+    # Do not print the key; never rewrite original or rotated archives.
+    key=base64.urlsafe_b64decode(os.environ['JW_PG_BACKUP_KEY'])
+else:
+    assert KEY.is_file() and not KEY.is_symlink()
+    assert stat.S_IMODE(KEY.stat().st_mode)==0o600
+    key=base64.urlsafe_b64decode(KEY.read_bytes())
 assert len(key)==32
 assert run(['docker','image','inspect','postgres:17','--format','{{.Id}}'])==IMAGE, 'BLOCKED_IMAGE_ID_CHANGED'
 assert '17.' in run(['pg_restore','--version']), 'BLOCKED_PG_RESTORE_VERSION'
@@ -171,7 +182,7 @@ finally:
         inspect=subprocess.run(['docker','inspect',NAME],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
         assert inspect.returncode!=0, 'BLOCKED_CONTAINER_CLEANUP_FAILED'
 
-print('NEW_REMOTE_PG17_REAL_RESTORE_PASS')
+print(MODE.upper()+'_REMOTE_PG17_REAL_RESTORE_PASS')
 print('RESTORE_COUNTS_PASS: tables=65 force_rls=64 rows=22 functions=72 triggers=74')
 print('EXISTING_DB_AND_VOLUMES_UNTOUCHED')
 print('TEMP_AND_CONTAINER_CLEANED')
