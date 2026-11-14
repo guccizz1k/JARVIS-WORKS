@@ -108,6 +108,17 @@ def _cookies_to_scope(scope: dict, upstream_token: str) -> dict:
 
 
 def _safe_cookie(scope: dict, cookie_name: str) -> str:
+    # Starlette's cookie parser retains one value if the same cookie appears
+    # twice. Reject ambiguity instead of authenticating whichever value wins.
+    expected = cookie_name.encode("ascii")
+    occurrences = sum(
+        1 for key, raw in scope.get("headers", ())
+        if key.lower() == b"cookie"
+        for part in raw.split(b";")
+        if part.partition(b"=")[0].strip() == expected
+    )
+    if occurrences > 1:
+        raise CutoverRefused("duplicate_session_cookie", 401)
     value = Request(scope).cookies.get(cookie_name, "")
     if value and not _SESSION_TOKEN.fullmatch(value):
         raise CutoverRefused("invalid_session_cookie", 401)
@@ -172,22 +183,51 @@ class CutoverFront:
         async def wrapped_send(message):
             if message["type"] == "http.response.start":
                 headers = []
+                session_count = 0
+                upstream_name = (UPSTREAM_COOKIE + "=").encode("ascii")
+                upstream_raw_name = UPSTREAM_COOKIE.encode("ascii")
+                virtual_names = (LEGACY_COOKIE.encode("ascii"), PG_COOKIE.encode("ascii"))
                 for key, value in message.get("headers", []):
-                    if key.lower() == b"set-cookie" and value.startswith((UPSTREAM_COOKIE + "=").encode()):
-                        attrs = {part.strip().lower() for part in value.split(b";")[1:]}
-                        if (b"path=/" not in attrs
-                                or any(part.startswith(b"domain=") for part in attrs)):
-                            raise CutoverRefused("insecure_upstream_session", 503)
-                        if b"secure" not in attrs:
-                            # SQLite's historical logout deletes the cookie without Secure.
-                            # Permit ONLY the explicit empty, Max-Age=0 deletion and
-                            # upgrade it to a valid __Host- Secure deletion. Never
-                            # accept an insecure cookie that can create a session.
-                            raw_value = value.split(b";", 1)[0].split(b"=", 1)[1]
-                            if raw_value not in (b"", b'""') or b"max-age=0" not in attrs:
+                    if key.lower() == b"set-cookie":
+                        raw_name, sep, raw_value = value.split(b";", 1)[0].partition(b"=")
+                        name = raw_name.strip()
+                        # Cookie names may have surrounding whitespace. Never
+                        # let an upstream backend set the other store's virtual
+                        # session or leak its own unvirtualized session.
+                        if name in virtual_names:
+                            raise CutoverRefused("upstream_cookie_namespace_collision", 503)
+                        if name == upstream_raw_name:
+                            if raw_name != upstream_raw_name or not sep:
                                 raise CutoverRefused("insecure_upstream_session", 503)
-                            value += b"; Secure; HttpOnly"
-                        value = (cookie_name + "=").encode() + value[len(UPSTREAM_COOKIE)+1:]
+                            session_count += 1
+                            if session_count > 1:
+                                raise CutoverRefused("duplicate_upstream_session", 503)
+                            attr_parts = [part.strip().lower() for part in value.split(b";")[1:] if part.strip()]
+                            attrs = set(attr_parts)
+                            attr_names = [part.partition(b"=")[0].strip() for part in attr_parts]
+                            # Browsers can resolve duplicate Path and SameSite
+                            # attributes differently. Reject ambiguity rather
+                            # than accepting Strict/Path=/ while a later
+                            # attribute overrides it in the browser.
+                            for protected in (b"path", b"domain", b"secure", b"httponly", b"samesite", b"max-age"):
+                                if attr_names.count(protected) > 1:
+                                    raise CutoverRefused("ambiguous_upstream_cookie_attributes", 503)
+                            is_delete = raw_value in (b"", b'""') and b"max-age=0" in attrs
+                            if (b"path=/" not in attrs
+                                    or b"domain" in attr_names):
+                                raise CutoverRefused("insecure_upstream_session", 503)
+                            if is_delete:
+                                # Historical SQLite logout omits Secure. Only a
+                                # deletion may be upgraded, never new sessions.
+                                if b"secure" not in attrs:
+                                    value += b"; Secure"
+                                if b"httponly" not in attrs:
+                                    value += b"; HttpOnly"
+                            elif (b"secure" not in attrs or b"httponly" not in attrs
+                                  or not ({b"samesite=lax", b"samesite=strict"} & attrs)
+                                  or not _SESSION_TOKEN.fullmatch(raw_value.decode("latin1"))):
+                                raise CutoverRefused("insecure_upstream_session", 503)
+                            value = (cookie_name + "=").encode() + value[len(upstream_name):]
                     headers.append((key, value))
                 message = {**message, "headers": headers}
             await send(message)
@@ -281,16 +321,24 @@ class CutoverFront:
         # the other service; each receives only its own validated session cookie.
         headers = {"accept": "application/json"}
         path = scope["path"]
-        qs = scope.get("query_string", b"").decode("ascii", "strict")
+        try:
+            qs = scope.get("query_string", b"").decode("ascii", "strict")
+        except UnicodeError as exc:
+            raise CutoverRefused("invalid_list_query_encoding", 400) from exc
         results = []
         for app, cookie in ((self.legacy_app, LEGACY_COOKIE), (self.pg_app, PG_COOKIE)):
             cookie_val = _safe_cookie(scope, cookie)
             h = {**headers, "cookie": f"{UPSTREAM_COOKIE}={cookie_val}"}
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="https://testserver", timeout=15
-            ) as client:
-                response = await client.get(path+("?" + qs if qs else ""), headers=h)
+            try:
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="https://testserver", timeout=15
+                ) as client:
+                    response = await client.get(path+("?" + qs if qs else ""), headers=h)
+            except httpx.RequestError as exc:
+                # Never return only the successful store's records when the
+                # other store cannot be reached; merged views are atomic.
+                raise CutoverRefused("dual_home_listing_unavailable", 503) from exc
             if response.status_code != 200:
                 raise CutoverRefused("dual_home_listing_failed", 503)
             try:
