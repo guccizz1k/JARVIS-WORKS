@@ -129,5 +129,21 @@ jobs:
           assert all(t['status']=='PASS' for t in d['tests'])
           print(f"PG17_ATOMIC_S4_{d['total']}_OF_{d['total']}_PASS")
           PY
+      - name: Install existing isolated dual-store E2E dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Run original real SQLite and disposable PG17 dual-session 30-case E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee dual-store-realdb.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=30 failures=0 synthetic_only=true' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_SESSION_ROW_REVOKED' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_SQLITE_SESSION_ROW_REVOKED' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_DUAL_LOGOUT_REJECTS_FORGED_PG_CSRF' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_CROSS_ORG_SESSION_REJECTED' dual-store-realdb.log
+          echo 'PASS_DISPOSABLE_SQLITE_PG17_30_CASE_DUAL_STORE_E2E'
       - name: Safety statement
-        run: echo "PASS means disposable Docker PostgreSQL 17 with fabricated data only; Supabase/Render/customer production/database migrations untouched."
+        run: echo "PASS means disposable Docker PostgreSQL 17 and SQLite with synthetic data only; Supabase/Render/customer production/database migrations untouched."
