@@ -164,3 +164,35 @@ async def test_legacy_write_preserves_legacy_csrf_but_never_pg_csrf():
     _assert_isolated(h)
     for seen in identities:
         _assert_isolated(seen)
+
+
+@pytest.mark.asyncio
+async def test_pg_write_does_not_reuse_legacy_csrf_without_pg_csrf():
+    """Missing PG CSRF must not silently become the SQLite CSRF token.
+
+    The synthetic PG handler echoes headers; actual PG auth still rejects
+    unsafe tokenless writes. This isolates the proxy's credential boundary.
+    """
+    front, identities = _harness()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=front),
+        base_url="https://testserver",
+    ) as client:
+        client.cookies.set(cut.LEGACY_COOKIE, L)
+        client.cookies.set(cut.PG_COOKIE, P)
+        response = await client.post(
+            "/api/quotes", json={"title": "Synthetic"},
+            headers={
+                "X-CSRF-Token": "legacy-only-csrf",
+                "Idempotency-Key": "tokenless-pg-regression",
+            },
+        )
+    assert response.status_code == 200, response.text
+    h = response.json()["headers"]
+    assert "x-csrf-token" not in h
+    assert "x-jw-pg-csrf" not in h
+    assert h["idempotency-key"] == "tokenless-pg-regression"
+    assert response.json()["cookie"] == P
+    _assert_isolated(h)
+    for seen in identities:
+        _assert_isolated(seen)
