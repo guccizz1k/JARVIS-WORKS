@@ -48,6 +48,7 @@ jobs:
       - name: Checkout exact review source without stored credentials
         uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - name: Python 3.12
         uses: actions/setup-python@v5
