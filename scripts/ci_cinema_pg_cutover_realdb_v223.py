@@ -203,7 +203,7 @@ def run() -> int:
 
                 pg_customer = c.post("/api/customers", json={
                     "name": "PG Partner", "business_number": "8111111111"
-                }, headers={"X-CSRF-Token": pg_csrf})
+                }, headers={"X-JW-PG-CSRF": pg_csrf})
                 check(pg_customer.status_code == 201, "REAL_PG_PARTNER_CREATED")
                 new_customer_id = pg_customer.json().get("id", "")
                 check(new_customer_id.startswith("pg_"), "PG_CUSTOMER_HOME_PREFIX")
@@ -212,7 +212,7 @@ def run() -> int:
                     "customer_id": new_customer_id, "title": "PG Quote",
                     "vat_mode": "taxable",
                     "items": [{"name": "Widget", "quantity": 3, "unit_price": 100}]
-                }, headers={"X-CSRF-Token": pg_csrf})
+                }, headers={"X-JW-PG-CSRF": pg_csrf})
                 check(pg_quote.status_code == 201, "REAL_PG_QUOTE_CREATED")
                 pg_id = pg_quote.json().get("id", "")
                 check(pg_id.startswith("pg_"), "PG_QUOTE_HOME_PREFIX")
