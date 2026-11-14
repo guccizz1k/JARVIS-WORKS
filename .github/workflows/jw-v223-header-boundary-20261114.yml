@@ -43,6 +43,6 @@ jobs:
           root=ET.parse('header-unit.xml').getroot()
           suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
           values={k:sum(int(s.get(k,'0')) for s in suites) for k in ('tests','failures','errors','skipped')}
-          assert values=={'tests':31,'failures':0,'errors':0,'skipped':0}, values
-          print('A_TRACK_HEADER_AND_SESSION_31_OF_31_PASS')
+          assert values=={'tests':32,'failures':0,'errors':0,'skipped':0}, values
+          print('A_TRACK_HEADER_AND_SESSION_32_OF_32_PASS')
           PY
