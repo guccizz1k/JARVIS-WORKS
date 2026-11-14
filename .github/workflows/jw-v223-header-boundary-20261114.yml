@@ -7,6 +7,8 @@ on:
       - app/pg_cinema_cutover_front_v223.py
       - tests/test_cinema_pg_cutover_merged_header_boundary_v223.py
       - tests/test_cinema_pg_v223_direct_route_header_isolation.py
+      - tests/test_cinema_pg_cutover_front_v223.py
+      - tests/test_cinema_pg_cutover_logout_v223.py
       - .github/workflows/jw-v223-header-boundary-20261114.yml
   workflow_dispatch:
 permissions:
@@ -32,15 +34,15 @@ jobs:
           python -m pip install --disable-pip-version-check 'fastapi>=0.115,<1' 'httpx>=0.27,<1' 'pytest>=8,<10' 'pytest-asyncio>=0.24,<2'
       - name: Compile protected-scope A code and isolated tests
         run: |
-          python -m py_compile app/pg_cinema_cutover_front_v223.py tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py
+          python -m py_compile app/pg_cinema_cutover_front_v223.py tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py
       - name: Run synthetic ASGI credential boundary tests; no real network/DB/keys
         run: |
-          python -m pytest -q -ra -p no:cacheprovider --noconftest --junitxml=header-unit.xml tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py
+          python -m pytest -q -ra -p no:cacheprovider --noconftest --junitxml=header-unit.xml tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py
           python - <<'PY'
           import xml.etree.ElementTree as ET
           root=ET.parse('header-unit.xml').getroot()
           suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
           values={k:sum(int(s.get(k,'0')) for s in suites) for k in ('tests','failures','errors','skipped')}
-          assert values=={'tests':8,'failures':0,'errors':0,'skipped':0}, values
-          print('HEADER_ISOLATION_8_OF_8_PASS')
+          assert values=={'tests':31,'failures':0,'errors':0,'skipped':0}, values
+          print('A_TRACK_HEADER_AND_SESSION_31_OF_31_PASS')
           PY
