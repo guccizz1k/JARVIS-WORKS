@@ -54,11 +54,51 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Confirm local disposable PG17 server and source protection
+      - name: Pinned originals and isolated review-diff guard (not global baseline whitelist)
         shell: bash
         run: |
           set -euo pipefail
-          python3 -I scripts/ci_cinema_pg_guard.py
+          python3 - <<'PY'
+          import subprocess
+          def git(*args):
+              return subprocess.check_output(("git", *args), text=True).strip()
+          baseline="08ea29867e962d4ac5be0e942fc1488528494428"
+          parent="e6a1ce84694812451964732ef6101c9155bf28a1"
+          assert git("branch","--show-current") == "review/jw-v223-cookie-resilience-20261114"
+          assert subprocess.run(("git","merge-base","--is-ancestor",baseline,"HEAD")).returncode == 0
+          protected={
+              "app/static/cinema/JARVIS_WORKS_CINEMA.html":"9bedf97fe718a94f07861e23670685af00619ca8",
+              "app/main.py":"775f500c8a7549d434ce196a8e0763aea33e1c67",
+              "app/static/cinematic_v222.css":"c7c5e796688582d27ab4322f0dd5cfd25b16226a",
+              "scripts/pg_backup_v223.py":"b4f350029d7a8b7abd357c8949bb6d5129485bad",
+              "tests/test_v223_pg_backup.py":"5fd569823f38ad83b8780bf9c9bd2782b3eaf916",
+              "docs/ops/V223_PG_BACKUP_RESTORE.md":"6ce80a02d7ef7676f3dc68270b2e5abfcd922c8a",
+              "docs/ops/V223_SYNTHETIC_CI.md":"5649d0a127cf516d994752dc8804bad7a0af46f2",
+              "tests/test_installer_v75.py":"d8b274a5455a74cced64579e2146c34837a72e0f",
+              "tests/test_installer_v79.py":"2f498ec592d315e2791f5d5915af691b4371068c",
+              "tests/test_pg_auth_v85.py":"c7df1d7bb6a749a064ea8b8611ae7df19132a046",
+          }
+          for path,expected in protected.items():
+              assert git("hash-object","--",path)==expected, f"protected hash mismatch: {path}"
+          def static_else(rev):
+              out=git("ls-tree","-r",rev,"--","app/static")
+              return sorted(x for x in out.splitlines() if not x.endswith("\tapp/static/cinematic_v222.css"))
+          assert static_else(baseline)==static_else("HEAD"), "protected static tree drift"
+          changed=set(git("diff","--name-only",parent,"HEAD").splitlines())
+          allowed={
+              "app/pg_cinema_cutover_front_v223.py",
+              "tests/test_cinema_pg_v223_cookie_boundary.py",
+              "tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py",
+              "tests/test_cinema_pg_v223_response_cookie_security.py",
+              "docs/review/issue142-cookie-red-green-20261114.md",
+              ".github/workflows/jw-v223-cookie-resilience-20261114.yml",
+              ".github/workflows/jw-v223-a-s4-cookie-unified-20261114.yml",
+              ".github/workflows/jw-v223-pg17-s4-real-qa-20261114.yml",
+          }
+          assert changed and changed<=allowed, f"scope mismatch: {sorted(changed-allowed)}"
+          assert not git("status","--porcelain"), "working tree not clean"
+          print("PASS_PINNED_PROTECTED_BLOBS_AND_ISOLATED_REVIEW_SCOPE",len(protected),len(changed))
+          PY
           test "$(psql -X -Atc 'show server_version_num' | cut -c1-2)" = "17"
           psql -X -Atc 'select current_database()' | grep -Fx 'postgres'
           python3 -m py_compile scripts/ci_cinema_pg_s4_reviewed_gate.py scripts/ci_cinema_pg_s4_atomic_gate.py
