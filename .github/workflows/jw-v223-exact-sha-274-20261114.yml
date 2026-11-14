@@ -1,4 +1,4 @@
-name: JW V22.3 integrated exact SHA 274 A S4 cookie PG17 SQLite gate
+name: JW V22.3 integrated exact SHA 281 A S4 cookie PG17 SQLite single writer gate
 on:
   push:
     branches:
@@ -150,6 +150,19 @@ jobs:
           actual={k:sum(int(s.get(k,'0')) for s in suites) for k in ('tests','failures','errors','skipped')}
           assert actual=={'tests':189,'failures':0,'errors':0,'skipped':0}, actual
           print('EXACT_SHA_PY_SECURITY_S4_COOKIE_189_OF_189_PASS')
+          PY
+      - name: Verify exactly one active quote writer is mounted across legacy and CINEMA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q -ra -p no:cacheprovider --noconftest --junitxml=s4-single-writer.xml tests/test_cinema_pg_s4_single_writer.py
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('s4-single-writer.xml').getroot()
+          suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          v={k:sum(int(s.get(k,'0')) for s in suites) for k in ('tests','failures','errors','skipped')}
+          assert v == {'tests':7,'failures':0,'errors':0,'skipped':0}, v
+          print('EXACT_SHA_S4_SINGLE_WRITER_7_OF_7_PASS')
           PY
       - name: Run original real SQLite and disposable PG17 dual-session 30-case E2E
         shell: bash
