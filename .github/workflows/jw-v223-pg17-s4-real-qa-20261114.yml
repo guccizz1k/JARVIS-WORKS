@@ -6,6 +6,7 @@ on:
     paths:
       - scripts/ci_cinema_pg_s4_reviewed_gate.py
       - scripts/ci_cinema_pg_s4_atomic_gate.py
+      - scripts/ci_cinema_pg_cutover_realdb_v223.py
       - scripts/ci_cinema_pg_sql_gate.py
       - scripts/review/cinema_pg_s4_reviewed_links_gate.sql
       - scripts/review/cinema_pg_s4_reviewed_links_test.sql
@@ -87,6 +88,7 @@ jobs:
           changed=set(git("diff","--name-only",parent,"HEAD").splitlines())
           allowed={
               "app/pg_cinema_cutover_front_v223.py",
+              "scripts/ci_cinema_pg_cutover_realdb_v223.py",
               "tests/test_cinema_pg_v223_cookie_boundary.py",
               "tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py",
               "tests/test_cinema_pg_v223_response_cookie_security.py",
