@@ -38,3 +38,12 @@ Only six files changed relative to prior review branch: one proxy app module, th
 - RED attempt `43583493488`: shallow checkout did not contain protected historical baseline SHA. Fixed using `fetch-depth: 0`.
 - RED attempt `43583560292`: original global `scripts/ci_cinema_pg_guard.py` **FAILED** due to unrelated workflow/docs introduced by prior integrated work that fall outside its historical whole-branch whitelist. This protected original guard was NOT altered or called PASS; the new workflow uses its **own narrower independent source-hash and changed-path verification**.
 - This is **not** a live Supabase/Supavisor or Render HTTPS E2E result. Original global guard and all release gates remain unfulfilled until their defined scope independently passes. Codex local `faa97d10` remains inaccessible in GitHub.
+
+
+## Real SQLite + disposable PG17 dual-session E2E integration
+- Existing `scripts/ci_cinema_pg_cutover_realdb_v223.py` was originally built for the older PG CSRF header contract. It sent `X-CSRF-Token` for both stores, which is intentionally stripped at the current cutover proxy PG trust boundary. Reproduced in GitHub Actions run `43583974170` (S4 PG17 55 checks PASS, subsequent E2E stopped at `FAIL_V223_REALDB_FRONT_REAL_PG_PARTNER_CREATED`).
+- **Minimal fix:** in the existing synthetic E2E driver only, use `X-JW-PG-CSRF` for the two successful PostgreSQL create requests. The legacy CSRF and required dual-token logout tests remain unchanged. Source code auth policy was NOT weakened.
+- Isolated branch test script commit `7e3f11ade297d2bc82fbdcea99021100a6eeeaf2`. Workflow tests this exact E2E file as a permitted changed source path, rather than silently excluding it from preflight.
+- **GREEN**: GitHub Actions `43584134368` on SHA `e0a2a8608b9f5e82bf17449a4a1e95d529d812b1` — **23/23** PG17 reviewed-link SQL, **32/32** PG17 S4 atomic/concurrency, **30/30** real SQLite+disposable PG17 session/trade E2E, total **85 scoped checks PASS**, zero failed. Tested actual SQL sessions and rollback on fabricated disposable resources.
+  https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43584134368
+- No live Supavisor/production Auth, customer data, hosted HTTPS, current Codex-only final HTML integration, or final 5-Gate release QA was tested. These are independent remaining blockers. Original global historical baseline whitelist gate remains not passed on this accumulated review branch.
