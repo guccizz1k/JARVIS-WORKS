@@ -1,0 +1,34 @@
+name: JW V22.3 S4 immutable reviewed snapshot integrity
+on:
+  push:
+    branches:
+      - review/jw-v223-s4-snapshot-guard-20261114
+    paths:
+      - app/pg_cinema_s4_reconciliation_v1.py
+      - tests/test_cinema_pg_s4_snapshot_integrity_20261114.py
+      - .github/workflows/jw-v223-s4-snapshot-integrity-20261114.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-s4-readonly-snapshot-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  pure-snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout exact review candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile production S4 module and regression
+        run: |
+          python -m py_compile app/pg_cinema_s4_reconciliation_v1.py tests/test_cinema_pg_s4_snapshot_integrity_20261114.py
+      - name: 12 synthetic pure-Python S4 tamper and positive checks, no DB
+        run: |
+          python -m unittest discover -s tests -p 'test_cinema_pg_s4_snapshot_integrity_20261114.py' -v
