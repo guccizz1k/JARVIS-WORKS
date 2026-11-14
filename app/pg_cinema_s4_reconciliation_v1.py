@@ -218,11 +218,40 @@ def audit_links(legacy: tuple[Quote, ...], cinema: tuple[Quote, ...],
 
 def provisional_unique_subtotal(result: AuditResult, cinema: tuple[Quote, ...]) -> int:
     """Read-only forensic subtotal, NEVER valid as a live accounting report."""
-    if not result.consistent_for_manual_review:
+    if (not result.consistent_for_manual_review or result.findings
+            or result.unlinked_legacy or result.unlinked_cinema
+            or not result.accepted):
         raise ValueError("BLOCKED: missing/ambiguous historical linkage or unsafe status")
-    lookup = {(q.org_id, q.quote_id): q for q in cinema}
-    return sum(lookup[(x.org_id, x.cinema_quote_id)].canonical()["subtotal_krw"]
-               for x in result.accepted)
+    # The forensic caller may supply different rows *after* audit_links
+    # reviewed and hashed its snapshots. Recheck every full snapshot digest
+    # (including ledger, tenant, quote/document ID, lines, VAT and status)
+    # before deriving even a provisional subtotal.
+    lookup: dict[tuple[str, str], Quote] = {}
+    for quote in cinema:
+        try:
+            snapshot = quote.canonical()
+            key = (snapshot["org"], snapshot["id"])
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError("BLOCKED: malformed current snapshot") from exc
+        if key in lookup:
+            raise ValueError("BLOCKED: duplicate current quote snapshot")
+        lookup[key] = quote
+    seen: set[tuple[str, str]] = set()
+    subtotal = 0
+    for link in result.accepted:
+        key = (link.org_id, link.cinema_quote_id)
+        quote = lookup.get(key)
+        if quote is None or key in seen:
+            raise ValueError("BLOCKED: missing/duplicate reviewed quote")
+        if quote.ledger != "cinema" or digest(quote) != link.cinema_digest:
+            raise ValueError("BLOCKED: reviewed snapshot changed after approval")
+        if quote.status not in ("approved", "ordered", "confirmed"):
+            raise ValueError("BLOCKED: current quote status is not reportable")
+        seen.add(key)
+        subtotal += quote.canonical()["subtotal_krw"]
+    if seen != set(lookup):
+        raise ValueError("BLOCKED: new or unreviewed quote supplied after audit")
+    return subtotal
 
 
 def approved_unique_subtotal(result: AuditResult, cinema: tuple[Quote, ...]) -> int:
