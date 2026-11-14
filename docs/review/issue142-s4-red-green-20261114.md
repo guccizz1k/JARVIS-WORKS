@@ -29,6 +29,8 @@ The existing header/session security fix is preserved in the new branch. **This 
 - Queried Supabase project catalog only; no DDL/DML and no real row data returned.
 - `jw_dev.quotes` and `jw_dev.cinema_pg_quotes` both: RLS true; FORCE RLS true; `anon` and `authenticated` direct SELECT false.
 - `jw_dev.cinema_pg_transitions` is an internal-looking table with RLS false; `anon` and `authenticated` direct SELECT false. Grants observed to owner and backup-readonly role. This alone does **not** prove data exposure; analyze privilege inheritance and intended use before recommending changes.
+- Full catalog API-role spot check: 65 `jw_dev` ordinary tables; 64 with RLS + FORCE RLS; **zero** direct `SELECT`/`INSERT` privileges for `anon` or `authenticated` across these tables; **zero** directly API-accessible non-RLS tables. This is a limited ACL observation, not a full authorization or HTTP E2E PASS.
+- `public.rls_auto_enable()` is a security-definer **event-trigger** function with default execute privilege to API roles. Its body enables RLS on newly created `public` tables; event-trigger functions are not ordinary callable RPC functions. Do not label this an exploitable API privilege escalation based on catalog grants alone. No permission was changed.
 - Live source-to-restored data equality remains NOT RUN; catalog inspection alone cannot establish it.
 
 ## Safety and remaining release gates
