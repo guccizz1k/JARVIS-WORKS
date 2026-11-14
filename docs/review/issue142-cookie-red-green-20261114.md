@@ -47,3 +47,16 @@ Only six files changed relative to prior review branch: one proxy app module, th
 - **GREEN**: GitHub Actions `43584134368` on SHA `e0a2a8608b9f5e82bf17449a4a1e95d529d812b1` — **23/23** PG17 reviewed-link SQL, **32/32** PG17 S4 atomic/concurrency, **30/30** real SQLite+disposable PG17 session/trade E2E, total **85 scoped checks PASS**, zero failed. Tested actual SQL sessions and rollback on fabricated disposable resources.
   https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43584134368
 - No live Supavisor/production Auth, customer data, hosted HTTPS, current Codex-only final HTML integration, or final 5-Gate release QA was tested. These are independent remaining blockers. Original global historical baseline whitelist gate remains not passed on this accumulated review branch.
+
+
+## Same-SHA integrated CI extension — Nov 14, 2026 (281/281)
+- New workflow: `.github/workflows/jw-v223-exact-sha-274-20261114.yml`. It reuses the existing scoped original/hash verification and runs Python A+S4+cookie controls, isolated PG17 S4 SQL, and real disposable SQLite/PG17 business E2E on a **single checked-out source SHA**. Each subgate asserts exact counters and zero failing/error/skipped cases. The runner uses synthetic, fresh Docker PG17 and temporary SQLite data only.
+- First same-SHA run `43594283947` at SHA `cdd9b2e6b9335576ab996cee30ee8cbeec7fd6f7`: 189 Python PASS + 23 SQL reviewed-link PASS + 32 SQL atomic/concurrency PASS + 30 isolated SQLite/PG17 real-DB E2E PASS = 274 scoped checks; GitHub Actions SUCCESS.
+  https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43594283947
+- Expanded same-SHA run `43594540832` at SHA `6ef6051a4712122dae9767265d5bc4229bd96b56`: the above **274** plus **7** S4 single-writer dual-engine enablement guards PASS, total **281 / 281**, all FAIL/ERROR/SKIP **0**; workflow SUCCESS.
+  https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43594540832
+- Source-scope check pinned **10 Git blobs**, validated protected static tree excluding the explicitly approved CSS blob, and checked exactly 10 allowed delta paths relative to parent `e6a1ce84694812451964732ef6101c9155bf28a1`.
+- Non-failing dependency notices remain: Starlette `httpx` TestClient deprecation, pytest-asyncio loop-scope setting warning, runner Node 20 compatibility/deprecation messages. Future version bumps require dedicated verification; no suppressions added.
+- **Honest boundary:** the historic `scripts/ci_cinema_pg_guard.py` whole-branch changed-file whitelist is still not PASS for this aggregated review branch; the new pinned scoped guard is independent, not an assertion that the historic guard passed.
+- Neither workflow makes Codex-only local `faa97d10c89853faa1bea3d1e272c41ee8c3faac` available. That commit remains absent from GitHub and from accessible conversation/library files. Latest Render deployments still correspond to prior November 3 and October 25 sources; no deployment occurred.
+- Final approved HTML `jarvis-works-v2.html` was not compared with this hosted frontend bundle in this pipeline. Physical GPU, real device, hosted Supavisor credentials, production backup/restore, latest Render HTTPS E2E, independent release QA and overall 5-Gate ALL PASS remain BLOCKED/NOT RUN/NOT VERIFIED according to their own evidence.
