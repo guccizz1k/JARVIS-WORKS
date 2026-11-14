@@ -28,3 +28,13 @@ Only six files changed relative to prior review branch: one proxy app module, th
 - Codex local integrated candidate `faa97d10c89853faa1bea3d1e272c41ee8c3faac` remains unavailable in GitHub. This review patch must be checked against that commit before integration; do not overwrite its work.
 - Real Supavisor HTTPS auth, full PostgreSQL transaction E2E, latest Render app candidate, physical GPU, real mobile and final UI acceptance remain NOT VERIFIED/BLOCKED.
 - Current PASS refers to 189 **synthetic** regressions, not a declaration of JARVIS-WORKS release ALL PASS. Keep final gate BLOCKED until independently evidenced.
+
+
+## Disposable PG17 S4 gate continuation — 2026-11-14
+- Test source commit: `008177551274a292b0273fdd45c6afdf0adcea86`.
+- Actual GitHub Actions run: https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43583733025
+- `PG17_REVIEWED_S4_23_OF_23_PASS` and `PG17_ATOMIC_S4_32_OF_32_PASS`. 55 scoped checks succeeded on disposable Docker `postgres:17` using synthetic data and isolated databases. Negative SQL errors were expected safeguards that the tests judged PASS.
+- Protected original, approved layout/backup and fixture hashes were checked (10 pinned blobs); all other protected static content matched baseline; eight changed paths were within this review branch's fixed parent-relative allowlist.
+- RED attempt `43583493488`: shallow checkout did not contain protected historical baseline SHA. Fixed using `fetch-depth: 0`.
+- RED attempt `43583560292`: original global `scripts/ci_cinema_pg_guard.py` **FAILED** due to unrelated workflow/docs introduced by prior integrated work that fall outside its historical whole-branch whitelist. This protected original guard was NOT altered or called PASS; the new workflow uses its **own narrower independent source-hash and changed-path verification**.
+- This is **not** a live Supabase/Supavisor or Render HTTPS E2E result. Original global guard and all release gates remain unfulfilled until their defined scope independently passes. Codex local `faa97d10` remains inaccessible in GitHub.
