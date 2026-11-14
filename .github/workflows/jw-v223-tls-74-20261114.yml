@@ -89,7 +89,7 @@ jobs:
           assert not git("status","--porcelain"),"dirty checkout"
           print("PASS_74_TLS_PINNED_ORIGINAL_AND_EXACT_REVIEW_SCOPE",len(changed))
           PY
-          psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}
+          psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}$'
       - name: Install test dependencies
         run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
       - name: Configure disposable PG17 server TLS with local self-signed test CA
