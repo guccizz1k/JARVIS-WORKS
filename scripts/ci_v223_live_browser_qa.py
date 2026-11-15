@@ -73,6 +73,28 @@ def main():
                             row.get('name')==partner_name for row in live.json()),
                             "REAL_BROWSER_PARTNER_WRITE_READBACK")
                         print("PASS_REAL_BROWSER_UI_CUSTOMER_CREATE_READBACK")
+
+                        customer_id=next(r['id'] for r in live.json() if r.get('name')==partner_name)
+                        page.locator('button[data-page="deals"]').click()
+                        qform=page.locator('form.jw-review-action-form').filter(
+                            has=page.get_by_role('button',name='견적서 서버 생성',exact=True)).first
+                        qform.wait_for(state="visible",timeout=15000)
+                        qform.locator('select[aria-label="거래처"]').select_option(customer_id)
+                        title="UIQA_QUOTE_"+uuid.uuid4().hex[:12]
+                        qform.locator('input[aria-label="견적 제목"]').fill(title)
+                        qform.locator('input[aria-label="품목명"]').fill("SYNTHETIC_ONLY_PART")
+                        qform.locator('input[aria-label="수량"]').fill("2")
+                        qform.locator('input[aria-label="단가(원)"]').fill("1800")
+                        qform.get_by_role('button',name='견적서 서버 생성').click()
+                        page.get_by_text(title,exact=True).wait_for(timeout=20000)
+                        qr=ctx.request.get(BASE+'/api/quotes')
+                        assert_true(qr.status==200 and any(
+                            r.get('title')==title and r.get('money',{}).get('total')==3960
+                            for r in qr.json()),"REAL_BROWSER_QUOTE_WRITE_READBACK")
+                        print("PASS_REAL_BROWSER_UI_QUOTE_CREATE_READBACK")
+                        page.locator('button[data-page="partners"]').click()
+                        page.locator('form.jw-review-action-form').first.wait_for(state="visible",timeout=15000)
+
                     heading=page.locator("h2.jw-review-title").inner_text()
                     assert_true("거래처" in heading,"PARTNERS_CONTENT_"+str(width))
                     overflow=page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 2")
