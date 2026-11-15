@@ -68,8 +68,21 @@ def one(browser,engine,width,height):
             page.locator('#jw-owner-menu[aria-hidden="false"] button[data-page="partners"]').click()
         page.locator('#app .jw-review-card').first.wait_for(state='visible',timeout=20000)
         check(not errors,'JAVASCRIPT_EXCEPTIONS_'+engine+str(width))
-        check(not page.evaluate('document.documentElement.scrollWidth > window.innerWidth + 2'),
-              'HORIZONTAL_OVERFLOW_'+engine+str(width))
+        overflow=page.evaluate('document.documentElement.scrollWidth > window.innerWidth + 2')
+        if overflow:
+            details=page.evaluate("""() => {
+              const W=window.innerWidth, els=Array.from(document.querySelectorAll('*'));
+              return {width:W,scrollWidth:document.documentElement.scrollWidth,
+                offenders:els.map(e=>{
+                  const r=e.getBoundingClientRect();
+                  return {tag:e.tagName,id:e.id,cls:String(e.className).slice(0,85),
+                    left:Math.round(r.left),right:Math.round(r.right),w:Math.round(r.width),
+                    text:(e.textContent||'').trim().slice(0,50)}
+                }).filter(e=>e.right>W+2&&e.w>0).sort((a,b)=>b.right-a.right).slice(0,18)};
+            }""")
+            print('HORIZONTAL_OVERFLOW_DOM_'+engine+'_'+str(width)+'='+json.dumps(details,ensure_ascii=False),flush=True)
+            page.screenshot(path=str(OUT/f'owner-visual-overflow-{engine}-{width}.png'),full_page=True)
+        check(not overflow,'HORIZONTAL_OVERFLOW_'+engine+str(width))
         check(page.evaluate("localStorage.getItem('jw3.db')") is None,'NEVER_SAVED_LOCAL_DB_'+engine+str(width))
         check(page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--acc').trim()")=='#d4ff3a',
               'EXACT_OWNER_LIME_COLOR_'+engine+str(width))
