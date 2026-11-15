@@ -48,14 +48,25 @@ jobs:
           expected={**review,**main_unique}
           assert "app/pg_v112_ocr_queue.py" in main_unique
           assert "app/pg_v112_wakeup.py" in main_unique
+          # Main contains opt-in V11.2 wake hub support absent from the original
+          # V22.3 realtime transport; preserve those exact audited Git blobs
+          # while retaining all remaining V22.3 code unchanged.
+          selected={
+              "app/pg_messenger_realtime_v90.py":"206d45b6d0a56c299dff2ab3f1552360d32a4a45",
+              "app/pg_v90_integrated_entry.py":"d7bc30b2436f1db2f6397e2de4782d14f0f9e46e",
+          }
+          for path, sha in selected.items():
+              assert main[path][1]==sha, f"main source changed: {path}"
+              expected[path]=main[path]
           workflow=".github/workflows/jw-v223-unified-qa-20261115.yml"
-          assert set(now)-set(expected)=={workflow},sorted(set(now)-set(expected))
+          test_path="tests/test_v223_v112_messenger_wake_integration_20261115.py"
+          assert set(now)-set(expected)=={workflow,test_path},sorted(set(now)-set(expected))
           assert set(expected)-set(now)==set(), sorted(set(expected)-set(now))
           for path,info in expected.items():
               assert now[path]==info,f"UNAPPROVED_BLOB_DRIFT: {path}"
           assert Path(workflow).is_file()
           assert not run("status","--porcelain").strip(),"dirty worktree"
-          print("PASS_INTEGRATION_121_MAIN_EXCLUSIVE_BLOBS_906_V223_BLOBS_UNCHANGED_25_CONFLICTS_RESERVED")
+          print("PASS_INTEGRATION_121_MAIN_EXCLUSIVE_904_V223_BLOBS_PRESERVED_2_V112_MESSENGER_BLOBS_23_CONFLICTS_RESERVED")
           print("NOT_RELEASE_PASS: 25 differing common files and unavailable Codex local SHA require verification")
           PY
   full-python-reviewed-product:
