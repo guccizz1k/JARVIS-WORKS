@@ -1,0 +1,83 @@
+name: V22.3 current SHA complete Python and JS regression
+on:
+  push:
+    branches: [review/jw-v223-p4-exact-full-regression-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  all-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 38
+    env:
+      JW_ENV: review
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pin active candidate, main logic, owner UI and audit-only difference
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 94afea25210f61f0cd15fa16d8d8540e649fc17e HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          files=set(subprocess.check_output(['git','diff','--name-only','94afea25210f61f0cd15fa16d8d8540e649fc17e','HEAD'],text=True).splitlines())
+          assert files=={'.github/workflows/jw-v223-p4-exact-full-regression-20261115.yml'},files
+          print('PASS_CURRENT_SHA_PROTECTED_CODE_UI_PROVENANCE')
+          PY
+          python -m compileall -q app scripts
+          node --check app/static/approved_ui_server_bridge_v223.js
+          node --check app/static/approved_ui_server_review_v223.js
+          node --test tests/test_v223_approved_review_node.cjs
+      - name: Install complete historical regression dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pip install --disable-pip-version-check -r requirements-jteam-external-pilot.txt
+          python -m pip install --disable-pip-version-check 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+      - name: Rebuild immutable V8.9 historical fixture to avoid false V22.3 baseline failures
+        run: |
+          set -euo pipefail
+          git worktree add --detach ../jw-v89-qa-fixture a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338
+          (cd ../jw-v89-qa-fixture && python "$GITHUB_WORKSPACE/scripts/ci_rebuild_v79_overlay.py")
+          test -f ../overlay/BASE_SHA256.json
+          test -f ../overlay/PAYLOAD_SHA256.json
+      - name: Full Python tests, zero skipped and duplicate JUnit case identities
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/full
+          python -m pytest -q -ra -p no:cacheprovider tests --junitxml=artifacts/full/all-tests.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('artifacts/full/all-tests.xml').getroot()
+          cases=list(root.iter('testcase'))
+          bad=[x for x in cases if any(x.find(y) is not None for y in ('failure','error','skipped'))]
+          names=[(x.get('classname'),x.get('name')) for x in cases]
+          assert len(cases)>=3500,(len(cases),'TOO_FEW_TESTS')
+          assert not bad,(len(bad),'FAILED_ERROR_SKIPPED')
+          assert len(names)==len(set(names)),'DUPLICATE_JUNIT_TEST_IDS'
+          print('PASS_CURRENT_SHA_FULL_PYTHON_'+str(len(cases))+'_ZERO_FAIL_SKIP')
+          PY
+          git diff --exit-code
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-current-sha-full-regression-junit
+          path: artifacts/full/all-tests.xml
+          if-no-files-found: ignore
+          retention-days: 3
+      - run: echo "Complete synthetic code regression only; real PG17 restore, P2 all UI workflows and operational release still not proven."
