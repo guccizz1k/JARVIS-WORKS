@@ -125,7 +125,12 @@ function start(){
                   start.addEventListener('click',async()=>{
                     if(measuring||token!==epoch)return;
                     measuring=true;start.disabled=true;
-                    try{await bridge.startTiming(mode);if(token===epoch)await renderTimer()}
+                    try{
+                      await bridge.startTiming(mode);
+                      // Release the prior action lock BEFORE rendering the next clickable control.
+                      measuring=false;
+                      if(token===epoch)await renderTimer()
+                    }
                     catch(e){if(token===epoch){timerState.textContent=msg(e);timerState.setAttribute('role','alert')}}
                     finally{measuring=false;start.disabled=false}
                   });timerButtons.append(start);

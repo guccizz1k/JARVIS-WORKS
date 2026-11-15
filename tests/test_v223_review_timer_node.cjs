@@ -99,3 +99,11 @@ test('confirmed manual completion status must be shown after timer rerender',()=
    'server completion confirmation must survive active timer refresh');
  assert.match(finishSection,/setAttribute\('role','status'\)/);
 });
+
+test('rapid start-to-finish transition releases the action lock before exposing finish button',()=>{
+ const startHandler=ui.split('await bridge.startTiming(mode);')[1]?.split('}catch(e)')[0];
+ assert.ok(startHandler,'timing start click handler not found');
+ const unlocked=startHandler.indexOf('measuring=false;');
+ const rendered=startHandler.indexOf('await renderTimer()');
+ assert.ok(unlocked>=0&&rendered>unlocked,'new finish/cancel button cannot appear while start lock is active');
+});
