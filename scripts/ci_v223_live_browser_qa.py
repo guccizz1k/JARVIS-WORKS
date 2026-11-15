@@ -28,8 +28,10 @@ def main():
                     page=ctx.new_page()
                     page_errors=[]
                     errors=[]
+                    http_errors=[]
                     page.on("pageerror",lambda exception:page_errors.append(str(exception)))
                     page.on("console",lambda message:errors.append(message.text) if message.type=="error" else None)
+                    page.on("response",lambda response:http_errors.append((response.url,response.status)) if response.status>=400 else None)
                     response=page.goto(BASE,wait_until="domcontentloaded",timeout=75000)
                     assert_true(response is not None and response.status==200,"HTML_"+str(width))
                     # The review bridge first checks /api/me, expects 401, then shows server login.
@@ -62,14 +64,19 @@ def main():
                     overflow=page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 2")
                     assert_true(not overflow,"HORIZONTAL_OVERFLOW_"+str(width))
                     assert_true(not page_errors,"JS_ERRORS_"+str(width))
-                    if errors:
-                        print("BROWSER_CONSOLE_ERROR_SAMPLE_"+str(width)+"="+str(errors[0])[:160])
-                    assert_true(not errors,"BROWSER_CONSOLE_ERRORS_"+str(width))
+                    expected_restore_auth=[(url,status) for url,status in http_errors
+                                           if url==BASE+"/api/me" and status==401]
+                    unexpected_http=[(url,status) for url,status in http_errors
+                                     if (url,status) not in expected_restore_auth]
+                    assert_true(not unexpected_http,"UNEXPECTED_HTTP_ERROR_"+str(width))
+                    # Chromium reports intentional pre-login /api/me 401 as console error.
+                    assert_true(len(errors)<=len(expected_restore_auth),"UNEXPECTED_CONSOLE_ERROR_"+str(width))
                     # Fetch failures due to missing font must not be falsely described as JS exceptions.
                     screenshot=str(OUT/f"jw-real-render-{width}.png")
                     page.screenshot(path=screenshot,full_page=True)
                     RESULTS={"viewport_width":width,"routes":len(unique),"horizontal_overflow":overflow,
-                             "page_errors":len(page_errors),"console_errors":len(errors),
+                             "page_errors":len(page_errors),"unexpected_console_errors":max(0,len(errors)-len(expected_restore_auth)),
+                             "expected_prelogin_auth_401":len(expected_restore_auth),
                              "real_https":True,"actual_server_login":True,
                              "server_readback":True,"screenshot":screenshot}
                     RESULT.append(RESULTS)
