@@ -49,7 +49,7 @@ class Bridge{
   async write(path,payload){
     if(!this.#who)throw new Refused('LOGIN_REQUIRED');
     // No arbitrary path, DELETE, bulk mutation, user administration or production migration.
-    const direct=new Set(['/api/customers','/api/quotes','/api/orders/from-quote','/api/invoices/from-order']);
+    const direct=new Set(['/api/customers','/api/quotes','/api/orders/from-quote','/api/invoices/from-order','/api/automation/statements/from-order']);
     const special=[
       /^\/api\/quotes\/[a-f0-9]{32}\/status$/,
       /^\/api\/orders\/[a-f0-9]{32}\/status$/,
@@ -62,6 +62,50 @@ class Bridge{
     if(!data||typeof data!=='object'||Array.isArray(data)||data.org_id!==this.#who?.org_id)
       throw new Refused('TENANT_MISMATCH');
     return Object.freeze({...data});
+  }
+
+
+  // Immutable trade statement conversion: a server-side snapshot of a fulfilled order.
+  // This is not a tax invoice and never modifies the source order or makes payments.
+  async statementFromOrder(orderId){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))throw new Refused('INVALID_ORDER_ID');
+    const d=await this.write('/api/automation/statements/from-order',{order_id:orderId});
+    if(typeof d.id!=='string'||!/^[a-f0-9]{32}$/.test(d.id)||
+       d.order_id!==orderId||d.document?.source_order_id!==orderId||
+       d.document?.legal_status!=='internal_business_record_not_tax_invoice'||
+       d.document?.document_type!=='trade_statement'||d.document?.finalized!==true||
+       !Number.isSafeInteger(d.document?.money?.total)||d.document.money.total<0)
+      throw new Refused('INVALID_STATEMENT_RESPONSE');
+    return d;
+  }
+  async statementDetail(statementId,orderId){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    if(typeof statementId!=='string'||!/^[a-f0-9]{32}$/.test(statementId)||
+       typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))
+      throw new Refused('INVALID_STATEMENT_ID');
+    const d=await this.#request('/api/automation/statements/'+statementId);
+    if(!d||d.id!==statementId||d.org_id!==this.#who?.org_id||
+       d.order_id!==orderId||d.document?.source_order_id!==orderId||
+       d.document?.legal_status!=='internal_business_record_not_tax_invoice'||
+       d.document?.finalized!==true)
+      throw new Refused('STATEMENT_IDENTITY_MISMATCH');
+    return d;
+  }
+  async orderTransactionTrace(orderId){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))
+      throw new Refused('INVALID_ORDER_ID');
+    const d=await this.#request('/api/automation/transactions/'+orderId);
+    if(!d||d.source_order_id!==orderId||d.scope!=='authenticated_tenant_only'||
+       !Array.isArray(d.events)||!d.events.every(e=>
+         e&&typeof e.type==='string'&&
+         ['quote','order','trade_statement','invoice','payment'].includes(e.type)&&
+         typeof e.id==='string'&&/^[a-f0-9]{32}$/.test(e.id))||
+       !Number.isSafeInteger(d.order_money?.total)||
+       !Number.isSafeInteger(d.active_paid))
+      throw new Refused('INVALID_TRANSACTION_TRACE');
+    return d;
   }
 
   async list(name){

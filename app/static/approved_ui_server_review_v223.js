@@ -7,7 +7,7 @@ const MENUS=[['home','홈','all'],['docs','문서',''],['deals','거래','quotes
 ['files','첨부 파일',''],['activity','감사 이력',''],['team','직원',''],['security','보안',''],['settings','설정',''],['account','내 계정','identity']];
 const t=(tag,cls,text)=>{const x=document.createElement(tag);if(cls)x.className=cls;if(text!==undefined)x.textContent=String(text);return x};
 const clear=e=>e.replaceChildren();
-const msg=e=>({'SESSION_EXPIRED':'세션이 종료되었습니다.','TENANT_MISMATCH':'다른 회사의 데이터가 확인되어 조회를 차단했습니다.','NETWORK_ERROR':'서버 연결 실패','FORBIDDEN':'접근 권한 없음','HTTPS_REQUIRED':'HTTPS 연결이 필요합니다.','ADMIN_ONLY':'관리자에게만 허용된 보안 정보입니다.','INVALID_STATISTICS':'서버 통계 형식을 확인할 수 없습니다.'}[e&&e.code]||'요청을 처리할 수 없습니다.');
+const msg=e=>({'SESSION_EXPIRED':'세션이 종료되었습니다.','TENANT_MISMATCH':'다른 회사의 데이터가 확인되어 조회를 차단했습니다.','NETWORK_ERROR':'서버 연결 실패','FORBIDDEN':'접근 권한 없음','HTTPS_REQUIRED':'HTTPS 연결이 필요합니다.','ADMIN_ONLY':'관리자에게만 허용된 보안 정보입니다.','INVALID_STATISTICS':'서버 통계 형식을 확인할 수 없습니다.','INVALID_STATEMENT_RESPONSE':'거래명세표 응답을 검증할 수 없습니다.','STATEMENT_IDENTITY_MISMATCH':'문서 원장과 서버 문서가 일치하지 않습니다.','INVALID_TRANSACTION_TRACE':'거래 이력 검증에 실패했습니다.'}[e&&e.code]||'요청을 처리할 수 없습니다.');
 function start(){
   const root=document.getElementById('app'), login=document.getElementById('login');document.getElementById('intro')?.remove();
   document.documentElement.dataset.theme='dark';document.body.classList.add('jw-approved-review');clear(root);clear(login);login.hidden=false;
@@ -69,6 +69,38 @@ function start(){
             line(box,'수동 작업 '+data.samples.manual+'건 · 자동화 '+data.samples.automated+'건');
             line(box,data.status==='COMPARISON_AVAILABLE'?'관측된 중위수 차이 '+data.observed_difference_ms+'ms':'측정 중');
             if(data.disclaimer)line(box,data.disclaimer);
+            const orders=await bridge.list('orders');
+            if(token!==epoch)return;
+            const candidates=orders.filter(r=>r.status==='fulfilled'&&r.review_state!=='pending');
+            const controls=card('납품 완료 수주 → 거래명세표 자동 생성');
+            line(controls,'확정 수주 데이터를 재사용합니다. 세금계산서 발행이나 입금 처리는 수행하지 않습니다.');
+            if(!candidates.length)line(controls,'전환 가능한 수주 자료 없음');
+            for(const order of candidates.slice(0,15)){
+              const button=t('button','jw-review-action-button',(order.doc_no||'수주')+' · 거래명세표 생성');
+              button.type='button';button.dataset.action='statement-from-order';button.dataset.order=order.id;
+              const alert=t('p','jw-review-muted','서버가 문서를 확정한 뒤 결과를 다시 조회합니다.');
+              button.addEventListener('click',async()=>{
+                if(button.disabled||token!==epoch)return;
+                if(!window.confirm((order.doc_no||'선택한 수주')+'의 거래명세표를 생성하시겠습니까?'))return;
+                button.disabled=true;
+                try{
+                  const created=await bridge.statementFromOrder(order.id);
+                  const verified=await bridge.statementDetail(created.id,order.id);
+                  const trace=await bridge.orderTransactionTrace(order.id);
+                  if(token!==epoch)return;
+                  if(trace.statement_id!==created.id ||
+                     trace.order_money.total!==verified.document.money.total)
+                    throw new Error('SNAPSHOT_TRACE_MISMATCH');
+                  alert.textContent=(created.reused?'기존 확정 문서 재사용 · ':'새 문서 생성 · ')+
+                    verified.doc_no+' · 합계 '+verified.document.money.total.toLocaleString('ko-KR')+
+                    '원 · 기록 '+trace.events.length+'건 (내부 거래명세표)';
+                  alert.setAttribute('role','status');
+                }catch(err){
+                  if(token===epoch){alert.textContent=msg(err);alert.setAttribute('role','alert')}
+                }finally{button.disabled=false;}
+              });
+              controls.append(button,alert);
+            }
           }else if(key==='security'||key==='team'){
             const box=card('관리자 전용 보안·조직 현황');
             line(box,'활성 세션 '+data.sessions+'건 · 보안 이벤트 '+data.security_events+'건');
