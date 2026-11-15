@@ -130,7 +130,17 @@ def main():
                         finish.click()
                         page.locator('p.jw-review-muted').filter(has_text='수작업 서버 측정 완료').wait_for(state='visible',timeout=22000)
                     bttn=page.locator('button[data-action="statement-from-order"][data-order="'+order+'"]')
-                    bttn.wait_for(state='visible',timeout=25000)
+                    try:
+                        bttn.wait_for(state='visible',timeout=25000)
+                    except Exception:
+                        if name=='webkit':
+                            print('WEBKIT_ACTIVE_VIEW_DIAG='+repr(page.locator('main.jw-review-main').inner_text()[-950:]),flush=True)
+                            status,server_orders=a.call('/api/orders')
+                            print('SERVER_ORDERS_STATUS_DIAG='+str(status)+
+                                  ' ORDER_COUNT='+str(len(server_orders) if isinstance(server_orders,list) else 'invalid'),flush=True)
+                            print('CLIENT_BUTTONS_COUNT_DIAG='+str(page.locator('button[data-action="statement-from-order"]').count()),flush=True)
+                            page.screenshot(path=str(OUT/'diagnostic-webkit-missing-statement.png'),full_page=True)
+                        raise
                     check('거래명세표 생성' in bttn.inner_text(),'ACTION_VISIBLE_'+name)
                     bttn.click()
                     # Must wait for actual immutable server POST followed by GET and trace before UI status.
