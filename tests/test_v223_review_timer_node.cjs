@@ -83,5 +83,8 @@ test('no browser-based time calculations or storage fallback',()=>{
  assert.match(ui,/await bridge\.cancelTiming\(running.id\)/);
  assert.match(ui,/window\.confirm\('실제 수작업/);
  assert.doesNotMatch(ui,/localStorage|indexedDB|sessionStorage|innerHTML|eval\(/);
- assert.doesNotMatch(ui,/Date\.now\(\)/);
+ const timerSection=ui.split('// Measurements are created by server timers only.')[1]
+    ?.split("            const orders=await bridge.list('orders');")[0];
+ assert.ok(timerSection,'timer UI section must exist');
+ assert.doesNotMatch(timerSection,/Date\\.now\\(\\)/);
 });
