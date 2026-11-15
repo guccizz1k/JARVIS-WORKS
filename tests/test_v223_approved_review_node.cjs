@@ -70,3 +70,11 @@ test('unauthenticated write refuses without a network request',async()=>{
  await assert.rejects(()=>bridge.write('/api/customers',{name:'A'}),{code:'LOGIN_REQUIRED'});
  assert.equal(calls.length,0);
 });
+
+test('review business forms are user initiated, CSRF-gated and never use browser local storage',()=>{
+ const s=fs.readFileSync('app/static/approved_ui_server_review_v223.js','utf8');
+ for(const path of ['/api/customers','/api/quotes','/api/orders/from-quote','/api/invoices/from-order'])
+   assert.ok(s.includes(path),'missing UI server action '+path);
+ assert.match(s,/bridge\.write/);
+ assert.doesNotMatch(s,/localStorage|indexedDB|sessionStorage|innerHTML|eval\(/);
+});

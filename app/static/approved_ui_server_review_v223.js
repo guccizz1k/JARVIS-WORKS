@@ -47,6 +47,135 @@ function start(){
           for(const r of section.rows.slice(0,50)){const row=t('div','jw-review-row');
             for(const value of [r.doc_no,r.name,r.title,r.customer_name,r.status])if(typeof value==='string'||typeof value==='number')row.append(t('span','',value));
             box.append(row)}if(!section.rows.length)box.append(t('p','jw-review-muted','데이터가 없습니다.'));view.append(box)}
+
+        // Mutations are review-only, user-triggered and committed by the server.
+        // Every response is tenant-bound by JWOwnerServerBridge.write(), never by browser storage.
+        if(['home','partners','deals','money'].includes(key)){
+          const actions=t('section','jw-review-card');
+          actions.append(t('h3','jw-review-cardtitle','서버 업무 처리 · 검토 모드'));
+          function form(title,fields,send){
+            const f=t('form','jw-review-action-form');
+            f.append(t('h4','jw-review-action-title',title));
+            const controls={};
+            for(const field of fields){
+              const wrap=t('label','jw-review-action-label',field.label);
+              const input=field.choices?t('select','jw-review-input'):t('input','jw-review-input');
+              input.setAttribute('aria-label',field.label);
+              if(field.choices){
+                for(const [value,label] of field.choices){
+                  const op=t('option','',label);op.value=value;input.append(op);
+                }
+              }else{
+                input.type=field.type||'text';
+                if(field.type==='number'){input.min=String(field.min??0);input.step='1';}
+                if(field.value)input.value=field.value;
+                if(field.maxlength)input.maxLength=field.maxlength;
+              }
+              input.required=field.required!==false;
+              controls[field.name]=input;
+              wrap.append(input);f.append(wrap);
+            }
+            const button=t('button','jw-review-button',title);
+            button.type='submit';const alert=t('p','jw-review-muted','서버 응답을 확인한 뒤에만 반영합니다.');
+            f.append(button,alert);
+            f.addEventListener('submit',async e=>{
+              e.preventDefault();if(button.disabled)return;
+              button.disabled=true;
+              try{
+                const vals=Object.fromEntries(Object.entries(controls).map(([name,x])=>[name,x.type==='number'?Number(x.value):x.value]));
+                await send(vals);
+                if(token===epoch)await open(key);
+              }catch(err){
+                if(token===epoch){alert.textContent=msg(err);alert.setAttribute('role','alert');}
+              }finally{button.disabled=false;}
+            });
+            actions.append(f);
+          }
+          function rowset(name){return values.find(x=>x.name===name)?.rows||[];}
+          async function fetched(name){
+            return selected[2]==='all'||selected[2]===name?rowset(name):await bridge.list(name);
+          }
+          if(key==='home'||key==='partners'){
+            form('거래처 서버 등록',[
+              {name:'name',label:'거래처명',maxlength:120},
+              {name:'business_number',label:'사업자번호 (선택)',required:false,maxlength:20},
+              {name:'contact_name',label:'담당자 (선택)',required:false,maxlength:100}
+            ],v=>bridge.write('/api/customers',{...v,email:'',phone:''}));
+          }
+          if(key==='home'||key==='deals'){
+            const customers=await fetched('customers');
+            if(token!==epoch)return;
+            if(customers.length){
+              form('견적서 서버 생성',[
+                {name:'customer_id',label:'거래처',choices:customers.map(r=>[r.id,r.name])},
+                {name:'title',label:'견적 제목',maxlength:150},
+                {name:'item',label:'품목명',maxlength:150},
+                {name:'quantity',label:'수량',type:'number',min:1,value:'1'},
+                {name:'unit_price',label:'단가(원)',type:'number',min:0,value:'0'}
+              ],v=>bridge.write('/api/quotes',{
+                customer_id:v.customer_id,title:v.title,vat_mode:'taxable',
+                items:[{name:v.item,quantity:v.quantity,unit_price:v.unit_price}]
+              }));
+            }
+            const quotes=await fetched('quotes');
+            for(const r of quotes.slice(0,12)){
+              if(!['draft','sent'].includes(r.status))continue;
+              const label=r.status==='draft'?'견적 발송':'견적 승인';
+              const next=r.status==='draft'?'sent':'accepted';
+              const b=t('button','jw-review-action-button',r.doc_no+' · '+label);
+              b.type='button';b.onclick=async()=>{
+                if(b.disabled||!window.confirm(r.doc_no+' '+label+'하시겠습니까?'))return;
+                b.disabled=true;
+                try{await bridge.write('/api/quotes/'+r.id+'/status',{status:next});if(token===epoch)await open(key);}
+                catch(e){b.disabled=false;const a=t('p','jw-review-failure',msg(e));a.setAttribute('role','alert');actions.append(a)}
+              };actions.append(b);
+            }
+            const accepted=quotes.filter(r=>r.status==='accepted');
+            if(accepted.length){
+              form('승인 견적에서 수주 생성',[
+                {name:'quote_id',label:'승인 견적',choices:accepted.map(r=>[r.id,r.doc_no])},
+                {name:'due_date',label:'납기일',type:'date',value:new Date(Date.now()+45*86400000).toISOString().slice(0,10)}
+              ],v=>bridge.write('/api/orders/from-quote',v));
+            }
+          }
+          if(key==='home'||key==='money'){
+            const orders=await fetched('orders');
+            if(token!==epoch)return;
+            for(const r of orders.slice(0,12)){
+              const next=r.status==='received'?'processing':r.status==='processing'?'fulfilled':null;
+              if(!next)continue;
+              const label=next==='processing'?'수주 처리 시작':'납품 완료';
+              const b=t('button','jw-review-action-button',r.doc_no+' · '+label);
+              b.type='button';b.onclick=async()=>{
+                if(b.disabled||!window.confirm(r.doc_no+' '+label+' 처리하시겠습니까?'))return;
+                b.disabled=true;
+                try{await bridge.write('/api/orders/'+r.id+'/status',{status:next});if(token===epoch)await open(key);}
+                catch(e){b.disabled=false;const a=t('p','jw-review-failure',msg(e));a.setAttribute('role','alert');actions.append(a)}
+              };actions.append(b);
+            }
+            const fulfilled=orders.filter(r=>r.status==='fulfilled');
+            if(fulfilled.length){
+              form('납품 완료 수주에서 청구서 생성',[
+                {name:'order_id',label:'납품 완료 수주',choices:fulfilled.map(r=>[r.id,r.doc_no])},
+                {name:'due_date',label:'입금기한',type:'date',value:new Date(Date.now()+45*86400000).toISOString().slice(0,10)}
+              ],v=>bridge.write('/api/invoices/from-order',v));
+            }
+            const invoices=await fetched('invoices');
+            if(token!==epoch)return;
+            const unpaid=invoices.filter(r=>typeof r.balance==='number'&&r.balance>0);
+            if(unpaid.length){
+              form('청구서 입금 기록',[
+                {name:'invoice_id',label:'미수 청구서',choices:unpaid.map(r=>[r.id,r.doc_no+' · 잔액 '+r.balance+'원'])},
+                {name:'amount',label:'입금액(원)',type:'number',min:1,value:'1'},
+                {name:'reference',label:'고유 입금 요청번호',maxlength:100},
+                {name:'paid_at',label:'입금일',type:'date',value:new Date().toISOString().slice(0,10)}
+              ],v=>bridge.write('/api/invoices/'+v.invoice_id+'/payments',{
+                reference:v.reference,amount:v.amount,paid_at:v.paid_at,note:''
+              }));
+            }
+          }
+          if(actions.childElementCount>1)view.append(actions);
+        }
       }catch(err){if(token!==epoch)return;clear(view);view.append(t('h2','jw-review-title','조회 차단'),t('p','jw-review-failure',msg(err)));if(!bridge.signedIn)entry('세션이 종료되었습니다.')}
     }
     open('home');
