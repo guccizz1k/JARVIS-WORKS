@@ -18,7 +18,7 @@ function start(){
   function entry(note){
     ++epoch;root.classList.remove('on');clear(root);clear(login);login.hidden=false;
     if(ownerVisual)window.JWOwnerVisualGL?.setMode('login');
-    const c=t('section','jw-review-entry');c.append(t('small','jw-review-kicker','JARVIS WORKS · SECURE REVIEW'),t('h1','jw-review-heading','WORK WITHOUT EDGES.'),t('p','jw-review-muted','실제 서버 인증 · 읽기 전용 연결 검토'));
+    const c=t('section','jw-review-entry');c.append(t('small','jw-review-kicker','JARVIS WORKS · SECURE REVIEW'),t('h2','jw-review-heading',ownerVisual?'다시 오신 것을 환영합니다':'WORK WITHOUT EDGES.'),t('p','jw-review-muted','실제 서버 인증 · 읽기 전용 연결 검토'));
     if(ownerVisual){
       c.classList.add('lcard','go');
       const brand=t('div','lbrand');const logo=t('div','logo','JW');brand.append(logo,t('span','', 'JARVIS WORKS'));

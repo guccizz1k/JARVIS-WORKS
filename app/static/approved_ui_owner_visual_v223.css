@@ -57,6 +57,9 @@ body.jw-approved-review.jw-owner-visual {background:var(--bg);color:var(--tx);fo
 .jw-owner-visual #app .jw-owner-bottomnav {display:none}
 .jw-owner-visual #app .jw-owner-menu-dialog {display:none}
 @media(max-width:900px){
+ /* Original .top::before extends 20px beyond its parent. Mobile main padding
+    is 16px: use an equal 16px gradient inset to prevent 4px phantom overflow. */
+ .jw-owner-visual #app .jw-review-top.top::before{left:-16px;right:-16px}
  .jw-owner-visual #login {padding:84px 18px 60px;display:grid;grid-template-columns:1fr;overflow-y:auto;align-content:start}
  .jw-owner-visual #login .jw-review-entry.lcard {justify-self:stretch;width:100%;margin-top:18px}
  .jw-owner-visual #login .jw-owner-brand {order:-1;padding-bottom:0}
