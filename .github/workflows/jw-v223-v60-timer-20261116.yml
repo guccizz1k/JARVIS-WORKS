@@ -23,7 +23,8 @@ jobs:
           import subprocess
           observed=set(subprocess.check_output(['git','diff','--name-only','e18240117cc7aa16a78bbebad65d9bd6592940e6','HEAD'],text=True).splitlines())
           expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js',
-          'tests/test_v223_review_timer_node.cjs','.github/workflows/jw-v223-v60-timer-20261116.yml'}
+          'tests/test_v223_review_timer_node.cjs','.github/workflows/jw-v223-v60-timer-20261116.yml',
+          '.github/workflows/jw-v223-approved-review-server-mode-20261115.yml'}
           assert observed==expected,(observed,expected)
           print('PASS_TIMER_QA_REVIEW_ONLY')
           PY
