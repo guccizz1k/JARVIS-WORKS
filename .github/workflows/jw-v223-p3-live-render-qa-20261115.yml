@@ -1,0 +1,46 @@
+name: V22.3 external Render HTTPS E2E (synthetic only)
+on:
+  push:
+    branches:
+      - review/jw-v223-p3-real-https-independent-20261115
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-p3-isolated-https
+  cancel-in-progress: false
+jobs:
+  real-render-synthetic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Verify independent QA source and target nonproduction isolation
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor cdcdc857e173f572fb1815f657cbc5d9b117bbd4 HEAD
+          test "$GITHUB_REF_NAME" = review/jw-v223-p3-real-https-independent-20261115
+          python - <<'PY'
+          import subprocess
+          allowed={'scripts/ci_v223_live_render_https_qa.py','.github/workflows/jw-v223-p3-live-render-qa-20261115.yml'}
+          observed=set(subprocess.check_output(['git','diff','--name-only','cdcdc857e173f572fb1815f657cbc5d9b117bbd4','HEAD'],text=True).splitlines())
+          assert observed==allowed,(observed,allowed)
+          print('PASS_QA_ONLY_NO_PRODUCT_SOURCE_CHANGES')
+          PY
+          python -m py_compile scripts/ci_v223_live_render_https_qa.py
+      - name: External TLS validated HTTP authentication and two-company real E2E
+        run: |
+          set -euo pipefail
+          python scripts/ci_v223_live_render_https_qa.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-real-https-synthetic-attestation
+          path: jw-v223-live-render-http-e2e.json
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Explicitly scope this PASS
+        run: echo "Only isolated synthetic SQLite staging, no real Supabase, Safari hardware or P4 release PASS."
