@@ -74,7 +74,7 @@ def main():
     check('https_health_200',ready)
     qa['verified_real_https']=True  # Python default system TLS verification was enabled.
     status,body,h=probe.request('/')
-    check('preview_html_200',status==200 and 'JWOwnerServerUI.start()' in body and 'WORK WITHOUT EDGES' in body)
+    check('preview_html_200',status==200 and 'JWOwnerServerUI.start()' in body and '/static/approved_ui_server_review_v223.js' in body and '#d4ff3a' in body)
     csp=h.get('Content-Security-Policy','')
     check('strict_inline_script_hash_csp',"'sha256-" in csp and "object-src 'none'" in csp and "frame-ancestors 'none'" in csp)
     check('no_store_root',h.get('Cache-Control')=='no-store')
