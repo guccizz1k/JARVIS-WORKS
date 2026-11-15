@@ -1,0 +1,43 @@
+{
+  "schema": "JW_V223_RELEASE_EVIDENCE_V1",
+  "candidate_sha": "5711acaa9203341dbd190f30efd9ed7009bca4f5",
+  "ui_sha256": "953c1b00cead79173c0c7a9c40319344e510bec9f6a1f646f30e0a147356076d",
+  "independent_audit": {
+    "different_operator": false,
+    "reviewed_same_sha": null
+  },
+  "phases": {
+    "P1": {
+      "status": "BLOCKED",
+      "synthetic": null,
+      "notes": "Vault has 2 ciphertext blobs; key custody and independent PG17 restore not proven"
+    },
+    "P2": {
+      "status": "PARTIAL",
+      "candidate_sha": "5711acaa9203341dbd190f30efd9ed7009bca4f5",
+      "synthetic": true,
+      "real_environment": true,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43723269326",
+      "independent_run_id": "43723269326",
+      "environment_id": "srv-dbsqnk3bc2fs73ca4np0",
+      "notes": "Server review UI nine new read-only panels, 19 Node PASS. Still missing 17 full business workflows, real data PostgreSQL, mobile Safari hardware."
+    },
+    "P3": {
+      "status": "PARTIAL",
+      "candidate_sha": "5711acaa9203341dbd190f30efd9ed7009bca4f5",
+      "synthetic": true,
+      "real_environment": true,
+      "actual_external_https": true,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43723448729",
+      "independent_run_id": "43723448729",
+      "environment_id": "srv-dbsqnk3bc2fs73ca4np0",
+      "notes": "Real HTTPS 35 synthetic company A/B operational reads at exact SHA 5711. Real production PG17 and 17 full business write flows still not proven."
+    },
+    "P4": {
+      "status": "BLOCKED",
+      "candidate_sha": "5711acaa9203341dbd190f30efd9ed7009bca4f5",
+      "synthetic": true,
+      "notes": "New exact SHA disposable PG17 92 PASS; full regression and browser QA require current completed evidence. P1 offsite key/restore and independent release not demonstrated."
+    }
+  }
+}
