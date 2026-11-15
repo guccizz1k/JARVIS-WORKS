@@ -1,0 +1,34 @@
+name: V22.3 real HTTPS operational panels QA synthetic
+on:
+  push:
+    branches: [review/jw-v223-p3-operational-panel-https-qa-20261115]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  remote-read-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Exact SHA and QA-only code diff
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = review/jw-v223-p3-operational-panel-https-qa-20261115
+          git merge-base --is-ancestor 5711acaa9203341dbd190f30efd9ed7009bca4f5 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          paths=set(subprocess.check_output(['git','diff','--name-only','5711acaa9203341dbd190f30efd9ed7009bca4f5','HEAD'],text=True).splitlines())
+          assert paths=={'scripts/ci_v223_operational_https_qa.py','.github/workflows/jw-v223-operational-https-qa-20261115.yml'},paths
+          PY
+          python -m py_compile scripts/ci_v223_operational_https_qa.py
+      - name: Real HTTPS protected operational read APIs for 2 companies
+        run: python scripts/ci_v223_operational_https_qa.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: {name: jw-v223-operational-https-evidence, path: operational_https_qa.json, if-no-files-found: ignore, retention-days: 3}
+      - run: echo "REAL HTTPS synthetic staging only; P4 launch evidence remains incomplete."
