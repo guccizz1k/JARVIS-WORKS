@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/jw-v223-unified-20261115
+      - review/jw-v223-j6-pin-hardening-20261115
   workflow_dispatch:
 permissions:
   contents: read
@@ -39,7 +40,7 @@ jobs:
               return result
           original_main="9760dadbb2370b508096976a1182fd437fc6f909"
           original_review="137a21dc11846bd34c5dc3de21c0a8a96ef32914"
-          assert run("branch","--show-current").decode().strip()=="review/jw-v223-unified-20261115"
+          assert run("branch","--show-current").decode().strip()=="review/jw-v223-j6-pin-hardening-20261115"
           main,review,now=tree(original_main),tree(original_review),tree("HEAD")
           main_unique={path:info for path,info in main.items() if path not in review}
           overlaps=[path for path in main if path in review and main[path]!=review[path]]
@@ -63,7 +64,7 @@ jobs:
           selected_j6={
               "AGENTS.md":"688dad3765d541d248b50b7fdd1206dbdaaa50fc",
               "scripts/jw_evidence_gate.py":"5607eb7bb841ad2afdd3199758e7068aed193d10",
-              "scripts/jw_skill_contract.py":"dcec532f581cf7c7cc43f49265d86fc13b6da4aa",
+              "scripts/jw_skill_contract.py":"33c009f12d85c57bc49c1a3cbb32420614e7ce00",
           }
           for path,sha in selected_j6.items():
               assert path in now, f"missing J6 guard: {path}"
@@ -75,6 +76,7 @@ jobs:
               test_path,
               "scripts/jw_v223_external_skill_pins.json",
               "tests/test_v223_j6_skill_gate_integration_20261115.py",
+              "tests/test_vendor_pin_atomicity.py",
               "docs/review/jw-v223-j6-bridge-20261115.md",
           }
           assert set(now)-set(expected)==additional_review_files,sorted(set(now)-set(expected))
@@ -108,7 +110,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = review/jw-v223-unified-20261115
+          test "$GITHUB_REF_NAME" = review/jw-v223-j6-pin-hardening-20261115
           test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
           test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = 9bedf97fe718a94f07861e23670685af00619ca8
           git merge-base --is-ancestor 08ea29867e962d4ac5be0e942fc1488528494428 HEAD
@@ -143,7 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/jw_evidence_gate.py --check-project .
-          python -m pytest -q -ra -p no:cacheprovider --noconftest tests/test_v223_j6_skill_gate_integration_20261115.py tests/test_jw_skill_contract.py tests/test_jw_evidence_gate.py
+          python -m pytest -q -ra -p no:cacheprovider --noconftest tests/test_v223_j6_skill_gate_integration_20261115.py tests/test_vendor_pin_atomicity.py tests/test_jw_skill_contract.py tests/test_jw_evidence_gate.py
       - name: Execute entire checked-out Python tests tree, no exclusion
         shell: bash
         run: |

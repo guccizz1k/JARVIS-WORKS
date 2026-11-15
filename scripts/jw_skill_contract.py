@@ -25,12 +25,30 @@ APPROVED = OLD | NEW
 # Their files are instead verified byte-for-byte against a fixed review SHA.
 EXTERNAL_REVIEW_ONLY = frozenset({'security-audit', 'ponytail', 'change-impact', 'impeccable'})
 EXTERNAL_PIN_SOURCE = '4a9af856b3aa29b848b5fa8f7cf0cc35899549c3'
+# Verified pinned Git blob from original review, independent of editable manifest.
+EXTERNAL_PIN_MANIFEST_BLOB_OID = '384fb406e5f594146a7f14c2e1f47d8c05f3e031'
 
 
 def _audit_external_pins(root: Path, present: set[str]) -> list[str]:
     external = present & EXTERNAL_REVIEW_ONLY
     if not external:
-        return []  # Older projects and minimal isolated test fixtures need no vendor bundle.
+        # An adopted vendor bundle must not disappear together with its manifest.
+        # Keep compatibility with truly legacy/minimal independent fixtures.
+        adoption_files = (
+            root / 'docs' / 'agents' / 'JW_V208_FOUR_SKILLS.md',
+            root / 'docs' / 'agents' / 'JW_V208_FOUR_SKILLS_MANIFEST.json',
+            root / 'scripts' / 'jw_v223_external_skill_pins.json',
+        )
+        adopted = any(p.exists() or p.is_symlink() for p in adoption_files)
+        guide = root / 'AGENTS.md'
+        if guide.is_file() and not guide.is_symlink():
+            try:
+                adopted |= '## V20.8 external skills, advisory only' in guide.read_text('utf-8')
+            except (OSError, UnicodeError):
+                return ['unreadable external advisory adoption policy']
+        if adopted:
+            return ['external advisory skill inventory missing despite adopted vendor policy']
+        return []  # Legacy projects without V20.8 adoption remain valid.
     if external != EXTERNAL_REVIEW_ONLY:
         return ['partial external advisory skill inventory']
 
@@ -38,7 +56,13 @@ def _audit_external_pins(root: Path, present: set[str]) -> list[str]:
     if manifest_path.is_symlink() or not manifest_path.is_file():
         return ['missing/unsafe external advisory pin manifest']
     try:
-        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        raw_manifest = manifest_path.read_bytes()
+        actual_oid = hashlib.sha1(
+            b'blob ' + str(len(raw_manifest)).encode('ascii') + b'\0' + raw_manifest
+        ).hexdigest()
+        if actual_oid != EXTERNAL_PIN_MANIFEST_BLOB_OID:
+            return ['external advisory pin manifest modified from reviewed baseline']
+        manifest = json.loads(raw_manifest.decode('utf-8'))
         if manifest.get('source_review_sha') != EXTERNAL_PIN_SOURCE:
             return ['external advisory baseline identity mismatch']
         expected = manifest.get('files')
