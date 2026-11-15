@@ -1,0 +1,48 @@
+{
+  "schema": "JW_V223_RELEASE_EVIDENCE_V1",
+  "candidate_sha": "38f63f4708ca5b6ca49b7783b5f5c52e3817904a",
+  "ui_sha256": "953c1b00cead79173c0c7a9c40319344e510bec9f6a1f646f30e0a147356076d",
+  "independent_audit": {
+    "different_operator": false,
+    "reviewed_same_sha": null
+  },
+  "phases": {
+    "P1": {
+      "status": "BLOCKED",
+      "synthetic": null,
+      "real_environment": false,
+      "notes": "Offsite AES-GCM recovery key custody and independent source-to-PG17 restore data/signature verification remain unproven. Do not enable expired backup role without renewed owner approval."
+    },
+    "P2": {
+      "status": "PARTIAL",
+      "candidate_sha": "38f63f4708ca5b6ca49b7783b5f5c52e3817904a",
+      "synthetic": true,
+      "real_environment": true,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43768533114",
+      "independent_run_id": "43768533114",
+      "environment_id": "srv-dbsqnk3bc2fs73ca4np0",
+      "notes": "Real server review shell and measured manual/automatic timing bridge, 43 Node tests PASS, protected entrypoint 5 PASS. Complete owner-approved UI with all 17 real workflows, iPhone hardware Safari and real PG17 not proven."
+    },
+    "P3": {
+      "status": "PARTIAL",
+      "candidate_sha": "38f63f4708ca5b6ca49b7783b5f5c52e3817904a",
+      "synthetic": true,
+      "real_environment": true,
+      "actual_external_https": true,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43769431879",
+      "independent_run_id": "43769431879",
+      "environment_id": "srv-dbsqnk3bc2fs73ca4np0",
+      "notes": "Same-SHA isolated Render free service LIVE; external Chromium/WebKit timer E2E under test at run 43769431879. Synthetic SQLite only. No production-equivalent PG17 persistent data or complete business E2E."
+    },
+    "P4": {
+      "status": "BLOCKED",
+      "candidate_sha": "38f63f4708ca5b6ca49b7783b5f5c52e3817904a",
+      "synthetic": true,
+      "real_environment": false,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43768698537",
+      "independent_run_id": "43768698537",
+      "environment_id": "isolated-ci-ubuntu24-pg17",
+      "notes": "Exact source 38f63f full Python 3525 pass, Node 43 pass, disposable PG17 92 pass. Owner original protected. Not independent restore or production release approval."
+    }
+  }
+}
