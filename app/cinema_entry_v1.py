@@ -27,9 +27,9 @@ def root_ui_mode():
     selected = os.environ.get(ROOT_UI_ENV, '').strip().lower()
     if selected == 'v222':
         return 'v222'
-    if (selected == 'owner-review' and os.environ.get('JW_ENV', '').lower() in ('review', 'test')
+    if (selected in ('owner-review', 'owner-visual-review') and os.environ.get('JW_ENV', '').lower() in ('review', 'test')
             and os.environ.get('JW_APPROVED_UI_REVIEW', '') == 'ISOLATED_REVIEW_ONLY'):
-        return 'owner-review'
+        return selected
     return 'cinema'
 
 
@@ -60,7 +60,57 @@ def _owner_review_response():
     })
 
 
+
+OWNER_VISUAL_SHA256 = '953c1b00cead79173c0c7a9c40319344e510bec9f6a1f646f30e0a147356076d'
+
+def owner_visual_review_response():
+    """Review-only visual bridge using the EXACT original approved CSS bytes.
+
+    The protected original remains untouched. Critically, its browser-local
+    account/storage and business scripts never execute: ONLY authenticated,
+    same-origin server bridge JS loads. This is NOT the full production UI.
+    """
+    original_bytes = (ROOT / 'static' / 'approved_v223_owner_original.html').read_bytes()
+    if hashlib.sha256(original_bytes).hexdigest() != OWNER_VISUAL_SHA256:
+        raise RuntimeError('Approved owner source has changed; refuse visual review')
+    original = original_bytes.decode('utf-8')
+    styles = re.findall(r'<style>([\s\S]*?)</style>', original)
+    if len(styles) != 1 or original.count('<script>') != 1 or original.count('boot();') != 1:
+        raise RuntimeError('Unexpected approved source layout; refuse execution')
+    font_links = re.findall(r'<link\b[^>]*>', original[:original.index('<style>')], re.I)
+    if not font_links or any('javascript:' in x.lower() or 'onload=' in x.lower() for x in font_links):
+        raise RuntimeError('Approved source font references changed')
+    fonts = '\n'.join(font_links)
+    html = (
+        '<!doctype html><html lang="ko" data-theme="dark"><head>'
+        '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+        '<title>JARVIS WORKS · 보호된 서버 연결 검토</title>' + fonts
+        + '<style>' + styles[0] + '</style>'
+        + '<link rel="stylesheet" href="/static/approved_ui_server_review_v223.css">'
+        + '<link rel="stylesheet" href="/static/approved_ui_owner_visual_v223.css">'
+        + '</head><body data-jw-review-mode="owner-visual">'
+        + '<div id="login"></div><div id="app"></div><div id="intro" hidden></div>'
+        + '<div id="toasts" aria-live="polite"></div>'
+        + '<script defer src="/static/approved_ui_server_bridge_v223.js"></script>'
+        + '<script defer src="/static/approved_ui_server_review_v223.js"></script>'
+        + '<script defer src="/static/approved_ui_owner_visual_v223.js"></script>'
+        + '</body></html>'
+    )
+    return HTMLResponse(html, headers={
+        'Cache-Control': 'no-store, private',
+        'Content-Security-Policy': (
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
+            "form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+        ),
+        'X-JW-Cinema-Main': '1',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+    })
+
 def cinema_main_response():
+    if root_ui_mode() == 'owner-visual-review':
+        return owner_visual_review_response()
     if root_ui_mode() == 'owner-review':
         return _owner_review_response()
     if root_ui_mode() == 'v222':

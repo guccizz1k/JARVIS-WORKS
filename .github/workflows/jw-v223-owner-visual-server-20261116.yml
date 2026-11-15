@@ -1,0 +1,46 @@
+name: V22.3 approved owner visual exact CSS and server-only integration QA
+on:
+  push:
+    branches: [review/jw-v223-owner-visual-server-integration-20261116]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  visual-source-and-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Guard exact parent and immutable owner source and main
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 38f63f4708ca5b6ca49b7783b5f5c52e3817904a HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python3 - <<'PY'
+          import subprocess
+          observed=set(subprocess.check_output(['git','diff','--name-only','38f63f4708ca5b6ca49b7783b5f5c52e3817904a','HEAD'],text=True).splitlines())
+          expect={'app/cinema_entry_v1.py','app/static/approved_ui_server_review_v223.js',
+          'app/static/approved_ui_owner_visual_v223.js','app/static/approved_ui_owner_visual_v223.css',
+          'tests/test_v223_owner_visual_server.py','tests/test_v223_owner_visual_server_node.cjs',
+          '.github/workflows/jw-v223-owner-visual-server-20261116.yml'}
+          assert observed==expect,(observed,expect)
+          print('PASS_IMMUTABLE_OWNER_CSS_AND_NO_MAIN_CHANGE')
+          PY
+      - name: Python server response, CSP and opt-in policy
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pytest -q -p no:cacheprovider --noconftest tests/test_v223_owner_visual_server.py tests/test_v223_owner_approved_ui_pin.py
+      - name: JS syntax and all existing protected server-bridge suites
+        run: |
+          set -euo pipefail
+          node --check app/static/approved_ui_server_review_v223.js
+          node --check app/static/approved_ui_owner_visual_v223.js
+          node --test tests/test_v223_approved_review_node.cjs tests/test_v223_review_operational_panels.cjs tests/test_v223_review_trade_statement_node.cjs tests/test_v223_review_timer_node.cjs tests/test_v223_owner_visual_server_node.cjs
+      - name: Explicit non-production review-only coverage
+        run: echo "Approved CSS exact, original local DB never executed, server bridge only. Not complete UI parity, actual Safari hardware, real backup restore or P4 release PASS."
