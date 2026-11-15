@@ -1,0 +1,44 @@
+name: V22.3 actual Render one-click trade statement Chromium WebKit E2E
+on:
+  push:
+    branches: [review/jw-v223-v60-real-statement-e2e-20261116]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-one-click-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Verify exact review parent and unchanged owner original
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor e18240117cc7aa16a78bbebad65d9bd6592940e6 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python3 - <<'PY'
+          import subprocess
+          paths=set(subprocess.check_output(['git','diff','--name-only','e18240117cc7aa16a78bbebad65d9bd6592940e6','HEAD'],text=True).splitlines())
+          expect={'scripts/ci_v223_v60_real_statement_browser.py','.github/workflows/jw-v223-v60-real-statement-browser-20261116.yml'}
+          assert paths==expect,(paths,expect)
+          PY
+          python -m py_compile scripts/ci_v223_v60_real_statement_browser.py
+      - name: Install real browser engines for externally deployed HTTPS
+        run: |
+          python -m pip install --disable-pip-version-check 'playwright==1.58.0'
+          python -m playwright install --with-deps chromium webkit
+      - name: Real browser statement creation, server readback, source trace, idempotence and A/B isolation
+        run: python scripts/ci_v223_v60_real_statement_browser.py
+      - name: Attach real server screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-v60-real-immutable-statement-ui
+          path: artifacts/jw-v223-v60-statement-e2e/
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Explicit limits
+        run: echo 'Isolated SQLite review only; not owner full approved UI, production PostgreSQL, physical iPhone Safari, or release PASS.'
