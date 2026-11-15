@@ -23,7 +23,8 @@ jobs:
           import subprocess
           changed=set(subprocess.check_output(['git','diff','--name-only','5711acaa9203341dbd190f30efd9ed7009bca4f5','HEAD'],text=True).splitlines())
           expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js',
-          'tests/test_v223_review_trade_statement_node.cjs','.github/workflows/jw-v223-review-v60-trade-statement-20261116.yml'}
+          'tests/test_v223_review_trade_statement_node.cjs','.github/workflows/jw-v223-review-v60-trade-statement-20261116.yml',
+          '.github/workflows/jw-v223-approved-review-server-mode-20261115.yml'}
           assert changed==expected,(changed,expected)
           print('PASS_ONLY_REVIEW_UI_NO_CORE_NO_DB_NO_MAIN')
           PY
