@@ -1,0 +1,38 @@
+name: JARVIS V22.3 J6 main-skill-policy bridge regression
+on:
+  push:
+    branches:
+      - review/jw-v223-unified-j6-guard-20261115
+    paths:
+      - scripts/jw_evidence_gate.py
+      - scripts/jw_skill_contract.py
+      - scripts/jw_v223_external_skill_pins.json
+      - AGENTS.md
+      - tests/test_v223_j6_skill_gate_integration_20261115.py
+      - .github/workflows/jw-v223-j6-bridge-20261115.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-j6-bridge-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  j6-main-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Source syntax and source constraints
+        run: |
+          python -m py_compile scripts/jw_evidence_gate.py scripts/jw_skill_contract.py tests/test_v223_j6_skill_gate_integration_20261115.py
+          test "$(git hash-object app/main.py)" = "775f500c8a7549d434ce196a8e0763aea33e1c67"
+      - name: Exercise J6 original contract and integration, no network
+        run: |
+          python -m pip install --disable-pip-version-check 'pytest>=8,<10'
+          python -m pytest -q -ra -p no:cacheprovider tests/test_v223_j6_skill_gate_integration_20261115.py tests/test_jw_skill_contract.py tests/test_jw_evidence_gate.py
+          python scripts/jw_evidence_gate.py --check-project .
