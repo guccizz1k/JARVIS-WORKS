@@ -40,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install pytest
-          python -m pytest -q -p no:cacheprovider tests/test_v223_owner_approved_ui_pin.py
+          python -m pytest -q -p no:cacheprovider --noconftest tests/test_v223_owner_approved_ui_pin.py
           python - <<'PY'
           from pathlib import Path
           s=Path('app/static/approved_v223_owner_original.html').read_text('utf8')

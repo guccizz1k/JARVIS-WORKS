@@ -11,7 +11,7 @@ def test_approved_ui_original_exact_bytes():
     raw=APPROVED.read_bytes()
     assert len(raw)==229028
     assert hashlib.sha256(raw).hexdigest()==SHA256
-    assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\\0'+raw).hexdigest()==GIT_BLOB
+    assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()==GIT_BLOB
 
 def test_preserved_visual_and_local_only_boundary():
     html=APPROVED.read_text('utf8')
@@ -22,4 +22,4 @@ def test_preserved_visual_and_local_only_boundary():
     assert 'function registerCompany' in html
     assert 'function login' in html
     # Pin checks source, not server integration. This is a documented blocker.
-    assert not re.search(r'fetch\\s*\\(', html)
+    assert not re.search(r'fetch\s*\(', html)
