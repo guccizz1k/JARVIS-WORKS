@@ -62,6 +62,9 @@ def main():
                     overflow=page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 2")
                     assert_true(not overflow,"HORIZONTAL_OVERFLOW_"+str(width))
                     assert_true(not page_errors,"JS_ERRORS_"+str(width))
+                    if errors:
+                        print("BROWSER_CONSOLE_ERROR_SAMPLE_"+str(width)+"="+str(errors[0])[:160])
+                    assert_true(not errors,"BROWSER_CONSOLE_ERRORS_"+str(width))
                     # Fetch failures due to missing font must not be falsely described as JS exceptions.
                     screenshot=str(OUT/f"jw-real-render-{width}.png")
                     page.screenshot(path=screenshot,full_page=True)
