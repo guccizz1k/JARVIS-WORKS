@@ -6,6 +6,8 @@ production is safe. Never executes any skill code or makes network requests.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -18,6 +20,66 @@ NEW = frozenset({'jw-tenant-security-review', 'jw-trade-document-integrity',
                  'jt-design-system-bridge', 'jt-audio-research',
                  'jt-local-model-evaluation', 'jt-workflow-adapter'})
 APPROVED = OLD | NEW
+# V22.3 already ships four separate third-party advisory skill trees.
+# These are not J TEAM-internal skills and may NOT execute automatically.
+# Their files are instead verified byte-for-byte against a fixed review SHA.
+EXTERNAL_REVIEW_ONLY = frozenset({'security-audit', 'ponytail', 'change-impact', 'impeccable'})
+EXTERNAL_PIN_SOURCE = '4a9af856b3aa29b848b5fa8f7cf0cc35899549c3'
+
+
+def _audit_external_pins(root: Path, present: set[str]) -> list[str]:
+    external = present & EXTERNAL_REVIEW_ONLY
+    if not external:
+        return []  # Older projects and minimal isolated test fixtures need no vendor bundle.
+    if external != EXTERNAL_REVIEW_ONLY:
+        return ['partial external advisory skill inventory']
+
+    manifest_path = root / 'scripts' / 'jw_v223_external_skill_pins.json'
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        return ['missing/unsafe external advisory pin manifest']
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+        if manifest.get('source_review_sha') != EXTERNAL_PIN_SOURCE:
+            return ['external advisory baseline identity mismatch']
+        expected = manifest.get('files')
+        if not isinstance(expected, dict) or not expected:
+            return ['invalid external advisory pin manifest']
+    except (OSError, UnicodeError, ValueError, AttributeError):
+        return ['unreadable external advisory pin manifest']
+
+    observed: dict[str, Path] = {}
+    for name in sorted(EXTERNAL_REVIEW_ONLY):
+        folder = root / '.agents' / 'skills' / name
+        if folder.is_symlink() or not folder.is_dir():
+            return ['missing/unsafe external advisory directory: ' + name]
+        for candidate in folder.rglob('*'):
+            if candidate.is_symlink():
+                return ['symlink in external advisory skill: ' + name]
+            if not candidate.is_file():
+                continue
+            relative = candidate.relative_to(root).as_posix()
+            observed[relative] = candidate
+    if set(observed) != set(expected):
+        return ['external advisory file inventory changed']
+    problems: list[str] = []
+    for relative, filename in sorted(observed.items()):
+        pin = expected.get(relative)
+        if not isinstance(pin, str) or not re.fullmatch(r'[0-9a-f]{40}', pin):
+            problems.append('invalid external advisory pin: ' + relative)
+            continue
+        try:
+            size = filename.stat().st_size
+            if size > 262144:
+                problems.append('oversized external advisory file: ' + relative)
+                continue
+            data = filename.read_bytes()
+            git_oid = hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\\0' + data).hexdigest()
+        except OSError:
+            problems.append('unreadable external advisory file: ' + relative)
+            continue
+        if git_oid != pin:
+            problems.append('external advisory blob modified: ' + relative)
+    return problems
 META = re.compile(r'\A---\nname: ([a-z][a-z0-9-]*)\ndescription: ([^\n]{35,500})\n---\n\n')
 DANGEROUS = (
     re.compile(r'\b(?:curl|wget)\b[^\n]{0,150}\|\s*(?:bash|sh)\b', re.I),
@@ -41,7 +103,8 @@ def audit(root: Path) -> list[str]:
         present = {p.name for p in folder.iterdir()}
     except OSError:
         return sorted(set(problems + ['unreadable skill registry']))
-    for unknown in sorted(present - APPROVED):
+    problems.extend(_audit_external_pins(root, present))
+    for unknown in sorted(present - APPROVED - EXTERNAL_REVIEW_ONLY):
         problems.append('unreviewed skill: ' + unknown)
     for missing in sorted(APPROVED - present):
         problems.append('missing approved skill: ' + missing)
