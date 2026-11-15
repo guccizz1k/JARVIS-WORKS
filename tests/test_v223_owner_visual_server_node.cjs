@@ -22,7 +22,7 @@ test('all 17 routes accessible on mobile with full menu',()=>{
  assert.ok(s.includes('root.querySelectorAll'));
 });
 test('owner visual maps native rail bottomnav login and cards',()=>{
- for(const c of ['.rail','.rsc','.ritem','.bottomnav','.lcard','.mega','.top','.view'])
+ for(const c of ['.rail','.rsc','.ritem','.jw-owner-bottomnav','.lcard','.mega','.top','.view'])
    assert.ok(css.includes(c),'owner style missing '+c);
  assert.ok(css.includes('@media(max-width:900px)'));
  assert.ok(css.includes('prefers-reduced-motion'));
