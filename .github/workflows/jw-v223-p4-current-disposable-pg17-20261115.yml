@@ -1,0 +1,86 @@
+name: V22.3 current exact SHA disposable PG17 independent regression
+on:
+  push:
+    branches: [review/jw-v223-p4-current-disposable-pg17-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-disposable-postgres17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5437:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: test
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5437'
+      PGUSER: postgres
+      PGPASSWORD: synthetic-ci-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact source SHA and owner original unmodified
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 94afea25210f61f0cd15fa16d8d8540e649fc17e HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          diff=set(subprocess.check_output(['git','diff','--name-only','94afea25210f61f0cd15fa16d8d8540e649fc17e','HEAD'],text=True).splitlines())
+          assert diff=={'.github/workflows/jw-v223-p4-current-disposable-pg17-20261115.yml'},diff
+          PY
+          psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}$'
+      - name: Install existing PostgreSQL engine test requirements
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Real local PG17 SQL reviewed-link and concurrent claims
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_cinema_pg_s4_reviewed_gate | tee reviewed.log
+          grep -F 'PASS: 23/23 S4 reviewed-link SQL tests; missing=0 extra=0 duplicates=0' reviewed.log
+          python -m scripts.ci_cinema_pg_s4_atomic_gate | tee atomic.log
+          python - <<'PY'
+          import json
+          a=json.load(open('jw-cinema-s4-atomic-pg17.json'))
+          assert a['overall']=='PASS',a
+          assert a['total']>=32 and a['failed']==[] and a['duplicate_names']==[],a
+          print('PASS_DISPOSABLE_PG17_S4_REVIEWED_23_ATOMIC_'+str(a['total']))
+          PY
+      - name: Real independent SQLite PG17 two-session E2E
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee dual-store.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=30 failures=0 synthetic_only=true' dual-store.log
+          python -m pytest -q -ra -p no:cacheprovider --noconftest tests/test_cinema_pg_s4_single_writer.py
+          echo 'PASS_DISPOSABLE_PG17_TWO_SESSION_30_AND_SINGLE_WRITER'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-current-pg17-disposable-evidence
+          path: |
+            jw-cinema-s4-reviewed-pg17.json
+            jw-cinema-s4-atomic-pg17.json
+          retention-days: 3
+          if-no-files-found: ignore
+      - run: echo 'Only disposable Docker PostgreSQL17 and SQLite synthetic data. No actual Supabase B2/B3 restore or release PASS.'
