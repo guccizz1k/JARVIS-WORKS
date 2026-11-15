@@ -1,0 +1,48 @@
+{
+  "schema": "JW_V223_RELEASE_EVIDENCE_V1",
+  "candidate_sha": "e18240117cc7aa16a78bbebad65d9bd6592940e6",
+  "ui_sha256": "953c1b00cead79173c0c7a9c40319344e510bec9f6a1f646f30e0a147356076d",
+  "independent_audit": {
+    "different_operator": false,
+    "reviewed_same_sha": null
+  },
+  "phases": {
+    "P1": {
+      "status": "BLOCKED",
+      "candidate_sha": "e18240117cc7aa16a78bbebad65d9bd6592940e6",
+      "synthetic": null,
+      "real_environment": false,
+      "notes": "Two encrypted vault artifacts present, but independent key custody, AES-GCM authentication, independent PG17 restore and original/restore data signature comparison still not proven."
+    },
+    "P2": {
+      "status": "PARTIAL",
+      "candidate_sha": "e18240117cc7aa16a78bbebad65d9bd6592940e6",
+      "synthetic": true,
+      "real_environment": true,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43765697555",
+      "independent_run_id": "43765697555",
+      "environment_id": "srv-dbsqnk3bc2fs73ca4np0",
+      "notes": "Actual Chromium+Linux WebKit one-click immutable trade-statement UI->Render server->readback+trace, tenant A/B, idempotence PASSED. Owner-approved 17 functional workflows and physical iPhone Safari not proven."
+    },
+    "P3": {
+      "status": "PARTIAL",
+      "candidate_sha": "e18240117cc7aa16a78bbebad65d9bd6592940e6",
+      "synthetic": true,
+      "real_environment": true,
+      "actual_external_https": true,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43765697555",
+      "independent_run_id": "43765697555",
+      "environment_id": "srv-dbsqnk3bc2fs73ca4np0",
+      "notes": "Isolated Render HTTPS free service, synthetic SQLite data. Existing Render PG17 free instance external connections blocked by empty IP allowlist (do not weaken). No production-equivalent PG17 write/readback and restore verification."
+    },
+    "P4": {
+      "status": "BLOCKED",
+      "candidate_sha": "e18240117cc7aa16a78bbebad65d9bd6592940e6",
+      "synthetic": true,
+      "real_environment": false,
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43765777204",
+      "independent_run_id": "43765777204",
+      "notes": "Latest SHA Python 3525, Node 28, disposable PG17 92 PASS; release security/backup/recovery, iOS hardware and independent operations not completed."
+    }
+  }
+}

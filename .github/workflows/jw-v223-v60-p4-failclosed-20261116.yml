@@ -1,0 +1,53 @@
+name: JARVIS-WORKS V22.3 independent release NO-GO structural gate
+on:
+  push:
+    branches:
+      - review/jw-v223-v60-p4-failclosed-20261116
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  independent-no-go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Verify no product source or owner UI modification
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor e18240117cc7aa16a78bbebad65d9bd6592940e6 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          diff=set(subprocess.check_output(['git','diff','--name-only','e18240117cc7aa16a78bbebad65d9bd6592940e6','HEAD'],text=True).splitlines())
+          assert diff=={'scripts/jw_v223_release_no_go_gate.py','tests/test_v223_p4_release_no_go_gate.py',
+          'docs/review/jw-v223-current-release-evidence-20261115.json','.github/workflows/jw-v223-v60-p4-failclosed-20261116.yml'},diff
+          PY
+      - name: Run adversarial evidence mutation tests
+        run: |
+          python -m pip install pytest --disable-pip-version-check
+          python -m pytest -q -p no:cacheprovider --noconftest tests/test_v223_p4_release_no_go_gate.py
+      - name: Assert current release is indeed BLOCKED
+        run: |
+          set +e
+          python scripts/jw_v223_release_no_go_gate.py docs/review/jw-v223-current-release-evidence-20261115.json > p4-current-evidence-verdict.json
+          code=$?
+          set -e
+          test "$code" = 1
+          python - <<'PY'
+          import json
+          d=json.load(open('p4-current-evidence-verdict.json'))
+          assert d['status']=='BLOCKED' and not d['can_release'] and d['findings']
+          print('PASS_FAIL_CLOSED_NO_GO_BLOCKERS='+str(len(d['findings'])))
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-real-no-go-evidence
+          path: p4-current-evidence-verdict.json
+          if-no-files-found: ignore
+          retention-days: 3
