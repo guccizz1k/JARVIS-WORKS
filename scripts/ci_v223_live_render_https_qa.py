@@ -109,7 +109,7 @@ def main():
         check('logout_server_'+str(i),status==200)
         status,result,h=u.request('/api/me')
         check('logout_revoked_'+str(i),status==401)
-    check('hsts_https',h.get('Strict-Transport-Security','').startswith('max-age=') or True)
+    check('hsts_https',h.get('Strict-Transport-Security','').startswith('max-age='))
     qa['timestamp_utc']=datetime.now(timezone.utc).isoformat()
     qa['counts']={'passed':len(qa['checks']),'failed':0,'skipped':0}
     qa['not_verified']=['PG17 production data','real backup restore','full 17 business API paths',
