@@ -47,7 +47,7 @@ def one(browser,engine,width,height):
             dialog.wait_for(state='visible',timeout=10000)
             check(dialog.locator('button[data-page]').count()==17,'ALL_17_REACHABLE_MOBILE_'+engine+str(width))
             dialog.locator('button[data-page="automation"]').click()
-            check(dialog.get_attribute('aria-hidden')=='true','MOBILE_MENU_CLOSED')
+            check(page.locator('#jw-owner-menu').get_attribute('aria-hidden')=='true','MOBILE_MENU_CLOSED')
             page.locator('#app .jw-review-title').wait_for(state='visible')
         nav=page.locator('#app nav.jw-review-nav')
         visited=[]
