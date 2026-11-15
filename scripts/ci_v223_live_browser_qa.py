@@ -92,6 +92,68 @@ def main():
                             r.get('title')==title and r.get('money',{}).get('total')==3960
                             for r in qr.json()),"REAL_BROWSER_QUOTE_WRITE_READBACK")
                         print("PASS_REAL_BROWSER_UI_QUOTE_CREATE_READBACK")
+
+                        current_quote=next(r for r in qr.json() if r.get('title')==title)
+                        page.on('dialog',lambda dlg:dlg.accept())
+                        page.get_by_role('button',name=current_quote['doc_no']+' · 견적 발송').click()
+                        page.get_by_role('button',name=current_quote['doc_no']+' · 견적 승인').wait_for(timeout=20000)
+                        page.get_by_role('button',name=current_quote['doc_no']+' · 견적 승인').click()
+                        for _ in range(25):
+                            status=ctx.request.get(BASE+'/api/quotes/'+current_quote['id'])
+                            if status.status==200 and status.json().get('status')=='accepted':break
+                            page.wait_for_timeout(200)
+                        else:raise AssertionError('FAIL_BROWSER_QUOTE_STATUS_ACCEPTED')
+                        print("PASS_REAL_BROWSER_UI_QUOTE_STATUS_TRANSITIONS")
+                        page.locator('button[data-page="home"]').click()
+                        of=page.locator('form.jw-review-action-form').filter(
+                            has=page.get_by_role('button',name='승인 견적에서 수주 생성',exact=True)).first
+                        of.wait_for(state="visible",timeout=20000)
+                        of.locator('select[aria-label="승인 견적"]').select_option(current_quote['id'])
+                        of.get_by_role('button',name='승인 견적에서 수주 생성').click()
+                        for _ in range(25):
+                            orr=ctx.request.get(BASE+'/api/orders')
+                            matches=[r for r in orr.json() if r.get('quote_id')==current_quote['id']] if orr.status==200 else []
+                            if matches:break
+                            page.wait_for_timeout(200)
+                        else:raise AssertionError('FAIL_BROWSER_ORDER_CREATE')
+                        order=matches[0]
+                        print("PASS_REAL_BROWSER_UI_ORDER_FROM_QUOTE_READBACK")
+                        page.get_by_role('button',name=order['doc_no']+' · 수주 처리 시작').wait_for(timeout=20000)
+                        page.get_by_role('button',name=order['doc_no']+' · 수주 처리 시작').click()
+                        page.get_by_role('button',name=order['doc_no']+' · 납품 완료').wait_for(timeout=20000)
+                        page.get_by_role('button',name=order['doc_no']+' · 납품 완료').click()
+                        invoice_form=page.locator('form.jw-review-action-form').filter(
+                            has=page.get_by_role('button',name='납품 완료 수주에서 청구서 생성',exact=True)).first
+                        invoice_form.wait_for(state="visible",timeout=20000)
+                        invoice_form.locator('select[aria-label="납품 완료 수주"]').select_option(order['id'])
+                        invoice_form.get_by_role('button',name='납품 완료 수주에서 청구서 생성').click()
+                        for _ in range(25):
+                            ir=ctx.request.get(BASE+'/api/invoices')
+                            inv=[r for r in ir.json() if r.get('order_id')==order['id']] if ir.status==200 else []
+                            if inv:break
+                            page.wait_for_timeout(200)
+                        else:raise AssertionError('FAIL_BROWSER_INVOICE_CREATE')
+                        invoice=inv[0]
+                        assert_true(invoice.get('balance')==3960,"BROWSER_INVOICE_BALANCE")
+                        print("PASS_REAL_BROWSER_UI_INVOICE_CREATE_READBACK")
+                        page.locator('button[data-page="money"]').click()
+                        pf=page.locator('form.jw-review-action-form').filter(
+                            has=page.get_by_role('button',name='청구서 입금 기록',exact=True)).first
+                        pf.wait_for(state="visible",timeout=20000)
+                        pf.locator('select[aria-label="미수 청구서"]').select_option(invoice['id'])
+                        pf.locator('input[aria-label="입금액(원)"]').fill('500')
+                        pf.locator('input[aria-label="고유 입금 요청번호"]').fill('UIQA_REF_'+uuid.uuid4().hex[:12])
+                        from datetime import datetime,timezone,timedelta
+                        today=datetime.now(timezone(timedelta(hours=9))).date().isoformat()
+                        pf.locator('input[aria-label="입금일"]').fill(today)
+                        pf.get_by_role('button',name='청구서 입금 기록').click()
+                        for _ in range(25):
+                            paid=ctx.request.get(BASE+'/api/invoices/'+invoice['id'])
+                            if paid.status==200 and paid.json().get('balance')==3460:break
+                            page.wait_for_timeout(200)
+                        else:raise AssertionError('FAIL_BROWSER_PAYMENT_READBACK')
+                        print("PASS_REAL_BROWSER_UI_PAYMENT_REAL_READBACK")
+
                         page.locator('button[data-page="partners"]').click()
                         page.locator('form.jw-review-action-form').first.wait_for(state="visible",timeout=15000)
 
