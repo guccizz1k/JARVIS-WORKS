@@ -1,0 +1,42 @@
+name: V22.3 external HTTPS synthetic quote-to-cash independent QA
+on:
+  push:
+    branches: [review/jw-v223-p3-newsha-trade-e2e-20261115]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency:
+  group: jw-v223-independent-trade-synthetic
+  cancel-in-progress: false
+jobs:
+  trade-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Prove only isolated QA source added
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 5711acaa9203341dbd190f30efd9ed7009bca4f5 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          actual=set(subprocess.check_output(['git','diff','--name-only','5711acaa9203341dbd190f30efd9ed7009bca4f5','HEAD'],text=True).splitlines())
+          expected={'scripts/ci_v223_live_trade_qa.py','.github/workflows/jw-v223-p3-newsha-trade-qa-20261115.yml'}
+          assert actual==expected,(actual,expected)
+          PY
+          python -m py_compile scripts/ci_v223_live_trade_qa.py
+      - name: Real HTTPS synthetic quote-to-cash multi-tenant E2E
+        run: python scripts/ci_v223_live_trade_qa.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-live-trade-e2e
+          path: jw-v223-real-trade-qa.json
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Safety scope
+        run: echo "Real HTTPS synthetic SQLite isolation only; NO live PG17 B2/B3 or P4 production release proof."
