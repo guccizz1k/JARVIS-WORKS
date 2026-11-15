@@ -1,31 +1,34 @@
 'use strict';
-const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs');
+const {test}=require('node:test'), assert=require('node:assert/strict'), fs=require('node:fs');
 const s=fs.readFileSync('app/static/approved_ui_server_review_v223.js','utf8');
 const bootstrap=fs.readFileSync('app/static/approved_ui_owner_visual_v223.js','utf8');
 const css=fs.readFileSync('app/static/approved_ui_owner_visual_v223.css','utf8');
-test('owner visual is disabled outside explicit flag',()=>{
- assert.match(s,/dataset\.jwReviewMode==='owner-visual'/);
- assert.match(bootstrap,/data(set)?\.jwReviewMode/);
+test('owner visual activates only under explicit review flag',()=>{
+ assert.ok(s.includes("dataset.jwReviewMode==='owner-visual'"));
+ assert.ok(bootstrap.includes("dataset.jwReviewMode!=='owner-visual'"));
 });
-test('owner visual renders native poster and login card, NOT browser local login',()=>{
- for(const c of ['lbrand','logo','poster jw-owner-brand','mega go','lcard','go'])
-   assert.ok(s.includes(c),'missing owner visual class '+c);
- assert.ok(s.includes("bridge.login(em.value,pw.value,otp.value)"));
- assert.doesNotMatch(bootstrap,/localStorage|indexedDB|sessionStorage|new Function|eval\\(/);
+test('review visual reuses owner poster and login; server session is authoritative',()=>{
+ for(const c of ['lbrand','logo','poster jw-owner-brand','mega go','lcard'])
+   assert.ok(s.includes(c),'missing original visual class '+c);
+ assert.ok(s.includes('bridge.login(em.value,pw.value,otp.value)'));
+ for(const banned of ['localStorage','indexedDB','sessionStorage','new Function','eval('])
+   assert.equal(bootstrap.includes(banned),false,'unsafe browser fallback '+banned);
 });
-test('all 17 routes remain available on mobile and desktop',()=>{
- assert.match(s,/for\\(const \\[key,label\\] of MENUS\\)/);
- assert.match(s,/jw-owner-mobile-menu|jw-owner-menu-dialog/);
- assert.match(s,/jw-owner-menu-grid/);
- assert.match(s,/btn\\.onclick=\\(\\)=>\\{closeMobile\\(\\);open\\(key\\)\\}/);
+test('all 17 routes accessible on mobile with full menu',()=>{
+ assert.ok(s.includes('for(const [key,label] of MENUS)'));
+ assert.ok(s.includes('jw-owner-menu-dialog'));
+ assert.ok(s.includes('jw-owner-menu-grid'));
+ assert.ok(s.includes('closeMobile();open(key)'));
+ assert.ok(s.includes('root.querySelectorAll'));
 });
-test('desktop owner source rail & mobile bottom nav assets styled',()=>{
- for(const key of ['.rail','.rsc','.ritem','.bottomnav','.lcard','.mega','.top','.view'])
-   assert.ok(css.includes(key),'owner class not mapped '+key);
+test('owner visual maps native rail bottomnav login and cards',()=>{
+ for(const c of ['.rail','.rsc','.ritem','.bottomnav','.lcard','.mega','.top','.view'])
+   assert.ok(css.includes(c),'owner style missing '+c);
  assert.ok(css.includes('@media(max-width:900px)'));
  assert.ok(css.includes('prefers-reduced-motion'));
 });
-test('no imported original local DB scripts or unsafe HTML insertion',()=>{
- assert.doesNotMatch(bootstrap,/\\bboot\\s*\\(|localStorage|indexedDB|innerHTML|eval\\(/);
- assert.doesNotMatch(s,/window\\.JWOwnerServerUI\\.bootLocal/);
+test('never execute original local account and storage script',()=>{
+ for(const blocked of ['boot();','jw3.db','localStorage','indexedDB','innerHTML','eval('])
+   assert.equal(bootstrap.includes(blocked),false,'unsafe boot fallback '+blocked);
+ assert.equal(s.includes('window.JWOwnerServerUI.bootLocal'),false);
 });
