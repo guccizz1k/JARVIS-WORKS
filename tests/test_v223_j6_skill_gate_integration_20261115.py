@@ -28,3 +28,40 @@ def test_project_gate_invokes_registered_skill_audit(monkeypatch):
 def test_current_skill_registry_is_auditable_without_network():
     root = Path(__file__).resolve().parents[1]
     assert skills.audit(root) == [], "J6 registry and external advisory pins are not aligned"
+
+
+def _isolated_skill_tree(tmp_path):
+    """Copy read-only sample metadata to a disposable scratch directory."""
+    import shutil
+    repo = Path(__file__).resolve().parents[1]
+    for file in ("AGENTS.md", "docs/agents/J6_EVIDENCE_GATED_ENGINEERING.md",
+                 "scripts/jw_v223_external_skill_pins.json"):
+        target = tmp_path / file
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repo / file, target)
+    names = skills.APPROVED | skills.EXTERNAL_REVIEW_ONLY
+    for name in names:
+        shutil.copytree(repo / ".agents/skills" / name,
+                        tmp_path / ".agents/skills" / name)
+    return tmp_path
+
+
+def test_external_advisory_byte_tamper_is_detected(tmp_path):
+    root = _isolated_skill_tree(tmp_path)
+    file = root / ".agents/skills/ponytail/SKILL.md"
+    file.write_bytes(file.read_bytes() + b"\\n# synthetic tamper\\n")
+    assert any("external advisory blob modified" in issue for issue in skills.audit(root))
+
+
+def test_external_advisory_unreviewed_file_is_detected(tmp_path):
+    root = _isolated_skill_tree(tmp_path)
+    (root / ".agents/skills/change-impact/unreviewed-install.sh").write_text("echo unreviewed")
+    assert "external advisory file inventory changed" in skills.audit(root)
+
+
+def test_external_advisory_symlink_is_detected(tmp_path):
+    root = _isolated_skill_tree(tmp_path)
+    f = root / ".agents/skills/ponytail/SKILL.md"
+    f.unlink()
+    f.symlink_to(root / "AGENTS.md")
+    assert any("symlink in external advisory skill" in issue for issue in skills.audit(root))
