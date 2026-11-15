@@ -45,7 +45,7 @@ class Client:
             raw=res.read(MAX_RESPONSE+1)
             if len(raw)>MAX_RESPONSE:raise RuntimeError('OVERSIZED_RESPONSE')
             status=res.status
-            response_headers=dict(res.headers.items())
+            response_headers={k.lower():v for k,v in res.headers.items()}
         if path.startswith('/api/'):
             try: obj=json.loads(raw)
             except ValueError: raise RuntimeError('NON_JSON_API_RESPONSE')
@@ -75,9 +75,9 @@ def main():
     qa['verified_real_https']=True  # Python default system TLS verification was enabled.
     status,body,h=probe.request('/')
     check('preview_html_200',status==200 and 'JWOwnerServerUI.start()' in body and '/static/approved_ui_server_review_v223.js' in body and '#d4ff3a' in body)
-    csp=h.get('Content-Security-Policy','')
+    csp=h.get('content-security-policy','')
     check('strict_inline_script_hash_csp',"'sha256-" in csp and "object-src 'none'" in csp and "frame-ancestors 'none'" in csp)
-    check('no_store_root',h.get('Cache-Control')=='no-store')
+    check('no_store_root',h.get('cache-control')=='no-store')
     status,data,h=probe.request('/api/me')
     check('unauthenticated_me_401',status==401)
     clients=[]
@@ -109,7 +109,7 @@ def main():
         check('logout_server_'+str(i),status==200)
         status,result,h=u.request('/api/me')
         check('logout_revoked_'+str(i),status==401)
-    check('hsts_https',h.get('Strict-Transport-Security','').startswith('max-age='))
+    check('hsts_https',h.get('strict-transport-security','').startswith('max-age='))
     qa['timestamp_utc']=datetime.now(timezone.utc).isoformat()
     qa['counts']={'passed':len(qa['checks']),'failed':0,'skipped':0}
     qa['not_verified']=['PG17 production data','real backup restore','full 17 business API paths',
