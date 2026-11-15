@@ -60,12 +60,12 @@ def run_browser(engine,viewport):
         check('기업별 실제 서버 현황' in card.inner_text(),'STATS_LIVE_RENDER')
         check('미수금' in page.locator('main.jw-review-main').inner_text(),'STATS_REAL_MONEY')
         check(not page.evaluate('document.documentElement.scrollWidth > window.innerWidth + 2'),'HORIZONTAL_OVERFLOW')
-        image=ROOT/(f'operational-{engine.name}-{ww}.png')
+        image=ROOT/(f'operational-{engine.browser_type.name}-{ww}.png')
         page.screenshot(path=str(image),full_page=True)
         page.locator('.jw-review-logout').click()
         page.locator('input[aria-label="이메일"]').wait_for(state='visible',timeout=20000)
         check(not exceptions,'JS_EXCEPTION_LOGOUT')
-        return {'engine':engine.name,'width':ww,'routes':len(ROUTES),'live_panels':panel_counts,'js_exceptions':0,'horizontal_overflow':False,'image':str(image)}
+        return {'engine':engine.browser_type.name,'width':ww,'routes':len(ROUTES),'live_panels':panel_counts,'js_exceptions':0,'horizontal_overflow':False,'image':str(image)}
     finally:ctx.close()
 def main():
     entries=[]
