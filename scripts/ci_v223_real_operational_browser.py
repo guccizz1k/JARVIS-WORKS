@@ -51,14 +51,14 @@ def run_browser(engine,viewport):
                 box.wait_for(state='visible',timeout=25000)
                 text=box.inner_text(timeout=12000)
                 check(bool(text.strip()),'EMPTY_PANEL_'+route)
-                check('조회 차단' not in page.locator('main').inner_text(),'SERVER_READ_DENIED_'+route)
+                check('조회 차단' not in page.locator('main.jw-review-main').inner_text(),'SERVER_READ_DENIED_'+route)
                 panel_counts+=1
             check(not exceptions,'JS_EXCEPTION_'+route)
         nav.locator('button[data-page="stats"]').click()
         card=page.locator('.jw-review-card').first
         card.wait_for(state='visible',timeout=15000)
         check('기업별 실제 서버 현황' in card.inner_text(),'STATS_LIVE_RENDER')
-        check('미수금' in page.locator('main').inner_text(),'STATS_REAL_MONEY')
+        check('미수금' in page.locator('main.jw-review-main').inner_text(),'STATS_REAL_MONEY')
         check(not page.evaluate('document.documentElement.scrollWidth > window.innerWidth + 2'),'HORIZONTAL_OVERFLOW')
         image=ROOT/(f'operational-{engine.name}-{ww}.png')
         page.screenshot(path=str(image),full_page=True)
