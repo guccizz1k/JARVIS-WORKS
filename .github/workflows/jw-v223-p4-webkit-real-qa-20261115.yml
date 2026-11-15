@@ -1,0 +1,57 @@
+name: V22.3 actual Render WebKit mobile browser independent QA
+on:
+  push:
+    branches: [review/jw-v223-p4-webkit-engine-qa-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  webkit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pin active exact staging SHA and approved original UI
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 94afea25210f61f0cd15fa16d8d8540e649fc17e HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          observed=set(subprocess.check_output(['git','diff','--name-only','94afea25210f61f0cd15fa16d8d8540e649fc17e','HEAD'],text=True).splitlines())
+          assert observed=={'.github/workflows/jw-v223-p4-webkit-real-qa-20261115.yml'},observed
+          print('PASS_WEBKIT_QA_ONLY_NO_OWNER_UI_OR_DB_MUTATION')
+          PY
+      - name: Install Playwright WebKit and Linux platform dependencies
+        run: |
+          python -m pip install --disable-pip-version-check 'playwright==1.58.0'
+          python -m playwright install --with-deps webkit
+      - name: Reuse independently proven real-browser trade user flow with WebKit
+        run: |
+          set -euo pipefail
+          git show 2d6a7906eb1609ec38e5c31bba798bcfb253968b:scripts/ci_v223_live_browser_qa.py > /tmp/jw-webkit-qa.py
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/jw-webkit-qa.py')
+          s=p.read_text()
+          old='playwright.chromium.launch(headless=True, args=["--no-sandbox"])'
+          assert old in s
+          p.write_text(s.replace(old,'playwright.webkit.launch(headless=True)'))
+          print('PASS_WEBKIT_TEST_ENGINE_SELECTED_SAME_E2E_ASSERTIONS')
+          PY
+          python /tmp/jw-webkit-qa.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-real-render-webkit-screens
+          path: artifacts/real-browser/
+          retention-days: 3
+          if-no-files-found: ignore
+      - run: echo 'Linux WebKit browser engine only. This does not substitute iOS Safari hardware testing or release approval.'
