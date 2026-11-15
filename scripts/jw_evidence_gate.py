@@ -107,7 +107,11 @@ def verify_project(root: Path) -> list[str]:
     # Preserve main's J6 registry gate after V22.3 integration.
     # Advisory skill documents are only inspected, never executed.
     if not issues:
-        from scripts.jw_skill_contract import audit
+        # Both documented direct-script CLI and module imports must run the gate.
+        if __package__:
+            from scripts.jw_skill_contract import audit
+        else:
+            from jw_skill_contract import audit
         issues.extend(audit(root))
     return issues
 
