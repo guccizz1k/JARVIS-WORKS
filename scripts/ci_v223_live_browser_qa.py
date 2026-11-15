@@ -59,6 +59,20 @@ def main():
                     # Real tenant-bound API view must reflect server-sourced customer data.
                     nav.locator('button[data-page="partners"]').click()
                     page.locator(".jw-review-row").first.wait_for(timeout=15000)
+                    if width==390:
+                        import uuid
+                        partner_name="UIQA_BROWSER_"+uuid.uuid4().hex[:12]
+                        f=page.locator('form.jw-review-action-form').filter(
+                            has=page.get_by_role('button',name='거래처 서버 등록',exact=True)).first
+                        f.wait_for(state="visible",timeout=15000)
+                        f.locator('input[aria-label="거래처명"]').fill(partner_name)
+                        f.get_by_role('button',name='거래처 서버 등록').click()
+                        page.get_by_text(partner_name,exact=True).wait_for(timeout=20000)
+                        live=ctx.request.get(BASE+'/api/customers')
+                        assert_true(live.status==200 and any(
+                            row.get('name')==partner_name for row in live.json()),
+                            "REAL_BROWSER_PARTNER_WRITE_READBACK")
+                        print("PASS_REAL_BROWSER_UI_CUSTOMER_CREATE_READBACK")
                     heading=page.locator("h2.jw-review-title").inner_text()
                     assert_true("거래처" in heading,"PARTNERS_CONTENT_"+str(width))
                     overflow=page.evaluate("document.documentElement.scrollWidth > window.innerWidth + 2")
