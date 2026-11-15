@@ -1,0 +1,54 @@
+name: V22.3 approved UI server-only isolated preview QA
+on:
+  push:
+    branches:
+      - review/jw-v223-approved-ui-server-mode-20261115
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-policy-and-node:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, fetch-depth: 0}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Exact provenance, restricted overlay
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor b58c7d5d62f2c1fd5cd23999c7b648be1ca031c2 HEAD
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          python - <<'PY'
+          import subprocess
+          expected={'app/cinema_entry_v1.py','app/static/approved_v223_secure_review.html',
+          'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js',
+          'app/static/approved_ui_server_review_v223.css','tests/test_v223_approved_review_server.py',
+          'tests/test_v223_approved_review_node.cjs','.github/workflows/jw-v223-approved-review-server-mode-20261115.yml'}
+          changed=set(subprocess.check_output(['git','diff','--name-only','b58c7d5d62f2c1fd5cd23999c7b648be1ca031c2','HEAD'],text=True).splitlines())
+          assert changed==expected,(changed,expected)
+          print('PASS_REVIEW_ONLY_ORIGINAL_AND_PROTECTED_APP_MAIN_UNCHANGED')
+          PY
+      - name: JavaScript policy, syntax, isolated session/tenant tests
+        run: |
+          set -euo pipefail
+          node --check app/static/approved_ui_server_bridge_v223.js
+          node --check app/static/approved_ui_server_review_v223.js
+          python - <<'PY'
+          from pathlib import Path
+          h=Path('app/static/approved_v223_secure_review.html').read_text('utf8')
+          assert h.count('<script>')==1
+          Path('/tmp/jw-preview-original.js').write_text(h.split('<script>',1)[1].split('</script>',1)[0],'utf8')
+          PY
+          node --check /tmp/jw-preview-original.js
+          node --test tests/test_v223_approved_review_node.cjs
+      - name: Read-only FastAPI entry policy (no customer DB or secrets)
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pytest -q -ra -p no:cacheprovider --noconftest tests/test_v223_approved_review_server.py tests/test_v223_owner_approved_ui_pin.py
+      - run: echo 'SCOPE ONLY. No live Render, Supabase restore, Safari device, 17 complete business workflows, or release PASS.'

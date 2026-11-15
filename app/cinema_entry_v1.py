@@ -24,7 +24,13 @@ ROOT_UI_ENV = 'JW_ROOT_UI'
 
 def root_ui_mode():
     """Return 'v222' only for an explicit opt-in; anything else is CINEMA (fail closed)."""
-    return 'v222' if os.environ.get(ROOT_UI_ENV, '').strip().lower() == 'v222' else 'cinema'
+    selected = os.environ.get(ROOT_UI_ENV, '').strip().lower()
+    if selected == 'v222':
+        return 'v222'
+    if (selected == 'owner-review' and os.environ.get('JW_ENV', '').lower() in ('review', 'test')
+            and os.environ.get('JW_APPROVED_UI_REVIEW', '') == 'ISOLATED_REVIEW_ONLY'):
+        return 'owner-review'
+    return 'cinema'
 
 
 def v222_main_response():
@@ -36,7 +42,27 @@ def v222_main_response():
     return HTMLResponse(html, headers={'Cache-Control': 'no-store'})
 
 
+def _owner_review_response():
+    """HTTPS review-only; CSP hashes the exact approved inline JS, no unsafe script execution."""
+    original = (ROOT / 'static' / 'approved_v223_secure_review.html').read_text('utf8')
+    match = re.search(r'<script>(.*?)</script>', original, re.S)
+    if not match or original.count('<script>') != 1:
+        raise RuntimeError('Approved review source layout invalid')
+    digest = base64.b64encode(hashlib.sha256(match.group(1).encode('utf8')).digest()).decode('ascii')
+    policy = ("default-src 'self'; script-src 'self' 'sha256-" + digest + "'; "
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+              "font-src 'self' https://fonts.gstatic.com; "
+              "img-src 'self' data:; connect-src 'self'; form-action 'self'; "
+              "frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+    return HTMLResponse(original, headers={
+        'Cache-Control': 'no-store', 'Content-Security-Policy': policy,
+        'X-JW-Cinema-Main': '1',
+    })
+
+
 def cinema_main_response():
+    if root_ui_mode() == 'owner-review':
+        return _owner_review_response()
     if root_ui_mode() == 'v222':
         return v222_main_response()
     original =(ROOT / 'static' / 'cinema' / 'JARVIS_WORKS_CINEMA.html').read_text(encoding='utf-8')
