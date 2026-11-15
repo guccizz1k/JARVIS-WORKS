@@ -1,0 +1,36 @@
+{
+  "schema": "JW_V223_RELEASE_EVIDENCE_V1",
+  "candidate_sha": "cdcdc857e173f572fb1815f657cbc5d9b117bbd4",
+  "ui_sha256": "953c1b00cead79173c0c7a9c40319344e510bec9f6a1f646f30e0a147356076d",
+  "independent_audit": {
+    "different_operator": false,
+    "reviewed_same_sha": null
+  },
+  "phases": {
+    "P1": {
+      "status": "BLOCKED",
+      "synthetic": null,
+      "notes": "Vault has 2 ciphertext blobs; key custody and independent PG17 restore not proven"
+    },
+    "P2": {
+      "status": "PARTIAL",
+      "synthetic": true,
+      "notes": "Approved immutable UI + review-only read-only API shell; 17 full workflows and Safari not proven"
+    },
+    "P3": {
+      "status": "PARTIAL",
+      "synthetic": true,
+      "real_environment": true,
+      "actual_external_https": true,
+      "independent_run_id": "43716891456",
+      "candidate_sha": "cdcdc857e173f572fb1815f657cbc5d9b117bbd4",
+      "evidence_url": "https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43716891456",
+      "environment_id": "srv-dbsqnk3bc2fs73ca4np0",
+      "notes": "24 actual HTTPS checks synthetic two orgs; no PG17 business migration"
+    },
+    "P4": {
+      "status": "BLOCKED",
+      "notes": "P1/P2/P3 incomplete; no signed independent release audit"
+    }
+  }
+}
