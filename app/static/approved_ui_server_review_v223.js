@@ -96,8 +96,10 @@ function start(){
                     try{
                       const done=await bridge.finishTiming(active.id);
                       if(token!==epoch)return;
-                      timerState.textContent='수작업 서버 측정 완료 · '+done.elapsed_ms+'ms (사용자 완료 확인)';
                       await renderTimer();
+                      if(token!==epoch)return;
+                      timerState.textContent='수작업 서버 측정 완료 · '+done.elapsed_ms+'ms (사용자 완료 확인)';
+                      timerState.setAttribute('role','status');
                     }catch(e){if(token===epoch){timerState.textContent=msg(e);timerState.setAttribute('role','alert')}}
                     finally{measuring=false;finish.disabled=false}
                   });
