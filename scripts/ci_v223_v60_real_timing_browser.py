@@ -84,6 +84,19 @@ def main():
     who=a.login('demo@hanbit.example')
     other=b.login('demo@bada.example')
     check(who['org_id']!=other['org_id'],'DISTINCT_DEMO_TENANTS')
+    # Review-only synthetic user may retain a RUNNING task after interrupted QA.
+    # Never delete completed evidence; cancel only an active task through the
+    # authenticated server endpoint, which excludes it from measured statistics.
+    status,stale=a.call('/api/automation/timing/active')
+    check(status==200,'READ_ACTIVE_SYNTHETIC_TIMER_BEFORE_RUN')
+    if stale is not None:
+        check(stale.get('workflow')=='trade_statement' and
+              stale.get('mode') in ('manual','automated') and
+              len(stale.get('id',''))==32,'ONLY_REVIEW_SYNTHETIC_TIMER_CAN_BE_CLEARED')
+        status,discard=a.call('/api/automation/timing/'+stale['id']+'/cancel','POST')
+        check(status==200 and discard.get('excluded_from_metrics') is True,
+              'RECOVER_INTERRUPTED_SYNTHETIC_RUN_EXCLUDED')
+        print('QA_RECOVERED_INTERRUPTED_SYNTHETIC_TIMER_EXCLUDED',flush=True)
     order,qid,org=seed_fulfilled_order(a)
     check(org==who['org_id'],'SOURCE_CUSTOMER_TENANT')
     # A foreign company cannot generate a statement for A's order.
