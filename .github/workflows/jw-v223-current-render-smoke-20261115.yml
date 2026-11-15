@@ -1,0 +1,97 @@
+name: V22.3 exact-deploy real Render regression
+on:
+  push:
+    branches: [review/jw-v223-current-render-smoke-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prove source SHA, owner UI immutable, no DB or app mutations
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 94afea25210f61f0cd15fa16d8d8540e649fc17e HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          changed=set(subprocess.check_output(["git","diff","--name-only","94afea25210f61f0cd15fa16d8d8540e649fc17e","HEAD"],text=True).splitlines())
+          assert changed=={".github/workflows/jw-v223-current-render-smoke-20261115.yml"},changed
+          print("PASS_SOURCE_PIN_EXACT_CURRENT_DEPLOY")
+          PY
+  https:
+    needs: source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reuse proven external HTTPS QA against current approved review SHA
+        run: |
+          set -euo pipefail
+          git show c1e08f6718867cf522e50596971c33761e583796:scripts/ci_v223_live_render_https_qa.py > /tmp/qa_https.py
+          sed -i s/cdcdc857e173f572fb1815f657cbc5d9b117bbd4/94afea25210f61f0cd15fa16d8d8540e649fc17e/g /tmp/qa_https.py
+          python /tmp/qa_https.py
+  trade:
+    needs: https
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reuse proven quote-to-cash and cross-tenant synthetic HTTPS E2E
+        run: |
+          set -euo pipefail
+          git show d399783fa3fbe7c9eb42311aed3f5a5352ed2525:scripts/ci_v223_live_trade_qa.py > /tmp/qa_trade.py
+          sed -i s/cdcdc857e173f572fb1815f657cbc5d9b117bbd4/94afea25210f61f0cd15fa16d8d8540e649fc17e/g /tmp/qa_trade.py
+          python /tmp/qa_trade.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-current-sha-live-trade-evidence
+          path: jw-v223-real-trade-qa.json
+          retention-days: 3
+          if-no-files-found: ignore
+  browser:
+    needs: trade
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install headless Chromium for real deployed page
+        run: |
+          python -m pip install --disable-pip-version-check 'playwright==1.58.0'
+          python -m playwright install --with-deps chromium
+      - name: Real Render browser 17 routes at 1440/390/320px
+        run: |
+          set -euo pipefail
+          git show 75f60bd89df5ea1cbca08019516579e5c1ae8841:scripts/ci_v223_live_browser_qa.py > /tmp/qa_browser.py
+          python /tmp/qa_browser.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-current-sha-live-render-browser
+          path: artifacts/real-browser/
+          retention-days: 3
+          if-no-files-found: ignore
+      - run: echo "Real HTTPS synthetic SQLite only, not production PG17 backup restore or P4 release authorization."
