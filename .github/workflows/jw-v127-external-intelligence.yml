@@ -1,0 +1,60 @@
+name: JW V12.7 Fabric Gitingest offline integration
+
+on:
+  push:
+    branches:
+      - review/v127-jteam-fabric-gitingest-20261026
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-v127-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-first:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      JW_ENV: review
+      JTEAM_PAID_API_APPROVED: "NO"
+      JTEAM_PROVIDER_BUDGET_ENFORCED: "NO"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Checkout isolated review branch without credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install development and PINNED optional pilot only
+        run: python -m pip install -r requirements-dev.txt -r requirements-jteam-external-pilot.txt
+      - name: Compile integration and runner source
+        run: python -m compileall -q scripts/jw_jteam_external_sources.py scripts/jw_jteam_openai_runner.py
+      - name: J team and J1-J6 config structural gate
+        run: |
+          python scripts/jw_agent_team_gate.py --root .
+          python scripts/jw_jteam_external_sources.py --check | tee fabric-preflight.json
+      - name: Exercise role and safety negative tests plus REAL Gitingest on synthetic fixture
+        run: python -m pytest -q tests/test_jw_jteam_external_sources.py tests/test_jw_jteam_gitingest_pilot.py tests/test_jw_jteam_tool_routing.py tests/test_jw_jteam_openai_runner.py --junitxml=jteam-external-unit.xml
+      - name: Extract safe synthetic repository with pinned Gitingest
+        run: python scripts/jw_jteam_external_sources.py --demo-local | tee gitingest-synthetic-ab.json
+      - name: Broader JW offline regression suite
+        run: python -m pytest -q tests/test_jw_*.py --junitxml=jteam-broader-regression.xml
+      - name: Preserve test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jteam-v127-synthetic-pilot-evidence
+          path: |
+            fabric-preflight.json
+            gitingest-synthetic-ab.json
+            jteam-external-unit.xml
+            jteam-broader-regression.xml
+          if-no-files-found: ignore
+          retention-days: 3

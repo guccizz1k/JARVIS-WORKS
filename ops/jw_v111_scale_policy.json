@@ -1,0 +1,33 @@
+{
+  "version": "JW-V11.1-review-only",
+  "deployment_authorized": false,
+  "infrastructure_actions_automatic": false,
+  "registered_account_design_target": 100000,
+  "account_policy": "one_primary_account_per_company_unchanged",
+  "unmeasured_capacity_proven": false,
+  "github_actions_monthly_overage_usd_ceiling": 5,
+  "render_monthly_cost_ceiling_usd": null,
+  "manual_scale_max_instances_preapproval": 1,
+  "scale_cap_after_approved_budget": 3,
+  "min_business_staging_samples": 1000,
+  "candidate_p95_ms": 500,
+  "candidate_http_error_ratio_max": 0.005,
+  "candidate_worker_pending_queue_max": 100,
+  "db_reserved_connections": 20,
+  "no_business_customer_data_before_release": true,
+  "requires_db_role_separation_and_forced_rls": true,
+  "requires_real_backup_restore": true,
+  "requires_interinstance_ws_test": true,
+  "requires_cold_restarts_replay_and_idempotency": true,
+  "requires_independent_acceptance": true,
+  "rollout": "review->isolated_2instance_test->signed_owner_approval->canary->measured_scale",
+  "roll_back_on": [
+    "tenant_isolation_violation",
+    "money_integrity_violation",
+    "session_cross_instance_failure",
+    "queue_duplicate_commit",
+    "p95_slo_failure",
+    "recoverability_failure"
+  ],
+  "status": "BLOCKED"
+}

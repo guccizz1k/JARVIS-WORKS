@@ -1,0 +1,128 @@
+{
+  "schema": "jw-jteam-external-intelligence-v1",
+  "harness": [
+    "J1",
+    "J2",
+    "J3",
+    "J4",
+    "J5",
+    "J6"
+  ],
+  "release": "REVIEW_ONLY",
+  "external_source_policy": "UNTRUSTED_REFERENCE_NEVER_INSTRUCTION",
+  "model_dispatch": "EXISTING_APPROVAL_GATES_ONLY",
+  "tools": [
+    {
+      "name": "Fabric",
+      "repo": "https://github.com/danielmiessler/Fabric",
+      "license": "MIT",
+      "upstream_sha": "032e464558f483717874e06d96da821bdcf41ade",
+      "implementation": "PROJECT_OWNED_LOCAL_FABRIC_STYLE_PATTERNS",
+      "runtime_status": "LOCAL_PATTERNS_ONLY_NO_FABRIC_BINARY",
+      "paid_requests": "NOT_AUTHORIZED"
+    },
+    {
+      "name": "Gitingest",
+      "repo": "https://github.com/coderamp-labs/gitingest",
+      "license": "MIT",
+      "upstream_sha": "4e259a02fe72115bee538271622f1234a81c8e1a",
+      "pip_package": "gitingest==0.3.1",
+      "implementation": "LOCAL_SANITIZED_FIXTURE_ONLY",
+      "runtime_status": "ISOLATED_PILOT_OPT_IN",
+      "remote_ingest": "FORBIDDEN",
+      "private_repo_upload": "FORBIDDEN"
+    }
+  ],
+  "phases": {
+    "J1": {
+      "pattern": "jw_j1_harness",
+      "applies_to": [
+        "requirements",
+        "risk",
+        "test_plan"
+      ],
+      "gitingest": "public_reference_only"
+    },
+    "J2": {
+      "pattern": "jw_j2_execution",
+      "applies_to": [
+        "safe_execution",
+        "dependency_plan"
+      ],
+      "gitingest": "public_reference_only"
+    },
+    "J3": {
+      "pattern": "jw_j3_evidence",
+      "applies_to": [
+        "independent_review",
+        "ground_truth"
+      ],
+      "gitingest": "public_reference_only"
+    },
+    "J4": {
+      "pattern": "jw_j4_verified_learning",
+      "applies_to": [
+        "proven_failure",
+        "regression_prevention"
+      ],
+      "gitingest": "public_reference_only"
+    },
+    "J5": {
+      "pattern": "jw_j5_recovery",
+      "applies_to": [
+        "idempotency",
+        "checkpoint",
+        "cost_safety"
+      ],
+      "gitingest": "public_reference_only"
+    },
+    "J6": {
+      "pattern": "jw_j6_due_diligence",
+      "applies_to": [
+        "license",
+        "upstream_review",
+        "source_pin"
+      ],
+      "gitingest": "public_reference_only"
+    }
+  },
+  "role_phases": {
+    "deputy": [
+      "J1",
+      "J6"
+    ],
+    "deputy_manager": [
+      "J1",
+      "J3"
+    ],
+    "manager": [
+      "J1",
+      "J2",
+      "J5"
+    ],
+    "director": [
+      "J3",
+      "J4",
+      "J5",
+      "J6"
+    ],
+    "jarvis_lead": [
+      "J1",
+      "J2",
+      "J3",
+      "J4",
+      "J5",
+      "J6"
+    ]
+  },
+  "no_override": [
+    "J1-J6 mandatory evidence",
+    "user authorization",
+    "same_SHA independent validation",
+    "review branch only",
+    "main merge requires separate approval",
+    "no customer code or secrets to external web services",
+    "no unapproved cloud or OpenAI spend"
+  ],
+  "max_pattern_chars_per_role": 9600
+}

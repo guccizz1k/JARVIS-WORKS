@@ -1,0 +1,32 @@
+name: JW V11.6 learning four-gate isolated audit
+on:
+  push:
+    branches:
+      - review/v116-learning-four-gate-audit-20261026
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  learning-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile isolated gate
+        run: python -m py_compile scripts/jw_learning_four_gate.py tests/test_jw_learning_four_gate.py
+      - name: Verify four-gate fail-closed behavior
+        run: python -m unittest tests.test_jw_learning_four_gate -v
+      - name: Confirm missing evidence cannot pass
+        run: |
+          printf '{}' > "$RUNNER_TEMP/jw-learning-empty-evidence.json"
+          set +e
+          python scripts/jw_learning_four_gate.py --evidence "$RUNNER_TEMP/jw-learning-empty-evidence.json" > "$RUNNER_TEMP/jw-learning-report.json"
+          code=$?
+          set -e
+          test "$code" -eq 2
+          python -c "import json,sys; x=json.load(open(sys.argv[1])); assert not x['all_pass'] and not x['production_allowed'] and not x['main_merge_allowed'] and all(g['status']=='BLOCKED' for g in x['gates'].values())" "$RUNNER_TEMP/jw-learning-report.json"
