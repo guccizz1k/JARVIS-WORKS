@@ -1,0 +1,63 @@
+name: V22.3 current deployed SHA independent release NO-GO verification
+on:
+  push:
+    branches: [review/jw-v223-p4-current-release-gate-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  independent-verdict:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify the exact currently staged candidate and original owner UI
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 94afea25210f61f0cd15fa16d8d8540e649fc17e HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          allowed={'.github/workflows/jw-v223-p4-current-release-no-go-20261115.yml'}
+          observed=set(subprocess.check_output(['git','diff','--name-only','94afea25210f61f0cd15fa16d8d8540e649fc17e','HEAD'],text=True).splitlines())
+          assert observed==allowed,(observed,allowed)
+          print('PASS_CURRENT_RELEASE_CANDIDATE_AND_OWNER_UI_PINNED')
+          PY
+      - name: Load previous audited gate into disposable CI worktree and point it at current SHA
+        run: |
+          set -euo pipefail
+          git show c34bbe7e73a8b5d1eefc4f5dd43bdd39fcf0dbbd:scripts/jw_v223_release_no_go_gate.py > scripts/jw_v223_release_no_go_gate.py
+          git show c34bbe7e73a8b5d1eefc4f5dd43bdd39fcf0dbbd:tests/test_v223_p4_release_no_go_gate.py > tests/test_v223_p4_release_no_go_gate.py
+          git show c34bbe7e73a8b5d1eefc4f5dd43bdd39fcf0dbbd:docs/review/jw-v223-current-release-evidence-20261115.json > docs/review/jw-v223-current-release-evidence-20261115.json
+          sed -i s/cdcdc857e173f572fb1815f657cbc5d9b117bbd4/94afea25210f61f0cd15fa16d8d8540e649fc17e/g scripts/jw_v223_release_no_go_gate.py docs/review/jw-v223-current-release-evidence-20261115.json
+          python -m pip install -q --disable-pip-version-check pytest
+          python -m pytest -q -p no:cacheprovider --noconftest tests/test_v223_p4_release_no_go_gate.py
+      - name: Assert actual release remains blocked rather than accepting synthetic proof
+        run: |
+          set +e
+          python scripts/jw_v223_release_no_go_gate.py docs/review/jw-v223-current-release-evidence-20261115.json > current-release-no-go.json
+          status=$?
+          set -e
+          test "$status" = 1
+          python - <<'PY'
+          import json
+          verdict=json.load(open('current-release-no-go.json'))
+          assert verdict['status']=='BLOCKED'
+          assert verdict['can_release'] is False
+          assert verdict['findings']
+          print('PASS_NO_GO_ENFORCED_ISSUES='+str(len(verdict['findings'])))
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-current-sha-independent-no-go-evidence
+          path: current-release-no-go.json
+          retention-days: 3
+          if-no-files-found: ignore
