@@ -1,0 +1,64 @@
+name: V22.3 owner-approved CSS actual Chromium WebKit server login E2E
+on:
+  push:
+    branches: [review/jw-v223-owner-gl-real-browser-20261116]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  owner-visual-real-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false,fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Pin owner original, server backend and exact QA-only diff
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor d91ebf00c63012a78845d094afbd15be0deefd1c HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python3 - <<'PY'
+          import subprocess
+          diff=set(subprocess.check_output(['git','diff','--name-only','d91ebf00c63012a78845d094afbd15be0deefd1c','HEAD'],text=True).splitlines())
+          assert diff=={'scripts/ci_v223_owner_gl_browser.py','.github/workflows/jw-v223-owner-gl-browser-20261116.yml'},diff
+          PY
+      - name: Install real browser engines and server
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt 'playwright==1.58.0'
+          python -m playwright install --with-deps chromium webkit
+      - name: Start self-signed disposable localhost HTTPS for same-origin cookie session
+        run: |
+          set -euo pipefail
+          openssl req -x509 -nodes -newkey rsa:2048 -keyout /tmp/jw-owner-qa-key.pem -out /tmp/jw-owner-qa-cert.pem -days 1 -subj "/CN=localhost" > /tmp/jw-cert.log 2>&1
+          JW_ENV=review JW_ROOT_UI=owner-visual-review JW_APPROVED_UI_REVIEW=ISOLATED_REVIEW_ONLY DEMO_SEED=1 JW_UPLOAD_SCAN=none \
+            uvicorn app.main:app --host 127.0.0.1 --port 8787 --ssl-keyfile /tmp/jw-owner-qa-key.pem \
+              --ssl-certfile /tmp/jw-owner-qa-cert.pem > /tmp/jw-owner-qa-server.log 2>&1 &
+          echo $! > /tmp/jw-owner-qa-server.pid
+          python - <<'PY'
+          import ssl,time,urllib.request
+          ctx=ssl._create_unverified_context() # only ephemeral, self-signed loopback
+          for attempt in range(50):
+              try:
+                  with urllib.request.urlopen('https://127.0.0.1:8787/api/health',timeout=2,context=ctx) as r:
+                      if r.status==200:
+                          print('PASS_LOCAL_TLS_SERVER_HEALTH_READY');break
+              except Exception:time.sleep(1)
+          else:
+              print(open('/tmp/jw-owner-qa-server.log').read()[-5000:])
+              raise SystemExit('LOCAL_SERVER_FAILED_TO_START')
+          PY
+      - name: Browser real server session, owner visual CSS, 17 menus, zero local records
+        run: python scripts/ci_v223_owner_gl_browser.py
+      - name: Actual screens and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-owner-original-css-webgl-real-browser
+          path: artifacts/jw-v223-owner-original-gl-browser/
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: No-go boundary
+        run: echo "Selfsigned localhost synthetic UI only. No public Render staging, iPhone Safari hardware, real PostgreSQL B2/B3 or release PASS."
