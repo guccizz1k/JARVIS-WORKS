@@ -100,6 +100,55 @@ def main():
     qid=clients[0][2][0]['id']
     status,other,h=clients[1][0].request('/api/quotes/'+qid)
     check('cross_tenant_quote_refused',status in (403,404))
+    # Perform actual business writes on the isolated, disposable synthetic-only
+    # Render SQLite staging. This never touches real PG17, customer DB or prod.
+    import uuid
+    from datetime import date,timedelta
+    a_client,a_me,_=clients[0]
+    b_client,b_me,_=clients[1]
+    synthetic_name='QA-ONLY-'+uuid.uuid4().hex[:20]
+    customer_payload={'name':synthetic_name,'business_number':'','contact_name':'',
+                      'email':'','phone':''}
+    status,_,h=a_client.request('/api/customers','POST',data=customer_payload)
+    check('synthetic_customer_missing_csrf_refused',status==403)
+    status,customer,h=a_client.request('/api/customers','POST',data=customer_payload,csrf=a_me['csrf_token'])
+    check('synthetic_customer_created_201',status==201 and customer.get('org_id')==org_a and customer.get('name')==synthetic_name)
+    new_customer=customer['id']
+    status,_,h=a_client.request('/api/customers','POST',data=customer_payload,csrf=a_me['csrf_token'])
+    check('synthetic_duplicate_customer_409',status==409)
+    status,all_a,h=a_client.request('/api/customers')
+    check('synthetic_customer_read_after_write',status==200 and sum(x.get('id')==new_customer for x in all_a)==1)
+    status,all_b,h=b_client.request('/api/customers')
+    check('synthetic_customer_hidden_other_company',status==200 and all(x.get('id')!=new_customer for x in all_b))
+    q_payload={'customer_id':new_customer,'title':'SYNTHETIC_QA_'+uuid.uuid4().hex[:12],
+               'vat_mode':'taxable','items':[{'name':'SYNTHETIC_PART','quantity':3,'unit_price':1250}]}
+    status,_,h=b_client.request('/api/quotes','POST',data=q_payload,csrf=b_me['csrf_token'])
+    check('cross_tenant_customer_cannot_create_quote',status in (403,404))
+    status,_,h=a_client.request('/api/quotes','POST',data=q_payload)
+    check('synthetic_quote_missing_csrf_refused',status==403)
+    status,created_q,h=a_client.request('/api/quotes','POST',data=q_payload,csrf=a_me['csrf_token'])
+    check('synthetic_quote_created_201',status==201 and created_q.get('org_id')==org_a and created_q.get('money',{}).get('subtotal')==3750)
+    qid=created_q['id']
+    status,read_q,h=a_client.request('/api/quotes/'+qid)
+    check('synthetic_quote_amount_read_after_write',status==200 and read_q.get('money',{}).get('total')==4125)
+    status,_,h=b_client.request('/api/quotes/'+qid)
+    check('synthetic_quote_cross_tenant_read_denied',status in (403,404))
+    status,_,h=a_client.request('/api/quotes/'+qid+'/status','POST',data={'status':'accepted'},csrf=a_me['csrf_token'])
+    check('synthetic_quote_invalid_direct_approval_refused',status==409)
+    status,sent,h=a_client.request('/api/quotes/'+qid+'/status','POST',data={'status':'sent'},csrf=a_me['csrf_token'])
+    check('synthetic_quote_submitted',status==200 and sent.get('status')=='sent')
+    status,accepted,h=a_client.request('/api/quotes/'+qid+'/status','POST',data={'status':'accepted'},csrf=a_me['csrf_token'])
+    check('synthetic_quote_accepted_legacy',status==200 and accepted.get('status')=='accepted')
+    order_data={'quote_id':qid,'due_date':(date.today()+timedelta(days=7)).isoformat()}
+    status,order,h=a_client.request('/api/orders/from-quote','POST',data=order_data,csrf=a_me['csrf_token'])
+    check('synthetic_order_from_quote_created',status==201 and order.get('org_id')==org_a and order.get('quote_id')==qid)
+    status,_,h=b_client.request('/api/orders/'+order['id'])
+    check('synthetic_order_cross_tenant_denied',status in (403,404))
+    status,_,h=a_client.request('/api/orders/from-quote','POST',data=order_data,csrf=a_me['csrf_token'])
+    check('synthetic_duplicate_order_refused',status==409)
+    # Legacy server accepted same-user quote status as designed; this is NOT
+    # a claim that CINEMA two-person approvals were exercised.
+
     status,data,h=clients[0][0].request('/api/logout','POST',csrf='bad')
     check('logout_wrong_csrf_403',status==403)
     status,data,h=clients[0][0].request('/api/me')
