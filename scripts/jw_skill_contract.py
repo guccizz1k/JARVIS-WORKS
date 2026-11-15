@@ -73,7 +73,7 @@ def _audit_external_pins(root: Path, present: set[str]) -> list[str]:
                 problems.append('oversized external advisory file: ' + relative)
                 continue
             data = filename.read_bytes()
-            git_oid = hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\\0' + data).hexdigest()
+            git_oid = hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\0' + data).hexdigest()
         except OSError:
             problems.append('unreadable external advisory file: ' + relative)
             continue
