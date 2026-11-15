@@ -17,6 +17,7 @@ function start(){
   let epoch=0,submitting=false;
   function entry(note){
     ++epoch;root.classList.remove('on');clear(root);clear(login);login.hidden=false;
+    if(ownerVisual)window.JWOwnerVisualGL?.setMode('login');
     const c=t('section','jw-review-entry');c.append(t('small','jw-review-kicker','JARVIS WORKS · SECURE REVIEW'),t('h1','jw-review-heading','WORK WITHOUT EDGES.'),t('p','jw-review-muted','실제 서버 인증 · 읽기 전용 연결 검토'));
     if(ownerVisual){
       c.classList.add('lcard','go');
@@ -41,6 +42,7 @@ function start(){
   }
   function dashboard(who){
     ++epoch;clear(login);login.hidden=true;clear(root);root.classList.add('on');
+    if(ownerVisual)window.JWOwnerVisualGL?.setMode('home');
     const shell=t('div','jw-review-shell'),nav=t('nav','jw-review-nav'),content=t('main','jw-review-main'),head=t('header','jw-review-top'),view=t('section','jw-review-view');
     nav.setAttribute('aria-label','업무 메뉴');
     const navList=ownerVisual?t('div','rsc'):nav;
@@ -95,6 +97,7 @@ function start(){
     }
     async function open(key){
       let selected=MENUS.find(m=>m[0]===key)||MENUS[0];let token=++epoch;
+      if(ownerVisual)window.JWOwnerVisualGL?.setMode(key==='home'?'home':'away');
       nav.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.page===key));
       if(ownerVisual)root.querySelectorAll('.jw-owner-bottomnav button[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===key));
       clear(view);view.append(t('small','jw-review-kicker','JARVIS WORKS'),t('h2','jw-review-title',selected[1]));

@@ -10,5 +10,6 @@ document.addEventListener('DOMContentLoaded',()=>{
     return;
   }
   window.JWOwnerServerUI.start();
+  window.JWOwnerVisualGL?.mount();
 },{once:true});
 })();

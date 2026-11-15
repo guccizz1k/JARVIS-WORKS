@@ -1,0 +1,43 @@
+name: Owner V22.3 original WebGL2 motion in isolated server-connected visual mode
+on:
+  push:
+    branches: [review/jw-v223-owner-original-webgl-server-20261116]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  protected-motion-module:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Restrict to visual module, safe UI hooks and exact immutable owner original
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 98d2e29becd54d844a04088847a5edfa230bdcb6 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          actual=set(subprocess.check_output(['git','diff','--name-only','98d2e29becd54d844a04088847a5edfa230bdcb6','HEAD'],text=True).splitlines())
+          allowed={'app/cinema_entry_v1.py','app/static/approved_ui_server_review_v223.js',
+                   'app/static/approved_ui_owner_visual_v223.js','app/static/approved_ui_owner_gl_v223.js',
+                   'tests/test_v223_owner_visual_gl.py','tests/test_v223_owner_visual_gl_node.cjs',
+                   '.github/workflows/jw-v223-original-gl-review-20261116.yml'}
+          assert actual==allowed,(actual,allowed)
+          PY
+      - name: Original graphic source identity and CSP / review-only server gates
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pytest -q -p no:cacheprovider --noconftest tests/test_v223_owner_visual_gl.py tests/test_v223_owner_visual_server.py
+          node --check app/static/approved_ui_owner_gl_v223.js
+          node --check app/static/approved_ui_owner_visual_v223.js
+          node --check app/static/approved_ui_server_review_v223.js
+          node --test tests/test_v223_owner_visual_gl_node.cjs tests/test_v223_owner_visual_server_node.cjs tests/test_v223_review_timer_node.cjs
+      - name: Scope
+        run: echo 'Original WebGL segment matched by bytes. Reduced motion/save data fallback. Not P2 full function or production release.'
