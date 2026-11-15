@@ -25,7 +25,8 @@ jobs:
           import subprocess
           actual=set(subprocess.check_output(['git','diff','--name-only','94afea25210f61f0cd15fa16d8d8540e649fc17e','HEAD'],text=True).splitlines())
           expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js',
-          'tests/test_v223_review_operational_panels.cjs','.github/workflows/jw-v223-operational-panels-20261115.yml'}
+          'tests/test_v223_review_operational_panels.cjs','.github/workflows/jw-v223-operational-panels-20261115.yml',
+          '.github/workflows/jw-v223-approved-review-server-mode-20261115.yml'}
           assert actual==expected,(actual,expected)
           PY
       - name: Existing and new isolated Node tests

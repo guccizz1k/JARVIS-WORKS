@@ -28,7 +28,8 @@ jobs:
           expected={'app/cinema_entry_v1.py','app/static/approved_v223_secure_review.html',
           'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js',
           'app/static/approved_ui_server_review_v223.css','tests/test_v223_approved_review_server.py',
-          'tests/test_v223_approved_review_node.cjs','.github/workflows/jw-v223-approved-review-server-mode-20261115.yml'}
+          'tests/test_v223_approved_review_node.cjs','.github/workflows/jw-v223-approved-review-server-mode-20261115.yml',
+          'tests/test_v223_review_operational_panels.cjs','.github/workflows/jw-v223-operational-panels-20261115.yml'}
           changed=set(subprocess.check_output(['git','diff','--name-only','b58c7d5d62f2c1fd5cd23999c7b648be1ca031c2','HEAD'],text=True).splitlines())
           assert changed==expected,(changed,expected)
           print('PASS_REVIEW_ONLY_ORIGINAL_AND_PROTECTED_APP_MAIN_UNCHANGED')
@@ -45,7 +46,7 @@ jobs:
           Path('/tmp/jw-preview-original.js').write_text(h.split('<script>',1)[1].split('</script>',1)[0],'utf8')
           PY
           node --check /tmp/jw-preview-original.js
-          node --test tests/test_v223_approved_review_node.cjs
+          node --test tests/test_v223_approved_review_node.cjs tests/test_v223_review_operational_panels.cjs
       - name: Read-only FastAPI entry policy (no customer DB or secrets)
         run: |
           set -euo pipefail
