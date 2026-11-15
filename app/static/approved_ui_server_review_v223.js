@@ -71,7 +71,7 @@ function start(){
             if(data.disclaimer)line(box,data.disclaimer);
 
             // Measurements are created by server timers only. Recovered after reload,
-            // never persisted as timing evidence in localStorage or IndexedDB.
+            // never persisted as timing evidence in client-side storage.
             const timerPanel=card('거래명세표 작업시간 실측');
             line(timerPanel,'같은 업무의 수작업·자동화 시간을 서버에서 측정합니다. 측정 종료를 직접 확인해야 합니다.');
             const timerState=t('p','jw-review-muted','실제 서버 측정 상태 조회 중');
