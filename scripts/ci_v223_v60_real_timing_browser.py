@@ -157,7 +157,9 @@ def main():
                     check('거래명세표 생성' in bttn.inner_text(),'ACTION_VISIBLE_'+name)
                     bttn.click()
                     # Must wait for actual immutable server POST followed by GET and trace before UI status.
-                    msg=page.locator('.jw-review-muted[role="status"]')
+                    # Restrict status to the statement button's immediate result paragraph;
+                    # manual timer completion also carries role=status on the same page.
+                    msg=bttn.locator('xpath=following-sibling::p[contains(@class,"jw-review-muted") and @role="status"][1]')
                     msg.wait_for(state='visible',timeout=30000)
                     label=msg.inner_text()
                     check('TS-' in label and '275,000원' in label and '내부 거래명세표' in label,'VERIFIED_UI_DOCUMENT_'+name)
