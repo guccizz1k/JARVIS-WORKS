@@ -23,7 +23,6 @@ test('server shell starts original visual engine only when review UI is active',
  assert.ok(ui.includes("window.JWOwnerVisualGL?.setMode(key==='home'?'home':'away')"));
 });
 
-const ui=fs.readFileSync('app/static/approved_ui_server_review_v223.js','utf8');
 test('mobile owner top gradient never exceeds 16px outer gutter',()=>{
  const css=fs.readFileSync('app/static/approved_ui_owner_visual_v223.css','utf8');
  assert.ok(css.includes('.jw-review-top.top::before{left:-16px;right:-16px}'));

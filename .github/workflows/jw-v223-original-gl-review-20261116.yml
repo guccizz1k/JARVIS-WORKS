@@ -26,6 +26,7 @@ jobs:
           actual=set(subprocess.check_output(['git','diff','--name-only','98d2e29becd54d844a04088847a5edfa230bdcb6','HEAD'],text=True).splitlines())
           allowed={'app/cinema_entry_v1.py','app/static/approved_ui_server_review_v223.js',
                    'app/static/approved_ui_owner_visual_v223.js','app/static/approved_ui_owner_gl_v223.js',
+                   'app/static/approved_ui_owner_visual_v223.css',
                    'tests/test_v223_owner_visual_gl.py','tests/test_v223_owner_visual_gl_node.cjs',
                    '.github/workflows/jw-v223-original-gl-review-20261116.yml'}
           assert actual==allowed,(actual,allowed)
