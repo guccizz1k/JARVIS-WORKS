@@ -1,0 +1,162 @@
+name: V22.3 exact latest source full Python Node and disposable PG17
+on:
+  push:
+    branches: [review/jw-v223-p4-newsha-full-pg17-20261115]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  all-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 38
+    env:
+      JW_ENV: review
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Pin active candidate, main logic, owner UI and audit-only difference
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 5711acaa9203341dbd190f30efd9ed7009bca4f5 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          files=set(subprocess.check_output(['git','diff','--name-only','5711acaa9203341dbd190f30efd9ed7009bca4f5','HEAD'],text=True).splitlines())
+          assert files=={'.github/workflows/jw-v223-p4-newsha-full-pg17-20261115.yml'},files
+          print('PASS_CURRENT_SHA_PROTECTED_CODE_UI_PROVENANCE')
+          PY
+          python -m compileall -q app scripts
+          node --check app/static/approved_ui_server_bridge_v223.js
+          node --check app/static/approved_ui_server_review_v223.js
+          node --test tests/test_v223_approved_review_node.cjs tests/test_v223_review_operational_panels.cjs
+      - name: Install complete historical regression dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pip install --disable-pip-version-check -r requirements-jteam-external-pilot.txt
+          python -m pip install --disable-pip-version-check 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+      - name: Rebuild immutable V8.9 historical fixture to avoid false V22.3 baseline failures
+        run: |
+          set -euo pipefail
+          git worktree add --detach ../jw-v89-qa-fixture a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338
+          (cd ../jw-v89-qa-fixture && python "$GITHUB_WORKSPACE/scripts/ci_rebuild_v79_overlay.py")
+          test -f ../overlay/BASE_SHA256.json
+          test -f ../overlay/PAYLOAD_SHA256.json
+      - name: Full Python tests, zero skipped and duplicate JUnit case identities
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/full
+          python -m pytest -q -ra -p no:cacheprovider tests --junitxml=artifacts/full/all-tests.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('artifacts/full/all-tests.xml').getroot()
+          cases=list(root.iter('testcase'))
+          bad=[x for x in cases if any(x.find(y) is not None for y in ('failure','error','skipped'))]
+          names=[(x.get('classname'),x.get('name')) for x in cases]
+          assert len(cases)>=3500,(len(cases),'TOO_FEW_TESTS')
+          assert not bad,(len(bad),'FAILED_ERROR_SKIPPED')
+          assert len(names)==len(set(names)),'DUPLICATE_JUNIT_TEST_IDS'
+          print('PASS_CURRENT_SHA_FULL_PYTHON_'+str(len(cases))+'_ZERO_FAIL_SKIP')
+          PY
+          git diff --exit-code
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-current-sha-full-regression-junit
+          path: artifacts/full/all-tests.xml
+          if-no-files-found: ignore
+          retention-days: 3
+      - run: echo "Complete synthetic code regression only; real PG17 restore, P2 all UI workflows and operational release still not proven."
+
+  real-disposable-postgres17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5437:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_ENV: test
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5437'
+      PGUSER: postgres
+      PGPASSWORD: synthetic-ci-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Exact source SHA and owner original unmodified
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 5711acaa9203341dbd190f30efd9ed7009bca4f5 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          diff=set(subprocess.check_output(['git','diff','--name-only','5711acaa9203341dbd190f30efd9ed7009bca4f5','HEAD'],text=True).splitlines())
+          assert diff=={'.github/workflows/jw-v223-p4-newsha-full-pg17-20261115.yml'},diff
+          PY
+          psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}$'
+      - name: Install existing PostgreSQL engine test requirements
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Real local PG17 SQL reviewed-link and concurrent claims
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_cinema_pg_s4_reviewed_gate | tee reviewed.log
+          grep -F 'PASS: 23/23 S4 reviewed-link SQL tests; missing=0 extra=0 duplicates=0' reviewed.log
+          python -m scripts.ci_cinema_pg_s4_atomic_gate | tee atomic.log
+          python - <<'PY'
+          import json
+          a=json.load(open('jw-cinema-s4-atomic-pg17.json'))
+          assert a['overall']=='PASS',a
+          assert a['total']>=32 and a['failed']==[] and a['duplicate_names']==[],a
+          print('PASS_DISPOSABLE_PG17_S4_REVIEWED_23_ATOMIC_'+str(a['total']))
+          PY
+      - name: Real independent SQLite PG17 two-session E2E
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee dual-store.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=30 failures=0 synthetic_only=true' dual-store.log
+          python -m pytest -q -ra -p no:cacheprovider --noconftest tests/test_cinema_pg_s4_single_writer.py
+          echo 'PASS_DISPOSABLE_PG17_TWO_SESSION_30_AND_SINGLE_WRITER'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-current-pg17-disposable-evidence
+          path: |
+            jw-cinema-s4-reviewed-pg17.json
+            jw-cinema-s4-atomic-pg17.json
+          retention-days: 3
+          if-no-files-found: ignore
+      - run: echo 'Only disposable Docker PostgreSQL17 and SQLite synthetic data. No actual Supabase B2/B3 restore or release PASS.'
