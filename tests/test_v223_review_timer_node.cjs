@@ -88,3 +88,14 @@ test('no browser-based time calculations or storage fallback',()=>{
  assert.ok(timerSection,'timer UI section must exist');
  assert.doesNotMatch(timerSection,/Date\\.now\\(\\)/);
 });
+
+test('confirmed manual completion status must be shown after timer rerender',()=>{
+ const finishSection=ui.split('const done=await bridge.finishTiming(active.id);')[1]
+   ?.split('}catch(e)')[0];
+ assert.ok(finishSection,'manual finish UI handler exists');
+ const refreshAt=finishSection.indexOf('await renderTimer();');
+ const confirmedAt=finishSection.indexOf("timerState.textContent='수작업 서버 측정 완료");
+ assert.ok(refreshAt>=0 && confirmedAt>refreshAt,
+   'server completion confirmation must survive active timer refresh');
+ assert.match(finishSection,/setAttribute\('role','status'\)/);
+});
