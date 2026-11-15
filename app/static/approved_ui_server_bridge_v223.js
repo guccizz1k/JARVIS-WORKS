@@ -108,6 +108,59 @@ class Bridge{
     return d;
   }
 
+
+  // Server-clock-only measurement: never use Date.now() to manufacture elapsed time.
+  // Running task state resides exclusively in authenticated tenant server storage.
+  async activeTiming(){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const d=await this.#request('/api/automation/timing/active');
+    if(d===null)return null;
+    if(!d||typeof d!=='object'||Array.isArray(d)||!/^[a-f0-9]{32}$/.test(d.id||'')||
+       d.workflow!=='trade_statement'||!['manual','automated'].includes(d.mode)||
+       typeof d.started_at!=='string'||!Number.isFinite(Date.parse(d.started_at)))
+      throw new Refused('INVALID_ACTIVE_TIMER');
+    return Object.freeze({id:d.id,workflow:d.workflow,mode:d.mode,started_at:d.started_at});
+  }
+  async startTiming(mode){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    if(mode!=='manual'&&mode!=='automated')throw new Refused('INVALID_TIMER_MODE');
+    const d=await this.#request('/api/automation/timing/start','POST',
+      {workflow:'trade_statement',mode},true);
+    if(!d||!/^[a-f0-9]{32}$/.test(d.id||'')||
+       d.status!=='running'||d.workflow!=='trade_statement'||d.mode!==mode)
+      throw new Refused('INVALID_TIMER_START');
+    return Object.freeze({id:d.id,workflow:d.workflow,mode:d.mode,status:d.status});
+  }
+  async finishTiming(runId,statementId=null){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    if(typeof runId!=='string'||!/^[a-f0-9]{32}$/.test(runId))throw new Refused('INVALID_TIMER_ID');
+    const active=await this.activeTiming();
+    if(!active||active.id!==runId)throw new Refused('TIMER_NOT_ACTIVE');
+    if(active.mode==='automated'&&
+       (typeof statementId!=='string'||!/^[a-f0-9]{32}$/.test(statementId)))
+      throw new Refused('AUTOMATED_REQUIRES_NEW_STATEMENT');
+    if(active.mode==='manual'&&statementId!==null)throw new Refused('MANUAL_CANNOT_LINK_DOCUMENT');
+    const body={completed:true,...(active.mode==='automated'?{statement_id:statementId}:{})};
+    const d=await this.#request('/api/automation/timing/'+runId+'/finish','POST',body,true);
+    if(!d||d.id!==runId||d.mode!==active.mode||d.workflow!=='trade_statement'||
+       d.status!=='completed'||d.measurement!=='server_elapsed_time'||
+       !Number.isSafeInteger(d.elapsed_ms)||d.elapsed_ms<0||d.elapsed_ms>1800000||
+       d.task_outcome!==(active.mode==='automated'?'linked_document':'self_reported_completion'))
+      throw new Refused('INVALID_TIMER_COMPLETION');
+    return Object.freeze({id:d.id,mode:d.mode,elapsed_ms:d.elapsed_ms,status:d.status,
+      measurement:d.measurement,task_outcome:d.task_outcome});
+  }
+  async cancelTiming(runId){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    if(typeof runId!=='string'||!/^[a-f0-9]{32}$/.test(runId))throw new Refused('INVALID_TIMER_ID');
+    const active=await this.activeTiming();
+    if(!active||active.id!==runId)throw new Refused('TIMER_NOT_ACTIVE');
+    const d=await this.#request('/api/automation/timing/'+runId+'/cancel','POST',undefined,true);
+    if(!d||d.id!==runId||d.status!=='cancelled'||d.excluded_from_metrics!==true)
+      throw new Refused('INVALID_TIMER_CANCEL');
+    return Object.freeze({id:d.id,status:d.status,excluded_from_metrics:true});
+  }
+
   async list(name){
     if(!this.#who)throw new Refused('LOGIN_REQUIRED');
     if(!['customers','quotes','orders','invoices'].includes(name))throw new Refused('UNSUPPORTED_API');

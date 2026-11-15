@@ -7,7 +7,7 @@ const MENUS=[['home','홈','all'],['docs','문서',''],['deals','거래','quotes
 ['files','첨부 파일',''],['activity','감사 이력',''],['team','직원',''],['security','보안',''],['settings','설정',''],['account','내 계정','identity']];
 const t=(tag,cls,text)=>{const x=document.createElement(tag);if(cls)x.className=cls;if(text!==undefined)x.textContent=String(text);return x};
 const clear=e=>e.replaceChildren();
-const msg=e=>({'SESSION_EXPIRED':'세션이 종료되었습니다.','TENANT_MISMATCH':'다른 회사의 데이터가 확인되어 조회를 차단했습니다.','NETWORK_ERROR':'서버 연결 실패','FORBIDDEN':'접근 권한 없음','HTTPS_REQUIRED':'HTTPS 연결이 필요합니다.','ADMIN_ONLY':'관리자에게만 허용된 보안 정보입니다.','INVALID_STATISTICS':'서버 통계 형식을 확인할 수 없습니다.','INVALID_STATEMENT_RESPONSE':'거래명세표 응답을 검증할 수 없습니다.','STATEMENT_IDENTITY_MISMATCH':'문서 원장과 서버 문서가 일치하지 않습니다.','INVALID_TRANSACTION_TRACE':'거래 이력 검증에 실패했습니다.'}[e&&e.code]||'요청을 처리할 수 없습니다.');
+const msg=e=>({'SESSION_EXPIRED':'세션이 종료되었습니다.','TENANT_MISMATCH':'다른 회사의 데이터가 확인되어 조회를 차단했습니다.','NETWORK_ERROR':'서버 연결 실패','FORBIDDEN':'접근 권한 없음','HTTPS_REQUIRED':'HTTPS 연결이 필요합니다.','ADMIN_ONLY':'관리자에게만 허용된 보안 정보입니다.','INVALID_STATISTICS':'서버 통계 형식을 확인할 수 없습니다.','INVALID_STATEMENT_RESPONSE':'거래명세표 응답을 검증할 수 없습니다.','STATEMENT_IDENTITY_MISMATCH':'문서 원장과 서버 문서가 일치하지 않습니다.','INVALID_TRANSACTION_TRACE':'거래 이력 검증에 실패했습니다.','INVALID_ACTIVE_TIMER':'측정 상태 검증에 실패했습니다.','TIMER_NOT_ACTIVE':'진행 중인 측정을 다시 확인하세요.','INVALID_TIMER_COMPLETION':'서버 측정 결과를 검증할 수 없습니다.','AUTOMATED_REQUIRES_NEW_STATEMENT':'자동화 측정은 새 확정 문서가 필요합니다.'}[e&&e.code]||'요청을 처리할 수 없습니다.');
 function start(){
   const root=document.getElementById('app'), login=document.getElementById('login');document.getElementById('intro')?.remove();
   document.documentElement.dataset.theme='dark';document.body.classList.add('jw-approved-review');clear(root);clear(login);login.hidden=false;
@@ -69,6 +69,70 @@ function start(){
             line(box,'수동 작업 '+data.samples.manual+'건 · 자동화 '+data.samples.automated+'건');
             line(box,data.status==='COMPARISON_AVAILABLE'?'관측된 중위수 차이 '+data.observed_difference_ms+'ms':'측정 중');
             if(data.disclaimer)line(box,data.disclaimer);
+
+            // Measurements are created by server timers only. Recovered after reload,
+            // never persisted as timing evidence in localStorage or IndexedDB.
+            const timerPanel=card('거래명세표 작업시간 실측');
+            line(timerPanel,'같은 업무의 수작업·자동화 시간을 서버에서 측정합니다. 측정 종료를 직접 확인해야 합니다.');
+            const timerState=t('p','jw-review-muted','실제 서버 측정 상태 조회 중');
+            const timerButtons=t('div','jw-review-timing-buttons');
+            timerPanel.append(timerState,timerButtons);
+            let measuring=false;
+            async function renderTimer(){
+              const active=await bridge.activeTiming();
+              if(token!==epoch)return active;
+              timerButtons.replaceChildren();
+              if(active){
+                timerState.textContent=(active.mode==='manual'?'수작업':'자동화')+
+                  ' 측정 진행 중 · 시작 '+new Date(active.started_at).toLocaleString('ko-KR')+
+                  ' · 측정 시간은 서버 기준';
+                if(active.mode==='manual'){
+                  const finish=t('button','jw-review-action-button','수작업 완료 기록');
+                  finish.type='button';finish.dataset.action='timing-manual-finish';
+                  finish.addEventListener('click',async()=>{
+                    if(measuring||token!==epoch)return;
+                    if(!window.confirm('실제 수작업을 끝냈습니까? 자기 보고 완료 기록으로 저장됩니다.'))return;
+                    measuring=true;finish.disabled=true;
+                    try{
+                      const done=await bridge.finishTiming(active.id);
+                      if(token!==epoch)return;
+                      timerState.textContent='수작업 서버 측정 완료 · '+done.elapsed_ms+'ms (사용자 완료 확인)';
+                      await renderTimer();
+                    }catch(e){if(token===epoch){timerState.textContent=msg(e);timerState.setAttribute('role','alert')}}
+                    finally{measuring=false;finish.disabled=false}
+                  });
+                  timerButtons.append(finish);
+                }else{
+                  line(timerPanel,'자동화 측정은 이 화면에서 새 거래명세표를 생성하면 자동으로 완료됩니다. 기존 문서를 재사용하면 실측에서 제외합니다.');
+                }
+                const cancel=t('button','jw-review-action-button','측정 취소 · 통계 제외');
+                cancel.type='button';cancel.dataset.action='timing-cancel';
+                cancel.addEventListener('click',async()=>{
+                  if(measuring||token!==epoch)return;
+                  if(!window.confirm('현재 측정을 취소하고 통계에서 제외하시겠습니까?'))return;
+                  measuring=true;cancel.disabled=true;
+                  try{await bridge.cancelTiming(active.id);if(token===epoch){await renderTimer();timerState.textContent='측정 취소 · 통계 제외'}}
+                  catch(e){if(token===epoch){timerState.textContent=msg(e);timerState.setAttribute('role','alert')}}
+                  finally{measuring=false;cancel.disabled=false}
+                });timerButtons.append(cancel);
+              }else{
+                timerState.textContent='진행 중인 측정 없음 · 비교 실측 자료가 없으면 “측정 중”으로 표시';
+                for(const mode of ['manual','automated']){
+                  const start=t('button','jw-review-action-button',mode==='manual'?'수작업 측정 시작':'자동화 측정 시작');
+                  start.type='button';start.dataset.action='timing-start-'+mode;
+                  start.addEventListener('click',async()=>{
+                    if(measuring||token!==epoch)return;
+                    measuring=true;start.disabled=true;
+                    try{await bridge.startTiming(mode);if(token===epoch)await renderTimer()}
+                    catch(e){if(token===epoch){timerState.textContent=msg(e);timerState.setAttribute('role','alert')}}
+                    finally{measuring=false;start.disabled=false}
+                  });timerButtons.append(start);
+                }
+              }
+              return active;
+            }
+            await renderTimer();
+            if(token!==epoch)return;
             const orders=await bridge.list('orders');
             if(token!==epoch)return;
             const candidates=orders.filter(r=>r.status==='fulfilled'&&r.review_state!=='pending');
@@ -91,9 +155,25 @@ function start(){
                   if(trace.statement_id!==created.id ||
                      trace.order_money.total!==verified.document.money.total)
                     throw new Error('SNAPSHOT_TRACE_MISMATCH');
+                  let timingNote='';
+                  const running=await bridge.activeTiming();
+                  if(token!==epoch)return;
+                  if(running&&running.mode==='automated'){
+                    if(created.reused){
+                      // Reuse is not new automation work and must not inflate savings.
+                      await bridge.cancelTiming(running.id);
+                      timingNote=' · 기존 문서 재사용: 자동화 실측 제외';
+                    }else{
+                      const measured=await bridge.finishTiming(running.id,created.id);
+                      timingNote=' · 자동화 서버 실측 '+measured.elapsed_ms+'ms';
+                    }
+                    if(token!==epoch)return;
+                    await renderTimer();
+                    if(token!==epoch)return;
+                  }
                   alert.textContent=(created.reused?'기존 확정 문서 재사용 · ':'새 문서 생성 · ')+
                     verified.doc_no+' · 합계 '+verified.document.money.total.toLocaleString('ko-KR')+
-                    '원 · 기록 '+trace.events.length+'건 (내부 거래명세표)';
+                    '원 · 기록 '+trace.events.length+'건 (내부 거래명세표)'+timingNote;
                   alert.setAttribute('role','status');
                 }catch(err){
                   if(token===epoch){alert.textContent=msg(err);alert.setAttribute('role','alert')}

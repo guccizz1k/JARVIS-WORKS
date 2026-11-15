@@ -1,0 +1,36 @@
+name: V22.3 safe real workflow timing review UI
+on:
+  push:
+    branches: [review/jw-v223-v60-timing-real-20261116]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  timing-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Pin exact source, original UI, and permit only timing review changes
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor e18240117cc7aa16a78bbebad65d9bd6592940e6 HEAD
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python3 - <<'PY'
+          import subprocess
+          observed=set(subprocess.check_output(['git','diff','--name-only','e18240117cc7aa16a78bbebad65d9bd6592940e6','HEAD'],text=True).splitlines())
+          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js',
+          'tests/test_v223_review_timer_node.cjs','.github/workflows/jw-v223-v60-timer-20261116.yml'}
+          assert observed==expected,(observed,expected)
+          print('PASS_TIMER_QA_REVIEW_ONLY')
+          PY
+      - name: Node function and security regression including new server timer gate
+        run: |
+          set -euo pipefail
+          node --check app/static/approved_ui_server_bridge_v223.js
+          node --check app/static/approved_ui_server_review_v223.js
+          node --test tests/test_v223_approved_review_node.cjs tests/test_v223_review_operational_panels.cjs tests/test_v223_review_trade_statement_node.cjs tests/test_v223_review_timer_node.cjs
+      - run: echo "Synthetic offline review Node tests only; P2 P3 P4 full launch remains NO-GO."
