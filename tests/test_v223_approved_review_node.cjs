@@ -39,3 +39,34 @@ test('review UI navigation has 17 options and no local database fallback',()=>{
  const routes=Array.from(m[1].matchAll(/\['([a-z]+)','/g)).map(x=>x[1]);
  assert.equal(routes.length,17);assert.equal(new Set(routes).size,17);
 });
+
+test('business write allowlist rejects arbitrary or cross-tenant target',async()=>{
+ const {bridge,calls}=setup(url=>url.endsWith('/api/me')?[me]:[{org_id:'org1',id:'record'}]);
+ await bridge.restore();
+ await assert.rejects(()=>bridge.write('/api/admin/secrets',{}),{code:'WRITE_NOT_ALLOWLISTED'});
+ await assert.rejects(()=>bridge.write('/api/customers',[]),{code:'INVALID_WRITE_PAYLOAD'});
+ await assert.rejects(()=>bridge.write('/api/quotes/../../status',{status:'accepted'}),{code:'WRITE_NOT_ALLOWLISTED'});
+ assert.equal(calls.length,1);
+});
+test('same-company business write uses server CSRF and same-origin session',async()=>{
+ const {bridge,calls}=setup(url=>url.endsWith('/api/me')?[me]:[{org_id:'org1',id:'customer'}]);
+ await bridge.restore();
+ let row=await bridge.write('/api/customers',{name:'SYNTHETIC ONLY'});
+ assert.equal(row.org_id,'org1');
+ const post=calls.at(-1).init;
+ assert.equal(post.method,'POST');
+ assert.equal(post.credentials,'same-origin');
+ assert.equal(post.cache,'no-store');
+ assert.equal(post.headers['X-CSRF-Token'],me.csrf_token);
+ assert.equal(JSON.stringify(bridge.identity).includes(me.csrf_token),false);
+});
+test('write result for a different organization is rejected without returning it',async()=>{
+ const {bridge}=setup(url=>url.endsWith('/api/me')?[me]:[{org_id:'org2',id:'private'}]);
+ await bridge.restore();
+ await assert.rejects(()=>bridge.write('/api/customers',{name:'A'}),{code:'TENANT_MISMATCH'});
+});
+test('unauthenticated write refuses without a network request',async()=>{
+ const {bridge,calls}=setup(()=>[{org_id:'org1'}]);
+ await assert.rejects(()=>bridge.write('/api/customers',{name:'A'}),{code:'LOGIN_REQUIRED'});
+ assert.equal(calls.length,0);
+});

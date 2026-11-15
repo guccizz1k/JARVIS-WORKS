@@ -46,6 +46,24 @@ class Bridge{
     return who
   }
   async logout(){try{if(this.#who)await this.#request('/api/logout','POST',undefined,true)}finally{this.#clear()}}
+  async write(path,payload){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    // No arbitrary path, DELETE, bulk mutation, user administration or production migration.
+    const direct=new Set(['/api/customers','/api/quotes','/api/orders/from-quote','/api/invoices/from-order']);
+    const special=[
+      /^\/api\/quotes\/[a-f0-9]{32}\/status$/,
+      /^\/api\/orders\/[a-f0-9]{32}\/status$/,
+      /^\/api\/invoices\/[a-f0-9]{32}\/payments$/
+    ];
+    if(!direct.has(path)&&!special.some(r=>r.test(path)))throw new Refused('WRITE_NOT_ALLOWLISTED');
+    if(!payload||typeof payload!=='object'||Array.isArray(payload))
+      throw new Refused('INVALID_WRITE_PAYLOAD');
+    const data=await this.#request(path,'POST',payload,true);
+    if(!data||typeof data!=='object'||Array.isArray(data)||data.org_id!==this.#who?.org_id)
+      throw new Refused('TENANT_MISMATCH');
+    return Object.freeze({...data});
+  }
+
   async list(name){
     if(!this.#who)throw new Refused('LOGIN_REQUIRED');
     if(!['customers','quotes','orders','invoices'].includes(name))throw new Refused('UNSUPPORTED_API');
