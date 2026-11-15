@@ -28,7 +28,7 @@ def one(browser,engine,width,height):
         check('WORK' in heading.inner_text() and 'EDGES.' in heading.inner_text(),'APPROVED_POSTER_'+engine+str(width))
         check(page.locator('#login .lcard').is_visible(),'APPROVED_LOGIN_CARD_'+engine+str(width))
         check(page.locator('#login input[type="email"]').count()==1,'SERVER_LOGIN_EMAIL_'+engine+str(width))
-        check('회사 등록' not in page.locator('#login').inner_text(),'LOCAL_REGISTER_NOT_AVAILABLE_'+engine+str(width))
+        check('회사 등록하고 시작하기' not in page.locator('#login').inner_text() and page.locator('#login input[autocomplete="organization"]').count()==0,'LOCAL_REGISTER_NOT_AVAILABLE_'+engine+str(width))
         check(page.evaluate("localStorage.getItem('jw3.db')") is None,'LOCAL_DB_NOT_CREATED_'+engine+str(width))
         page.screenshot(path=str(OUT/f'owner-visual-login-{engine}-{width}.png'),full_page=True)
         page.locator('input[aria-label="이메일"]').fill('demo@hanbit.example')
