@@ -5,7 +5,6 @@ function setup(handler){
  const calls=[],location={origin:'https://stage.example.invalid',protocol:'https:'};
  const fetch=async(url,init)=>{calls.push({url,init});const [data,status=200]=handler(url,init);return {
   ok:status>=200&&status<300,status,headers:{get:x=>x==='content-type'?'application/json':null},json:async()=>data}};
- };
  const ctx={window:{},globalThis:{},location,fetch,console};
  vm.runInNewContext(code,ctx);
  const bridge=new ctx.window.JWOwnerServerBridge();
