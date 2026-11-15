@@ -7,7 +7,7 @@ const MENUS=[['home','홈','all'],['docs','문서',''],['deals','거래','quotes
 ['files','첨부 파일',''],['activity','감사 이력',''],['team','직원',''],['security','보안',''],['settings','설정',''],['account','내 계정','identity']];
 const t=(tag,cls,text)=>{const x=document.createElement(tag);if(cls)x.className=cls;if(text!==undefined)x.textContent=String(text);return x};
 const clear=e=>e.replaceChildren();
-const msg=e=>({'SESSION_EXPIRED':'세션이 종료되었습니다.','TENANT_MISMATCH':'다른 회사의 데이터가 확인되어 조회를 차단했습니다.','NETWORK_ERROR':'서버 연결 실패','FORBIDDEN':'접근 권한 없음','HTTPS_REQUIRED':'HTTPS 연결이 필요합니다.'}[e&&e.code]||'요청을 처리할 수 없습니다.');
+const msg=e=>({'SESSION_EXPIRED':'세션이 종료되었습니다.','TENANT_MISMATCH':'다른 회사의 데이터가 확인되어 조회를 차단했습니다.','NETWORK_ERROR':'서버 연결 실패','FORBIDDEN':'접근 권한 없음','HTTPS_REQUIRED':'HTTPS 연결이 필요합니다.','ADMIN_ONLY':'관리자에게만 허용된 보안 정보입니다.','INVALID_STATISTICS':'서버 통계 형식을 확인할 수 없습니다.'}[e&&e.code]||'요청을 처리할 수 없습니다.');
 function start(){
   const root=document.getElementById('app'), login=document.getElementById('login');document.getElementById('intro')?.remove();
   document.documentElement.dataset.theme='dark';document.body.classList.add('jw-approved-review');clear(root);clear(login);login.hidden=false;
@@ -38,6 +38,67 @@ function start(){
       nav.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.page===key));
       clear(view);view.append(t('small','jw-review-kicker','JARVIS WORKS'),t('h2','jw-review-title',selected[1]));
       if(key==='account'){view.append(t('p','jw-review-muted',who.name+' · '+who.email+' · '+who.org_name+' · '+who.role));return}
+
+      // Operational read-only panels: server is the sole source of truth.
+      const readOnlyPanels=new Set(['stats','automation','activity','messenger','docs','files','inbox','security','team']);
+      if(readOnlyPanels.has(key)){
+        try{
+          const data=await bridge.readPanel(key);
+          if(token!==epoch)return;
+          const card=(heading)=>{
+            const section=t('section','jw-review-card');
+            section.append(t('h3','jw-review-cardtitle',heading));view.append(section);return section;
+          };
+          const line=(box,content)=>box.append(t('div','jw-review-row',content));
+          const empty=()=>line(card('서버 조회 결과'),'자료 없음');
+          if(key==='stats'){
+            const box=card('기업별 실제 서버 현황');
+            const labels={customers:'거래처',quotes:'견적',orders:'수주',invoices:'청구'};
+            for(const [k,v] of Object.entries(data.counts))line(box,(labels[k]||k)+' · '+v+'건');
+            line(box,'미수금 '+data.money.outstanding.toLocaleString('ko-KR')+'원');
+            line(box,'입금 누계 '+data.money.collected.toLocaleString('ko-KR')+'원');
+            line(box,'견적 누계 '+data.money.quote_total.toLocaleString('ko-KR')+'원');
+            const measured=card('업무 절감시간 · 서버 실측');
+            line(measured,data.measured?'관측된 중위수 차이 '+data.observed_difference_ms+'ms':'측정 중 · 비교 가능한 실측 자료 없음');
+            if(data.issues.length){
+              const items=card('확인이 필요한 업무');
+              for(const x of data.issues)line(items,x.title);
+            }
+          }else if(key==='automation'){
+            const box=card('업무 처리시간 · 실측 자료');
+            line(box,'수동 작업 '+data.samples.manual+'건 · 자동화 '+data.samples.automated+'건');
+            line(box,data.status==='COMPARISON_AVAILABLE'?'관측된 중위수 차이 '+data.observed_difference_ms+'ms':'측정 중');
+            if(data.disclaimer)line(box,data.disclaimer);
+          }else if(key==='security'||key==='team'){
+            const box=card('관리자 전용 보안·조직 현황');
+            line(box,'활성 세션 '+data.sessions+'건 · 보안 이벤트 '+data.security_events+'건');
+            line(box,'MFA 등록 사용자 '+data.mfa_enabled_user_count+'명');
+            line(box,data.db_row_level_security_enabled?'DB RLS 활성':'DB RLS 미인증 · 정식 운영 차단');
+            line(box,data.security_monitoring_automated?'보안 모니터링 자동화 연결':'보안 모니터링 자동화 미연결');
+            for(const x of data.users)line(box,(x.name||'이름 없음')+' · '+(x.role||'권한 없음')+(x.disabled_at?' · 사용 중지':''));
+          }else{
+            const rows=Array.isArray(data)?data:[];
+            if(!rows.length)empty();
+            else{
+              const box=card('서버 저장 데이터 · '+rows.length+'건');
+              for(const x of rows.slice(0,100)){
+                let label='';
+                if(key==='activity')label=[x.actor_name,x.action,x.entity_type,x.created_at].filter(Boolean).join(' · ');
+                else if(key==='messenger')label=[x.other_company,x.status,'안읽음 '+x.unread_count+'건'].filter(Boolean).join(' · ');
+                else if(key==='docs'||key==='files')label=[x.kind,x.counterparty,x.document_date,x.gross_amount].filter(v=>v!==null&&v!==undefined).join(' · ');
+                else if(key==='inbox')label=[x.filename,x.document_kind,x.status].filter(Boolean).join(' · ');
+                line(box,label||'자료 없음');
+              }
+            }
+          }
+        }catch(e){
+          if(token!==epoch)return;
+          const error=t('p','jw-review-failure',msg(e));error.setAttribute('role','alert');
+          view.append(error);
+          if(!bridge.signedIn)entry('세션이 종료되었습니다.');
+        }
+        return;
+      }
       if(!selected[2]){view.append(t('p','jw-review-unwired','서버 연결 검증 전입니다. 조회·등록·수정·승인 기능을 사용할 수 없습니다.'));return}
       const names=selected[2]==='all'?['customers','quotes','orders','invoices']:[selected[2]];
       try{

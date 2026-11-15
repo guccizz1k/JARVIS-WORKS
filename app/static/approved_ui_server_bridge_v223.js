@@ -72,6 +72,101 @@ class Bridge{
     if(!data.every(r=>r&&typeof r==='object'&&!Array.isArray(r)&&r.org_id===this.#who?.org_id))throw new Refused('TENANT_MISMATCH');
     return data
   }
+  // Typed, allowlisted server reads for additional review-only panels.
+  // Never expose arbitrary paths or use browser local records as a fallback.
+  async readPanel(name){
+    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const routes={
+      'stats':['/api/dashboard','/api/automation/time-savings'],
+      'automation':['/api/automation/time-savings'],
+      'activity':['/api/audit'],
+      'messenger':['/api/messenger/threads'],
+      'docs':['/api/evidence/records'],
+      'files':['/api/evidence/records'],
+      'inbox':['/api/evidence/queue'],
+      'security':['/api/security/overview'],
+      'team':['/api/security/overview'],
+    };
+    const allowed=routes[name];
+    if(!allowed)throw new Refused('READ_NOT_ALLOWLISTED');
+    if(['security','team'].includes(name)&&this.#who.role!=='admin')
+      throw new Refused('ADMIN_ONLY');
+    const raw=await Promise.all(allowed.map(path=>this.#request(path)));
+    if(!this.#who)throw new Refused('SESSION_EXPIRED');
+    const org=this.#who.org_id;
+    const array=(data,label,allowMissingOrg)=>{
+      if(!Array.isArray(data))throw new Refused('INVALID_'+label.toUpperCase());
+      for(const row of data){
+        if(!row||typeof row!=='object'||Array.isArray(row))throw new Refused('INVALID_ROW');
+        if(typeof row.org_id==='string'&&row.org_id!==org)throw new Refused('TENANT_MISMATCH');
+        if(!allowMissingOrg&&typeof row.org_id!=='string')throw new Refused('TENANT_MISMATCH');
+      }
+      return data;
+    };
+    let result;
+    switch(name){
+      case 'stats':{
+        const [d,t]=raw;
+        if(!d||typeof d!=='object'||Array.isArray(d) ||
+          !['customers','quotes','orders','invoices','outstanding','collected','quote_total'].every(k=>Number.isSafeInteger(d[k])&&d[k]>=0)||
+          !Array.isArray(d.issues)||!t||!['NOT_MEASURED','COMPARISON_AVAILABLE'].includes(t.status))
+          throw new Refused('INVALID_STATISTICS');
+        result={counts:{customers:d.customers,quotes:d.quotes,orders:d.orders,invoices:d.invoices},
+          money:{outstanding:d.outstanding,collected:d.collected,quote_total:d.quote_total},
+          issues:d.issues.filter(x=>x&&typeof x.title==='string').slice(0,30),
+          observed_difference_ms:t.status==='COMPARISON_AVAILABLE'&&Number.isFinite(t.observed_difference_ms)?t.observed_difference_ms:null,
+          measured:t.status==='COMPARISON_AVAILABLE',
+          samples:t.samples};
+        break;
+      }
+      case 'automation':{
+        const t=raw[0];
+        if(!t||!['NOT_MEASURED','COMPARISON_AVAILABLE'].includes(t.status)||
+          !t.samples||!Number.isSafeInteger(t.samples.manual)||!Number.isSafeInteger(t.samples.automated))
+          throw new Refused('INVALID_AUTOMATION');
+        result={status:t.status,samples:t.samples,
+          observed_difference_ms:t.status==='COMPARISON_AVAILABLE'&&Number.isFinite(t.observed_difference_ms)?t.observed_difference_ms:null,
+          disclaimer:typeof t.disclaimer==='string'?t.disclaimer:''};
+        break;
+      }
+      case 'activity':result=array(raw[0],'audit',false).slice(0,30).map(x=>({
+        action:x.action,entity_type:x.entity_type,actor_name:x.actor_name,created_at:x.created_at}));break;
+      case 'messenger':{
+        const threads=array(raw[0],'threads',true);
+        if(!threads.every(x=>typeof x.id==='string'&&typeof x.other_company==='string'&&
+          Number.isSafeInteger(x.unread_count)&&x.unread_count>=0 &&
+          x.other_org_id!==org))throw new Refused('INVALID_THREADS');
+        result=threads.slice(0,100).map(x=>({other_company:x.other_company,status:x.status,
+          unread_count:x.unread_count}));
+        break;
+      }
+      case 'docs':
+      case 'files':result=array(raw[0],'documents',true).slice(0,100).map(x=>({
+        kind:x.kind,counterparty:x.counterparty,gross_amount:x.gross_amount,
+        document_date:x.document_date}));break;
+      case 'inbox':{
+        const data=raw[0];
+        if(!data||!Array.isArray(data.items))throw new Refused('INVALID_QUEUE');
+        result=array(data.items,'queue',true).slice(0,100).map(x=>({
+          filename:x.filename,status:x.status,document_kind:x.document_kind,created_at:x.created_at}));break;
+      }
+      case 'security':
+      case 'team':{
+        const sec=raw[0];
+        if(!sec||!Array.isArray(sec.users)||!Array.isArray(sec.sessions)||!Array.isArray(sec.events)||
+          typeof sec.db_row_level_security_enabled!=='boolean')throw new Refused('INVALID_SECURITY_OVERVIEW');
+        result={users:sec.users.slice(0,100).map(x=>({name:x.name,role:x.role,disabled_at:x.disabled_at})),
+          sessions:sec.sessions.length,security_events:sec.events.length,
+          mfa_enabled_user_count:sec.mfa_enabled_user_count,
+          db_row_level_security_enabled:sec.db_row_level_security_enabled,
+          security_monitoring_automated:sec.security_monitoring_automated};
+        break;
+      }
+      default:throw new Refused('READ_NOT_ALLOWLISTED');
+    }
+    return Object.freeze(result);
+  }
+
 }
 g.JWOwnerServerBridge=Bridge;
 if(typeof module==='object'&&module.exports)module.exports={Bridge,Refused};

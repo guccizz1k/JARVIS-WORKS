@@ -1,0 +1,39 @@
+name: V22.3 real operational server panels (review only)
+on:
+  push:
+    branches:
+      - review/jw-v223-p2-operational-panels-20261115
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  operational-server-panels:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Protect owner final UI, backend API and minimal review diff
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = review/jw-v223-p2-operational-panels-20261115
+          git merge-base --is-ancestor 94afea25210f61f0cd15fa16d8d8540e649fc17e HEAD
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          python3 - <<'PY'
+          import subprocess
+          actual=set(subprocess.check_output(['git','diff','--name-only','94afea25210f61f0cd15fa16d8d8540e649fc17e','HEAD'],text=True).splitlines())
+          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js',
+          'tests/test_v223_review_operational_panels.cjs','.github/workflows/jw-v223-operational-panels-20261115.yml'}
+          assert actual==expected,(actual,expected)
+          PY
+      - name: Existing and new isolated Node tests
+        run: |
+          set -euo pipefail
+          node --check app/static/approved_ui_server_bridge_v223.js
+          node --check app/static/approved_ui_server_review_v223.js
+          node --check tests/test_v223_review_operational_panels.cjs
+          node --test tests/test_v223_approved_review_node.cjs tests/test_v223_review_operational_panels.cjs
+      - name: Explicit scope
+        run: echo "Read-only review API connections, synthetic test mocks only. Not all 17 operational functions or final P2/P3/P4 PASS."
