@@ -1,0 +1,334 @@
+name: JARVIS-WORKS V22.3 unified code and DB release candidate QA
+on:
+  push:
+    branches:
+      - review/jw-v223-unified-20261115
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-unified-qa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  provenance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout full Git history with no persisted credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Assert main unique files preserved and all V22.3 tested originals unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          def run(*args):
+              return subprocess.check_output(("git",*args))
+          def tree(ref):
+              result={}
+              for item in run("ls-tree","-r","-z",ref).split(b"\0"):
+                  if not item: continue
+                  hdr,name=item.split(b"\t",1)
+                  mode,kind,sha=hdr.decode("ascii").split()
+                  assert kind=="blob", (kind,name)
+                  result[name.decode("utf-8")]=(mode,sha)
+              return result
+          original_main="9760dadbb2370b508096976a1182fd437fc6f909"
+          original_review="137a21dc11846bd34c5dc3de21c0a8a96ef32914"
+          assert run("branch","--show-current").decode().strip()=="review/jw-v223-unified-20261115"
+          main,review,now=tree(original_main),tree(original_review),tree("HEAD")
+          main_unique={path:info for path,info in main.items() if path not in review}
+          overlaps=[path for path in main if path in review and main[path]!=review[path]]
+          assert len(review)==906 and len(main)==530, (len(review),len(main))
+          assert len(main_unique)==121 and len(overlaps)==25,(len(main_unique),len(overlaps))
+          expected={**review,**main_unique}
+          assert "app/pg_v112_ocr_queue.py" in main_unique
+          assert "app/pg_v112_wakeup.py" in main_unique
+          workflow=".github/workflows/jw-v223-unified-qa-20261115.yml"
+          assert set(now)-set(expected)=={workflow},sorted(set(now)-set(expected))
+          assert set(expected)-set(now)==set(), sorted(set(expected)-set(now))
+          for path,info in expected.items():
+              assert now[path]==info,f"UNAPPROVED_BLOB_DRIFT: {path}"
+          assert Path(workflow).is_file()
+          assert not run("status","--porcelain").strip(),"dirty worktree"
+          print("PASS_INTEGRATION_121_MAIN_EXCLUSIVE_BLOBS_906_V223_BLOBS_UNCHANGED_25_CONFLICTS_RESERVED")
+          print("NOT_RELEASE_PASS: 25 differing common files and unavailable Codex local SHA require verification")
+          PY
+  full-python-reviewed-product:
+    needs: provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      JW_ENV: review
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout exact review candidate with protected history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check original protected blobs and exact review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = review/jw-v223-unified-20261115
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = 9bedf97fe718a94f07861e23670685af00619ca8
+          git merge-base --is-ancestor 08ea29867e962d4ac5be0e942fc1488528494428 HEAD
+          python -m compileall -q app scripts
+          git diff --exit-code
+      - name: Install regression system and Python prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+          python -m pip install --disable-pip-version-check 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+      - name: Reconstruct historical V8.9 overlay from pinned historical checkout only
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never apply the V8.9 baseline assertion to modern V22.3 app/main.py.
+          # This isolated historical worktree writes its immutable overlay into
+          # the shared parent that modern frozen installer tests already expect.
+          git worktree add --detach ../jw-v89-historical-fixture a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338
+          (
+            cd ../jw-v89-historical-fixture
+            python "$GITHUB_WORKSPACE/scripts/ci_rebuild_v79_overlay.py"
+          )
+          test -f ../overlay/BASE_SHA256.json
+          test -f ../overlay/PAYLOAD_SHA256.json
+          git diff --exit-code
+      - name: Execute entire checked-out Python tests tree, no exclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v223-full
+          python -m pytest -q -ra -p no:cacheprovider tests --junitxml=artifacts/v223-full/all-tests.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          p=Path('artifacts/v223-full/all-tests.xml')
+          root=ET.parse(p).getroot()
+          cases=list(root.iter('testcase'))
+          assert cases, 'No pytest cases observed'
+          failed=[x for x in cases if any(x.find(k) is not None for k in ('failure','error','skipped'))]
+          names=[f"{x.get('classname','')}.{x.get('name','')}" for x in cases]
+          assert len(names)==len(set(names)), 'Duplicate JUnit case identities detected'
+          assert not failed, f"{len(failed)} failures/errors/skips in {len(cases)} cases"
+          assert len(cases)>=2000, f"Regression coverage unexpectedly low: {len(cases)}"
+          print(f'FULL_PYTHON_EXACT_SHA_PASS_{len(cases)}_ZERO_FAIL_ERROR_SKIP')
+          PY
+          python -m scripts.jw_integrated_acceptance --junit artifacts/v223-full/all-tests.xml
+          git diff --exit-code
+      - name: Store bounded actual JUnit evidence even on failing run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-full-python-junit
+          path: artifacts/v223-full/all-tests.xml
+          if-no-files-found: ignore
+          retention-days: 3
+  disposable-pg17-s4:
+    needs: provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-local-s4-review-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5437:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5437'
+      PGUSER: postgres
+      PGPASSWORD: ci-local-s4-review-only
+      JW_ENV: test
+    steps:
+      - name: Checkout exact review source without stored credentials
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify isolated PostgreSQL 17 and compile unchanged S4 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(psql -X -Atc 'SHOW server_version_num' | cut -c1-2)" = "17"
+          psql -X -Atc 'SELECT current_database()' | grep -Fx postgres
+          python3 -m py_compile scripts/ci_cinema_pg_s4_reviewed_gate.py scripts/ci_cinema_pg_s4_atomic_gate.py
+      - name: Run real PG17 reviewed-link SQL audit with exact 23 checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_s4_reviewed_gate | tee s4-reviewed.log
+          grep -F 'PASS: 23/23 S4 reviewed-link SQL tests; missing=0 extra=0 duplicates=0' s4-reviewed.log
+          python3 - <<'PY'
+          import json
+          d=json.load(open('jw-cinema-s4-reviewed-pg17.json'))
+          assert d['overall']=='PASS' and d['actual_pg17'] is True
+          assert d['tests']==23 and d['passed']==23 and d['failures']==[]
+          assert not d['duplicate']
+          print('PG17_REVIEWED_S4_23_OF_23_PASS')
+          PY
+      - name: Run disposable PG17 S4 atomic multi-connection concurrent claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_s4_atomic_gate | tee s4-atomic.log
+          python3 - <<'PY'
+          import json
+          d=json.load(open('jw-cinema-s4-atomic-pg17.json'))
+          assert d['overall']=='PASS',d
+          assert d['total']>=32 and d['failed']==[] and d['duplicate_names']==[],d
+          assert all(t['status']=='PASS' for t in d['tests'])
+          print(f"PG17_ATOMIC_S4_{d['total']}_OF_{d['total']}_PASS")
+          PY
+      - name: Install existing isolated dual-store E2E dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Run full 189 Python security, cookie and immutable S4 regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile app/pg_cinema_cutover_front_v223.py app/pg_cinema_s4_reconciliation_v1.py tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py tests/test_cinema_pg_s4_reconciliation.py tests/test_cinema_pg_s4_snapshot_integrity_20261114.py tests/test_cinema_pg_v223_trade_auth_integration_20261114.py tests/test_cinema_pg_v223_cookie_boundary.py tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py tests/test_cinema_pg_v223_response_cookie_security.py
+          python3 -m pytest -q -ra -p no:cacheprovider --noconftest --junitxml=unified-a-s4-cookie.xml tests/test_cinema_pg_cutover_merged_header_boundary_v223.py tests/test_cinema_pg_v223_direct_route_header_isolation.py tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_cutover_logout_v223.py tests/test_cinema_pg_s4_reconciliation.py tests/test_cinema_pg_s4_snapshot_integrity_20261114.py tests/test_cinema_pg_v223_trade_auth_integration_20261114.py tests/test_cinema_pg_v223_cookie_boundary.py tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py tests/test_cinema_pg_v223_response_cookie_security.py
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('unified-a-s4-cookie.xml').getroot()
+          suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          actual={k:sum(int(s.get(k,'0')) for s in suites) for k in ('tests','failures','errors','skipped')}
+          assert actual=={'tests':189,'failures':0,'errors':0,'skipped':0}, actual
+          print('EXACT_SHA_PY_SECURITY_S4_COOKIE_189_OF_189_PASS')
+          PY
+      - name: Verify exactly one active quote writer is mounted across legacy and CINEMA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest -q -ra -p no:cacheprovider --noconftest --junitxml=s4-single-writer.xml tests/test_cinema_pg_s4_single_writer.py
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root=ET.parse('s4-single-writer.xml').getroot()
+          suites=[root] if root.tag=='testsuite' else root.findall('.//testsuite')
+          v={k:sum(int(s.get(k,'0')) for s in suites) for k in ('tests','failures','errors','skipped')}
+          assert v == {'tests':7,'failures':0,'errors':0,'skipped':0}, v
+          print('EXACT_SHA_S4_SINGLE_WRITER_7_OF_7_PASS')
+          PY
+      - name: Run original real SQLite and disposable PG17 dual-session 30-case E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_cutover_realdb_v223 | tee dual-store-realdb.log
+          grep -F 'PASS_V223_REAL_SQLITE_PG17_CUTOVER_FRONT checks=30 failures=0 synthetic_only=true' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_PG17_SESSION_ROW_REVOKED' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_REAL_SQLITE_SESSION_ROW_REVOKED' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_DUAL_LOGOUT_REJECTS_FORGED_PG_CSRF' dual-store-realdb.log
+          grep -F 'PASS_V223_REALDB_FRONT_CROSS_ORG_SESSION_REJECTED' dual-store-realdb.log
+          echo 'PASS_DISPOSABLE_SQLITE_PG17_30_CASE_DUAL_STORE_E2E'
+      - name: Safety statement
+        run: echo "PASS means disposable Docker PostgreSQL 17 and SQLite with synthetic data only; Supabase/Render/customer production/database migrations untouched."
+  integrated-https-pg17:
+    needs: provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v223-tls-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5435'
+      PGUSER: postgres
+      PGPASSWORD: ci-v223-tls-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify isolated PostgreSQL 17
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}$'
+      - name: Install test dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Configure disposable PG17 server TLS with local self-signed test CA
+        shell: bash
+        run: |
+          set -euo pipefail
+          certdir="$RUNNER_TEMP/jw-v223-tls"
+          mkdir -p "$certdir"
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 1 -nodes \
+            -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+            -keyout "$certdir/server.key" -out "$certdir/server.crt" >/dev/null 2>&1
+          cid="$(docker ps --filter publish=5435 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+          docker cp "$certdir/server.key" "$cid:/tmp/jw-v223-server.key"
+          docker cp "$certdir/server.crt" "$cid:/tmp/jw-v223-server.crt"
+          docker exec -u root "$cid" sh -c \
+            'chown postgres:postgres /tmp/jw-v223-server.key /tmp/jw-v223-server.crt; chmod 0600 /tmp/jw-v223-server.key; chmod 0644 /tmp/jw-v223-server.crt'
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='/tmp/jw-v223-server.crt'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_key_file='/tmp/jw-v223-server.key'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl='on'"
+          docker exec -u postgres "$cid" pg_ctl -D /var/lib/postgresql/data reload
+          for i in $(seq 1 15); do
+            if [ "$(psql -X -Atc 'SHOW ssl')" = on ]; then break; fi
+            sleep 1
+          done
+          test "$(psql -X -Atc 'SHOW ssl')" = on
+          echo "JW_PG_CI_TLS_CA=$certdir/server.crt" >> "$GITHUB_ENV"
+          echo "JW_PG_CI_TLS_SERVER_CERT=$certdir/server.crt" >> "$GITHUB_ENV"
+          echo "JW_PG_CI_TLS_SERVER_KEY=$certdir/server.key" >> "$GITHUB_ENV"
+      - name: Run full PG review factory and 74 real HTTPS transaction cases
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_integrated_https_v223 | tee v223-validated-tls.log
+          grep -F 'PASS_V223_REAL_VALIDATED_LEGACY_TX_TLS_PG17' v223-validated-tls.log
+          grep -F 'PASS_V223_INTEGRATED_FACTORY_HTTPS_PG17_74_CASES' v223-validated-tls.log
+          grep -F 'PASS_V223_INTEGRATED_AUTH_ROLE_SEPARATE_TLS' v223-validated-tls.log
+          grep -F 'PASS_V223_INTEGRATED_HTTPS_HEALTH_CAPABILITIES_AUTH_AND_HEADERS' v223-validated-tls.log
+          grep -F 'PASS_V223_REAL_HTTPS_74_HTTP_E2E_VERIFIED_TLS' v223-validated-tls.log
+          grep -F 'PASS_V223_HTTPS_UNTRUSTED_CERT_REFUSED' v223-validated-tls.log
+          grep -F 'PASS: 74 checks, 0 failed, expected exactly 74' v223-validated-tls.log
+          echo 'DISPOSABLE PG17 LOOPBACK HTTPS ONLY: Supabase and external HTTPS deployment were not exercised.'
