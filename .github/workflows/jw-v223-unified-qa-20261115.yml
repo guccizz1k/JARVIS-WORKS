@@ -51,23 +51,40 @@ jobs:
           # Main contains opt-in V11.2 wake hub support absent from the original
           # V22.3 realtime transport; preserve those exact audited Git blobs
           # while retaining all remaining V22.3 code unchanged.
-          selected={
+          selected_main={
               "app/pg_messenger_realtime_v90.py":"206d45b6d0a56c299dff2ab3f1552360d32a4a45",
               "app/pg_v90_integrated_entry.py":"d7bc30b2436f1db2f6397e2de4782d14f0f9e46e",
           }
-          for path, sha in selected.items():
+          for path, sha in selected_main.items():
               assert main[path][1]==sha, f"main source changed: {path}"
               expected[path]=main[path]
+          # J6 main skill-policy guard was omitted from the first unified candidate.
+          # Each deliberately changed blob is pinned to an independently reviewed SHA.
+          selected_j6={
+              "AGENTS.md":"688dad3765d541d248b50b7fdd1206dbdaaa50fc",
+              "scripts/jw_evidence_gate.py":"5607eb7bb841ad2afdd3199758e7068aed193d10",
+              "scripts/jw_skill_contract.py":"dcec532f581cf7c7cc43f49265d86fc13b6da4aa",
+          }
+          for path,sha in selected_j6.items():
+              assert path in now, f"missing J6 guard: {path}"
+              expected[path]=(now[path][0],sha)
           workflow=".github/workflows/jw-v223-unified-qa-20261115.yml"
           test_path="tests/test_v223_v112_messenger_wake_integration_20261115.py"
-          assert set(now)-set(expected)=={workflow,test_path},sorted(set(now)-set(expected))
+          additional_review_files={
+              workflow,
+              test_path,
+              "scripts/jw_v223_external_skill_pins.json",
+              "tests/test_v223_j6_skill_gate_integration_20261115.py",
+              "docs/review/jw-v223-j6-bridge-20261115.md",
+          }
+          assert set(now)-set(expected)==additional_review_files,sorted(set(now)-set(expected))
           assert set(expected)-set(now)==set(), sorted(set(expected)-set(now))
           for path,info in expected.items():
               assert now[path]==info,f"UNAPPROVED_BLOB_DRIFT: {path}"
           assert Path(workflow).is_file()
           assert not run("status","--porcelain").strip(),"dirty worktree"
-          print("PASS_INTEGRATION_121_MAIN_EXCLUSIVE_904_V223_BLOBS_PRESERVED_2_V112_MESSENGER_BLOBS_23_CONFLICTS_RESERVED")
-          print("NOT_RELEASE_PASS: 25 differing common files and unavailable Codex local SHA require verification")
+          print("PASS_UNIFIED_J6_121_MAIN_EXCLUSIVE_2_V112_MESSENGER_3_PINNED_J6_GUARDS_21_COMMON_CONFLICTS_RESERVED")
+          print("NOT_RELEASE_PASS: 21 unresolved differing common files and unavailable Codex local SHA require verification")
           PY
   full-python-reviewed-product:
     needs: provenance
@@ -121,6 +138,12 @@ jobs:
           test -f ../overlay/BASE_SHA256.json
           test -f ../overlay/PAYLOAD_SHA256.json
           git diff --exit-code
+      - name: J6 main skill-safety contract with pinned advisory files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/jw_evidence_gate.py --check-project .
+          python -m pytest -q -ra -p no:cacheprovider --noconftest tests/test_v223_j6_skill_gate_integration_20261115.py tests/test_jw_skill_contract.py tests/test_jw_evidence_gate.py
       - name: Execute entire checked-out Python tests tree, no exclusion
         shell: bash
         run: |
