@@ -25,7 +25,7 @@ import re
 import secrets
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,7 +135,7 @@ def shape_admin(admin_db: str, db: str) -> None:
 
 
 def apply_backup_role(db: str) -> subprocess.CompletedProcess:
-    until = (date.today() + timedelta(days=2)).isoformat() + " 00:00:00+09"
+    until = (datetime.now(timezone.utc) + timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S+00")
     done = psql(db, user=SIM_ADMIN, file=BK, vars_={"valid_until": until})
     if done.returncode == 0:   # CI only; the real password is set by the owner with \password on their own PC
         psql("postgres", sql=f"ALTER ROLE jw_backup_ro PASSWORD '{PASSWORDS['jw_backup_ro']}'")
