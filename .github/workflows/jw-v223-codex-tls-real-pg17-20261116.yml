@@ -61,7 +61,8 @@ jobs:
             "scripts/ci_cinema_pg_validated_tls_e2e_v223.py",
             "tests/test_v223_tls_role_cleanup.py",
             ".github/workflows/jw-v223-codex-tls-cleanup-20261116.yml",
-            ".github/workflows/jw-v223-codex-tls-real-pg17-20261116.yml"
+            ".github/workflows/jw-v223-codex-tls-real-pg17-20261116.yml",
+            ".github/workflows/jw-v223-codex-tls-independent-full-20261116.yml"
           }
           assert changed==expected,(changed,expected)
           pinned={
