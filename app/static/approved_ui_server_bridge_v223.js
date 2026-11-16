@@ -17,7 +17,7 @@ class Bridge{
     if(this.#authBusy)throw new Refused('AUTH_BUSY');
     this.#authBusy=true;++this.#epoch;if(clear)this.#clear();return this.#epoch;
   }
-  async #request(path,method='GET',body,csrf=false){
+  async #request(path,method='GET',body,csrf=false,format='json'){
     const epoch=this.#epoch;
     if(!/^\/api\/[a-z0-9/-]+$/.test(path))throw new Refused('BAD_PATH');
     if(!['GET','POST'].includes(method))throw new Refused('BAD_METHOD');
@@ -31,6 +31,17 @@ class Bridge{
     if(response.status===401){++this.#epoch;this.#clear();throw new Refused('SESSION_EXPIRED')}
     if(response.status===403)throw new Refused('FORBIDDEN');
     if(!response.ok)throw new Refused('API_FAILURE');
+    if(format==='xlsx'){
+      const type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      if((response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase()!==type)throw new Refused('INVALID_XLSX_TYPE');
+      const size=response.headers.get('content-length');
+      if(size!==null&&(!/^\d+$/.test(size)||Number(size)>2097152))throw new Refused('RESPONSE_TOO_BIG');
+      let buffer;try{buffer=await response.arrayBuffer()}catch{this.#assertEpoch(epoch);throw new Refused('NETWORK_ERROR')}
+      this.#assertEpoch(epoch);const bytes=new Uint8Array(buffer);
+      if(bytes.byteLength>2097152)throw new Refused('RESPONSE_TOO_BIG');
+      if(bytes.length<4||bytes[0]!==80||bytes[1]!==75||bytes[2]!==3||bytes[3]!==4)throw new Refused('INVALID_XLSX_BYTES');
+      return bytes;
+    }
     if(!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')||''))throw new Refused('NON_JSON');
     if(Number(response.headers.get('content-length')||0)>2097152)throw new Refused('RESPONSE_TOO_BIG');
     let data;try{data=await response.json()}catch{this.#assertEpoch(epoch);throw new Refused('INVALID_JSON')}
@@ -200,6 +211,49 @@ class Bridge{
     if(!d||d.id!==runId||d.status!=='cancelled'||d.excluded_from_metrics!==true)
       throw new Refused('INVALID_TIMER_CANCEL');
     return Object.freeze({id:d.id,status:d.status,excluded_from_metrics:true});
+  }
+
+  #draft(d,id=null,kind=null,sourceId=null){
+    const kinds={sales_order_draft:'quote',delivery_note_draft:'order',payment_request_draft:'invoice'};
+    if(!d||typeof d!=='object'||Array.isArray(d)||!/^[a-f0-9]{32}$/.test(d.id||'')||
+       !Object.hasOwn(kinds,d.kind)||d.source_type!==kinds[d.kind]||!/^[a-f0-9]{32}$/.test(d.source_id||'')||
+       d.scope!=='authenticated_tenant_only'||typeof d.document_no!=='string'||
+       d.document?.source_id!==d.source_id||d.document?.source_type!==d.source_type||
+       d.document?.document_status!=='internal_review_draft_only'||
+       !Number.isSafeInteger(d.document?.money?.total)||d.document.money.total<0||
+       (id!==null&&d.id!==id)||(kind!==null&&d.kind!==kind)||(sourceId!==null&&d.source_id!==sourceId))
+      throw new Refused('INVALID_DRAFT_RESPONSE');
+    return Object.freeze({...d});
+  }
+  async draftFromSource(kind,sourceId){
+    const epoch=this.#session();
+    if(!['sales_order_draft','delivery_note_draft','payment_request_draft'].includes(kind)||
+       typeof sourceId!=='string'||!/^[a-f0-9]{32}$/.test(sourceId))throw new Refused('INVALID_DRAFT_SOURCE');
+    const d=await this.#request('/api/automation/drafts/from-source','POST',{kind,source_id:sourceId},true);
+    this.#assertEpoch(epoch);return this.#draft(d,null,kind,sourceId);
+  }
+  async draftSummary(){
+    const epoch=this.#session(),d=await this.#request('/api/automation/drafts/summary');this.#assertEpoch(epoch);
+    const kinds=['sales_order_draft','delivery_note_draft','payment_request_draft'];
+    if(!d||d.scope!=='authenticated_tenant_only'||!Number.isSafeInteger(d.total)||d.total<0||
+       !d.by_kind||typeof d.by_kind!=='object'||Array.isArray(d.by_kind)||
+       !Object.entries(d.by_kind).every(([k,v])=>kinds.includes(k)&&Number.isSafeInteger(v)&&v>=0)||
+       Object.values(d.by_kind).reduce((a,b)=>a+b,0)!==d.total||
+       !Array.isArray(d.recent)||d.recent.length>5||!d.recent.every(r=>r&&/^[a-f0-9]{32}$/.test(r.id||'')&&
+          kinds.includes(r.kind)&&typeof r.document_no==='string'&&typeof r.created_at==='string'))
+      throw new Refused('INVALID_DRAFT_SUMMARY');
+    return Object.freeze({...d});
+  }
+  async draftDetail(id){
+    const epoch=this.#session();if(typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id))throw new Refused('INVALID_DRAFT_ID');
+    const d=await this.#request('/api/automation/drafts/'+id);this.#assertEpoch(epoch);
+    const checked=this.#draft(d,id);if(typeof checked.stale!=='boolean')throw new Refused('INVALID_DRAFT_RESPONSE');return checked;
+  }
+  async draftXlsx(id){
+    const epoch=this.#session(),d=await this.draftDetail(id);this.#assertEpoch(epoch);
+    if(d.stale)throw new Refused('STALE_DRAFT');
+    const bytes=await this.#request('/api/automation/drafts/'+id+'/xlsx','GET',undefined,false,'xlsx');this.#assertEpoch(epoch);
+    return Object.freeze({bytes,filename:'draft-'+id+'.xlsx',contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   }
 
   async list(name){

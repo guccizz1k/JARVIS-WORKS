@@ -93,6 +93,7 @@ def owner_visual_review_response():
         + '<div id="login"></div><div id="app"></div><div id="intro" hidden></div>'
         + '<div id="toasts" aria-live="polite"></div>'
         + '<script defer src="/static/approved_ui_server_bridge_v223.js"></script>'
+        + '<script defer src="/static/approved_ui_document_export_v223.js"></script>'
         + '<script defer src="/static/approved_ui_server_review_v223.js"></script>'
         + '<script defer src="/static/approved_ui_owner_gl_v223.js"></script>'
         + '<script defer src="/static/approved_ui_owner_visual_v223.js"></script>'

@@ -41,9 +41,13 @@ await b.write('/api/quotes/'+q.id+'/status',{status:'sent'});await b.write('/api
 const o=await b.write('/api/orders/from-quote',{quote_id:q.id,due_date:'2099-12-30'});
 await b.write('/api/orders/'+o.id+'/status',{status:'processing'});await b.write('/api/orders/'+o.id+'/status',{status:'fulfilled'});
 const s=await b.statementFromOrder(o.id);await b.statementDetail(s.id,o.id);
+const draft=await b.draftFromSource('delivery_note_draft',o.id);assert.equal((await b.draftDetail(draft.id)).source_id,o.id);assert.ok((await b.draftSummary()).recent.some(r=>r.id===draft.id));assert.equal((await b.draftXlsx(draft.id)).bytes[0],80);checks++;
+const foreign=setup();await foreign.bridge.login('demo@bada.example',password);await assert.rejects(foreign.bridge.draftXlsx(draft.id));checks++;
 const inv=await b.write('/api/invoices/from-order',{order_id:o.id,due_date:'2099-12-31'});
 assert.equal(inv.money.total,2200);
+const paymentDraft=await b.draftFromSource('payment_request_draft',inv.id);
 await b.write('/api/invoices/'+inv.id+'/payments',{reference:'tls-synthetic-reference',amount:2200,paid_at:new Date().toISOString().slice(0,10)});
+await assert.rejects(b.draftXlsx(paymentDraft.id),{code:'STALE_DRAFT'});checks++;
 const trace=await b.orderTransactionTrace(o.id);assert.equal(trace.active_paid,2200);checks++;
 await b.write('/api/invoices/'+inv.id+'/payments',{reference:'tls-synthetic-reference',amount:2200,paid_at:new Date().toISOString().slice(0,10)});assert.equal((await b.orderTransactionTrace(o.id)).active_paid,2200);checks++;
 await assert.rejects(b.write('/api/invoices/'+inv.id+'/payments',{reference:'tls-synthetic-reference',amount:2100,paid_at:new Date().toISOString().slice(0,10)}));checks++;

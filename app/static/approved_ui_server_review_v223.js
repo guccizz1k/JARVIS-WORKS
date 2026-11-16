@@ -103,6 +103,11 @@ function start(){
       clear(view);view.append(t('small','jw-review-kicker','JARVIS WORKS'),t('h2','jw-review-title',selected[1]));
       if(key==='account'){view.append(t('p','jw-review-muted',who.name+' · '+who.email+' · '+who.org_name+' · '+who.role));return}
 
+      if(key==='export'){
+        if(!g.JWOwnerDocumentExport){view.append(t('p','jw-review-unwired','문서 내보내기 모듈을 불러오지 못했습니다.'));return}
+        await g.JWOwnerDocumentExport.render({bridge,view,isCurrent:()=>token===epoch});return;
+      }
+
       // Operational read-only panels: server is the sole source of truth.
       const readOnlyPanels=new Set(['stats','automation','activity','messenger','docs','files','inbox','security','team']);
       if(readOnlyPanels.has(key)){

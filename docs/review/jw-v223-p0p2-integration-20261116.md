@@ -23,7 +23,7 @@ Node deferred-response tests reproduce old failures before the patch and cover o
 |messenger|threads|read-only; conversation/send/attachment UI incomplete|
 |automation|server timing,start/finish/cancel and statements|implemented review subset|
 |stats|dashboard,time-savings|server reads; not original analytics parity|
-|export|no handler; explicitly unwired|NOT IMPLEMENTED in review shell|
+|export|draft summary/create/detail/freshness-checked XLSX download|review draft export implemented; not complete accounting/settlement export|
 |inbox|evidence queue|read-only; approve/reject UI incomplete|
 |files|evidence records|read-only; upload/download management incomplete|
 |activity|audit|read-only server data|
@@ -32,10 +32,10 @@ Node deferred-response tests reproduce old failures before the patch and cover o
 |settings|no handler; explicitly unwired|NOT IMPLEMENTED; configuration semantics/API must not be invented|
 |account|verified server identity|read-only; profile update UI incomplete|
 
-A17-menu list is not17 implemented workflows. Preserve ChatGPT's original design and do not silently replace missing product behavior with a server-review placeholder. Full P2 remains blocked until those user flows and actual browser/accessibility/mobile behavior are integrated and verified. Physical iPhone Safari is not inferred from Node or Linux browser tests.
+A17-menu list is not17 implemented workflows. Existing verified-source draft XLSX APIs are now wired through an opt-in module; creation requires explicit confirmation and download requires a separate click. Binary MIME/size/ZIP magic, stale invoice balance, tenant scope and session epochs are checked. No schema or original HTML/CSS change. Preserve ChatGPT's original design and do not silently replace missing product behavior with a server-review placeholder. Full P2 remains blocked until those user flows and actual browser/accessibility/mobile behavior are integrated and verified. Physical iPhone Safari is not inferred from Node or Linux browser tests.
 
 ## P0 and CI boundary
 
-Main's530 existing paths are all present. The24 shared modified files require per-file impact review, not just existence checks. The independent review ledger and exact-SHA results live in the local evidence directory outside this commit. Historical J1–J6 and TLS workflow allowlists target older source/branch scopes; the new review-only workflow deliberately pins this base, this exact seven-file delta and the protected original blobs. It runs full Python, all Node CJS suites and independent disposable PG17 TLS/fault checks. Preparing this workflow does not publish a commit, start CI, authorize costs or certify remote success. New remote push/PR/manual workflow dispatch require explicit scoped authorization.
+Main's530 existing paths are all present. The24 shared modified files require per-file impact review, not just existence checks. The independent review ledger and exact-SHA results live in the local evidence directory outside this commit. Historical J1–J6 and TLS workflow allowlists target older source/branch scopes; the new review-only workflow deliberately pins this base, this exact eleven-file delta and the protected original blobs. It runs full Python, all Node CJS suites and independent disposable PG17 TLS/fault checks. Preparing this workflow does not publish a commit, start CI, authorize costs or certify remote success. New remote push/PR/manual workflow dispatch require explicit scoped authorization.
 
 Local artifacts must identify source SHA, command, environment, exit status, failures/skips and scope. Do not reuse03863 or5b63 successful logs as proof of this new candidate. No production/main/Render/persistent DB changes, no original UI mutations, no secret export, no paid execution. Rollback is the focused review-branch diff; server schema and business engines have no migration to reverse.
