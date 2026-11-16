@@ -30,3 +30,13 @@ def test_only_fixed_readonly_paths():
 def test_no_redirect_is_accepted():
     redirect=module.NoRedirect()
     assert redirect.redirect_request(None,None,302,"redirect",{},"http://attacker.invalid") is None
+
+def test_diagnostic_reason_classes_are_bounded_and_no_raw_exception_logged():
+    import socket
+    import ssl
+    import urllib.error
+    assert module.safe_error_code(TimeoutError("ignored"))=="TIMEOUT"
+    assert module.safe_error_code(socket.gaierror(-2,"dns detail"))=="DNS_ERROR"
+    assert module.safe_error_code(ssl.SSLError("ssl detail"))=="TLS_ERROR"
+    assert module.safe_error_code(urllib.error.URLError("Tunnel connection failed: 403 Forbidden"))=="PROXY_TUNNEL_FAILURE"
+    assert module.safe_error_code(OSError("private DSN/password must never print"))=="TRANSPORT_UNKNOWN"
