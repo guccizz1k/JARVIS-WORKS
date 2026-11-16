@@ -9,7 +9,7 @@ What is proven (on the server it ran on; PG17 is the target, PG16 is supplementa
   * an expired role cannot log in; the renew file, run by the Supabase-shaped admin, restores login with the SAME password;
   * renewal changes ONLY the expiry: role attributes, password verifier, connection limit, role settings, memberships and
     every table/sequence ACL are identical before and after; the backup tool's rules and the preflight still accept the role;
-  * the renew file refuses a past window, a window beyond 24 hours, a window beyond the approved absolute limit
+  * the renew file refuses a past window, a window beyond 5 hours, a window beyond the approved absolute limit
     (2026-11-10 09:00:00+09), any execution after that limit, a missing variable and a missing role, each without any change;
   * the revoke file stops new logins at once and ends open sessions; a later renewal does NOT silently re-enable LOGIN;
   * the existing rollback SQL still removes a renewed role and returns the database to the pre-C fingerprint.
@@ -99,7 +99,7 @@ def main_phase() -> None:
             applied.returncode == 0 and expired.returncode != 0 and "authentication failed" in expired.stderr
             and pf.scalar(db, "SELECT rolvaliduntil < now() FROM pg_roles WHERE rolname='jw_backup_ro'") == "t", expired.stderr[-120:])
 
-        win = with_limit(stamp(timedelta(hours=48)))   # limit far away: only the 24 h rule is in play here
+        win = with_limit(stamp(timedelta(hours=48)))   # limit far away: only the 5 h rule is in play here
         done = renew(db, stamp(timedelta(hours=2)), file=win)
         back = cg.login_ok(db, "jw_backup_ro", "SHOW default_transaction_read_only")
         rec("RN.02_renew_file_restores_login_with_the_same_password_and_stays_read_only",
@@ -119,12 +119,12 @@ def main_phase() -> None:
         # refusals: each leaves the expiry and everything else exactly as it was
         keep_until, keep_state = pf.scalar(db, VALID_UNTIL), state(db)
         refusals = {"past": renew(db, "2000-01-01 00:00:00+00", file=win),
-                    "too_far": renew(db, stamp(timedelta(hours=30)), file=win),
+                    "too_far": renew(db, stamp(timedelta(hours=5, minutes=5)), file=win),
                     "missing_variable": renew(db, None, file=win)}
         unchanged = pf.scalar(db, VALID_UNTIL) == keep_until and state(db) == keep_state
         pf.psql(db, user=ADMIN, file=cg.ROLLBACK_SQL)
         no_role = renew(db, stamp(timedelta(hours=2)), file=win)
-        rec("RN.05_refuses_past_window_beyond_24_hours_missing_variable_and_missing_role_without_any_change",
+        rec("RN.05_refuses_past_window_beyond_5_hours_missing_variable_and_missing_role_without_any_change",
             all(p.returncode != 0 for p in refusals.values()) and unchanged
             and "renewal window" in refusals["past"].stderr and "renewal window" in refusals["too_far"].stderr
             and no_role.returncode != 0 and "does not exist" in no_role.stderr
@@ -173,8 +173,8 @@ def main_phase() -> None:
         cg.run_c(db, ADMIN)
         pf.psql(db, user=ADMIN, sql="ALTER ROLE jw_backup_ro VALID UNTIL '2000-01-01 00:00:00+00'")
         keep_u, keep_s = pf.scalar(db, VALID_UNTIL), state(db)
-        near = with_limit(stamp(timedelta(hours=6)))
-        over = renew(db, stamp(timedelta(hours=7)), file=near)               # inside 24 h, beyond the limit
+        near = with_limit(stamp(timedelta(hours=4)))
+        over = renew(db, stamp(timedelta(hours=4, minutes=30)), file=near)   # within 5h, beyond absolute limit
         closed = renew(db, stamp(timedelta(hours=1)), file=with_limit(stamp(timedelta(hours=-1))))   # now is past the limit
         real_after = renew(db, "2026-11-10 09:01:00+09")                     # the unmodified file: never accepts beyond the real limit
         real_two_days = renew(db, stamp(timedelta(hours=49)))
@@ -182,8 +182,8 @@ def main_phase() -> None:
                       and closed.returncode != 0 and "renewal window closed" in closed.stderr
                       and real_after.returncode != 0 and real_two_days.returncode != 0
                       and pf.scalar(db, VALID_UNTIL) == keep_u and state(db) == keep_s)
-        inside = renew(db, stamp(timedelta(hours=5)), file=near)
-        exact_stamp = stamp(timedelta(hours=6))
+        inside = renew(db, stamp(timedelta(hours=3)), file=near)
+        exact_stamp = stamp(timedelta(hours=4))
         edge = renew(db, exact_stamp, file=with_limit(exact_stamp))          # exactly the limit is allowed
         now_ok = pf.scalar(db, "SELECT rolvaliduntil > now() FROM pg_roles WHERE rolname='jw_backup_ro'") == "t"
         pf.psql(db, user=ADMIN, file=cg.ROLLBACK_SQL)
