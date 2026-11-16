@@ -427,6 +427,16 @@ function start(){
           if(key==='home'||key==='money'){
             const orders=await fetched('orders');
             if(token!==epoch)return;
+            if(key==='money'){
+              if(!g.JWOwnerOrderReview){
+                actions.append(t('p','jw-review-unwired','수주 변경·관리자 승인 모듈이 없습니다.'));
+              }else{
+                await g.JWOwnerOrderReview.render({
+                  bridge,view:actions,isCurrent:()=>token===epoch
+                });
+                if(token!==epoch)return;
+              }
+            }
             for(const r of orders.slice(0,12)){
               const next=r.status==='received'?'processing':r.status==='processing'?'fulfilled':null;
               if(!next)continue;

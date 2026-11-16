@@ -239,6 +239,60 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
             assert a.post(edit_url,headers=headers_a,json={
                 **update_body,'expected_sha256':checked.json()['fingerprint']}).status_code==409
 
+            # Review-only order edit / explicit admin acknowledgement via real TLS.
+            quote_request={'customer_id':customer_id,'title':'HTTPS Order Review',
+                'vat_mode':'taxable','items':[{'name':'Power cable','quantity':2,'unit_price':1000}]}
+            order_quote=a.post(origin+'/api/quotes',headers=headers_a,json=quote_request)
+            assert order_quote.status_code==201,order_quote.status_code
+            oqid=order_quote.json()['id']
+            for transition in ('sent','accepted'):
+                progressed=a.post(origin+'/api/quotes/'+oqid+'/status',
+                    headers=headers_a,json={'status':transition})
+                assert progressed.status_code==200,progressed.status_code
+            order_created=a.post(origin+'/api/orders/from-quote',
+                headers=headers_a,json={'quote_id':oqid,'due_date':'2099-12-30'})
+            assert order_created.status_code==201,order_created.status_code
+            oid=order_created.json()['id']
+            order_context_url=origin+'/api/review/orders/'+oid+'/edit-context'
+            order_update_url=origin+'/api/review/orders/'+oid+'/update'
+            order_ack_url=origin+'/api/review/orders/'+oid+'/acknowledge'
+            beginning=a.get(order_context_url)
+            assert beginning.status_code==200,beginning.status_code
+            original_order=beginning.json()
+            original_line=original_order['order']['items'][0]
+            order_changes={'fingerprint':original_order['fingerprint'],
+                'updated':{'due_date':'2099-12-30',
+                    'change_reason':'합성 HTTPS 수주 품목 변경',
+                    'items':[{'source_quote_item_id':original_line['source_quote_item_id'],
+                              'name':'Power cable','quantity':3,'unit_price':1000}]}}
+            assert a.post(order_update_url,json=order_changes).status_code==403
+            assert b.get(order_context_url).status_code==404
+            assert b.post(order_update_url,headers=headers_b,json=order_changes).status_code==404
+            updated_order=a.post(order_update_url,headers=headers_a,json=order_changes)
+            assert updated_order.status_code==200,updated_order.status_code
+            assert updated_order.json()['order']['review_state']=='pending'
+            assert updated_order.json()['order']['money']['total']==3300
+            assert a.post(order_update_url,headers=headers_a,json=order_changes).status_code==409
+            current_order=a.get(order_context_url).json()
+            assert current_order['order']['review_state']=='pending'
+            assert a.post(origin+'/api/orders/'+oid+'/status',headers=headers_a,
+                          json={'status':'processing'}).status_code==200
+            assert a.post(origin+'/api/orders/'+oid+'/status',headers=headers_a,
+                          json={'status':'fulfilled'}).status_code==409
+            latest_order=a.get(order_context_url).json()
+            assert b.post(order_ack_url,headers=headers_b,json={
+                'fingerprint':latest_order['fingerprint'],'confirm':True}).status_code==404
+            assert a.post(order_ack_url,json={
+                'fingerprint':latest_order['fingerprint'],'confirm':True}).status_code==403
+            assert a.post(order_ack_url,headers=headers_a,json={
+                'fingerprint':original_order['fingerprint'],'confirm':True}).status_code==409
+            approved_order=a.post(order_ack_url,headers=headers_a,json={
+                'fingerprint':latest_order['fingerprint'],'confirm':True})
+            assert approved_order.status_code==200,approved_order.status_code
+            assert approved_order.json()['order']['review_state']=='acknowledged'
+            assert a.post(origin+'/api/orders/'+oid+'/status',headers=headers_a,
+                          json={'status':'fulfilled'}).status_code==200
+
             # An unrelated company can neither enumerate thread nor read messages.
             from app.main import hash_password, now
             other_org = uuid.uuid4().hex

@@ -30,7 +30,7 @@ class Bridge{
     catch{this.#assertEpoch(epoch);throw new Refused('NETWORK_ERROR')}
     this.#assertEpoch(epoch);
     if(response.status===401){++this.#epoch;this.#clear();throw new Refused('SESSION_EXPIRED')}
-    if(response.status===409&&(path.startsWith('/api/account/')||path.startsWith('/api/review/customers/')||path.startsWith('/api/review/quotes/')))throw new Refused('STALE_VERSION');
+    if(response.status===409&&(path.startsWith('/api/account/')||path.startsWith('/api/review/customers/')||path.startsWith('/api/review/quotes/')||path.startsWith('/api/review/orders/')))throw new Refused('STALE_VERSION');
     if(response.status===403)throw new Refused('FORBIDDEN');
     if(!response.ok)throw new Refused('API_FAILURE');
     if(format==='xlsx'){
@@ -513,6 +513,85 @@ class Bridge{
       throw new Refused('INVALID_QUOTE_EDIT_CONTEXT');
     return Object.freeze({fingerprint:data.fingerprint,quote:Object.freeze({...q,
       items:Object.freeze(q.items.map(item=>Object.freeze({...item})))})});
+  }
+  // A review context is a tenant-scoped immutable snapshot and fingerprint.
+  #orderReviewContext(data,orderId){
+    const q=data?.order;
+    const isId=x=>typeof x==='string'&&/^[a-f0-9]{32}$/.test(x);
+    if(!q||q.id!==orderId||q.org_id!==this.#who?.org_id||
+       !['received','processing'].includes(q.status)||
+       !['clean','pending','acknowledged'].includes(q.review_state)||
+       !isId(q.quote_id)||!isId(q.customer_id)||
+       typeof q.title!=='string'||typeof q.doc_no!=='string'||
+       typeof q.due_date!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(q.due_date)||
+       typeof data.fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(data.fingerprint)||
+       !Array.isArray(q.items)||!q.items.length||q.items.length>100||
+       !Array.isArray(q.quote_items)||!q.quote_items.length||q.quote_items.length>100||
+       !Array.isArray(q.differences)||q.differences.length>500||
+       !q.money||!Number.isSafeInteger(q.money.total)||q.money.total<0||
+       !q.items.every((r,i)=>r&&isId(r.id)&&(r.source_quote_item_id===null||isId(r.source_quote_item_id))&&
+         typeof r.name==='string'&&r.name.length>0&&r.name.length<=150&&
+         Number.isSafeInteger(r.quantity)&&r.quantity>0&&r.quantity<=100000&&
+         Number.isSafeInteger(r.unit_price)&&r.unit_price>=0&&r.unit_price<=1000000000&&r.position===i)||
+       !q.quote_items.every((r,i)=>r&&isId(r.id)&&
+         typeof r.name==='string'&&r.name.length>0&&r.name.length<=150&&
+         Number.isSafeInteger(r.quantity)&&r.quantity>0&&
+         Number.isSafeInteger(r.unit_price)&&r.unit_price>=0&&r.position===i))
+      throw new Refused('INVALID_ORDER_REVIEW_CONTEXT');
+    const sourceIds=new Set(q.quote_items.map(i=>i.id));
+    if(q.items.some(x=>x.source_quote_item_id!==null&&!sourceIds.has(x.source_quote_item_id)))
+      throw new Refused('INVALID_ORDER_SOURCE');
+    return Object.freeze({fingerprint:data.fingerprint,order:Object.freeze({
+      ...q,items:q.items.map(x=>Object.freeze({...x})),
+      quote_items:q.quote_items.map(x=>Object.freeze({...x})),
+      differences:q.differences.map(x=>Object.freeze({...x}))})});
+  }
+  async orderReviewContext(orderId){
+    const epoch=this.#session();
+    if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))
+      throw new Refused('INVALID_ORDER_ID');
+    const data=await this.#request('/api/review/orders/'+orderId+'/edit-context');
+    this.#assertEpoch(epoch);
+    return this.#orderReviewContext(data,orderId);
+  }
+  async orderReviewSave(orderId,fingerprint,updated){
+    const epoch=this.#session();
+    const isId=x=>typeof x==='string'&&/^[a-f0-9]{32}$/.test(x);
+    const validItem=r=>r&&typeof r.name==='string'&&!!r.name.trim()&&r.name.length<=150&&
+      Number.isSafeInteger(r.quantity)&&r.quantity>=1&&r.quantity<=100000&&
+      Number.isSafeInteger(r.unit_price)&&r.unit_price>=0&&r.unit_price<=1000000000&&
+      (r.source_quote_item_id===null||isId(r.source_quote_item_id));
+    if(!isId(orderId)||typeof fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(fingerprint)||
+       !updated||typeof updated!=='object'||
+       typeof updated.due_date!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(updated.due_date)||
+       typeof updated.change_reason!=='string'||updated.change_reason.trim().length<5||
+       updated.change_reason.length>500||!Array.isArray(updated.items)||
+       !updated.items.length||updated.items.length>100||!updated.items.every(validItem))
+      throw new Refused('INVALID_ORDER_UPDATE');
+    const refs=updated.items.filter(x=>x.source_quote_item_id!==null).map(x=>x.source_quote_item_id);
+    if(new Set(refs).size!==refs.length)throw new Refused('DUPLICATE_ORDER_SOURCE');
+    const body={due_date:updated.due_date,change_reason:updated.change_reason.trim(),
+      items:updated.items.map(x=>({source_quote_item_id:x.source_quote_item_id,
+        name:x.name.trim(),quantity:x.quantity,unit_price:x.unit_price}))};
+    const data=await this.#request('/api/review/orders/'+orderId+'/update','POST',
+      {fingerprint,updated:body},true);
+    this.#assertEpoch(epoch);
+    if(typeof data?.changed!=='boolean')throw new Refused('INVALID_ORDER_RECEIPT');
+    return Object.freeze({...this.#orderReviewContext(data,orderId),changed:data.changed});
+  }
+  async orderReviewAcknowledge(orderId,fingerprint){
+    const epoch=this.#session();
+    if(this.#who?.role!=='admin')throw new Refused('ADMIN_ONLY');
+    if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId)||
+       typeof fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(fingerprint))
+      throw new Refused('INVALID_ORDER_ACK');
+    const data=await this.#request('/api/review/orders/'+orderId+'/acknowledge',
+      'POST',{fingerprint,confirm:true},true);
+    this.#assertEpoch(epoch);
+    const result=this.#orderReviewContext(data,orderId);
+    if(result.order.review_state!=='acknowledged'||!result.order.differences.length)
+      throw new Refused('INVALID_ORDER_ACK_RECEIPT');
+    return result;
   }
   async quoteEditContext(quoteId){
     const epoch=this.#session();

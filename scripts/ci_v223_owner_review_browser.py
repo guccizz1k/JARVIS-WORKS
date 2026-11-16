@@ -100,6 +100,35 @@ def main():
                                     page.locator('.jw-review-form button[type=submit]').click()
                                     page.locator('.jw-review-shell').wait_for(timeout=30000)
                                     assert page.evaluate("document.documentElement.dataset.theme==='dark'")
+                                    # Independent synthetic HTTPS seed; mutations below
+                                    # are then performed through the actual browser UI.
+                                    with httpx.Client(verify=ssl_context,trust_env=False,timeout=8) as api:
+                                        signed=api.post(origin+'/api/login',json={
+                                            'email':'demo@hanbit.example',
+                                            'password':'Demo!2026secure'})
+                                        assert signed.status_code==200,signed.status_code
+                                        headers={'X-CSRF-Token':signed.json()['csrf_token']}
+                                        customers=api.get(origin+'/api/customers')
+                                        assert customers.status_code==200 and customers.json()
+                                        customer_id=customers.json()[0]['id']
+                                        q=api.post(origin+'/api/quotes',headers=headers,json={
+                                            'customer_id':customer_id,
+                                            'title':f'Browser order source {engine} {width}',
+                                            'vat_mode':'taxable',
+                                            'items':[{'name':'Synthetic cable','quantity':2,
+                                                      'unit_price':1000}]})
+                                        assert q.status_code==201,q.status_code
+                                        source_id=q.json()['id']
+                                        for phase in ('sent','accepted'):
+                                            step=api.post(origin+'/api/quotes/'+source_id+'/status',
+                                                headers=headers,json={'status':phase})
+                                            assert step.status_code==200,step.status_code
+                                        made=api.post(origin+'/api/orders/from-quote',headers=headers,
+                                            json={'quote_id':source_id,'due_date':'2099-12-30'})
+                                        assert made.status_code==201,made.status_code
+                                        browser_order=made.json()
+                                        browser_order_id=browser_order['id']
+                                        browser_order_no=browser_order['doc_no']
                                     for route,label in ROUTES:
                                         if width < 600:
                                             page.locator('.jw-owner-bottomnav button[data-action=show-all]').click()
@@ -156,6 +185,61 @@ def main():
                                             assert after['money']['total']==1485,(engine,width,'QUOTE_MONEY')
                                             assert after['items'][0]['quantity']==3,(engine,width,'QUOTE_QUANTITY')
                                             print(f'PASS_V223_REAL_{engine.upper()}_{width}_QUOTE_DRAFT_CAS_HTTPS',flush=True)
+                                        if route == 'money':
+                                            panel=page.locator('.jw-review-order-panel')
+                                            panel.wait_for(timeout=20000)
+                                            panel.get_by_role('button',
+                                                name=browser_order_no+' · 변경·검토').click()
+                                            form=panel.locator('form.jw-review-action-form').last
+                                            form.wait_for(timeout=15000)
+                                            form.locator('input[aria-label="수량"]').first.fill('3')
+                                            form.locator('textarea[aria-label="수주 변경 사유 (5자 이상)"]').fill(
+                                                'Browser QA requested quantity change')
+                                            page.once('dialog',lambda dialog:dialog.accept())
+                                            form.locator('button[type=submit]').click()
+                                            panel.get_by_text('수주 변경 서버 저장·재조회 완료',
+                                                exact=False).wait_for(timeout=20000)
+                                            with httpx.Client(verify=ssl_context,trust_env=False,
+                                                              timeout=8) as verify:
+                                                login=verify.post(origin+'/api/login',json={
+                                                    'email':'demo@hanbit.example',
+                                                    'password':'Demo!2026secure'})
+                                                assert login.status_code==200
+                                                csrf={'X-CSRF-Token':login.json()['csrf_token']}
+                                                current=verify.get(origin+'/api/review/orders/'+
+                                                   browser_order_id+'/edit-context')
+                                                assert current.status_code==200
+                                                order_doc=current.json()['order']
+                                                assert order_doc['review_state']=='pending'
+                                                assert order_doc['items'][0]['quantity']==3
+                                                assert order_doc['money']['total']==3300
+                                                phase=verify.post(origin+'/api/orders/'+browser_order_id+
+                                                    '/status',headers=csrf,json={'status':'processing'})
+                                                assert phase.status_code==200
+                                                blocked=verify.post(origin+'/api/orders/'+browser_order_id+
+                                                    '/status',headers=csrf,json={'status':'fulfilled'})
+                                                assert blocked.status_code==409
+                                            page.once('dialog',lambda dialog:dialog.accept())
+                                            panel.get_by_role('button',name='변경사항 확인·승인').click()
+                                            panel.get_by_text('관리자 변경 확인·서버 재조회 완료',
+                                                exact=False).wait_for(timeout=20000)
+                                            with httpx.Client(verify=ssl_context,trust_env=False,
+                                                              timeout=8) as verify:
+                                                login=verify.post(origin+'/api/login',json={
+                                                    'email':'demo@hanbit.example',
+                                                    'password':'Demo!2026secure'})
+                                                assert login.status_code==200
+                                                csrf={'X-CSRF-Token':login.json()['csrf_token']}
+                                                status=verify.get(origin+'/api/orders/'+browser_order_id)
+                                                assert status.status_code==200
+                                                assert status.json()['review_state']=='acknowledged'
+                                                fulfilled=verify.post(origin+'/api/orders/'+browser_order_id+
+                                                    '/status',headers=csrf,json={'status':'processing'})
+                                                assert fulfilled.status_code==409  # already processing
+                                                fulfilled=verify.post(origin+'/api/orders/'+browser_order_id+
+                                                    '/status',headers=csrf,json={'status':'fulfilled'})
+                                                assert fulfilled.status_code==200
+                                            print(f'PASS_V223_REAL_{engine.upper()}_{width}_ORDER_EDIT_ACK_HTTPS',flush=True)
                                         if route == 'partners':
                                             # Real user path: create in the approved UI, edit with
                                             # CAS, verify authenticated server state. No mocks.
