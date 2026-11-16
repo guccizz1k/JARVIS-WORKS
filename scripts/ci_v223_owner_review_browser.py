@@ -110,6 +110,33 @@ def main():
                                             "label => document.querySelector('h2.jw-review-title')?.textContent===label",
                                             arg=label,timeout=18000)
                                         page.wait_for_timeout(170)
+                                        if route == 'partners':
+                                            # Real user path: create in the approved UI, edit with
+                                            # CAS, verify authenticated server state. No mocks.
+                                            root=page.locator('.jw-review-view')
+                                            created_name=f'Browser QA {engine}-{width}'
+                                            edited_name=f'Browser Verified {engine}-{width}'
+                                            editor=root.locator('.jw-review-customer-edits')
+                                            editor.wait_for(timeout=15000)
+                                            create_form=root.locator('form.jw-review-action-form').first
+                                            create_form.locator('input[aria-label="거래처명"]').fill(created_name)
+                                            create_form.locator('button[type=submit]').click()
+                                            editor=root.locator('.jw-review-customer-edits')
+                                            editor.get_by_role('button',name=created_name+' · 수정').wait_for(timeout=15000)
+                                            editor.get_by_role('button',name=created_name+' · 수정').click()
+                                            edit_form=editor.locator('form.jw-review-action-form').first
+                                            edit_form.locator('input[name="name"]').fill(edited_name)
+                                            edit_form.locator('button[type=submit]').click()
+                                            edit_form.get_by_text('서버 저장 및 재조회 완료').wait_for(timeout=15000)
+                                            actual=page.evaluate("""async () => {
+                                               const response=await fetch('/api/customers',{
+                                                 credentials:'same-origin',cache:'no-store'});
+                                               if(!response.ok)throw Error('customer readback HTTP '+response.status);
+                                               return response.json();
+                                            }""")
+                                            assert sum(1 for record in actual
+                                                if record['name']==edited_name)==1,(engine,width,'CUSTOMER_READBACK')
+                                            print(f'PASS_V223_REAL_{engine.upper()}_{width}_CUSTOMER_CREATE_CAS_EDIT_HTTPS',flush=True)
                                         if width > 900:
                                             # Catch real geometry overlap, not just page overflow.
                                             assert page.evaluate("""
