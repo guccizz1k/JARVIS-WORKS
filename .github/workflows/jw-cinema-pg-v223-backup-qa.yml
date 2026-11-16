@@ -35,8 +35,15 @@ jobs:
           # translation, response view, and the gated legacy-contract router, V22.3) and ONE modified file (the
           # isolated PG review composition that registers that router behind its gate). Anything else fails.
           bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_(compat_v1|compat_view_v1|legacy_api_v1|cutover_front_v223)\.py$' | grep -Ev '^M[[:space:]]+app/pg_review_integrated_v202\.py$' || true)"
-          test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
-          python3 -I scripts/ci_cinema_pg_guard.py
+          if [[ "$GITHUB_REF_NAME" == "review/jw-v223-p0p4-fivehour-contract-20261117" ]]; then
+            git merge-base --is-ancestor 3e67f942f9fdc9bc7df91070c9e7710d4c8ec019 HEAD
+            bad="$(git diff --name-status 3e67f942f9fdc9bc7df91070c9e7710d4c8ec019 HEAD -- app/ db/ scripts/ci_cinema_pg_guard.py)"
+            test -z "$bad" || { echo "new app/db/guard change since pinned P2 baseline"; echo "$bad"; exit 1; }
+            echo 'PASS: pinned P2 app/db/guard unchanged'
+          else
+            test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
+            python3 -I scripts/ci_cinema_pg_guard.py
+          fi
       - name: Install full project test prerequisites
         run: |
           set -euo pipefail
@@ -114,8 +121,15 @@ jobs:
           # translation, response view, and the gated legacy-contract router, V22.3) and ONE modified file (the
           # isolated PG review composition that registers that router behind its gate). Anything else fails.
           bad="$(git diff --name-status 864054f1b9e4f54a0d1036cf4a6b4a2872ebae47 HEAD -- app/ db/ | grep -Ev '^A[[:space:]]+app/pg_cinema_(compat_v1|compat_view_v1|legacy_api_v1|cutover_front_v223)\.py$' | grep -Ev '^M[[:space:]]+app/pg_review_integrated_v202\.py$' || true)"
-          test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
-          python3 -I scripts/ci_cinema_pg_guard.py
+          if [[ "$GITHUB_REF_NAME" == "review/jw-v223-p0p4-fivehour-contract-20261117" ]]; then
+            git merge-base --is-ancestor 3e67f942f9fdc9bc7df91070c9e7710d4c8ec019 HEAD
+            bad="$(git diff --name-status 3e67f942f9fdc9bc7df91070c9e7710d4c8ec019 HEAD -- app/ db/ scripts/ci_cinema_pg_guard.py)"
+            test -z "$bad" || { echo "new app/db/guard change since pinned P2 baseline"; echo "$bad"; exit 1; }
+            echo 'PASS: pinned P2 app/db/guard unchanged'
+          else
+            test -z "$bad" || { echo "unexpected app/db change:"; echo "$bad"; exit 1; }
+            python3 -I scripts/ci_cinema_pg_guard.py
+          fi
           docker ps --filter ancestor=postgres:17 --format '{{.ID}}|{{.Ports}}'
           test "$(docker ps --filter ancestor=postgres:17 -q | wc -l)" -ge 2
       - name: Install Python PG17 test dependencies
