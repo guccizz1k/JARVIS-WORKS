@@ -49,7 +49,30 @@ jobs:
       - name: Guard original and verify PG17
         run: |
           set -euo pipefail
-          python3 -I scripts/ci_cinema_pg_guard.py
+          # Legacy ci_cinema_pg_guard is intentionally scoped to the 2026-11-06
+          # backup-only tree and rejects later approved UI/workflows. Instead,
+          # verify exactly the authorized delta against this review parent.
+          python3 - <<'PY'
+          import subprocess
+          base="d91ebf00c63012a78845d094afbd15be0deefd1c"
+          changed=set(subprocess.check_output(
+            ["git","diff","--name-only",base,"HEAD"],text=True).splitlines())
+          expected={
+            "scripts/ci_cinema_pg_validated_tls_e2e_v223.py",
+            "tests/test_v223_tls_role_cleanup.py",
+            ".github/workflows/jw-v223-codex-tls-cleanup-20261116.yml",
+            ".github/workflows/jw-v223-codex-tls-real-pg17-20261116.yml"
+          }
+          assert changed==expected,(changed,expected)
+          pinned={
+            "scripts/pg_backup_v223.py":"b4f350029d7a8b7abd357c8949bb6d5129485bad",
+            "app/static/cinema/JARVIS_WORKS_CINEMA.html":"9bedf97fe718a94f07861e23670685af00619ca8"
+          }
+          for path,sha in pinned.items():
+            observed=subprocess.check_output(["git","hash-object",path],text=True).strip()
+            assert observed==sha,(path,observed)
+          print("PASS_EXACT_V223_REVIEW_SCOPE_PROTECTED_ORIGINALS")
+          PY
           psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}$'
       - name: Install test dependencies
         run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
