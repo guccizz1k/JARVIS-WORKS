@@ -40,7 +40,7 @@ from scripts.pg_backup_v223 import parse_dsn, pg_env  # noqa: E402
 
 APPROVAL_COMMENT = "6755130318"                       # issue #140 conditional approval the owner confirms on the command line
 APPROVED_LIMIT = datetime(2026, 11, 11, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
-MAX_WINDOW = timedelta(hours=23)                       # below the renew SQL's own 24 h rule: Python's clock runs before the server's
+MAX_WINDOW = timedelta(hours=4, minutes=59)              # 60-second margin under the <=5h database gate
 PROJECT_REF = "rvymwwzclagvljnofyss"
 EXPECTED_TABLES = 65
 POSTAB_FINGERPRINT_DEFAULT = "d3e6284dfbd277b43041052ea8f927ca"   # scripts/ci_cinema_pg_w.py POSTAB_FINGERPRINT; env overrides
@@ -157,8 +157,9 @@ def check_pins() -> dict:
         if (ROOT / path).is_file() and git("hash-object", path) != pinned:
             raise Blocked("guard pin mismatch (the guard and the file come from different commits): " + path)
     code = "\n".join(line for line in RENEW_SQL.read_text().splitlines() if not line.lstrip().startswith("--"))
-    if code.count("2026-11-11 09:00:00+09") != 1 or "7 days" in code:
-        raise Blocked("renew SQL does not carry the approved absolute limit exactly once")
+    if (code.count("2026-11-11 09:00:00+09") != 1 or code.count("interval ''5 hours''") != 1
+            or "24 hours" in code or "7 days" in code):
+        raise Blocked("renew SQL violates approved absolute limit or five-hour duration")
     done = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/ci_cinema_pg_guard.py")], cwd=ROOT,
                           capture_output=True, text=True, timeout=120, check=False)
     if done.returncode:
