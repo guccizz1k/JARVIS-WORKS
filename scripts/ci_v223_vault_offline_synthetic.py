@@ -21,10 +21,10 @@ from scripts import pg_backup_v223 as pb
 
 def main() -> None:
     dsn = os.environ.get("JW_PG_TARGET_ADMIN_DSN", "")
-    opts = offline.ephemeral_target_options(dsn)
-    pb.require_pg17_tools()
     token = secrets.token_hex(16)
     os.environ[pb.EPHEMERAL_TOKEN_ENV] = token
+    opts = offline.ephemeral_target_options(dsn)
+    pb.require_pg17_tools()
     seed = "jw_v223_synth_" + secrets.token_hex(5)
     with tempfile.TemporaryDirectory(prefix="jw-v223-vault-ci-", dir="/tmp") as temp:
         root = Path(temp)
