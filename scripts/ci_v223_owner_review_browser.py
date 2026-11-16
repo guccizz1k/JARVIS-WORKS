@@ -129,6 +129,9 @@ def main():
                                         browser_order=made.json()
                                         browser_order_id=browser_order['id']
                                         browser_order_no=browser_order['doc_no']
+                                        processing=api.post(origin+'/api/orders/'+browser_order_id+
+                                            '/status',headers=headers,json={'status':'processing'})
+                                        assert processing.status_code==200,processing.status_code
                                     for route,label in ROUTES:
                                         if width < 600:
                                             page.locator('.jw-owner-bottomnav button[data-action=show-all]').click()
@@ -213,9 +216,6 @@ def main():
                                                 assert order_doc['review_state']=='pending'
                                                 assert order_doc['items'][0]['quantity']==3
                                                 assert order_doc['money']['total']==3300
-                                                phase=verify.post(origin+'/api/orders/'+browser_order_id+
-                                                    '/status',headers=csrf,json={'status':'processing'})
-                                                assert phase.status_code==200
                                                 blocked=verify.post(origin+'/api/orders/'+browser_order_id+
                                                     '/status',headers=csrf,json={'status':'fulfilled'})
                                                 assert blocked.status_code==409
