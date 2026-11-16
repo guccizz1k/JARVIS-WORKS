@@ -46,7 +46,8 @@
   }
   async function messenger({bridge, view, isCurrent}) {
     const user = exactBridge(bridge);
-    let active = null, requestId = null, requestText = null, sending = false, autoRefreshEnabled=false;
+    let active = null, selection = 0, sending = false, autoRefreshEnabled=false;
+    const pendingSends = new Map();
     const header = el('section','jw-review-card');
     header.append(el('h3','jw-review-cardtitle','기업 간 보안 메신저'));
     notice(header,'서버 저장된 메시지만 표시합니다. 발송 결과가 불확실하면 먼저 서버에서 재조회하세요.');
@@ -60,6 +61,7 @@
     const fail = e => { if (current(bridge,user,isCurrent)) {status.textContent=why(e);status.setAttribute('role','alert');} };
     async function showMessages(thread) {
       if (!current(bridge,user,isCurrent)) return;
+      const generation = ++selection;
       const previousThread=active;
       active = thread.id;
       const savedDraft=previousThread===thread.id ? (messagesBox.querySelector('textarea')?.value || '') : '';
@@ -67,7 +69,7 @@
       const requestFor = thread.id;
       try {
         const messages = await bridge.messengerMessages(requestFor, thread.other_org_id);
-        if (!current(bridge,user,isCurrent) || active !== requestFor) return;
+        if (!current(bridge,user,isCurrent) || active !== requestFor || generation !== selection) return;
         for (const msg of messages) {
           const item = el('div','jw-review-row', (msg.mine?'나':'상대 기업')+' · '+msg.body);
           messagesBox.append(item);
@@ -77,10 +79,11 @@
           // Explicit user action only, not an automatic read-side effect.
           const mark = formButton('여기까지 읽음 처리');
           mark.onclick = async () => {
+            if (!current(bridge,user,isCurrent) || active!==requestFor || generation!==selection) return;
             mark.disabled = true;
             try {
               await bridge.messengerMarkRead(requestFor,messages[messages.length-1].id);
-              if (current(bridge,user,isCurrent) && active===requestFor) status.textContent='읽음 상태를 서버에서 확인했습니다.';
+              if (current(bridge,user,isCurrent) && active===requestFor && generation===selection) status.textContent='읽음 상태를 서버에서 확인했습니다.';
             } catch(e) {fail(e)} finally {mark.disabled=false}
           };
           messagesBox.append(mark);
@@ -91,27 +94,31 @@
         const delivery = el('p','jw-review-muted','전송 전'); delivery.setAttribute('role','status');
         entry.append(input,send,delivery);messagesBox.append(entry);
         entry.addEventListener('submit',async event => {
-          event.preventDefault(); if (sending || !current(bridge,user,isCurrent) || active !== requestFor) return;
+          event.preventDefault(); if (sending || !current(bridge,user,isCurrent) || active !== requestFor || generation !== selection) return;
           const body = input.value.trim(); if (!body || body.length>2000) return;
-          if (requestText !== body) {requestText=body;requestId=randomRequestId();}
+          let attempt = pendingSends.get(requestFor);
+          if (!attempt || attempt.body !== body) {
+            attempt = {body, id:randomRequestId()};
+            pendingSends.set(requestFor, attempt);
+          }
           sending=true;send.disabled=true;delivery.textContent='서버 저장 및 재조회 확인 중';
           try {
-            const result = await bridge.messengerSend(requestFor,body,requestId);
+            const result = await bridge.messengerSend(requestFor,body,attempt.id);
             const after = await bridge.messengerMessages(requestFor, thread.other_org_id);
-            if (!current(bridge,user,isCurrent) || active!==requestFor) return;
+            if (!current(bridge,user,isCurrent) || active!==requestFor || generation !== selection) return;
             if (!after.some(x=>x.id===result.id && x.body===body && x.mine===true))
               throw Object.assign(new Error('READBACK_MISMATCH'),{code:'READBACK_MISMATCH'});
-            input.value=''; requestId=null;requestText=null;
+            input.value=''; pendingSends.delete(requestFor);
             await showMessages(thread);
             if (current(bridge,user,isCurrent)) status.textContent='메시지 서버 저장·재조회 완료';
           } catch(e) {
-            if (current(bridge,user,isCurrent) && active===requestFor) {
+            if (current(bridge,user,isCurrent) && active===requestFor && generation === selection) {
               delivery.textContent=why(e)+' 전송 결과가 불확실하면 목록을 다시 확인하세요.';
               delivery.setAttribute('role','alert');
             }
           } finally {sending=false;send.disabled=false;}
         });
-      } catch(e) {fail(e)}
+      } catch(e) {if (generation === selection && active === requestFor) fail(e)}
     }
     // SSE is a change signal only. All data always comes from authorized GETs.
     // Timer remains a bounded fallback if SSE is unavailable or disconnected.
