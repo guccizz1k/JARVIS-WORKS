@@ -218,6 +218,35 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
                 'email': 'staff-e2e@example.invalid',
                 'password': 'StrongSynthetic!2026'}).status_code == 200
 
+            # Review-only staff role control: reauthentication, tenant and session safety.
+            role_url=origin+f'/api/account/staff/{staff_id}/role'
+            promote={'expected_role':'member','target_role':'admin',
+                     'admin_password':'Demo!2026secure'}
+            assert a.post(role_url,json=promote).status_code==403  # missing CSRF
+            assert a.post(role_url,headers=headers_a,json={
+                **promote,'admin_password':'bad'}).status_code==403
+            assert b.post(role_url,headers=headers_b,json=promote).status_code==404
+            changed=a.post(role_url,headers=headers_a,json=promote)
+            assert changed.status_code==200,changed.status_code
+            assert changed.json()['role']=='admin'
+            assert changed.json()['sessions_revoked'] is True
+            assert staff.get(origin+'/api/me').status_code==401
+            assert a.post(role_url,headers=headers_a,json=promote).status_code==409
+            relogin=staff.post(origin+'/api/login',json={
+                'email':'staff-e2e@example.invalid',
+                'password':'StrongSynthetic!2026'})
+            assert relogin.status_code==200 and relogin.json()['user']['role']=='admin'
+            demoted=a.post(role_url,headers=headers_a,json={
+                'expected_role':'admin','target_role':'member',
+                'admin_password':'Demo!2026secure'})
+            assert demoted.status_code==200
+            assert demoted.json()['role']=='member'
+            assert staff.get(origin+'/api/me').status_code==401
+            assert a.post(origin+f'/api/account/staff/{alice["user"]["id"]}/role',
+                headers=headers_a,json={
+                    'expected_role':'admin','target_role':'member',
+                    'admin_password':'Demo!2026secure'}).status_code==409
+
             # Admin session revocation is scoped to company, never global.
             a_other = client()
             login(a_other, 'demo@hanbit.example')

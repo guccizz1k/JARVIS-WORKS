@@ -421,6 +421,21 @@ class Bridge{
     if(!r||r.ok!==true)throw new Refused('INVALID_STAFF_RESPONSE');
     return Object.freeze({ok:true});
   }
+  async securityChangeStaffRole(userId,expectedRole,targetRole,adminPassword){
+    const epoch=this.#session();if(this.#who.role!=='admin')throw new Refused('ADMIN_ONLY');
+    if(!this.#v223id(userId)||userId===this.#who.id||
+      !['admin','member'].includes(expectedRole)||!['admin','member'].includes(targetRole)||
+      typeof adminPassword!=='string'||!adminPassword||adminPassword.length>1000)
+      throw new Refused('INVALID_STAFF_ACTION');
+    const response=await this.#request('/api/account/staff/'+userId+'/role','POST',
+      {expected_role:expectedRole,target_role:targetRole,admin_password:adminPassword},true);
+    this.#assertEpoch(epoch);
+    if(!response||response.ok!==true||response.user_id!==userId||
+      response.role!==targetRole||typeof response.sessions_revoked!=='boolean')
+      throw new Refused('INVALID_STAFF_RESPONSE');
+    return Object.freeze({ok:true,user_id:userId,role:targetRole,
+      sessions_revoked:response.sessions_revoked});
+  }
   async securityRevokeSession(sessionId){
     const epoch=this.#session();if(this.#who.role!=='admin')throw new Refused('ADMIN_ONLY');
     if(!this.#v223id(sessionId))throw new Refused('INVALID_SESSION_ID');

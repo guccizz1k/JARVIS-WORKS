@@ -211,7 +211,25 @@
               catch(e){if(current(bridge,user,isCurrent)){status.textContent=why(e);status.setAttribute('role','alert')}}
               finally{btn.disabled=false}
             };
-            line.append(passwordInput,btn);
+            const roleButton=formButton(person.role==='admin'?'관리자 권한 해제':'관리자로 지정');
+            roleButton.disabled=Boolean(person.disabled_at);
+            roleButton.onclick=async()=>{
+              if(!current(bridge,user,isCurrent)||roleButton.disabled)return;
+              if(!window.confirm('직원 권한 변경 후 기존 로그인 세션을 종료하시겠습니까?'))return;
+              const password=passwordInput.value;passwordInput.value='';
+              if(!password){status.textContent='관리자 재인증 비밀번호를 입력하세요.';return}
+              roleButton.disabled=true;
+              try{
+                const nextRole=person.role==='admin'?'member':'admin';
+                await bridge.securityChangeStaffRole(person.id,person.role,nextRole,password);
+                if(current(bridge,user,isCurrent)){
+                  await display();status.textContent='직원 권한과 세션 상태를 서버에서 다시 확인했습니다.';
+                }
+              }catch(e){
+                if(current(bridge,user,isCurrent)){status.textContent=why(e);status.setAttribute('role','alert')}
+              }finally{roleButton.disabled=false}
+            };
+            line.append(passwordInput,btn,roleButton);
           }
           details.append(line);
         }

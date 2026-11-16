@@ -46,7 +46,7 @@ jobs:
           python - <<'PY'
           import subprocess
           paths=set(subprocess.check_output(["git","diff","--name-only","03863d1d14f1c9bc04a7d4ba74cb66ef16e995bb","HEAD"],text=True).splitlines())
-          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','tests/test_v223_operational_https.py','app/owner_settings_v223.py','app/static/approved_ui_profile_v223.js','app/static/approved_ui_profile_v223.css','tests/test_v223_profile_preferences.py','tests/test_v223_account_node.cjs','app/owner_review_app_v223.py','tests/test_v223_review_isolation.py','tests/test_v223_profile_ui_node.cjs','tests/test_v223_messenger_live_node.cjs','app/static/approved_ui_statement_list_v223.js','tests/test_v223_statement_node.cjs'}
+          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','tests/test_v223_operational_https.py','app/owner_settings_v223.py','app/static/approved_ui_profile_v223.js','app/static/approved_ui_profile_v223.css','tests/test_v223_profile_preferences.py','tests/test_v223_account_node.cjs','app/owner_review_app_v223.py','tests/test_v223_review_isolation.py','tests/test_v223_profile_ui_node.cjs','tests/test_v223_messenger_live_node.cjs','app/static/approved_ui_statement_list_v223.js','tests/test_v223_statement_node.cjs','tests/test_v223_staff_role_node.cjs'}
           assert paths==expected,(paths,expected)
           PY
           test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
@@ -68,6 +68,7 @@ jobs:
           node --test tests/test_v223_messenger_live_node.cjs
           node --check app/static/approved_ui_statement_list_v223.js
           node --test tests/test_v223_statement_node.cjs
+          node --test tests/test_v223_staff_role_node.cjs
       - name: Install regression system and Python prerequisites
         shell: bash
         run: |
