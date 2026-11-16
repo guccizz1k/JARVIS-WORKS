@@ -292,6 +292,23 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check -r requirements-dev.txt 'playwright>=1.50,<2'
           python -m playwright install --with-deps chromium webkit
+      - name: Install official Chromium SUID sandbox on the disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          sandbox_source="$(python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              helper=Path(p.chromium.executable_path).with_name('chrome_sandbox')
+              assert helper.is_file() and not helper.is_symlink(), 'Official sandbox helper missing'
+              print(helper)
+          PY
+          )"
+          sandbox_target="$RUNNER_TEMP/jw-chrome-sandbox"
+          sudo install -o root -g root -m 4755 "$sandbox_source" "$sandbox_target"
+          test "$(stat -c '%u:%g:%a' "$sandbox_target")" = '0:0:4755'
+          echo "CHROME_DEVEL_SANDBOX=$sandbox_target" >> "$GITHUB_ENV"
       - name: Run 17 reviewed menu routes in Chromium and WebKit desktop/mobile
         shell: bash
         run: |
