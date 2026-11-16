@@ -42,7 +42,7 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
     for secret in ('BOOTSTRAP_EMAIL', 'BOOTSTRAP_PASSWORD', 'BOOTSTRAP_ORG', 'JW_INSECURE_LOCAL_DEV'):
         env.pop(secret, None)
     origin = f'https://127.0.0.1:{port}'
-    context = ssl.create_default_context(cafile=str(cert))
+    tls_context = ssl.create_default_context(cafile=str(cert))
     with (tmp_path / 'https-server.log').open('w') as server_log:
         proc = subprocess.Popen([
             sys.executable, '-m', 'uvicorn', 'app.owner_review_app_v223:app', '--host', '127.0.0.1',
@@ -51,7 +51,7 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
         clients = []
         try:
             def client():
-                c = httpx.Client(verify=context, trust_env=False, timeout=8.0)
+                c = httpx.Client(verify=tls_context, trust_env=False, timeout=8.0)
                 clients.append(c)
                 return c
 
@@ -212,9 +212,9 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
             qid=created.json()['id']
             context_url=origin+'/api/review/quotes/'+qid+'/edit-context'
             edit_url=origin+'/api/review/quotes/'+qid+'/update'
-            context=a.get(context_url)
-            assert context.status_code==200,context.status_code
-            old=context.json()
+            quote_context_response=a.get(context_url)
+            assert quote_context_response.status_code==200,quote_context_response.status_code
+            old=quote_context_response.json()
             assert len(old['fingerprint'])==64
             assert old['quote']['status']=='draft'
             update_body={'expected_sha256':old['fingerprint'],'updated':{
