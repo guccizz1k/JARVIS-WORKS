@@ -30,7 +30,7 @@ class Bridge{
     catch{this.#assertEpoch(epoch);throw new Refused('NETWORK_ERROR')}
     this.#assertEpoch(epoch);
     if(response.status===401){++this.#epoch;this.#clear();throw new Refused('SESSION_EXPIRED')}
-    if(response.status===409&&path.startsWith('/api/account/'))throw new Refused('STALE_VERSION');
+    if(response.status===409&&(path.startsWith('/api/account/')||path.startsWith('/api/review/customers/')))throw new Refused('STALE_VERSION');
     if(response.status===403)throw new Refused('FORBIDDEN');
     if(!response.ok)throw new Refused('API_FAILURE');
     if(format==='xlsx'){
@@ -490,6 +490,39 @@ class Bridge{
       messenger_auto_refresh:preferences.messenger_auto_refresh};
     const r=await this.#request('/api/account/preferences','POST',body,true);
     this.#assertEpoch(epoch);return this.#ownerPreferencesResult(r);
+  }
+  // Review-only customer edit: compare all server-original fields inside the
+  // transaction. Never send a generic PUT, or overwrite unseen concurrent edits.
+  async customerEdit(customerId,original,updated){
+    const epoch=this.#session();
+    if(typeof customerId!=='string'||!/^[a-f0-9]{32}$/.test(customerId))
+      throw new Refused('INVALID_CUSTOMER_ID');
+    const clean=x=>{
+      if(!x||typeof x!=='object'||Array.isArray(x))throw new Refused('INVALID_CUSTOMER_PAYLOAD');
+      const bounds={name:120,business_number:20,contact_name:100,email:255,phone:30};
+      const result={};
+      for(const [key,max] of Object.entries(bounds)){
+        if(typeof x[key]!=='string'||x[key].length>max)throw new Refused('INVALID_CUSTOMER_PAYLOAD');
+        result[key]=x[key].trim();
+      }
+      if(!result.name)throw new Refused('INVALID_CUSTOMER_PAYLOAD');
+      if(result.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email))
+        throw new Refused('INVALID_CUSTOMER_PAYLOAD');
+      return result;
+    };
+    if(original?.id!==customerId||original?.org_id!==this.#who.org_id)
+      throw new Refused('TENANT_MISMATCH');
+    const expected=clean(original),next=clean(updated);
+    const result=await this.#request('/api/review/customers/'+customerId+'/update',
+      'POST',{expected,updated:next},true);
+    this.#assertEpoch(epoch);
+    if(!result||result.id!==customerId||result.org_id!==this.#who.org_id)
+      throw new Refused('TENANT_MISMATCH');
+    for(const [key,max] of Object.entries({name:120,business_number:20,contact_name:100,email:255,phone:30})){
+      if(typeof result[key]!=='string'||result[key].length>max||result[key]!==next[key])
+        throw new Refused('INVALID_CUSTOMER_READBACK');
+    }
+    return Object.freeze({...result});
   }
   async list(name){
     const epoch=this.#session();

@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from . import main as core
 from .owner_settings_v223 import install_schema, register_routes
+from .owner_customer_cas_v223 import register_routes as register_customer_review_routes
 
 
 @asynccontextmanager
@@ -34,7 +35,9 @@ app = FastAPI(title='JARVIS WORKS isolated owner review', docs_url=None,
 
 @app.middleware('http')
 async def account_security_headers(request: Request, call_next):
-    account = request.url.path.startswith('/api/account/')
+    account = (request.url.path.startswith('/api/account/') or
+               (request.url.path.startswith('/api/review/customers/') and
+                request.url.path.endswith('/update')))
     scoped_review_read = request.url.path == '/api/automation/statements'
     if account and request.method not in ('GET', 'HEAD', 'OPTIONS'):
         if request.headers.get('Sec-Fetch-Site') == 'cross-site':
@@ -58,6 +61,7 @@ async def account_security_headers(request: Request, call_next):
 register_routes(app, current_user=core.current_user, conn=core.conn,
                 transaction=core.transaction, now=core.now,
                 audit=core.audit, fail=core.fail)
+register_customer_review_routes(app)
 
 # A mounted sub-application keeps every original business route and middleware
 # unchanged while the four account routes above take precedence.

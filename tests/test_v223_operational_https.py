@@ -147,6 +147,29 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
             assert a.post(origin+'/api/account/preferences',headers=headers_a,json={
                 'version':0,'compact_view':False,'messenger_auto_refresh':True}).status_code==409
 
+            # Verified HTTPS review customer edit: atomic original-snapshot CAS
+            # and cross-tenant/CSRF protection; no production records touched.
+            made_customer=a.post(origin+'/api/customers',headers=headers_a,
+              json={'name':'Synthetic HTTPS CAS Customer'})
+            assert made_customer.status_code==201,made_customer.status_code
+            before=made_customer.json()
+            keys=('name','business_number','contact_name','email','phone')
+            expected={key:before[key] for key in keys}
+            updated={**expected,'name':'HTTPS CAS Updated'}
+            url_customer=origin+'/api/review/customers/'+before['id']+'/update'
+            assert a.post(url_customer,json={'expected':expected,'updated':updated}).status_code==403
+            assert b.post(url_customer,headers=headers_b,
+              json={'expected':expected,'updated':updated}).status_code==404
+            committed=a.post(url_customer,headers=headers_a,
+              json={'expected':expected,'updated':updated})
+            assert committed.status_code==200,committed.status_code
+            assert committed.json()['name']=='HTTPS CAS Updated'
+            assert any(r['name']=='HTTPS CAS Updated' for r in a.get(origin+'/api/customers').json())
+            stale=a.post(url_customer,headers=headers_a,
+              json={'expected':expected,'updated':{**updated,'name':'Stale Lost Update'}})
+            assert stale.status_code==409
+            assert any(r['name']=='HTTPS CAS Updated' for r in a.get(origin+'/api/customers').json())
+
             # Immutable trade-statement index: production-style flow, isolated HTTPS only.
             quotes=a.get(origin+'/api/quotes')
             assert quotes.status_code==200 and quotes.json()

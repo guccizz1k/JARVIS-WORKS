@@ -369,6 +369,16 @@ function start(){
               {name:'business_number',label:'사업자번호 (선택)',required:false,maxlength:20},
               {name:'contact_name',label:'담당자 (선택)',required:false,maxlength:100}
             ],v=>bridge.write('/api/customers',{...v,email:'',phone:''}));
+            if(key==='partners'){
+              if(!g.JWOwnerCustomerEdit){
+                actions.append(t('p','jw-review-unwired','거래처 수정 검토 모듈이 없습니다.'));
+              }else{
+                await g.JWOwnerCustomerEdit.render({
+                  bridge,view:actions,isCurrent:()=>token===epoch
+                });
+                if(token!==epoch)return;
+              }
+            }
           }
           if(key==='home'||key==='deals'){
             const customers=await fetched('customers');
