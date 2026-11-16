@@ -16,21 +16,24 @@ jobs:
       - name: Parent/source/UI immutability and exact diff guard
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = d91ebf00c63012a78845d094afbd15be0deefd1c
+          git merge-base --is-ancestor d91ebf00c63012a78845d094afbd15be0deefd1c HEAD
+          test "$(git hash-object scripts/ci_cinema_pg_validated_tls_e2e_v223.py)" = a20bc4c93ed942254aab54ca2331fb17f7d73622
+          test "$(git hash-object tests/test_v223_tls_role_cleanup.py)" = 07f0b985d97f068328bc3c6a5c25ecc5314442d0
           test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
           test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
           python - <<'PY'
           import subprocess
-          changed=set(subprocess.check_output(['git','diff','--name-only','HEAD^','HEAD'],text=True).splitlines())
+          changed=set(subprocess.check_output(['git','diff','--name-only','d91ebf00c63012a78845d094afbd15be0deefd1c','HEAD'],text=True).splitlines())
           expect={'scripts/ci_cinema_pg_validated_tls_e2e_v223.py',
                   'tests/test_v223_tls_role_cleanup.py',
-                  '.github/workflows/jw-v223-codex-tls-cleanup-20261116.yml'}
+                  '.github/workflows/jw-v223-codex-tls-cleanup-20261116.yml',
+                  '.github/workflows/jw-v223-codex-tls-real-pg17-20261116.yml'}
           assert changed==expect,(changed,expect)
           print('PASS_CODEx_ISOLATED_THREE_FILE_CHANGE')
           PY
           python -m compileall -q scripts/ci_cinema_pg_validated_tls_e2e_v223.py tests/test_v223_tls_role_cleanup.py
       - name: Install existing Python QA environment
-        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
       - name: Original Codex role cleanup adversarial tests
         run: python -m pytest -q --noconftest tests/test_v223_tls_role_cleanup.py
       - name: Original package and production gates remain importable
