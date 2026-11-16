@@ -21,11 +21,12 @@ class Bridge{
     const epoch=this.#epoch;
     if(!/^\/api\/[a-z0-9/-]+$/.test(path))throw new Refused('BAD_PATH');
     if(!['GET','POST'].includes(method))throw new Refused('BAD_METHOD');
-    const headers={'Accept':'application/json'};
-    if(body!==undefined)headers['Content-Type']='application/json';
+    const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
+    const headers={'Accept':format==='xlsx'?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/json'};
+    if(body!==undefined&&!multipart)headers['Content-Type']='application/json';
     if(csrf){if(!this.#csrf)throw new Refused('CSRF_MISSING');headers['X-CSRF-Token']=this.#csrf}
     let response;
-    try{response=await fetch(this.#origin+path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer',headers,...(body===undefined?{}:{body:JSON.stringify(body)})})}
+    try{response=await fetch(this.#origin+path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer',headers,...(body===undefined?{}:{body:multipart?body:JSON.stringify(body)})})}
     catch{this.#assertEpoch(epoch);throw new Refused('NETWORK_ERROR')}
     this.#assertEpoch(epoch);
     if(response.status===401){++this.#epoch;this.#clear();throw new Refused('SESSION_EXPIRED')}
@@ -211,6 +212,64 @@ class Bridge{
     if(!d||d.id!==runId||d.status!=='cancelled'||d.excluded_from_metrics!==true)
       throw new Refused('INVALID_TIMER_CANCEL');
     return Object.freeze({id:d.id,status:d.status,excluded_from_metrics:true});
+  }
+
+  #evidence(d,id=null){
+    if(!d||typeof d!=='object'||Array.isArray(d)||!/^[a-f0-9]{32}$/.test(d.id||'')||
+       (id!==null&&d.id!==id)||!/^[a-f0-9]{64}$/.test(d.digest||'')||
+       !/^[a-f0-9]{64}$/.test(d.source_file_sha256||'')||
+       !['pending','confirmed'].includes(d.status)||d.original_file_stored!==false||
+       !d.document||typeof d.document!=='object'||Array.isArray(d.document)||
+       !d.document.fields||typeof d.document.fields!=='object'||Array.isArray(d.document.fields))
+      throw new Refused('INVALID_EVIDENCE_PREVIEW');
+    return Object.freeze({...d});
+  }
+  async uploadEvidence(file){
+    const epoch=this.#session();
+    if(typeof Blob==='undefined'||!(file instanceof Blob)||typeof file.name!=='string'||
+       !/\.(png|jpe?g|webp|pdf|xlsx)$/i.test(file.name)||/[\\/]/.test(file.name)||
+       file.size<1||file.size>5242880)throw new Refused('INVALID_EVIDENCE_FILE');
+    const form=new FormData();form.append('file',file,file.name);
+    const d=await this.#request('/api/evidence/preview','POST',form,true);this.#assertEpoch(epoch);
+    const checked=this.#evidence(d);if(checked.status!=='pending'||checked.confirmation_required!==true||checked.source_size_bytes!==file.size)
+      throw new Refused('INVALID_EVIDENCE_PREVIEW');return checked;
+  }
+  async evidenceQueue(){
+    const epoch=this.#session(),d=await this.#request('/api/evidence/queue');this.#assertEpoch(epoch);
+    if(!d||!Array.isArray(d.items)||d.items.length>100||!d.items.every(r=>r&&/^[a-f0-9]{32}$/.test(r.id||'')&&
+       typeof r.filename==='string'&&['pending','confirmed'].includes(r.status)&&typeof r.created_at==='string'))
+      throw new Refused('INVALID_EVIDENCE_QUEUE');
+    return Object.freeze({items:d.items});
+  }
+  async evidencePreview(id){
+    const epoch=this.#session();if(typeof id!=='string'||!/^[a-f0-9]{32}$/.test(id))throw new Refused('INVALID_EVIDENCE_ID');
+    const d=await this.#request('/api/evidence/preview/'+id);this.#assertEpoch(epoch);return this.#evidence(d,id);
+  }
+  async confirmEvidence(id,payload){
+    const epoch=this.#session();
+    if(!payload||typeof payload!=='object'||Array.isArray(payload)||payload.original_checked!==true)
+      throw new Refused('ORIGINAL_REVIEW_REQUIRED');
+    const allowed=['preview_digest','record_type','document_kind','counterparty','document_date','gross_amount','reference_number','sku','quantity','unit','original_checked'];
+    if(Object.keys(payload).some(k=>!allowed.includes(k)))throw new Refused('INVALID_EVIDENCE_APPROVAL');
+    const d=await this.evidencePreview(id);this.#assertEpoch(epoch);
+    if(d.status!=='pending')throw new Refused('EVIDENCE_ALREADY_CONFIRMED');
+    if(d.digest!==payload.preview_digest||!d.document.document_kind||d.document.document_kind!==payload.document_kind||
+       ['ambiguous','unknown','unsupported'].includes(d.document.kind_inference))throw new Refused('EVIDENCE_CHANGED');
+    const result=await this.#request('/api/evidence/preview/'+id+'/confirm','POST',payload,true);this.#assertEpoch(epoch);
+    if(!result||!/^[a-f0-9]{32}$/.test(result.id||'')||result.record_type!==payload.record_type||
+       !Array.isArray(result.corrected_fields)||!result.corrected_fields.every(k=>typeof k==='string')||
+       result.accounting_posted!==false||result.payment_created!==false||result.inventory_stock_changed!==false)
+      throw new Refused('INVALID_EVIDENCE_CONFIRMATION');
+    return Object.freeze({...result});
+  }
+  async listEvidenceRecords(){
+    const epoch=this.#session(),d=await this.#request('/api/evidence/records');this.#assertEpoch(epoch);
+    if(!Array.isArray(d)||d.length>100||!d.every(r=>r&&/^[a-f0-9]{32}$/.test(r.id||'')&&
+       ['sales','purchase','expense','inventory_snapshot'].includes(r.kind)&&typeof r.source_kind==='string'&&
+       typeof r.counterparty==='string'&&typeof r.document_date==='string'&&
+       (r.gross_amount===null||(Number.isSafeInteger(r.gross_amount)&&r.gross_amount>0))&&
+       (r.org_id===undefined||r.org_id===this.#who?.org_id)))throw new Refused('INVALID_EVIDENCE_RECORDS');
+    return d;
   }
 
   #draft(d,id=null,kind=null,sourceId=null){

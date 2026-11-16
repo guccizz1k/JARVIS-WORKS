@@ -46,7 +46,10 @@ def test_bridge_real_https_cookie_epoch_and_full_business_flow(tmp_path):
                 org=db.execute("SELECT org_id FROM users WHERE email='demo@hanbit.example'").fetchone()[0]
                 db.execute('INSERT INTO users VALUES(?,?,?,?,?,?,?)',
                            (uuid.uuid4().hex,org,'sameorg@example.invalid',hash_password('Demo!2026secure'),'Synthetic member','member',now()))
-            runenv={**env,'NODE_EXTRA_CA_CERTS':str(cert),'JW_TEST_ORIGIN':origin,'JW_TEST_PASSWORD':'Demo!2026secure'}
+            from tests.test_evidence_v64 import xlsx
+            evidence=tmp_path/'synthetic.xlsx'
+            evidence.write_bytes(xlsx(company='SYNTHETIC ONLY',gross=1000,reference='TLS-EVIDENCE-01'))
+            runenv={**env,'JW_TEST_EVIDENCE_FILE':str(evidence),'NODE_EXTRA_CA_CERTS':str(cert),'JW_TEST_ORIGIN':origin,'JW_TEST_PASSWORD':'Demo!2026secure'}
             result=subprocess.run(['node','tests/fixtures/v223_auth_https.mjs'],cwd=ROOT,env=runenv,
                                   capture_output=True,text=True,timeout=90)
             assert result.returncode==0, result.stdout+'\n'+result.stderr

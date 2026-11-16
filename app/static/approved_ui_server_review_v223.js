@@ -108,6 +108,11 @@ function start(){
         await g.JWOwnerDocumentExport.render({bridge,view,isCurrent:()=>token===epoch});return;
       }
 
+      if(['docs','inbox','files'].includes(key)){
+        if(!g.JWOwnerEvidenceReview){view.append(t('p','jw-review-unwired','문서 검토 모듈을 불러오지 못했습니다.'));return}
+        await g.JWOwnerEvidenceReview.render({bridge,view,page:key,isCurrent:()=>token===epoch});return;
+      }
+
       // Operational read-only panels: server is the sole source of truth.
       const readOnlyPanels=new Set(['stats','automation','activity','messenger','docs','files','inbox','security','team']);
       if(readOnlyPanels.has(key)){

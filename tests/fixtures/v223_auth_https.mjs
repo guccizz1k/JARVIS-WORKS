@@ -21,7 +21,7 @@ function setup(){
   if(hold&&url.endsWith('/api/customers')){const gate=hold;hold=null;arrived.resolve();await gate.promise;}
   return r;
  };
- const ctx={window:{},location:{origin,protocol:'https:'},fetch:fetcher,console};vm.runInNewContext(code,ctx);
+ const ctx={window:{},location:{origin,protocol:'https:'},fetch:fetcher,FormData,Blob,File,console};vm.runInNewContext(code,ctx);
  return {bridge:new ctx.window.JWOwnerServerBridge(),hold(){hold=defer();arrived=defer();return {arrived:arrived.promise,release:()=>hold?.resolve(),gate:hold}},invalid(){invalidNext=true},failNextMe(){failMe=true},posts:()=>loginPosts,flags,raw:async(path,init={})=>fetch(origin+path,{...init,headers:{...init.headers,...(cookie?{Cookie:cookie}:{})}})};
 }
 async function transitionRace(target,unauthorized=false){
@@ -51,6 +51,12 @@ await assert.rejects(b.draftXlsx(paymentDraft.id),{code:'STALE_DRAFT'});checks++
 const trace=await b.orderTransactionTrace(o.id);assert.equal(trace.active_paid,2200);checks++;
 await b.write('/api/invoices/'+inv.id+'/payments',{reference:'tls-synthetic-reference',amount:2200,paid_at:new Date().toISOString().slice(0,10)});assert.equal((await b.orderTransactionTrace(o.id)).active_paid,2200);checks++;
 await assert.rejects(b.write('/api/invoices/'+inv.id+'/payments',{reference:'tls-synthetic-reference',amount:2100,paid_at:new Date().toISOString().slice(0,10)}));checks++;
+const uploaded=await b.uploadEvidence(new File([fs.readFileSync(process.env.JW_TEST_EVIDENCE_FILE)],'synthetic.xlsx'));assert.equal(uploaded.confirmation_required,true);assert.equal(uploaded.original_file_stored,false);assert.ok((await b.evidenceQueue()).items.some(r=>r.id===uploaded.id));checks++;
+const reviewed=await b.evidencePreview(uploaded.id);const approval={preview_digest:reviewed.digest,record_type:'expense',document_kind:reviewed.document.document_kind,counterparty:reviewed.document.fields.counterparty,document_date:reviewed.document.fields.document_date,gross_amount:reviewed.document.fields.gross_amount,reference_number:reviewed.document.fields.reference_number,original_checked:true};
+await assert.rejects(b.confirmEvidence(uploaded.id,{...approval,original_checked:false}),{code:'ORIGINAL_REVIEW_REQUIRED'});checks++;
+const confirmed=await b.confirmEvidence(uploaded.id,approval);assert.equal(confirmed.accounting_posted,false);assert.equal(confirmed.payment_created,false);assert.equal(confirmed.inventory_stock_changed,false);assert.ok((await b.listEvidenceRecords()).some(r=>r.id===confirmed.id));checks++;
+await assert.rejects(foreign.bridge.evidencePreview(uploaded.id));assert.ok(!(await foreign.bridge.evidenceQueue()).items.some(r=>r.id===uploaded.id));checks++;
+await assert.rejects(b.confirmEvidence(uploaded.id,approval),{code:'EVIDENCE_ALREADY_CONFIRMED'});assert.equal((await b.orderTransactionTrace(o.id)).active_paid,2200);checks++;
 await b.logout();assert.equal((await x.raw('/api/me')).status,401);assert.equal(b.signedIn,false);checks++;
 const partial=setup();partial.failNextMe();await assert.rejects(partial.bridge.login('demo@hanbit.example',password),{code:'NETWORK_ERROR'});assert.equal(partial.bridge.signedIn,false);assert.equal((await partial.raw('/api/me')).status,200);await partial.bridge.logout();assert.equal((await partial.raw('/api/me')).status,401);checks++;
 console.log(JSON.stringify({status:'PASS_REAL_HTTPS_BRIDGE_COOKIE_CSRF_EPOCH_AND_BUSINESS',checks,synthetic_only:true,physical_safari:false}));
