@@ -12,7 +12,7 @@ function h(handler){
  fetch:async(url,opts)=>{
    calls.push({path:new URL(url).pathname,opts});
    let result=await handler(new URL(url).pathname,opts);
-   const status=result?.status||200;
+   const status=Number.isInteger(result?.status)?result.status:200;
    return {status,ok:status>=200&&status<300,headers:{get:key=>key==='content-type'?'application/json':null},json:async()=>result?.body??result};
  }};
  vm.runInNewContext(bridgeSrc,ctx);
