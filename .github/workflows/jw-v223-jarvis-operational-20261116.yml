@@ -8,6 +8,8 @@ on:
       - tests/**
       - scripts/ci_v223_owner_review_browser.py
       - scripts/ci_v223_stage_readonly.py
+      - scripts/ci_v223_vault_offline_restore.py
+      - scripts/ci_v223_vault_offline_synthetic.py
       - .github/workflows/jw-v223-jarvis-operational-20261116.yml
   workflow_dispatch:
 permissions:
@@ -48,7 +50,7 @@ jobs:
           python - <<'PY'
           import subprocess
           paths=set(subprocess.check_output(["git","diff","--name-only","03863d1d14f1c9bc04a7d4ba74cb66ef16e995bb","HEAD"],text=True).splitlines())
-          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','tests/test_v223_operational_https.py','app/owner_settings_v223.py','app/static/approved_ui_profile_v223.js','app/static/approved_ui_profile_v223.css','tests/test_v223_profile_preferences.py','tests/test_v223_account_node.cjs','app/owner_review_app_v223.py','tests/test_v223_review_isolation.py','tests/test_v223_profile_ui_node.cjs','tests/test_v223_messenger_live_node.cjs','app/static/approved_ui_statement_list_v223.js','tests/test_v223_statement_node.cjs','tests/test_v223_staff_role_node.cjs','tests/test_v223_staff_role.py','scripts/ci_v223_owner_review_browser.py','app/owner_customer_cas_v223.py','app/static/approved_ui_customer_edit_v223.js','tests/test_v223_customer_cas.py','tests/test_v223_customer_node.cjs','app/owner_quote_cas_v223.py','app/static/approved_ui_quote_edit_v223.js','tests/test_v223_quote_cas.py','tests/test_v223_quote_node.cjs','app/owner_order_review_v223.py','app/static/approved_ui_order_review_v223.js','tests/test_v223_order_review.py','tests/test_v223_order_review_node.cjs','app/static/approved_ui_finance_review_v223.js','tests/test_v223_finance_ledger.py','tests/test_v223_finance_node.cjs','scripts/ci_v223_stage_readonly.py','tests/test_v223_stage_readonly.py','docs/review/jw-v223-cross-track-execution-20261116.md'}
+          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','tests/test_v223_operational_https.py','app/owner_settings_v223.py','app/static/approved_ui_profile_v223.js','app/static/approved_ui_profile_v223.css','tests/test_v223_profile_preferences.py','tests/test_v223_account_node.cjs','app/owner_review_app_v223.py','tests/test_v223_review_isolation.py','tests/test_v223_profile_ui_node.cjs','tests/test_v223_messenger_live_node.cjs','app/static/approved_ui_statement_list_v223.js','tests/test_v223_statement_node.cjs','tests/test_v223_staff_role_node.cjs','tests/test_v223_staff_role.py','scripts/ci_v223_owner_review_browser.py','app/owner_customer_cas_v223.py','app/static/approved_ui_customer_edit_v223.js','tests/test_v223_customer_cas.py','tests/test_v223_customer_node.cjs','app/owner_quote_cas_v223.py','app/static/approved_ui_quote_edit_v223.js','tests/test_v223_quote_cas.py','tests/test_v223_quote_node.cjs','app/owner_order_review_v223.py','app/static/approved_ui_order_review_v223.js','tests/test_v223_order_review.py','tests/test_v223_order_review_node.cjs','app/static/approved_ui_finance_review_v223.js','tests/test_v223_finance_ledger.py','tests/test_v223_finance_node.cjs','scripts/ci_v223_stage_readonly.py','tests/test_v223_stage_readonly.py','docs/review/jw-v223-cross-track-execution-20261116.md','scripts/ci_v223_vault_offline_restore.py','scripts/ci_v223_vault_offline_synthetic.py','tests/test_v223_vault_offline_restore.py','docs/review/jw-v223-existing-vault-offline-b3-20261116.md'}
           assert paths==expected,(paths,expected)
           PY
           test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
@@ -324,3 +326,69 @@ jobs:
           python scripts/ci_v223_stage_readonly.py \
             --candidate "$GITHUB_SHA" \
             --deployed-metadata-sha 38f63f4708ca5b6ca49b7783b5f5c52e3817904a
+
+  existing-vault-offline-restoration-synthetic:
+    # This tests the offline restore engine on generated, disposable data ONLY.
+    # It does not fetch the private vault or read JW_PG_BACKUP_KEY.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v223-vault-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5439:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_TARGET_ADMIN_DSN: postgresql://postgres:ci-v223-vault-only@127.0.0.1:5439/postgres
+      JW_NO_EXTERNAL_DATABASE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact source boundary and install isolated dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=44,<47' 'pytest>=8,<10'
+      - name: Use PostgreSQL 17 client commands from the official disposable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/jw-vault-pg17-bin"
+          for tool in pg_dump pg_restore; do
+            cat > "$RUNNER_TEMP/jw-vault-pg17-bin/$tool" <<EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host --user "\$(id -u):\$(id -g)" \
+            -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD \
+            -e PGDATABASE -e PGSSLMODE -e PGSSLROOTCERT postgres:17 $tool "\$@"
+          EOF
+            chmod 0700 "$RUNNER_TEMP/jw-vault-pg17-bin/$tool"
+          done
+          echo "$RUNNER_TEMP/jw-vault-pg17-bin" >> "$GITHUB_PATH"
+      - name: Execute authentic encryption and actual synthetic PG17 offline restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          pg_restore --version
+          pg_dump --version
+          python -m scripts.ci_v223_vault_offline_synthetic | tee /tmp/jw-vault-synthetic-check.log
+          grep -Fx 'PASS_V223_EXISTING_ARCHIVE_OFFLINE_RESTORE_SYNTHETIC_PG17_ONLY' /tmp/jw-vault-synthetic-check.log
+          grep -Fx 'BLOCKED_REAL_B2_B3_OWNER_VAULT_KEY_AND_SNAPSHOT_PROVENANCE_REQUIRED' /tmp/jw-vault-synthetic-check.log
+          echo 'REAL_ENCRYPTED_OWNER_VAULT_ARCHIVE_HAS_NOT_BEEN_DECRYPTED_OR_RESTORED'
