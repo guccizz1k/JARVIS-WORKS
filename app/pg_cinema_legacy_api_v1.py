@@ -105,6 +105,9 @@ class WriterTx:
                 with conn.cursor() as cur:
                     cur.execute(f"SET LOCAL ROLE {WRITER_ROLE}")
                     cur.execute("SELECT set_config('jw.session_hash', %s, true)", (session_hash,))
+                    # The API validates dates in KST; SQL current_date must use
+                    # the same business day, scoped to this transaction only.
+                    cur.execute("SET LOCAL TIME ZONE 'Asia/Seoul'")
                     return work(cur)
 
 
@@ -123,6 +126,7 @@ class ValidatedLegacyTx:
             if cur.fetchone() != (False,):
                 raise HTTPException(409, "Existing legacy trades require verified reconciliation")
             cur.execute(f"SET LOCAL ROLE {WRITER_ROLE}")
+            cur.execute("SET LOCAL TIME ZONE 'Asia/Seoul'")
             return work(cur)
 
 
