@@ -3,6 +3,39 @@ import sqlite3
 from fastapi.testclient import TestClient
 
 from app import main
+from app.owner_review_app_v223 import app as owner_app
+import pytest
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    # Only the isolated owner preview gains optional settings tables.
+    monkeypatch.setenv('JW_ENV','review')
+    monkeypatch.setenv('JW_ROOT_UI','owner-visual-review')
+    monkeypatch.setenv('JW_APPROVED_UI_REVIEW','ISOLATED_REVIEW_ONLY')
+    monkeypatch.setenv('DEMO_SEED','1')
+    monkeypatch.delenv('BOOTSTRAP_EMAIL',raising=False)
+    monkeypatch.setattr(main,'DB_PATH',tmp_path/'owner-review.db')
+    with TestClient(owner_app,base_url='https://testserver') as c:
+        yield c
+
+@pytest.fixture
+def api(client):
+    class Wrapper:
+        def __init__(self,c):self.c=c
+        def login(self,email='demo@hanbit.example',password='Demo!2026secure'):
+            r=self.c.post('/api/login',json={'email':email,'password':password})
+            if r.status_code==200:
+                token=r.cookies.get(main.SESSION_COOKIE)
+                self.auth={'Cookie':main.SESSION_COOKIE+'='+token,
+                           'X-CSRF-Token':r.json()['csrf_token']}
+            return r
+        def req(self,method,path,json=None):
+            return self.c.request(method,'/api'+path,json=json,headers=self.auth)
+        def get(self,path):return self.req('GET',path)
+        def post(self,path,json):return self.req('POST',path,json)
+    wrapper=Wrapper(client)
+    assert wrapper.login().status_code==200
+    return wrapper
 
 
 def test_profile_is_self_scoped_and_versioned(api):
@@ -76,7 +109,7 @@ def test_profile_and_preferences_require_cookie_and_csrf(api):
       json={'version':0,'name':'No CSRF'}).status_code == 403
     assert api.c.post('/api/account/preferences',
       json={'version':0,'compact_view':True,'messenger_auto_refresh':False}).status_code == 403
-    with TestClient(main.app,base_url='https://testserver') as outsider:
+    with TestClient(owner_app,base_url='https://testserver') as outsider:
         assert outsider.get('/api/account/profile').status_code == 401
         assert outsider.get('/api/account/preferences').status_code == 401
 
@@ -120,7 +153,7 @@ def test_preferences_persist_across_client_recreation(api):
     assert api.post('/account/preferences', {
         'version':0,'compact_view':True,'messenger_auto_refresh':False
     }).status_code == 200
-    with TestClient(main.app,base_url='https://testserver') as restarted:
+    with TestClient(owner_app,base_url='https://testserver') as restarted:
         r=restarted.post('/api/login',json={
             'email':'demo@hanbit.example','password':'Demo!2026secure'})
         assert r.status_code == 200

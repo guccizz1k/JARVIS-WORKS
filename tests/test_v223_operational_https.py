@@ -45,7 +45,7 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
     context = ssl.create_default_context(cafile=str(cert))
     with (tmp_path / 'https-server.log').open('w') as server_log:
         proc = subprocess.Popen([
-            sys.executable, '-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1',
+            sys.executable, '-m', 'uvicorn', 'app.owner_review_app_v223:app', '--host', '127.0.0.1',
             '--port', str(port), '--ssl-certfile', str(cert), '--ssl-keyfile', str(key)
         ], cwd=ROOT, env=env, stdout=server_log, stderr=subprocess.STDOUT)
         clients = []
