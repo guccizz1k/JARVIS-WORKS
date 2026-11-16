@@ -1,5 +1,7 @@
 """Public Render QA auth isolation; no real external app or credentials."""
 import base64
+import hashlib
+from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,7 +20,7 @@ def public_env(tmp_path):
         'JW_APPROVED_UI_REVIEW':'ISOLATED_REVIEW_ONLY',
         'JW_NO_EXTERNAL_DATABASE':'1',
         'DEMO_SEED':'1',
-        'JARVIS_DB_PATH':str(tmp_path/'jw-v223-qa-regression.sqlite3'),
+        'JARVIS_DB_PATH':'/tmp/jw-v223-qa-'+hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]+'.sqlite3',
         'JW_REVIEW_BASIC_USER':'review_qa',
         'JW_REVIEW_BASIC_PASSWORD':'A-random-test-only-long-REDACTED-unsafe-to-use',
     }
@@ -87,7 +89,8 @@ def test_isolated_public_review_middleware_protects_all_mounted_routes(tmp_path,
     settings=public_env(tmp_path)
     for k,v in settings.items():
         monkeypatch.setenv(k,v)
-    monkeypatch.setattr(main,'DB_PATH',tmp_path/'jw-v223-qa-regression.sqlite3')
+    db_path=Path(settings['JARVIS_DB_PATH'])
+    monkeypatch.setattr(main,'DB_PATH',db_path)
     with TestClient(app,base_url='https://testserver') as client:
         health=client.get('/api/health')
         assert health.status_code==200
@@ -108,6 +111,9 @@ def test_isolated_public_review_middleware_protects_all_mounted_routes(tmp_path,
             'email':'demo@hanbit.example','password':'Demo!2026secure'})
         assert origin.status_code==200,origin.text
         assert client.get('/api/customers',headers=basic()).status_code==200
+    # No test-only synthetic database can persist after this fixture.
+    for suffix in ('','-wal','-shm'):
+        Path(str(db_path)+suffix).unlink(missing_ok=True)
 
 
 def test_invalid_public_mode_fails_before_seeding_database(tmp_path,monkeypatch):
@@ -115,7 +121,7 @@ def test_invalid_public_mode_fails_before_seeding_database(tmp_path,monkeypatch)
     settings['DATABASE_URL']='postgresql://real.invalid/live'
     for k,v in settings.items():
         monkeypatch.setenv(k,v)
-    db_path=tmp_path/'jw-v223-qa-regression.sqlite3'
+    db_path=Path(settings['JARVIS_DB_PATH'])
     monkeypatch.setattr(main,'DB_PATH',db_path)
     with pytest.raises(PublicQAGateError,match='EXTERNAL_CREDENTIALS'):
         with TestClient(app,base_url='https://testserver'):
