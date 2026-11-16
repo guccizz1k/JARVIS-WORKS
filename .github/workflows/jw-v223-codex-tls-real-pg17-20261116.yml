@@ -123,4 +123,15 @@ jobs:
           grep -F 'FAIL_V223_VALIDATED_TLS_TRUST_ROOT_EXISTS' /tmp/jw-invalid-ca-failure.log
           test "$(psql -X -Atc "SELECT count(*) FROM pg_roles WHERE rolname='jw_ci_v223_tls_business'")" = 0
           echo 'PASS_INVALID_CA_FAILURE_OWNED_ROLE_REMOVED_ZERO_RESIDUE'
+          # A pre-existing role is not ours to revoke, even when CI setup collides.
+          psql -X -v ON_ERROR_STOP=1 -c 'CREATE ROLE jw_ci_v223_tls_business NOLOGIN'
+          set +e
+          python3 -m scripts.ci_cinema_pg_validated_tls_e2e_v223 >/tmp/jw-preexisting-role-collision.log 2>&1
+          collision_rc=$?
+          set -e
+          test "$collision_rc" -ne 0
+          grep -E 'DuplicateObject|already exists' /tmp/jw-preexisting-role-collision.log
+          test "$(psql -X -Atc "SELECT count(*) FROM pg_roles WHERE rolname='jw_ci_v223_tls_business' AND NOT rolcanlogin")" = 1
+          psql -X -v ON_ERROR_STOP=1 -c 'DROP ROLE jw_ci_v223_tls_business'
+          echo 'PASS_PREEXISTING_ROLE_PRESERVED_ON_COLLISION_AND_EXPLICIT_TEST_TEARDOWN'
           echo 'DISPOSABLE PG17 LOOPBACK HTTPS ONLY: Supabase and external HTTPS deployment were not exercised.'
