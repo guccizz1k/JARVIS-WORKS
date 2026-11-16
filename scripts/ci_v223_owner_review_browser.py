@@ -132,6 +132,29 @@ def main():
                                         processing=api.post(origin+'/api/orders/'+browser_order_id+
                                             '/status',headers=headers,json={'status':'processing'})
                                         assert processing.status_code==200,processing.status_code
+                                    if width < 600:
+                                        # Modal accessibility, genuine browser keyboard focus.
+                                        menu=page.locator('#jw-owner-menu')
+                                        more=page.locator('.jw-owner-bottomnav button[data-action=show-all]')
+                                        more.focus()
+                                        page.keyboard.press('Enter')
+                                        assert menu.get_attribute('aria-hidden')=='false'
+                                        assert page.evaluate("""() => document.querySelector(
+                                            '.jw-review-shell').inert &&
+                                            document.querySelector('.jw-owner-bottomnav').inert""")
+                                        assert page.evaluate("""() => document.activeElement.textContent.trim()==='닫기'""")
+                                        page.keyboard.press('Shift+Tab')
+                                        assert page.evaluate("""() => document.activeElement===document.querySelector(
+                                            '.jw-owner-menu-grid button:last-child')""")
+                                        page.keyboard.press('Tab')
+                                        assert page.evaluate("""() => document.activeElement.textContent.trim()==='닫기'""")
+                                        page.keyboard.press('Escape')
+                                        assert menu.get_attribute('aria-hidden')=='true'
+                                        assert page.evaluate("""() => document.activeElement===document.querySelector(
+                                            '.jw-owner-bottomnav button[data-action="show-all"]')""")
+                                        assert not page.evaluate("""() => document.querySelector('.jw-review-shell').inert ||
+                                            document.querySelector('.jw-owner-bottomnav').inert""")
+                                        print(f'PASS_V223_REAL_{engine.upper()}_{width}_MODAL_FOCUS_TRAP_ESCAPE_RETURN',flush=True)
                                     for route,label in ROUTES:
                                         if width < 600:
                                             page.locator('.jw-owner-bottomnav button[data-action=show-all]').click()

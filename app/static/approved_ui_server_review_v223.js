@@ -77,7 +77,13 @@ function start(){
       menu.setAttribute('aria-label','전체 메뉴');menu.setAttribute('aria-hidden','true');
       const panel=t('div','jw-owner-menu-panel');const heading=t('h2','', '전체 업무 메뉴');
       const close=t('button','btn ghost sm','닫기');close.type='button';
-      function closeMobile(){menu.setAttribute('aria-hidden','true');navList.querySelector('.selected')?.focus();}
+      let returnFocus=null;
+      function closeMobile(){
+        menu.setAttribute('aria-hidden','true');
+        shell.inert=false;bottom.inert=false;
+        const target=returnFocus&&returnFocus.isConnected?returnFocus:more;
+        returnFocus=null;target.focus();
+      }
       close.onclick=closeMobile;
       const list=t('div','jw-owner-menu-grid');
       for(const [key,label] of MENUS){
@@ -86,7 +92,18 @@ function start(){
         list.append(btn);
       }
       menu.addEventListener('click',e=>{if(e.target===menu)closeMobile()});
-      menu.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();closeMobile()}});
+      menu.addEventListener('keydown',e=>{
+        if(e.key==='Escape'){e.preventDefault();closeMobile();return}
+        if(e.key!=='Tab'||menu.getAttribute('aria-hidden')==='true')return;
+        const focusable=[...menu.querySelectorAll('button:not([disabled])')];
+        if(!focusable.length){e.preventDefault();return}
+        const first=focusable[0],last=focusable[focusable.length-1];
+        if(e.shiftKey&&(document.activeElement===first||!menu.contains(document.activeElement))){
+          e.preventDefault();last.focus()
+        }else if(!e.shiftKey&&(document.activeElement===last||!menu.contains(document.activeElement))){
+          e.preventDefault();first.focus()
+        }
+      });
       panel.append(heading,close,list);menu.append(panel);
       for(const [key,label,glyph] of [['home','홈','⌂'],['docs','문서','▤'],['deals','거래','⇄'],['automation','자동화','⚙'],['stats','통계','▥']]){
         const b=t('button','',label);b.type='button';b.dataset.page=key;
@@ -94,7 +111,12 @@ function start(){
       }
       const more=t('button','','전체');more.type='button';more.dataset.action='show-all';
       more.replaceChildren(t('span','jw-owner-mobile-glyph','☷'),t('span','', '전체'));
-      more.onclick=()=>{menu.setAttribute('aria-hidden','false');close.focus();};
+      more.onclick=()=>{
+        returnFocus=document.activeElement;
+        menu.setAttribute('aria-hidden','false');
+        shell.inert=true;bottom.inert=true;
+        close.focus();
+      };
       bottom.append(more);root.append(bottom,menu);
     }
     async function open(key){
