@@ -112,6 +112,20 @@ class Bridge{
 
   // Immutable trade statement conversion: a server-side snapshot of a fulfilled order.
   // This is not a tax invoice and never modifies the source order or makes payments.
+  // Tenant-scoped list of finalized, immutable internal trade statements.
+  async statementList(){
+    const epoch=this.#session();
+    const data=await this.#request('/api/automation/statements');this.#assertEpoch(epoch);
+    if(!Array.isArray(data)||data.length>100||!data.every(x=>
+      x&&typeof x.id==='string'&&/^[a-f0-9]{32}$/.test(x.id)&&
+      x.org_id===this.#who?.org_id&&typeof x.order_id==='string'&&
+      /^[a-f0-9]{32}$/.test(x.order_id)&&
+      typeof x.doc_no==='string'&&x.doc_no.startsWith('TS-')&&
+      typeof x.created_at==='string'&&x.created_at.length<80))
+      throw new Refused('INVALID_STATEMENT_LIST');
+    return data.map(x=>Object.freeze({id:x.id,org_id:x.org_id,order_id:x.order_id,
+      doc_no:x.doc_no,created_at:x.created_at}));
+  }
   async statementFromOrder(orderId){
     const epoch=this.#session();
     if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))throw new Refused('INVALID_ORDER_ID');

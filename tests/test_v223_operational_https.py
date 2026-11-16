@@ -147,6 +147,36 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
             assert a.post(origin+'/api/account/preferences',headers=headers_a,json={
                 'version':0,'compact_view':False,'messenger_auto_refresh':True}).status_code==409
 
+            # Immutable trade-statement index: production-style flow, isolated HTTPS only.
+            quotes=a.get(origin+'/api/quotes')
+            assert quotes.status_code==200 and quotes.json()
+            quote_id=quotes.json()[0]['id']
+            for transition in ('sent','accepted'):
+                changed=a.post(origin+f'/api/quotes/{quote_id}/status',
+                               headers=headers_a,json={'status':transition})
+                assert changed.status_code==200,(transition,changed.status_code)
+            ordered=a.post(origin+'/api/orders/from-quote',headers=headers_a,
+                           json={'quote_id':quote_id,'due_date':'2099-12-30'})
+            assert ordered.status_code==201,ordered.status_code
+            order_id=ordered.json()['id']
+            for transition in ('processing','fulfilled'):
+                changed=a.post(origin+f'/api/orders/{order_id}/status',
+                               headers=headers_a,json={'status':transition})
+                assert changed.status_code==200,(transition,changed.status_code)
+            minted=a.post(origin+'/api/automation/statements/from-order',headers=headers_a,
+                          json={'order_id':order_id})
+            assert minted.status_code==201,minted.status_code
+            statement=minted.json()
+            assert statement['org_id']==org_a and statement['order_id']==order_id
+            listing=a.get(origin+'/api/automation/statements')
+            assert listing.status_code==200
+            assert any(x['id']==statement['id'] and x['order_id']==order_id
+                       for x in listing.json())
+            foreign=b.get(origin+'/api/automation/statements')
+            assert foreign.status_code==200
+            assert all(x['org_id']!=org_a for x in foreign.json())
+            assert b.get(origin+'/api/automation/statements/'+statement['id']).status_code==404
+
             # An unrelated company can neither enumerate thread nor read messages.
             from app.main import hash_password, now
             other_org = uuid.uuid4().hex

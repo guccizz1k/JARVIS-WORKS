@@ -108,6 +108,10 @@ function start(){
         if(!g.JWOwnerOperational){view.append(t('p','jw-review-unwired','업무 모듈을 불러오지 못했습니다.'));return}
         await g.JWOwnerOperational.render({bridge,view,page:key,isCurrent:()=>token===epoch});return;
       }
+      if(key==='papers'){
+        if(!g.JWOwnerStatements){view.append(t('p','jw-review-unwired','거래 문서 서버 모듈이 없습니다.'));return}
+        await g.JWOwnerStatements.render({bridge,view,isCurrent:()=>token===epoch});return;
+      }
       if(['account','settings'].includes(key)){
         if(!g.JWOwnerProfile){view.append(t('p','jw-review-unwired','계정 설정 서버 모듈을 불러오지 못했습니다.'));return}
         await g.JWOwnerProfile.render({bridge,view,page:key,isCurrent:()=>token===epoch});return;
