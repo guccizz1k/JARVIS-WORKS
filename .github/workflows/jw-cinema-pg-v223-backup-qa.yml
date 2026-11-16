@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
-          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
+          python3 -m pip install -r requirements-dev.txt -r requirements-postgres-check.txt -r requirements-jteam-external-pilot.txt 'PyMuPDF>=1.24,<2' 'reportlab>=4,<5'
       - name: Execute new backup security tests and all application tests
         run: |
           set -euo pipefail
