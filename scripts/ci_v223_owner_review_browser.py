@@ -1,0 +1,133 @@
+"""Real Chromium/WebKit navigation for the isolated approved V22.3 owner review.
+
+Local HTTPS and synthetic SQLite only. Not a physical iPhone/Safari test,
+production deploy, persistent tenant data migration or release certification.
+"""
+from __future__ import annotations
+
+import os
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+import httpx
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parents[1]
+ARTIFACTS = ROOT / 'artifacts' / 'v223-owner-browser'
+
+ROUTES = [
+    ('home', '홈'), ('docs', '문서'), ('deals', '거래'),
+    ('papers', '거래 문서'), ('money', '입금·미수금'),
+    ('partners', '거래처'), ('messenger', '메신저'),
+    ('automation', '자동화'), ('stats', '통계'),
+    ('export', '내보내기'), ('inbox', '승인함'),
+    ('files', '첨부 파일'), ('activity', '감사 이력'),
+    ('team', '직원'), ('security', '보안'),
+    ('settings', '설정'), ('account', '내 계정')
+]
+
+
+def main():
+    if os.getenv('JW_ENV') != 'review':
+        raise RuntimeError('Review browser test requires JW_ENV=review')
+    assert len(ROUTES) == 17 and len({x[0] for x in ROUTES}) == 17
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='jw-v223-owner-browser-') as temp:
+        temp = Path(temp)
+        cert, key = temp / 'server.crt', temp / 'server.key'
+        subprocess.run([
+            'openssl','req','-x509','-newkey','rsa:2048','-sha256',
+            '-days','1','-nodes','-subj','/CN=localhost',
+            '-addext','subjectAltName=DNS:localhost,IP:127.0.0.1',
+            '-keyout',str(key),'-out',str(cert)
+        ], check=True, capture_output=True)
+        key.chmod(0o600)
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1',0))
+            port = sock.getsockname()[1]
+        origin = f'https://127.0.0.1:{port}'
+        env = {**os.environ, 'JW_ENV':'review', 'DEMO_SEED':'1',
+               'JARVIS_DB_PATH':str(temp / 'synthetic-owner.db'),
+               'JW_ROOT_UI':'owner-visual-review',
+               'JW_APPROVED_UI_REVIEW':'ISOLATED_REVIEW_ONLY',
+               'JW_NO_EXTERNAL_DATABASE':'1'}
+        for key_name in ('BOOTSTRAP_EMAIL','BOOTSTRAP_PASSWORD','BOOTSTRAP_ORG','JW_INSECURE_LOCAL_DEV'):
+            env.pop(key_name, None)
+        with (temp/'server.log').open('w') as log:
+            proc = subprocess.Popen([
+                sys.executable,'-m','uvicorn','app.owner_review_app_v223:app',
+                '--host','127.0.0.1','--port',str(port),
+                '--ssl-certfile',str(cert),'--ssl-keyfile',str(key)],
+                cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT)
+            try:
+                ssl_context=ssl.create_default_context(cafile=str(cert))
+                with httpx.Client(verify=ssl_context,trust_env=False,timeout=8) as probe:
+                    for _ in range(120):
+                        assert proc.poll() is None, 'Owner review TLS server stopped'
+                        try:
+                            if probe.get(origin+'/api/health').status_code==200:
+                                break
+                        except httpx.TransportError:
+                            pass
+                        time.sleep(.1)
+                    else:
+                        raise AssertionError('Owner review TLS startup failed')
+
+                with sync_playwright() as playwright:
+                    for engine in ('chromium','webkit'):
+                        browser_type=getattr(playwright,engine)
+                        browser=browser_type.launch(headless=True,
+                            args=['--no-sandbox'] if engine=='chromium' else [])
+                        try:
+                            for width,height in ((1440,900),(390,844)):
+                                context=browser.new_context(viewport={'width':width,'height':height},
+                                    ignore_https_errors=True,reduced_motion='reduce')
+                                page=context.new_page()
+                                errors=[]
+                                failed_5xx=[]
+                                page.on('pageerror',lambda err: errors.append(str(err)))
+                                page.on('response',lambda r: failed_5xx.append(r.url)
+                                    if r.status>=500 else None)
+                                try:
+                                    page.goto(origin+'/',wait_until='domcontentloaded',timeout=25000)
+                                    page.locator('.jw-review-form input[type=email]').fill('demo@hanbit.example')
+                                    page.locator('.jw-review-form input[type=password]').fill('Demo!2026secure')
+                                    page.locator('.jw-review-form button[type=submit]').click()
+                                    page.locator('.jw-review-shell').wait_for(timeout=30000)
+                                    assert page.evaluate("document.documentElement.dataset.theme==='dark'")
+                                    for route,label in ROUTES:
+                                        if width < 600:
+                                            page.locator('.jw-owner-bottomnav button[data-action=show-all]').click()
+                                            page.locator(f'.jw-owner-menu-grid button[data-page="{route}"]').click()
+                                        else:
+                                            page.locator(f'.jw-review-nav button[data-page="{route}"]').click()
+                                        page.wait_for_function(
+                                            "label => document.querySelector('h2.jw-review-title')?.textContent===label",
+                                            arg=label,timeout=18000)
+                                        page.wait_for_timeout(170)
+                                        assert not page.locator('.jw-review-unwired').count(),(engine,width,route)
+                                        assert not page.locator('.jw-review-failure').count(),(engine,width,route)
+                                        assert page.evaluate(
+                                            "document.documentElement.scrollWidth<=innerWidth+2"),(
+                                            engine,width,route)
+                                    assert not errors,(engine,width,errors)
+                                    assert not failed_5xx,(engine,width,failed_5xx)
+                                    path=ARTIFACTS/f'{engine}_{width}_owner_17routes.png'
+                                    page.screenshot(path=str(path),full_page=True,animations='disabled')
+                                    print(f'PASS_V223_REAL_{engine.upper()}_{width}_17_MENUS_HTTPS_NO_PAGE_ERRORS',flush=True)
+                                finally:
+                                    context.close()
+                        finally:
+                            browser.close()
+            finally:
+                proc.terminate()
+                try: proc.wait(timeout=5)
+                except subprocess.TimeoutExpired: proc.kill();proc.wait()
+
+if __name__=='__main__':
+    main()

@@ -6,6 +6,7 @@ on:
     paths:
       - app/**
       - tests/**
+      - scripts/ci_v223_owner_review_browser.py
       - .github/workflows/jw-v223-jarvis-operational-20261116.yml
   workflow_dispatch:
 permissions:
@@ -46,7 +47,7 @@ jobs:
           python - <<'PY'
           import subprocess
           paths=set(subprocess.check_output(["git","diff","--name-only","03863d1d14f1c9bc04a7d4ba74cb66ef16e995bb","HEAD"],text=True).splitlines())
-          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','tests/test_v223_operational_https.py','app/owner_settings_v223.py','app/static/approved_ui_profile_v223.js','app/static/approved_ui_profile_v223.css','tests/test_v223_profile_preferences.py','tests/test_v223_account_node.cjs','app/owner_review_app_v223.py','tests/test_v223_review_isolation.py','tests/test_v223_profile_ui_node.cjs','tests/test_v223_messenger_live_node.cjs','app/static/approved_ui_statement_list_v223.js','tests/test_v223_statement_node.cjs','tests/test_v223_staff_role_node.cjs','tests/test_v223_staff_role.py'}
+          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','tests/test_v223_operational_https.py','app/owner_settings_v223.py','app/static/approved_ui_profile_v223.js','app/static/approved_ui_profile_v223.css','tests/test_v223_profile_preferences.py','tests/test_v223_account_node.cjs','app/owner_review_app_v223.py','tests/test_v223_review_isolation.py','tests/test_v223_profile_ui_node.cjs','tests/test_v223_messenger_live_node.cjs','app/static/approved_ui_statement_list_v223.js','tests/test_v223_statement_node.cjs','tests/test_v223_staff_role_node.cjs','tests/test_v223_staff_role.py','scripts/ci_v223_owner_review_browser.py'}
           assert paths==expected,(paths,expected)
           PY
           test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
@@ -237,3 +238,46 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -c 'DROP ROLE jw_ci_v223_tls_business'
           echo 'PASS_PREEXISTING_ROLE_PRESERVED_ON_COLLISION_AND_EXPLICIT_TEST_TEARDOWN'
           echo 'DISPOSABLE PG17 LOOPBACK HTTPS ONLY: Supabase and external HTTPS deployment were not exercised.'
+
+  owner-review-real-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      JW_ENV: review
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify original UI and core are byte-identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python -m py_compile scripts/ci_v223_owner_review_browser.py
+      - name: Install isolated Chromium and WebKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium webkit
+      - name: Run 17 reviewed menu routes in Chromium and WebKit desktop/mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_v223_owner_review_browser
+      - name: Preserve real browser screenshots, including on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-owner-17menu-chromium-webkit
+          path: artifacts/v223-owner-browser/*.png
+          retention-days: 3
+          if-no-files-found: ignore
