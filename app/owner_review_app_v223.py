@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from . import main as core
+from .owner_review_public_qa_guard_v223 import check_public_qa_runtime, public_qa_middleware
 from .owner_settings_v223 import install_schema, register_routes
 from .owner_customer_cas_v223 import register_routes as register_customer_review_routes
 from .owner_quote_cas_v223 import register_routes as register_quote_review_routes
@@ -20,6 +21,8 @@ from .owner_order_review_v223 import register_routes as register_order_review_ro
 
 @asynccontextmanager
 async def owner_review_lifespan(_app):
+    # Before any database schema initialization, validate public QA isolation.
+    check_public_qa_runtime()
     if not (os.environ.get('JW_ENV', '').lower() in ('review', 'test')
             and os.environ.get('JW_ROOT_UI') == 'owner-visual-review'
             and os.environ.get('JW_APPROVED_UI_REVIEW') == 'ISOLATED_REVIEW_ONLY'):
@@ -33,6 +36,10 @@ async def owner_review_lifespan(_app):
 
 app = FastAPI(title='JARVIS WORKS isolated owner review', docs_url=None,
               redoc_url=None, openapi_url=None, lifespan=owner_review_lifespan)
+
+# Applies to all mounted core and owner routes; other middleware may run first.
+# No effect without JW_PUBLIC_QA_MODE=1.
+app.middleware('http')(public_qa_middleware)
 
 
 @app.middleware('http')
