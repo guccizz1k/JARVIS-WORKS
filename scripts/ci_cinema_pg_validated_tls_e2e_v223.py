@@ -20,6 +20,7 @@ from app import pg_v90_integrated_entry as v90
 from scripts import ci_cinema_pg_legacy_api_e2e_v223 as e2e
 
 ROLE = "jw_ci_v223_tls_business"
+_role_created = False
 
 class SyncedOrgs(dict):
     def __setitem__(self, key, value):
@@ -33,6 +34,7 @@ def must(ok, label):
     print("PASS_V223_VALIDATED_TLS_" + label)
 
 def prepare():
+    global _role_created
     # Set up only inside the throw-away database already populated by e2e.main().
     # Four legacy ledger relations are required by the actual S4 collision guard.
     with psycopg.connect(dbname=e2e.DB, autocommit=True) as conn:
@@ -47,6 +49,7 @@ def prepare():
     password = secrets.token_urlsafe(28)
     with psycopg.connect(dbname="postgres", autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE ROLE {} LOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION PASSWORD {}").format(sql.Identifier(ROLE), sql.Literal(password)))
+        _role_created = True
         admin.execute(sql.SQL("GRANT jw_app_dev TO {} WITH INHERIT FALSE, SET TRUE").format(sql.Identifier(ROLE)))
         admin.execute(sql.SQL("GRANT jw_cinema_writer TO {} WITH INHERIT FALSE, SET TRUE").format(sql.Identifier(ROLE)))
     root = Path(os.environ["JW_PG_CI_TLS_CA"])
@@ -133,6 +136,7 @@ def real_build_app():
     return app
 
 def main():
+    global _role_created
     if os.environ.get("JW_CINEMA_PG_DISPOSABLE") != "1" or os.environ.get("PGHOST") not in ("localhost", "127.0.0.1"):
         raise SystemExit("BLOCKED: DISPOSABLE PG17 LOOPBACK ONLY")
     if not os.environ.get("JW_PG_CI_TLS_CA"):
@@ -140,7 +144,16 @@ def main():
     e2e.ORGS = SyncedOrgs(value="ci-a,ci-b")
     os.environ[legacy.ORGS_ENV] = e2e.ORGS["value"]
     e2e.build_app = real_build_app
-    result = e2e.main()
+    # The inner runner drops its disposable database in its own finally block.
+    # Never revoke an existing role when CREATE ROLE failed before ownership.
+    _role_created = False
+    try:
+        result = e2e.main()
+    finally:
+        if _role_created and os.environ.get("JW_CINEMA_KEEP_DB") != "1":
+            with psycopg.connect(dbname="postgres", autocommit=True) as admin:
+                admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(ROLE)))
+            _role_created = False
     if result == 0:
         print(json.dumps({"result": "PASS_V223_REAL_VALIDATED_LEGACY_TX_TLS_PG17",
                           "http_checks": 74, "synthetic": True, "real_supabase": False}))
