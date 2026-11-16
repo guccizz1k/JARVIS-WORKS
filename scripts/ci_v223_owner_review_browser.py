@@ -276,8 +276,26 @@ def main():
                                             invoice_form.locator('select[aria-label="납품 완료 수주"]').select_option(
                                                 browser_order_id)
                                             invoice_form.locator('input[aria-label="입금기한"]').fill('2099-12-31')
-                                            invoice_form.locator('button[type=submit]').click()
-                                            page.locator('.jw-review-finance-panel').wait_for(timeout=20000)
+                                            # A click is NOT a completed server write.
+                                            # Observe the authenticated POST response then the
+                                            # refreshed server-rendered finance panel. This
+                                            # prevents racing the still-pending invoice write.
+                                            with page.expect_response(
+                                                lambda r:r.url.endswith('/api/invoices/from-order')
+                                                 and r.request.method=='POST',
+                                                timeout=20000) as response_wait:
+                                                invoice_form.locator('button[type=submit]').click()
+                                            issued=response_wait.value
+                                            assert issued.status==201,(engine,width,'INVOICE_HTTP',issued.status)
+                                            current_invoice=issued.json()
+                                            assert current_invoice['order_id']==browser_order_id
+                                            assert current_invoice['money']['total']==3300
+                                            invoice_id=current_invoice['id']
+                                            finance=page.locator('.jw-review-finance-panel')
+                                            invoice_button=finance.get_by_role('button',
+                                                name=current_invoice['doc_no']+' · 입금·정산 확인')
+                                            invoice_button.wait_for(state='visible',timeout=20000)
+                                            invoice_button.click()
                                             invoices=page.evaluate("""async () => {
                                                const response=await fetch('/api/invoices',{
                                                  credentials:'same-origin',cache:'no-store'});
@@ -285,12 +303,8 @@ def main():
                                                return response.json();
                                             }""")
                                             matching=[x for x in invoices if x['order_id']==browser_order_id]
-                                            assert len(matching)==1,(engine,width,'INVOICE_NOT_CREATED',matching)
-                                            current_invoice=matching[0]
-                                            invoice_id=current_invoice['id']
-                                            finance=page.locator('.jw-review-finance-panel')
-                                            finance.get_by_role('button',
-                                                name=current_invoice['doc_no']+' · 입금·정산 확인').click()
+                                            assert len(matching)==1,(engine,width,'INVOICE_READBACK_MISMATCH')
+                                            assert matching[0]['id']==invoice_id
                                             finance.get_by_text('원본 수주·청구·입금 원장 대조 완료',
                                                 exact=False).wait_for(timeout=16000)
                                             payment_form=finance.locator('form.jw-review-action-form').last
