@@ -33,7 +33,7 @@ def test_renewal_changes_exactly_one_attribute_in_one_transaction():
 
 
 def test_renewal_guard_refuses_past_far_future_and_missing_role():
-    for needle in ("<= now()", "interval ''24 hours''", "does not exist", "renewal window", "now() >= "):
+    for needle in ("<= now()", "interval ''5 hours''", "does not exist", "renewal window", "now() >= "):
         assert needle in RENEW, needle
     assert "interval ''7 days''" not in RENEW
     assert "\\gexec" in RENEW and RENEW.index("\\gexec") < RENEW.index("ALTER ROLE jw_backup_ro")
@@ -53,3 +53,23 @@ def test_revoke_never_drops_or_grants_and_ends_sessions():
     assert "ALTER ROLE jw_backup_ro NOLOGIN;" in body and "pg_terminate_backend" in body
     assert not re.search(r"(?i)\b(drop|grant|revoke|password)\b", body)
     assert body.upper().count("BEGIN;") == 1 and body.upper().count("COMMIT;") == 1
+
+
+def test_all_historical_renew_sql_paths_are_five_hours_and_expired():
+    paths = {
+        "cinema_pg_v223_backup_role_renew_proposal.sql": "2026-11-10 09:00:00+09",
+        "cinema_pg_v223_backup_role_renew_20261111.sql": "2026-11-11 09:00:00+09",
+        "cinema_pg_v223_backup_role_temporary_login_20261111.sql": "2026-11-11 09:00:00+09",
+    }
+    for filename, deadline in paths.items():
+        text = (ROOT / "scripts/review" / filename).read_text()
+        body = code(text)
+        assert text.count("interval ''5 hours''") == 1, filename
+        assert "24 hours" not in text, filename
+        assert body.count(deadline) == 1, filename
+        assert body.index("now() >=") < body.index("ALTER ROLE jw_backup_ro"), filename
+        assert "VALID UNTIL :'valid_until'" in body, filename
+    temporary = (ROOT / "scripts/review/cinema_pg_v223_backup_role_temporary_login_20261111.sql").read_text()
+    assert "AND NOT rolcanlogin" in temporary
+    assert "pg_stat_activity" in temporary
+    assert "VALID UNTIL :'valid_until' LOGIN" in temporary
