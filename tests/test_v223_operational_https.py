@@ -118,6 +118,35 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
                           json={'last_message_id': mid}, headers=headers_b)
             assert read.status_code == 200 and read.json()['status'] == 'read'
 
+            # Authenticated personal profile & UI preferences are real HTTPS server state.
+            p_before=a.get(origin+'/api/account/profile')
+            assert p_before.status_code==200
+            p_obj=p_before.json()
+            assert p_obj['id']==alice['user']['id'] and p_obj['org_id']==org_a
+            assert p_obj['version']==0
+            assert a.post(origin+'/api/account/profile',
+                          json={'version':0,'name':'Synthetic HTTPS Renamed'}).status_code==403
+            p_update=a.post(origin+'/api/account/profile',
+                            headers=headers_a,json={'version':0,'name':'Synthetic HTTPS Renamed'})
+            assert p_update.status_code==200, p_update.status_code
+            assert p_update.json()['version']==1
+            assert a.get(origin+'/api/account/profile').json()['name']=='Synthetic HTTPS Renamed'
+            assert a.get(origin+'/api/me').json()['name']=='Synthetic HTTPS Renamed'
+            assert a.post(origin+'/api/account/profile',headers=headers_a,
+                          json={'version':0,'name':'Stale'}).status_code==409
+            assert b.get(origin+'/api/account/profile').json()['name']!= 'Synthetic HTTPS Renamed'
+            options=a.get(origin+'/api/account/preferences')
+            assert options.status_code==200
+            assert options.json()['version']==0
+            op=a.post(origin+'/api/account/preferences',headers=headers_a,json={
+                'version':0,'compact_view':True,'messenger_auto_refresh':False})
+            assert op.status_code==200, op.status_code
+            assert op.json()['version']==1
+            assert a.get(origin+'/api/account/preferences').json()['compact_view'] is True
+            assert b.get(origin+'/api/account/preferences').json()['compact_view'] is False
+            assert a.post(origin+'/api/account/preferences',headers=headers_a,json={
+                'version':0,'compact_view':False,'messenger_auto_refresh':True}).status_code==409
+
             # An unrelated company can neither enumerate thread nor read messages.
             from app.main import hash_password, now
             other_org = uuid.uuid4().hex

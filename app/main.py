@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .import_engine import DocumentError, MAX_FILE_SIZE, supplement_review
 from .messenger import install_schema as install_messenger_schema, demo_company_profiles, register_routes as register_messenger_routes
+from .owner_settings_v223 import install_schema as install_owner_settings_schema, register_routes as register_owner_settings_routes
 from .security_hardening import (data_cipher, match_totp, secret_for_user, limited_extract, install_tenant_relationship_guards, install_item_link_guards, sealed_json, unseal_json, migrate_evidence_encryption, issue_recovery_codes, recovery_hash)
 from .automation_v60 import install_schema as install_automation_schema, register_routes as register_automation_routes
 from .automation_v62 import install_schema as install_draft_schema_v62, register_routes as register_draft_routes_v62
@@ -549,6 +550,7 @@ def order_diff(c,order):
 async def lifespan(_app: FastAPI):
     require_safe_runtime()
     init_db()
+    install_owner_settings_schema(conn)
     install_automation_schema(conn)
     install_draft_schema_v62(conn)
     install_evidence_schema_v64(conn)
@@ -1513,6 +1515,8 @@ register_import_batch_routes_v63(app, current_user=current_user, transaction=tra
 
 register_messenger_routes(app, current_user=current_user, conn=conn, transaction=transaction,
                           ident=ident, now=now, fail=fail, need_admin=need_admin, detail_doc=detail_doc)
+register_owner_settings_routes(app, current_user=current_user, conn=conn,
+    transaction=transaction, now=now, audit=audit, fail=fail)
 
 
 register_automation_routes(app, conn=conn, transaction=transaction,

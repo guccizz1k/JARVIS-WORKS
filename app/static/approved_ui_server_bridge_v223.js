@@ -30,6 +30,7 @@ class Bridge{
     catch{this.#assertEpoch(epoch);throw new Refused('NETWORK_ERROR')}
     this.#assertEpoch(epoch);
     if(response.status===401){++this.#epoch;this.#clear();throw new Refused('SESSION_EXPIRED')}
+    if(response.status===409&&path.startsWith('/api/account/'))throw new Refused('STALE_VERSION');
     if(response.status===403)throw new Refused('FORBIDDEN');
     if(!response.ok)throw new Refused('API_FAILURE');
     if(format==='xlsx'){
@@ -412,6 +413,54 @@ class Bridge{
     const r=await this.#request('/api/security/sessions/'+sessionId+'/revoke','POST',undefined,true);
     this.#assertEpoch(epoch);if(!r||r.ok!==true)throw new Refused('INVALID_REVOKE_RESPONSE');
     return Object.freeze({ok:true});
+  }
+  // Self-scoped profile and UI preferences only; no generic account administration.
+  #ownerProfileResult(r){
+    if(!r||r.id!==this.#who?.id||r.org_id!==this.#who?.org_id||
+      r.role!==this.#who.role||
+      typeof r.email!=='string'||typeof r.name!=='string'||!r.name||
+      typeof r.org_name!=='string'||!Number.isSafeInteger(r.version)||r.version<0)
+      throw new Refused('INVALID_PROFILE');
+    return Object.freeze({id:r.id,org_id:r.org_id,email:r.email,name:r.name,
+      role:r.role,org_name:r.org_name,version:r.version});
+  }
+  async profileRead(){
+    const epoch=this.#session();
+    const r=await this.#request('/api/account/profile');this.#assertEpoch(epoch);
+    return this.#ownerProfileResult(r);
+  }
+  async profileSave(name,version){
+    const epoch=this.#session(),v=typeof name==='string'?name.trim():'';
+    if(!v||v.length>80||Array.from(v).some(ch=>ch.charCodeAt(0)<32||ch.charCodeAt(0)===127)||
+      !Number.isSafeInteger(version)||version<0)throw new Refused('INVALID_PROFILE_INPUT');
+    const r=await this.#request('/api/account/profile','POST',{name:v,version},true);
+    this.#assertEpoch(epoch);
+    const p=this.#ownerProfileResult(r);
+    this.#who=Object.freeze({...this.#who,name:p.name});return p;
+  }
+  #ownerPreferencesResult(r){
+    if(!r||r.user_id!==this.#who?.id||r.org_id!==this.#who?.org_id||
+      typeof r.compact_view!=='boolean'||typeof r.messenger_auto_refresh!=='boolean'||
+      !Number.isSafeInteger(r.version)||r.version<0)
+      throw new Refused('INVALID_PREFERENCES');
+    return Object.freeze({user_id:r.user_id,org_id:r.org_id,
+      compact_view:r.compact_view,messenger_auto_refresh:r.messenger_auto_refresh,version:r.version});
+  }
+  async preferencesRead(){
+    const epoch=this.#session();const r=await this.#request('/api/account/preferences');
+    this.#assertEpoch(epoch);return this.#ownerPreferencesResult(r);
+  }
+  async preferencesSave(preferences){
+    const epoch=this.#session();
+    if(!preferences||typeof preferences!=='object'||Array.isArray(preferences)||
+      !Number.isSafeInteger(preferences.version)||preferences.version<0||
+      typeof preferences.compact_view!=='boolean'||
+      typeof preferences.messenger_auto_refresh!=='boolean')
+      throw new Refused('INVALID_PREFERENCES_INPUT');
+    const body={version:preferences.version,compact_view:preferences.compact_view,
+      messenger_auto_refresh:preferences.messenger_auto_refresh};
+    const r=await this.#request('/api/account/preferences','POST',body,true);
+    this.#assertEpoch(epoch);return this.#ownerPreferencesResult(r);
   }
   async list(name){
     const epoch=this.#session();

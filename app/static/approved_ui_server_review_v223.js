@@ -16,6 +16,7 @@ function start(){
   let bridge;try{bridge=new g.JWOwnerServerBridge()}catch(e){login.append(t('p','jw-review-failure',msg(e)));return}
   let epoch=0,submitting=false;
   function entry(note){
+    g.JWOwnerOperational?.dispose?.();
     ++epoch;root.classList.remove('on');clear(root);clear(login);login.hidden=false;
     if(ownerVisual)window.JWOwnerVisualGL?.setMode('login');
     const c=t('section','jw-review-entry');c.append(t('small','jw-review-kicker','JARVIS WORKS · SECURE REVIEW'),t('h2','jw-review-heading',ownerVisual?'다시 오신 것을 환영합니다':'WORK WITHOUT EDGES.'),t('p','jw-review-muted','실제 서버 인증 · 읽기 전용 연결 검토'));
@@ -65,6 +66,7 @@ function start(){
     }
     const logout=t('button','jw-review-logout','로그아웃');logout.onclick=async()=>{let note='서버에서 로그아웃했습니다.';try{await bridge.logout()}catch{note='서버 로그아웃을 확인하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도하세요.'}entry(note)};
     head.append(t('span','jw-review-kicker','서버 데이터 연결 검토'),t('span','jw-review-user',who.name+' · '+who.org_name),logout);content.append(head,view);shell.append(nav,content);root.append(shell);
+    void g.JWOwnerProfile?.applySaved?.({bridge});
     if(ownerVisual){
       // The original source's mobile bottom navigation has 5 shortcuts.
       // '전체' exposes all 17 routes with a keyboard-accessible dialog.
@@ -96,6 +98,7 @@ function start(){
       bottom.append(more);root.append(bottom,menu);
     }
     async function open(key){
+      g.JWOwnerOperational?.dispose?.();
       let selected=MENUS.find(m=>m[0]===key)||MENUS[0];let token=++epoch;
       if(ownerVisual)window.JWOwnerVisualGL?.setMode(key==='home'?'home':'away');
       nav.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.page===key));
@@ -105,7 +108,10 @@ function start(){
         if(!g.JWOwnerOperational){view.append(t('p','jw-review-unwired','업무 모듈을 불러오지 못했습니다.'));return}
         await g.JWOwnerOperational.render({bridge,view,page:key,isCurrent:()=>token===epoch});return;
       }
-      if(key==='account'){view.append(t('p','jw-review-muted',who.name+' · '+who.email+' · '+who.org_name+' · '+who.role));return}
+      if(['account','settings'].includes(key)){
+        if(!g.JWOwnerProfile){view.append(t('p','jw-review-unwired','계정 설정 서버 모듈을 불러오지 못했습니다.'));return}
+        await g.JWOwnerProfile.render({bridge,view,page:key,isCurrent:()=>token===epoch});return;
+      }
 
       if(key==='export'){
         if(!g.JWOwnerDocumentExport){view.append(t('p','jw-review-unwired','문서 내보내기 모듈을 불러오지 못했습니다.'));return}

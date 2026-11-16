@@ -5,6 +5,8 @@
 (function (g) {
   'use strict';
   const M32 = /^[a-f0-9]{32}$/;
+  let activeCleanup=null;
+  function dispose(){if(activeCleanup){const fn=activeCleanup;activeCleanup=null;fn()}}
   const ERRORS = Object.freeze({
     LOGIN_REQUIRED: '로그인이 필요합니다.', SESSION_EXPIRED: '세션이 종료되었습니다.',
     STALE_SESSION: '사용자 세션이 변경됐습니다. 다시 조회하세요.', AUTH_BUSY: '인증 상태를 확인하고 다시 요청하세요.',
@@ -44,7 +46,7 @@
   }
   async function messenger({bridge, view, isCurrent}) {
     const user = exactBridge(bridge);
-    let active = null, requestId = null, requestText = null, sending = false;
+    let active = null, requestId = null, requestText = null, sending = false, autoRefreshEnabled=false;
     const header = el('section','jw-review-card');
     header.append(el('h3','jw-review-cardtitle','기업 간 보안 메신저'));
     notice(header,'서버 저장된 메시지만 표시합니다. 발송 결과가 불확실하면 먼저 서버에서 재조회하세요.');
@@ -58,7 +60,10 @@
     const fail = e => { if (current(bridge,user,isCurrent)) {status.textContent=why(e);status.setAttribute('role','alert');} };
     async function showMessages(thread) {
       if (!current(bridge,user,isCurrent)) return;
-      active = thread.id; messagesBox.replaceChildren(el('h3','jw-review-cardtitle',thread.other_company+' · 대화'));
+      const previousThread=active;
+      active = thread.id;
+      const savedDraft=previousThread===thread.id ? (messagesBox.querySelector('textarea')?.value || '') : '';
+      messagesBox.replaceChildren(el('h3','jw-review-cardtitle',thread.other_company+' · 대화'));
       const requestFor = thread.id;
       try {
         const messages = await bridge.messengerMessages(requestFor, thread.other_org_id);
@@ -81,7 +86,7 @@
           messagesBox.append(mark);
         }
         const entry = el('form','jw-review-action-form'), input = el('textarea','jw-review-input');
-        input.maxLength=2000;input.required=true;input.rows=3;input.setAttribute('aria-label','전송할 메시지');
+        input.maxLength=2000;input.required=true;input.rows=3;input.value=savedDraft;input.setAttribute('aria-label','전송할 메시지');
         const send = el('button','jw-review-button','메시지 전송');send.type='submit';
         const delivery = el('p','jw-review-muted','전송 전'); delivery.setAttribute('role','status');
         entry.append(input,send,delivery);messagesBox.append(entry);
@@ -108,6 +113,47 @@
         });
       } catch(e) {fail(e)}
     }
+    // SSE is a change signal only. All data always comes from authorized GETs.
+    // Timer remains a bounded fallback if SSE is unavailable or disconnected.
+    function beginLive(thread){
+      dispose();
+      if(!autoRefreshEnabled||!current(bridge,user,isCurrent)||active!==thread.id)return;
+      let stopped=false,source=null,retry=null,retryMs=1000,running=false;
+      const isLive=()=>!stopped&&current(bridge,user,isCurrent)&&active===thread.id;
+      async function sync(){
+        if(!isLive()){dispose();return}
+        if(running||sending)return;
+        running=true;
+        try{await showMessages(thread);if(isLive())await listThreads()}
+        catch(e){fail(e)}
+        finally{running=false}
+      }
+      function connect(){
+        if(!isLive()||typeof g.EventSource!=='function')return;
+        try{
+          source=new g.EventSource(location.origin+'/api/messenger/threads/'+thread.id+'/events',
+            {withCredentials:true});
+          source.addEventListener('open',()=>{retryMs=1000});
+          source.addEventListener('change',()=>{void sync()});
+          source.addEventListener('revoked',()=>{
+            if(!isLive())return;
+            dispose();
+            if(current(bridge,user,isCurrent))status.textContent='메신저 접근 권한 또는 세션이 종료됐습니다.';
+          });
+          source.onerror=()=>{
+            source?.close();source=null;
+            if(!isLive())return;
+            retry=setTimeout(connect,retryMs);
+            retryMs=Math.min(retryMs*2,30000);
+          };
+        }catch{
+          if(isLive()){retry=setTimeout(connect,retryMs);retryMs=Math.min(retryMs*2,30000)}
+        }
+      }
+      const tick=setInterval(()=>{if(!document.hidden)void sync()},8000);
+      activeCleanup=()=>{stopped=true;clearInterval(tick);if(retry!==null)clearTimeout(retry);source?.close();source=null};
+      connect();
+    }
     async function listThreads() {
       const rows = await bridge.messengerThreads();
       if (!current(bridge,user,isCurrent)) return;
@@ -115,18 +161,19 @@
       if (!rows.length) notice(threadsBox,'연결된 기업 대화가 없습니다.');
       for (const thread of rows) {
         const btn = formButton(thread.other_company+' · 안 읽음 '+thread.unread_count+'건');
-        btn.onclick=()=>showMessages(thread);threadsBox.append(btn);
+        btn.onclick=async()=>{await showMessages(thread);beginLive(thread)};threadsBox.append(btn);
       }
     }
     create.onclick = async () => {
       if (!directory.value || !M32.test(directory.value)) return;
       create.disabled = true;
-      try {const thread=await bridge.messengerCreateThread(directory.value);if (!current(bridge,user,isCurrent)) return;await listThreads();await showMessages(thread)}
+      try {const thread=await bridge.messengerCreateThread(directory.value);if (!current(bridge,user,isCurrent)) return;await listThreads();await showMessages(thread);beginLive(thread)}
       catch(e){fail(e)} finally{create.disabled=false}
     };
     refresh.onclick=async()=>{refresh.disabled=true;try{await listThreads();if(active){const x=(await bridge.messengerThreads()).find(t=>t.id===active);if(x)await showMessages(x)}}catch(e){fail(e)}finally{refresh.disabled=false}};
     try {
-      const [companies] = await Promise.all([bridge.messengerDirectory(),listThreads()]);
+      const [companies,prefs] = await Promise.all([bridge.messengerDirectory(),bridge.preferencesRead(),listThreads()]);
+      autoRefreshEnabled=prefs.messenger_auto_refresh;
       if (!current(bridge,user,isCurrent)) return;
       for(const company of companies){
         const opt=el('option','',company.company_name);opt.value=company.org_id;directory.append(opt);
@@ -191,11 +238,12 @@
     try{await display()}catch(e){if(current(bridge,user,isCurrent)){status.textContent=why(e);status.setAttribute('role','alert')}}
   }
   async function render({bridge,view,page,isCurrent}) {
+    dispose();
     if(!view||typeof isCurrent!=='function')throw new Error('RENDER_CONTEXT_REQUIRED');
     if(page==='messenger')return messenger({bridge,view,isCurrent});
     if(page==='team'||page==='security')return admin({bridge,view,page,isCurrent});
     throw new Error('UNSUPPORTED_OPERATIONAL_PAGE');
   }
-  g.JWOwnerOperational={render,randomRequestId};
+  g.JWOwnerOperational={render,dispose,randomRequestId};
   if(typeof module==='object'&&module.exports)module.exports={render,randomRequestId};
 })(typeof window==='object'?window:globalThis);
