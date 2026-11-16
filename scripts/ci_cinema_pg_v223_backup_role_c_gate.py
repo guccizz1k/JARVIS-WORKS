@@ -32,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +46,7 @@ NO_ADMIN_OPT, NO_CREATEROLE, NO_BYPASS = "jw_sim_cg_noadminopt", "jw_sim_cg_nocr
 for _r in (NO_ADMIN_OPT, NO_CREATEROLE, NO_BYPASS):
     pf.PASSWORDS[_r] = "ci-only-" + secrets.token_hex(8)
 EXPECTED = ["CG.01", "CG.02", "CG.03", "CG.04", "CG.05", "CG.06", "CG.07", "CG.08", "CG.09", "CG.10", "CG.11",
-            "CG.12", "CG.13", "CG.14", "CG.15", "CG.16"]
+            "CG.12", "CG.13", "CG.14", "CG.15", "CG.16", "CG.17"]
 results: list[tuple[str, bool, str]] = []
 
 _RAW = "coalesce(c.relacl::text,'')"
@@ -69,8 +69,8 @@ def rec(name: str, ok: bool, detail: str = "") -> None:
     print(("PASS" if ok else "FAIL"), name, "" if ok else detail[:300])
 
 
-def until(days: int = 2) -> str:
-    return (date.today() + timedelta(days=days)).isoformat() + " 00:00:00+09"
+def until(hours: float = 4) -> str:
+    return (datetime.now(timezone.utc) + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S+00")
 
 
 def run_c(db: str, user: str, *, file: Path = C_SQL, on_error_stop: bool = True, valid_until: str | None = None):
@@ -243,6 +243,14 @@ def phase_failures_and_dry_run() -> None:
         rec("CG.16_C_sql_contains_no_password_dsn_or_secret_and_takes_expiry_as_a_variable",
             not secrets_in_sql and ":'valid_until'" in sql and "NOSUPERUSER" in sql and "NOCREATEROLE" in sql
             and "CONNECTION LIMIT 2" in sql and "BEGIN;" in sql, str(secrets_in_sql))
+        original = (pf.scalar(db, FP), pf.scalar(db, ADMIN_MEMBERSHIPS))
+        denied_past = run_c(db, ADMIN, valid_until="2000-01-01 00:00:00+00")
+        denied_over = run_c(db, ADMIN, valid_until=until(hours=5.2))
+        preserved = (pf.scalar(db, FP), pf.scalar(db, ADMIN_MEMBERSHIPS)) == original
+        rec("CG.17_rejects_expired_or_over_five_hour_creation_before_role_or_grant",
+            denied_past.returncode != 0 and denied_over.returncode != 0
+            and "creation requires" in denied_past.stderr and "creation requires" in denied_over.stderr
+            and preserved and pf.scalar(db, "SELECT count(*) FROM pg_roles WHERE rolname='jw_backup_ro'") == "0")
     finally:
         drop_everything()
         pf.cleanup(db)
