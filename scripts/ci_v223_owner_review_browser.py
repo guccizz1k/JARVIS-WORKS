@@ -110,6 +110,27 @@ def main():
                                             "label => document.querySelector('h2.jw-review-title')?.textContent===label",
                                             arg=label,timeout=18000)
                                         page.wait_for_timeout(170)
+                                        if width > 900:
+                                            # Catch real geometry overlap, not just page overflow.
+                                            assert page.evaluate("""
+                                                (() => {
+                                                  const rail=document.querySelector('.jw-review-nav.rail');
+                                                  const body=document.querySelector('.jw-review-main.main');
+                                                  if(!rail||!body)return false;
+                                                  return body.getBoundingClientRect().left>=
+                                                    rail.getBoundingClientRect().right+8;
+                                                })()
+                                            """),(engine,width,route,'EXPANDED_RAIL_COVERS_MAIN')
+                                        if route == 'account':
+                                            page.wait_for_function("""
+                                                () => [...document.querySelectorAll('.jw-review-card [role=status]')]
+                                                  .some(x=>x.textContent.includes('서버 프로필 확인 완료'))
+                                            """,timeout=10000)
+                                        if route == 'settings':
+                                            page.wait_for_function("""
+                                                () => [...document.querySelectorAll('.jw-review-card [role=status]')]
+                                                  .some(x=>x.textContent.includes('서버 설정 확인 완료'))
+                                            """,timeout=10000)
                                         assert not page.locator('.jw-review-unwired').count(),(engine,width,route)
                                         assert not page.locator('.jw-review-failure').count(),(engine,width,route)
                                         assert page.evaluate(

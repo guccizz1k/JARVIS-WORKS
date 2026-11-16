@@ -40,6 +40,7 @@ async function render({bridge,view,page,isCurrent}){
   if(page==='account'){
     try {
       let profile=await bridge.profileRead();if(!alive())return;
+      status.textContent='서버 프로필 확인 완료';
       card.insertBefore(t('h3','jw-review-cardtitle','내 계정 · 서버 프로필'),status);
       note(card,profile.email+' · '+profile.org_name+' · '+profile.role);
       const form=t('form','jw-review-action-form'),input=t('input','jw-review-input'),button=t('button','jw-review-button','표시 이름 저장');
@@ -66,6 +67,7 @@ async function render({bridge,view,page,isCurrent}){
   }
   try{
     let pref=await bridge.preferencesRead();if(!alive())return;
+    status.textContent='서버 설정 확인 완료';
     apply(pref);
     card.insertBefore(t('h3','jw-review-cardtitle','개인 업무 설정 · 서버 저장'),status);
     const form=t('form','jw-review-action-form');
