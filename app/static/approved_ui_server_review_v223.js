@@ -395,6 +395,14 @@ function start(){
                 items:[{name:v.item,quantity:v.quantity,unit_price:v.unit_price}]
               }));
             }
+            if(key==='deals'){
+              if(!g.JWOwnerQuoteEdit){actions.append(t('p','jw-review-unwired','견적 수정 서버 모듈이 없습니다.'))}
+              else{
+                await g.JWOwnerQuoteEdit.render({bridge,view:actions,
+                  isCurrent:()=>token===epoch});
+                if(token!==epoch)return;
+              }
+            }
             const quotes=await fetched('quotes');
             for(const r of quotes.slice(0,12)){
               if(!['draft','sent'].includes(r.status))continue;

@@ -110,6 +110,52 @@ def main():
                                             "label => document.querySelector('h2.jw-review-title')?.textContent===label",
                                             arg=label,timeout=18000)
                                         page.wait_for_timeout(170)
+                                        if route == 'deals':
+                                            # Real browser: create a server-side draft, modify its
+                                            # item and title via CAS, and verify readback via HTTPS.
+                                            quote_title=f'Browser Quote {engine}-{width}'
+                                            new_title=f'Browser Quote Edited {engine}-{width}'
+                                            quote_form=page.locator('form.jw-review-action-form').filter(
+                                                has=page.locator('h4',has_text='견적서 서버 생성')).first
+                                            quote_form.locator('input[aria-label="견적 제목"]').fill(quote_title)
+                                            quote_form.locator('input[aria-label="품목명"]').fill('Synthetic Part')
+                                            quote_form.locator('input[aria-label="수량"]').fill('1')
+                                            quote_form.locator('input[aria-label="단가(원)"]').fill('1000')
+                                            quote_form.locator('button[type=submit]').click()
+                                            page.wait_for_function("""title => {
+                                               const p=document.querySelector('h2.jw-review-title');
+                                               return p?.textContent==='거래';
+                                            }""",arg=quote_title,timeout=15000)
+                                            page.wait_for_timeout(120)
+                                            created_quotes=page.evaluate("""async () => {
+                                               const r=await fetch('/api/quotes',{credentials:'same-origin'});
+                                               if(!r.ok)throw Error('draft readback '+r.status);
+                                               return r.json();
+                                            }""")
+                                            created_quote=next((q for q in created_quotes
+                                                if q['title']==quote_title),None)
+                                            assert created_quote,(engine,width,'QUOTE_NOT_CREATED')
+                                            page.get_by_role('button',
+                                                name=created_quote['doc_no']+' · 초안 수정').click()
+                                            quote_editor=page.locator('form.jw-review-action-form').filter(
+                                                has=page.get_by_role('button',name='견적 초안 저장')).last
+                                            quote_editor.wait_for(timeout=15000)
+                                            quote_editor.locator('input[aria-label="견적 제목"]').fill(new_title)
+                                            quote_editor.locator('input[aria-label="수량"]').fill('3')
+                                            quote_editor.locator('input[aria-label="단가(원)"]').fill('450')
+                                            quote_editor.locator('button[type=submit]').click()
+                                            page.get_by_text('견적 초안을 서버에 저장하고 재조회했습니다.',
+                                                exact=False).wait_for(timeout=20000)
+                                            after=page.evaluate("""async (quoteId) => {
+                                               const r=await fetch('/api/quotes/'+quoteId,{
+                                                 credentials:'same-origin',cache:'no-store'});
+                                               if(!r.ok)throw Error('quote readback '+r.status);
+                                               return r.json();
+                                            }""",created_quote['id'])
+                                            assert after['title']==new_title,(engine,width,'QUOTE_TITLE')
+                                            assert after['money']['total']==1485,(engine,width,'QUOTE_MONEY')
+                                            assert after['items'][0]['quantity']==3,(engine,width,'QUOTE_QUANTITY')
+                                            print(f'PASS_V223_REAL_{engine.upper()}_{width}_QUOTE_DRAFT_CAS_HTTPS',flush=True)
                                         if route == 'partners':
                                             # Real user path: create in the approved UI, edit with
                                             # CAS, verify authenticated server state. No mocks.

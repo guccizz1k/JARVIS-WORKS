@@ -200,6 +200,45 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
             assert all(x['org_id']!=org_a for x in foreign.json())
             assert b.get(origin+'/api/automation/statements/'+statement['id']).status_code==404
 
+            # Isolated HTTPS draft quotation edit: CAS, multi-line totals,
+            # tenant isolation, CSRF and immutable sent status.
+            qcust=a.get(origin+'/api/customers')
+            assert qcust.status_code==200 and qcust.json()
+            customer_id=qcust.json()[0]['id']
+            body={'customer_id':customer_id,'title':'HTTPS Quote Before',
+                'vat_mode':'taxable','items':[{'name':'Part A','quantity':2,'unit_price':300}]}
+            created=a.post(origin+'/api/quotes',headers=headers_a,json=body)
+            assert created.status_code==201,created.status_code
+            qid=created.json()['id']
+            context_url=origin+'/api/review/quotes/'+qid+'/edit-context'
+            edit_url=origin+'/api/review/quotes/'+qid+'/update'
+            context=a.get(context_url)
+            assert context.status_code==200,context.status_code
+            old=context.json()
+            assert len(old['fingerprint'])==64
+            assert old['quote']['status']=='draft'
+            update_body={'expected_sha256':old['fingerprint'],'updated':{
+                **body,'title':'HTTPS Quote Changed',
+                'items':[{'name':'Part B','quantity':4,'unit_price':900}]}}
+            assert a.post(edit_url,json=update_body).status_code==403
+            assert b.get(context_url).status_code==404
+            assert b.post(edit_url,headers=headers_b,json=update_body).status_code==404
+            edited=a.post(edit_url,headers=headers_a,json=update_body)
+            assert edited.status_code==200,edited.status_code
+            assert edited.json()['quote']['money']['total']==3960
+            assert edited.json()['fingerprint']!=old['fingerprint']
+            checked=a.get(context_url)
+            assert checked.status_code==200
+            assert checked.json()['quote']['title']=='HTTPS Quote Changed'
+            assert checked.json()['fingerprint']==edited.json()['fingerprint']
+            assert a.post(edit_url,headers=headers_a,json=update_body).status_code==409
+            finalized=a.post(origin+'/api/quotes/'+qid+'/status',
+                headers=headers_a,json={'status':'sent'})
+            assert finalized.status_code==200
+            assert a.get(context_url).status_code==409
+            assert a.post(edit_url,headers=headers_a,json={
+                **update_body,'expected_sha256':checked.json()['fingerprint']}).status_code==409
+
             # An unrelated company can neither enumerate thread nor read messages.
             from app.main import hash_password, now
             other_org = uuid.uuid4().hex

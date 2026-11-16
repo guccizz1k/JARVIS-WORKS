@@ -30,7 +30,7 @@ class Bridge{
     catch{this.#assertEpoch(epoch);throw new Refused('NETWORK_ERROR')}
     this.#assertEpoch(epoch);
     if(response.status===401){++this.#epoch;this.#clear();throw new Refused('SESSION_EXPIRED')}
-    if(response.status===409&&(path.startsWith('/api/account/')||path.startsWith('/api/review/customers/')))throw new Refused('STALE_VERSION');
+    if(response.status===409&&(path.startsWith('/api/account/')||path.startsWith('/api/review/customers/')||path.startsWith('/api/review/quotes/')))throw new Refused('STALE_VERSION');
     if(response.status===403)throw new Refused('FORBIDDEN');
     if(!response.ok)throw new Refused('API_FAILURE');
     if(format==='xlsx'){
@@ -493,6 +493,58 @@ class Bridge{
   }
   // Review-only customer edit: compare all server-original fields inside the
   // transaction. Never send a generic PUT, or overwrite unseen concurrent edits.
+  // Draft-quotation edit is confined to isolated owner-review routes.
+  // The SHA-256 fingerprint binds every line ID and position to the saved draft.
+  #quoteEditEnvelope(data,quoteId){
+    const q=data?.quote;
+    if(!q||q.id!==quoteId||q.org_id!==this.#who?.org_id||
+      q.status!=='draft'||typeof q.title!=='string'||!q.title||
+      !['taxable','exempt'].includes(q.vat_mode)||
+      typeof q.customer_id!=='string'||!/^[a-f0-9]{32}$/.test(q.customer_id)||
+      typeof q.doc_no!=='string'||
+      typeof data.fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(data.fingerprint)||
+      !Array.isArray(q.items)||q.items.length<1||q.items.length>100||
+      !q.items.every((item,index)=>item&&
+        typeof item.id==='string'&&/^[a-f0-9]{32}$/.test(item.id)&&
+        typeof item.name==='string'&&!!item.name&&item.name.length<=150&&
+        Number.isSafeInteger(item.quantity)&&item.quantity>=1&&item.quantity<=100000&&
+        Number.isSafeInteger(item.unit_price)&&item.unit_price>=0&&item.unit_price<=1000000000&&
+        item.position===index))
+      throw new Refused('INVALID_QUOTE_EDIT_CONTEXT');
+    return Object.freeze({fingerprint:data.fingerprint,quote:Object.freeze({...q,
+      items:Object.freeze(q.items.map(item=>Object.freeze({...item})))})});
+  }
+  async quoteEditContext(quoteId){
+    const epoch=this.#session();
+    if(typeof quoteId!=='string'||!/^[a-f0-9]{32}$/.test(quoteId))
+      throw new Refused('INVALID_QUOTE_ID');
+    const data=await this.#request('/api/review/quotes/'+quoteId+'/edit-context');
+    this.#assertEpoch(epoch);
+    return this.#quoteEditEnvelope(data,quoteId);
+  }
+  async quoteEditSave(quoteId,fingerprint,updated){
+    const epoch=this.#session();
+    if(typeof quoteId!=='string'||!/^[a-f0-9]{32}$/.test(quoteId)||
+      typeof fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(fingerprint)||
+      !updated||typeof updated!=='object'||Array.isArray(updated)||
+      typeof updated.customer_id!=='string'||!/^[a-f0-9]{32}$/.test(updated.customer_id)||
+      typeof updated.title!=='string'||!updated.title.trim()||updated.title.length>150||
+      !['taxable','exempt'].includes(updated.vat_mode)||
+      !Array.isArray(updated.items)||!updated.items.length||updated.items.length>100||
+      !updated.items.every(item=>item&&typeof item.name==='string'&&
+        !!item.name.trim()&&item.name.length<=150&&
+        Number.isSafeInteger(item.quantity)&&item.quantity>=1&&item.quantity<=100000&&
+        Number.isSafeInteger(item.unit_price)&&item.unit_price>=0&&item.unit_price<=1000000000))
+      throw new Refused('INVALID_QUOTE_UPDATE');
+    const body={customer_id:updated.customer_id,title:updated.title.trim(),
+      vat_mode:updated.vat_mode,items:updated.items.map(item=>({
+        name:item.name.trim(),quantity:item.quantity,unit_price:item.unit_price}))};
+    const data=await this.#request('/api/review/quotes/'+quoteId+'/update','POST',
+      {expected_sha256:fingerprint,updated:body},true);
+    this.#assertEpoch(epoch);
+    if(typeof data?.changed!=='boolean')throw new Refused('INVALID_QUOTE_EDIT_RESULT');
+    return Object.freeze({...this.#quoteEditEnvelope(data,quoteId),changed:data.changed});
+  }
   async customerEdit(customerId,original,updated){
     const epoch=this.#session();
     if(typeof customerId!=='string'||!/^[a-f0-9]{32}$/.test(customerId))
