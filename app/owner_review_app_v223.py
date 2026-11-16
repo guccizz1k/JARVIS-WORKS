@@ -6,6 +6,7 @@ unaltered. Only the explicit review runtime installs additive account tables.
 from contextlib import asynccontextmanager
 import os
 import re
+from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +20,25 @@ from .owner_quote_cas_v223 import register_routes as register_quote_review_route
 from .owner_order_review_v223 import register_routes as register_order_review_routes
 
 
+def check_review_database_target():
+    """Reject unsafe local targets before the original app can initialize them.
+
+    Review flags alone do not isolate a database. Keep this adapter off the
+    original default database and require a disposable local filesystem path.
+    Check every existing component, since core.conn checks only the final file.
+    """
+    target = Path(core.DB_PATH)
+    default = core.ROOT.parent / 'data' / 'works.db'
+    if (not target.is_absolute() or '..' in target.parts or target == default
+            or not any(root in target.parents for root in
+                       (Path('/tmp'), Path('/workspace/work')))):
+        raise RuntimeError('Review database target must be an isolated disposable path')
+    if any(part.is_symlink() for part in (target, *target.parents)):
+        raise RuntimeError('Review database target must not contain a symlink')
+    if target.exists() and not target.is_file():
+        raise RuntimeError('Review database target must be a regular file')
+
+
 @asynccontextmanager
 async def owner_review_lifespan(_app):
     # Before any database schema initialization, validate public QA isolation.
@@ -27,6 +47,7 @@ async def owner_review_lifespan(_app):
             and os.environ.get('JW_ROOT_UI') == 'owner-visual-review'
             and os.environ.get('JW_APPROVED_UI_REVIEW') == 'ISOLATED_REVIEW_ONLY'):
         raise RuntimeError('Owner account extension requires isolated explicit review mode')
+    check_review_database_target()
     # The legacy application still owns its exact original schema and lifecycle.
     async with core.app.router.lifespan_context(core.app):
         # Only the isolated review application's database receives optional rows.

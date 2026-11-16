@@ -81,8 +81,10 @@ def main():
                 with sync_playwright() as playwright:
                     for engine in ('chromium','webkit'):
                         browser_type=getattr(playwright,engine)
-                        browser=browser_type.launch(headless=True,
-                            args=['--no-sandbox'] if engine=='chromium' else [])
+                        launch_options = {'headless': True}
+                        if engine == 'chromium':
+                            launch_options['chromium_sandbox'] = True
+                        browser=browser_type.launch(**launch_options)
                         try:
                             for width,height in ((1440,900),(390,844)):
                                 context=browser.new_context(viewport={'width':width,'height':height},
