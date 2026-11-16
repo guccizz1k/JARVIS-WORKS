@@ -20,7 +20,7 @@ def code(text: str) -> str:
 
 
 def test_gate_expectations_are_unique_and_complete():
-    assert len(cg.EXPECTED) == len(set(cg.EXPECTED)) == 16
+    assert len(cg.EXPECTED) == len(set(cg.EXPECTED)) == 17
 
 
 def test_c_is_one_transaction_with_no_secret_and_no_privilege_escalation():
@@ -46,3 +46,14 @@ def test_rollback_is_one_transaction_and_drops_the_role_only_when_present():
     body = code(RB).upper()
     assert body.count("BEGIN;") == 1 and body.count("COMMIT;") == 1
     assert "DROP ROLE JW_BACKUP_RO" in body and "NOLOGIN" in body and "GRANTED BY CURRENT_USER" in body
+
+
+def test_initial_role_creation_refuses_over_five_hours_before_creating_role():
+    body = code(C)
+    assert body.count("interval ''5 hours''") == 1
+    assert "24 hours" not in C
+    assert ":'valid_until'" in body
+    assert "\\gexec" in body
+    assert body.index("\\gexec") < body.index("CREATE ROLE jw_backup_ro")
+    assert body.index("CREATE ROLE jw_backup_ro") < body.index("GRANT USAGE")
+    assert "creation requires an approved future expiry within 5 hours" in body
