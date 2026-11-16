@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/jw-v223-jarvis-p2-operational-20261116
+      - review/codex-v223-independent-20261117
     paths:
       - app/**
       - tests/**
@@ -42,7 +43,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$GITHUB_REF_NAME" = review/jw-v223-jarvis-p2-operational-20261116
+          case "$GITHUB_REF_NAME" in
+            review/jw-v223-jarvis-p2-operational-20261116|review/codex-v223-independent-20261117) ;;
+            *) echo 'Unapproved review branch'; exit 1 ;;
+          esac
           git merge-base --is-ancestor d91ebf00c63012a78845d094afbd15be0deefd1c HEAD
           test "$(git hash-object scripts/ci_cinema_pg_validated_tls_e2e_v223.py)" = a20bc4c93ed942254aab54ca2331fb17f7d73622
           test "$(git hash-object tests/test_v223_tls_role_cleanup.py)" = 07f0b985d97f068328bc3c6a5c25ecc5314442d0
@@ -51,6 +55,13 @@ jobs:
           import subprocess
           paths=set(subprocess.check_output(["git","diff","--name-only","03863d1d14f1c9bc04a7d4ba74cb66ef16e995bb","HEAD"],text=True).splitlines())
           expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','tests/test_v223_operational_https.py','app/owner_settings_v223.py','app/static/approved_ui_profile_v223.js','app/static/approved_ui_profile_v223.css','tests/test_v223_profile_preferences.py','tests/test_v223_account_node.cjs','app/owner_review_app_v223.py','tests/test_v223_review_isolation.py','tests/test_v223_profile_ui_node.cjs','tests/test_v223_messenger_live_node.cjs','app/static/approved_ui_statement_list_v223.js','tests/test_v223_statement_node.cjs','tests/test_v223_staff_role_node.cjs','tests/test_v223_staff_role.py','scripts/ci_v223_owner_review_browser.py','app/owner_customer_cas_v223.py','app/static/approved_ui_customer_edit_v223.js','tests/test_v223_customer_cas.py','tests/test_v223_customer_node.cjs','app/owner_quote_cas_v223.py','app/static/approved_ui_quote_edit_v223.js','tests/test_v223_quote_cas.py','tests/test_v223_quote_node.cjs','app/owner_order_review_v223.py','app/static/approved_ui_order_review_v223.js','tests/test_v223_order_review.py','tests/test_v223_order_review_node.cjs','app/static/approved_ui_finance_review_v223.js','tests/test_v223_finance_ledger.py','tests/test_v223_finance_node.cjs','scripts/ci_v223_stage_readonly.py','tests/test_v223_stage_readonly.py','docs/review/jw-v223-cross-track-execution-20261116.md','scripts/ci_v223_vault_offline_restore.py','scripts/ci_v223_vault_offline_synthetic.py','tests/test_v223_vault_offline_restore.py','docs/review/jw-v223-existing-vault-offline-b3-20261116.md','app/owner_review_public_qa_guard_v223.py','tests/test_v223_public_qa_gate.py','docs/review/jw-v223-render-isolated-qa-gate-20261116.md'}
+          import os
+          if os.environ['GITHUB_REF_NAME']=='review/codex-v223-independent-20261117':
+              baseline='e130c9440ca7572400d7691647773a9acd8059e9'
+              subprocess.run(['git','merge-base','--is-ancestor',baseline,'HEAD'],check=True)
+              paths=set(subprocess.check_output(['git','diff','--name-only',baseline,'HEAD'],text=True).splitlines())
+              expected={'app/owner_review_app_v223.py','app/static/approved_ui_operational_v223.js','scripts/ci_v223_owner_review_browser.py','tests/test_v223_review_target_boundary.py','tests/test_v223_messenger_selection_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml'}
+              assert subprocess.check_output(['git','hash-object','app/owner_review_app_v223.py'],text=True).strip()=='54a7d3cee87f2a03ef739c6aa2f50087fb8fb029'
           assert paths==expected,(paths,expected)
           PY
           test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
