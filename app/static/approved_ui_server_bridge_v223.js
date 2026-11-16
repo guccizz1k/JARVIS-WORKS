@@ -1,17 +1,24 @@
 /* Approved UI server-only review adapter. OFF without explicit review UI.
  * Cookie-based same-origin session. Never touches jw3.db, IndexedDB or demo data.
- * No write except login/logout; business screens are read-only and fail closed.
+ * Authentication transitions are serialized; stale responses never cross sessions.
  */
 (function(g){
 'use strict';
 class Refused extends Error{constructor(code){super(code);this.code=code;this.name='JWServerRefusal'}}
 class Bridge{
-  #who=null;#csrf='';#origin;
+  #who=null;#csrf='';#origin;#epoch=0;#authBusy=false;
   constructor(){if(!location.origin||location.protocol!=='https:')throw new Refused('HTTPS_REQUIRED');this.#origin=location.origin}
   get identity(){return this.#who?Object.freeze({...this.#who}):null}
   get signedIn(){return Boolean(this.#who)}
   #clear(){this.#who=null;this.#csrf=''}
+  #assertEpoch(epoch){if(epoch!==this.#epoch)throw new Refused('STALE_SESSION')}
+  #session(){if(this.#authBusy)throw new Refused('AUTH_BUSY');if(!this.#who)throw new Refused('LOGIN_REQUIRED');return this.#epoch}
+  #beginAuth(clear=true){
+    if(this.#authBusy)throw new Refused('AUTH_BUSY');
+    this.#authBusy=true;++this.#epoch;if(clear)this.#clear();return this.#epoch;
+  }
   async #request(path,method='GET',body,csrf=false){
+    const epoch=this.#epoch;
     if(!/^\/api\/[a-z0-9/-]+$/.test(path))throw new Refused('BAD_PATH');
     if(!['GET','POST'].includes(method))throw new Refused('BAD_METHOD');
     const headers={'Accept':'application/json'};
@@ -19,13 +26,15 @@ class Bridge{
     if(csrf){if(!this.#csrf)throw new Refused('CSRF_MISSING');headers['X-CSRF-Token']=this.#csrf}
     let response;
     try{response=await fetch(this.#origin+path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer',headers,...(body===undefined?{}:{body:JSON.stringify(body)})})}
-    catch{throw new Refused('NETWORK_ERROR')}
-    if(response.status===401){this.#clear();throw new Refused('SESSION_EXPIRED')}
+    catch{this.#assertEpoch(epoch);throw new Refused('NETWORK_ERROR')}
+    this.#assertEpoch(epoch);
+    if(response.status===401){++this.#epoch;this.#clear();throw new Refused('SESSION_EXPIRED')}
     if(response.status===403)throw new Refused('FORBIDDEN');
     if(!response.ok)throw new Refused('API_FAILURE');
     if(!/^application\/json(?:;|$)/i.test(response.headers.get('content-type')||''))throw new Refused('NON_JSON');
     if(Number(response.headers.get('content-length')||0)>2097152)throw new Refused('RESPONSE_TOO_BIG');
-    try{return await response.json()}catch{throw new Refused('INVALID_JSON')}
+    let data;try{data=await response.json()}catch{this.#assertEpoch(epoch);throw new Refused('INVALID_JSON')}
+    this.#assertEpoch(epoch);return data;
   }
   #accept(who){
     if(!who||typeof who!=='object'||Array.isArray(who))throw new Refused('BAD_IDENTITY');
@@ -36,18 +45,40 @@ class Bridge{
     this.#who=Object.freeze(Object.fromEntries(['id','org_id','email','name','role','org_name'].map(k=>[k,who[k]])));
     this.#csrf=who.csrf_token;return this.identity
   }
-  async restore(){this.#clear();return this.#accept(await this.#request('/api/me'))}
-  async login(email,password,otp){
-    this.#clear();if(!email||!password)throw new Refused('CREDENTIALS_REQUIRED');
-    const result=await this.#request('/api/login','POST',{email,password,...(otp?{otp}:{})});
-    if(!result||!result.user||!result.user.id||!result.user.org_id)throw new Refused('INVALID_LOGIN');
-    const who=await this.restore();
-    if(result.user.id!==who.id||result.user.org_id!==who.org_id){this.#clear();throw new Refused('IDENTITY_MISMATCH')}
-    return who
+  async #restore(epoch){
+    const who=await this.#request('/api/me');this.#assertEpoch(epoch);return this.#accept(who);
   }
-  async logout(){try{if(this.#who)await this.#request('/api/logout','POST',undefined,true)}finally{this.#clear()}}
+  async restore(){
+    const epoch=this.#beginAuth();
+    try{return await this.#restore(epoch)}finally{this.#authBusy=false}
+  }
+  async login(email,password,otp){
+    if(!email||!password)throw new Refused('CREDENTIALS_REQUIRED');
+    const epoch=this.#beginAuth();
+    try{
+      const result=await this.#request('/api/login','POST',{email,password,...(otp?{otp}:{})});
+      this.#assertEpoch(epoch);
+      if(!result||!result.user||!result.user.id||!result.user.org_id)throw new Refused('INVALID_LOGIN');
+      const who=await this.#restore(epoch);this.#assertEpoch(epoch);
+      if(result.user.id!==who.id||result.user.org_id!==who.org_id)throw new Refused('IDENTITY_MISMATCH');
+      return who;
+    }catch(error){if(epoch===this.#epoch)this.#clear();throw error}
+    finally{this.#authBusy=false}
+  }
+  async logout(){
+    const epoch=this.#beginAuth(false);
+    try{
+      // A successful login POST can set a cookie even if its /me read failed.
+      // Recover server identity/CSRF before claiming that session was revoked.
+      if(!this.#who){
+        try{await this.#restore(epoch)}catch(error){if(error.code==='SESSION_EXPIRED')return;throw error}
+      }
+      this.#assertEpoch(epoch);await this.#request('/api/logout','POST',undefined,true);
+    }
+    finally{this.#clear();this.#authBusy=false}
+  }
   async write(path,payload){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     // No arbitrary path, DELETE, bulk mutation, user administration or production migration.
     const direct=new Set(['/api/customers','/api/quotes','/api/orders/from-quote','/api/invoices/from-order','/api/automation/statements/from-order']);
     const special=[
@@ -59,6 +90,7 @@ class Bridge{
     if(!payload||typeof payload!=='object'||Array.isArray(payload))
       throw new Refused('INVALID_WRITE_PAYLOAD');
     const data=await this.#request(path,'POST',payload,true);
+    this.#assertEpoch(epoch);
     if(!data||typeof data!=='object'||Array.isArray(data)||data.org_id!==this.#who?.org_id)
       throw new Refused('TENANT_MISMATCH');
     return Object.freeze({...data});
@@ -68,9 +100,10 @@ class Bridge{
   // Immutable trade statement conversion: a server-side snapshot of a fulfilled order.
   // This is not a tax invoice and never modifies the source order or makes payments.
   async statementFromOrder(orderId){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))throw new Refused('INVALID_ORDER_ID');
     const d=await this.write('/api/automation/statements/from-order',{order_id:orderId});
+    this.#assertEpoch(epoch);
     if(typeof d.id!=='string'||!/^[a-f0-9]{32}$/.test(d.id)||
        d.order_id!==orderId||d.document?.source_order_id!==orderId||
        d.document?.legal_status!=='internal_business_record_not_tax_invoice'||
@@ -80,11 +113,12 @@ class Bridge{
     return d;
   }
   async statementDetail(statementId,orderId){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     if(typeof statementId!=='string'||!/^[a-f0-9]{32}$/.test(statementId)||
        typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))
       throw new Refused('INVALID_STATEMENT_ID');
     const d=await this.#request('/api/automation/statements/'+statementId);
+    this.#assertEpoch(epoch);
     if(!d||d.id!==statementId||d.org_id!==this.#who?.org_id||
        d.order_id!==orderId||d.document?.source_order_id!==orderId||
        d.document?.legal_status!=='internal_business_record_not_tax_invoice'||
@@ -93,10 +127,11 @@ class Bridge{
     return d;
   }
   async orderTransactionTrace(orderId){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))
       throw new Refused('INVALID_ORDER_ID');
     const d=await this.#request('/api/automation/transactions/'+orderId);
+    this.#assertEpoch(epoch);
     if(!d||d.source_order_id!==orderId||d.scope!=='authenticated_tenant_only'||
        !Array.isArray(d.events)||!d.events.every(e=>
          e&&typeof e.type==='string'&&
@@ -112,8 +147,9 @@ class Bridge{
   // Server-clock-only measurement: never use Date.now() to manufacture elapsed time.
   // Running task state resides exclusively in authenticated tenant server storage.
   async activeTiming(){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     const d=await this.#request('/api/automation/timing/active');
+    this.#assertEpoch(epoch);
     if(d===null)return null;
     if(!d||typeof d!=='object'||Array.isArray(d)||!/^[a-f0-9]{32}$/.test(d.id||'')||
        d.workflow!=='trade_statement'||!['manual','automated'].includes(d.mode)||
@@ -122,19 +158,21 @@ class Bridge{
     return Object.freeze({id:d.id,workflow:d.workflow,mode:d.mode,started_at:d.started_at});
   }
   async startTiming(mode){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     if(mode!=='manual'&&mode!=='automated')throw new Refused('INVALID_TIMER_MODE');
     const d=await this.#request('/api/automation/timing/start','POST',
       {workflow:'trade_statement',mode},true);
+    this.#assertEpoch(epoch);
     if(!d||!/^[a-f0-9]{32}$/.test(d.id||'')||
        d.status!=='running'||d.workflow!=='trade_statement'||d.mode!==mode)
       throw new Refused('INVALID_TIMER_START');
     return Object.freeze({id:d.id,workflow:d.workflow,mode:d.mode,status:d.status});
   }
   async finishTiming(runId,statementId=null){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     if(typeof runId!=='string'||!/^[a-f0-9]{32}$/.test(runId))throw new Refused('INVALID_TIMER_ID');
     const active=await this.activeTiming();
+    this.#assertEpoch(epoch);
     if(!active||active.id!==runId)throw new Refused('TIMER_NOT_ACTIVE');
     if(active.mode==='automated'&&
        (typeof statementId!=='string'||!/^[a-f0-9]{32}$/.test(statementId)))
@@ -142,6 +180,7 @@ class Bridge{
     if(active.mode==='manual'&&statementId!==null)throw new Refused('MANUAL_CANNOT_LINK_DOCUMENT');
     const body={completed:true,...(active.mode==='automated'?{statement_id:statementId}:{})};
     const d=await this.#request('/api/automation/timing/'+runId+'/finish','POST',body,true);
+    this.#assertEpoch(epoch);
     if(!d||d.id!==runId||d.mode!==active.mode||d.workflow!=='trade_statement'||
        d.status!=='completed'||d.measurement!=='server_elapsed_time'||
        !Number.isSafeInteger(d.elapsed_ms)||d.elapsed_ms<0||d.elapsed_ms>1800000||
@@ -151,20 +190,23 @@ class Bridge{
       measurement:d.measurement,task_outcome:d.task_outcome});
   }
   async cancelTiming(runId){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     if(typeof runId!=='string'||!/^[a-f0-9]{32}$/.test(runId))throw new Refused('INVALID_TIMER_ID');
     const active=await this.activeTiming();
+    this.#assertEpoch(epoch);
     if(!active||active.id!==runId)throw new Refused('TIMER_NOT_ACTIVE');
     const d=await this.#request('/api/automation/timing/'+runId+'/cancel','POST',undefined,true);
+    this.#assertEpoch(epoch);
     if(!d||d.id!==runId||d.status!=='cancelled'||d.excluded_from_metrics!==true)
       throw new Refused('INVALID_TIMER_CANCEL');
     return Object.freeze({id:d.id,status:d.status,excluded_from_metrics:true});
   }
 
   async list(name){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     if(!['customers','quotes','orders','invoices'].includes(name))throw new Refused('UNSUPPORTED_API');
     const data=await this.#request('/api/'+name);
+    this.#assertEpoch(epoch);
     if(!Array.isArray(data))throw new Refused('INVALID_ROWS');
     if(!data.every(r=>r&&typeof r==='object'&&!Array.isArray(r)&&r.org_id===this.#who?.org_id))throw new Refused('TENANT_MISMATCH');
     return data
@@ -172,7 +214,7 @@ class Bridge{
   // Typed, allowlisted server reads for additional review-only panels.
   // Never expose arbitrary paths or use browser local records as a fallback.
   async readPanel(name){
-    if(!this.#who)throw new Refused('LOGIN_REQUIRED');
+    const epoch=this.#session();
     const routes={
       'stats':['/api/dashboard','/api/automation/time-savings'],
       'automation':['/api/automation/time-savings'],
@@ -189,6 +231,7 @@ class Bridge{
     if(['security','team'].includes(name)&&this.#who.role!=='admin')
       throw new Refused('ADMIN_ONLY');
     const raw=await Promise.all(allowed.map(path=>this.#request(path)));
+    this.#assertEpoch(epoch);
     if(!this.#who)throw new Refused('SESSION_EXPIRED');
     const org=this.#who.org_id;
     const array=(data,label,allowMissingOrg)=>{

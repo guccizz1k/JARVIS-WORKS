@@ -63,7 +63,7 @@ function start(){
       else b.textContent=label;
       b.onclick=()=>open(key);navList.append(b);
     }
-    const logout=t('button','jw-review-logout','로그아웃');logout.onclick=async()=>{try{await bridge.logout()}catch{}entry('서버에서 로그아웃했습니다.')};
+    const logout=t('button','jw-review-logout','로그아웃');logout.onclick=async()=>{let note='서버에서 로그아웃했습니다.';try{await bridge.logout()}catch{note='서버 로그아웃을 확인하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도하세요.'}entry(note)};
     head.append(t('span','jw-review-kicker','서버 데이터 연결 검토'),t('span','jw-review-user',who.name+' · '+who.org_name),logout);content.append(head,view);shell.append(nav,content);root.append(shell);
     if(ownerVisual){
       // The original source's mobile bottom navigation has 5 shortcuts.
