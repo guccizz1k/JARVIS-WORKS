@@ -172,6 +172,11 @@ jobs:
           docker cp "$certdir/server.crt" "$cid:/tmp/jw-v223-server.crt"
           docker exec -u root "$cid" sh -c \
             'chown postgres:postgres /tmp/jw-v223-server.key /tmp/jw-v223-server.crt; chmod 0600 /tmp/jw-v223-server.key; chmod 0644 /tmp/jw-v223-server.crt'
+          # CREATE ROLE collision is deliberately tested below. Keep ERROR events,
+          # but never dump SQL text or bind values containing generated passwords.
+          # This setting touches only this disposable local service container.
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET log_min_error_statement='panic'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET log_parameter_max_length_on_error='0'"
           psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='/tmp/jw-v223-server.crt'"
           psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_key_file='/tmp/jw-v223-server.key'"
           psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl='on'"
@@ -181,6 +186,8 @@ jobs:
             sleep 1
           done
           test "$(psql -X -Atc 'SHOW ssl')" = on
+          test "$(psql -X -Atc 'SHOW log_min_error_statement')" = panic
+          test "$(psql -X -Atc 'SHOW log_parameter_max_length_on_error')" = 0
           echo "JW_PG_CI_TLS_CA=$certdir/server.crt" >> "$GITHUB_ENV"
           echo "JW_PG_CI_TLS_SERVER_CERT=$certdir/server.crt" >> "$GITHUB_ENV"
           echo "JW_PG_CI_TLS_SERVER_KEY=$certdir/server.key" >> "$GITHUB_ENV"
