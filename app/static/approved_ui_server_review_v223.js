@@ -101,6 +101,10 @@ function start(){
       nav.querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.page===key));
       if(ownerVisual)root.querySelectorAll('.jw-owner-bottomnav button[data-page]').forEach(b=>b.classList.toggle('selected',b.dataset.page===key));
       clear(view);view.append(t('small','jw-review-kicker','JARVIS WORKS'),t('h2','jw-review-title',selected[1]));
+      if(['messenger','team','security'].includes(key)){
+        if(!g.JWOwnerOperational){view.append(t('p','jw-review-unwired','업무 모듈을 불러오지 못했습니다.'));return}
+        await g.JWOwnerOperational.render({bridge,view,page:key,isCurrent:()=>token===epoch});return;
+      }
       if(key==='account'){view.append(t('p','jw-review-muted',who.name+' · '+who.email+' · '+who.org_name+' · '+who.role));return}
 
       if(key==='export'){

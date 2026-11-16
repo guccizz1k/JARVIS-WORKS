@@ -95,6 +95,7 @@ def owner_visual_review_response():
         + '<script defer src="/static/approved_ui_server_bridge_v223.js"></script>'
         + '<script defer src="/static/approved_ui_document_export_v223.js"></script>'
         + '<script defer src="/static/approved_ui_evidence_review_v223.js"></script>'
+        + '<script defer src="/static/approved_ui_operational_v223.js"></script>'
         + '<script defer src="/static/approved_ui_server_review_v223.js"></script>'
         + '<script defer src="/static/approved_ui_owner_gl_v223.js"></script>'
         + '<script defer src="/static/approved_ui_owner_visual_v223.js"></script>'

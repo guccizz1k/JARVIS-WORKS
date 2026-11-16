@@ -1,0 +1,232 @@
+name: V22.3 JARVIS P2 messenger and admin integration full regression
+on:
+  push:
+    branches:
+      - review/jw-v223-jarvis-p2-operational-20261116
+    paths:
+      - app/**
+      - tests/**
+      - .github/workflows/jw-v223-auth-races-20261116.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-full-python-qa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  full-python-reviewed-product:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      JW_ENV: review
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout exact review candidate with protected history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check original protected blobs and exact review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = review/jw-v223-jarvis-p2-operational-20261116
+          git merge-base --is-ancestor d91ebf00c63012a78845d094afbd15be0deefd1c HEAD
+          test "$(git hash-object scripts/ci_cinema_pg_validated_tls_e2e_v223.py)" = a20bc4c93ed942254aab54ca2331fb17f7d73622
+          test "$(git hash-object tests/test_v223_tls_role_cleanup.py)" = 07f0b985d97f068328bc3c6a5c25ecc5314442d0
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+          python - <<'PY'
+          import subprocess
+          paths=set(subprocess.check_output(["git","diff","--name-only","03863d1d14f1c9bc04a7d4ba74cb66ef16e995bb","HEAD"],text=True).splitlines())
+          expected={'app/static/approved_ui_server_bridge_v223.js','app/static/approved_ui_server_review_v223.js','tests/test_v223_auth_races.cjs','tests/test_v223_auth_https.py','tests/fixtures/v223_auth_https.mjs','.github/workflows/jw-v223-auth-races-20261116.yml','docs/review/jw-v223-p0p2-integration-20261116.md','app/cinema_entry_v1.py','app/static/approved_ui_document_export_v223.js','tests/test_v223_document_export.cjs','tests/test_v223_draft_bridge.cjs','app/static/approved_ui_evidence_review_v223.js','tests/test_v223_evidence_bridge.cjs','tests/test_v223_evidence_review.cjs','app/static/approved_ui_operational_v223.js','tests/test_v223_operational_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml'}
+          assert paths==expected,(paths,expected)
+          PY
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = 9bedf97fe718a94f07861e23670685af00619ca8
+          git merge-base --is-ancestor 08ea29867e962d4ac5be0e942fc1488528494428 HEAD
+          python -m compileall -q app scripts
+          git diff --exit-code
+      - name: Operational JS syntax and allowed API regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check app/static/approved_ui_server_bridge_v223.js
+          node --check app/static/approved_ui_server_review_v223.js
+          node --check app/static/approved_ui_operational_v223.js
+          node --test tests/test_v223_operational_node.cjs
+      - name: Install regression system and Python prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt -r requirements-jteam-external-pilot.txt
+          python -m pip install --disable-pip-version-check 'PyMuPDF==1.26.7' 'reportlab==4.4.9'
+      - name: Reconstruct historical V8.9 overlay from pinned historical checkout only
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never apply the V8.9 baseline assertion to modern V22.3 app/main.py.
+          # This isolated historical worktree writes its immutable overlay into
+          # the shared parent that modern frozen installer tests already expect.
+          git worktree add --detach ../jw-v89-historical-fixture a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338
+          (
+            cd ../jw-v89-historical-fixture
+            python "$GITHUB_WORKSPACE/scripts/ci_rebuild_v79_overlay.py"
+          )
+          test -f ../overlay/BASE_SHA256.json
+          test -f ../overlay/PAYLOAD_SHA256.json
+          git diff --exit-code
+      - name: Execute entire checked-out Python tests tree, no exclusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/v223-full
+          python -m pytest -q -ra -p no:cacheprovider tests --junitxml=artifacts/v223-full/all-tests.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          p=Path('artifacts/v223-full/all-tests.xml')
+          root=ET.parse(p).getroot()
+          cases=list(root.iter('testcase'))
+          assert cases, 'No pytest cases observed'
+          failed=[x for x in cases if any(x.find(k) is not None for k in ('failure','error','skipped'))]
+          names=[f"{x.get('classname','')}.{x.get('name','')}" for x in cases]
+          assert len(names)==len(set(names)), 'Duplicate JUnit case identities detected'
+          assert not failed, f"{len(failed)} failures/errors/skips in {len(cases)} cases"
+          assert len(cases)>=2000, f"Regression coverage unexpectedly low: {len(cases)}"
+          print(f'FULL_PYTHON_EXACT_SHA_PASS_{len(cases)}_ZERO_FAIL_ERROR_SKIP')
+          PY
+          python -m scripts.jw_integrated_acceptance --junit artifacts/v223-full/all-tests.xml
+          git diff --exit-code
+      - name: Complete approved owner-server JS functional and security contract regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tests/*.cjs
+          git diff --exit-code
+      - name: Store bounded actual JUnit evidence even on failing run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-full-python-junit
+          path: artifacts/v223-full/all-tests.xml
+          if-no-files-found: ignore
+          retention-days: 3
+  validated-tls-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-v223-tls-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5435:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      JW_CINEMA_PG_DISPOSABLE: '1'
+      PGHOST: 127.0.0.1
+      PGPORT: '5435'
+      PGUSER: postgres
+      PGPASSWORD: ci-v223-tls-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Original Codex Git object identity and protected source
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor d91ebf00c63012a78845d094afbd15be0deefd1c HEAD
+          test "$(git hash-object scripts/ci_cinema_pg_validated_tls_e2e_v223.py)" = a20bc4c93ed942254aab54ca2331fb17f7d73622
+          test "$(git hash-object tests/test_v223_tls_role_cleanup.py)" = 07f0b985d97f068328bc3c6a5c25ecc5314442d0
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/approved_v223_owner_original.html)" = a1712541b46167c21e9779d41bb198745df2ffc0
+      - name: Verify actual PG17 version
+        run: psql -X -Atc 'SHOW server_version_num' | grep -E '^17[0-9]{4}$'
+      - name: Install test dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Configure disposable PG17 server TLS with local self-signed test CA
+        shell: bash
+        run: |
+          set -euo pipefail
+          certdir="$RUNNER_TEMP/jw-v223-tls"
+          mkdir -p "$certdir"
+          openssl req -x509 -newkey rsa:2048 -sha256 -days 1 -nodes \
+            -subj '/CN=localhost' \
+            -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+            -keyout "$certdir/server.key" -out "$certdir/server.crt" >/dev/null 2>&1
+          cid="$(docker ps --filter publish=5435 --format '{{.ID}}' | head -n 1)"
+          test -n "$cid"
+          docker cp "$certdir/server.key" "$cid:/tmp/jw-v223-server.key"
+          docker cp "$certdir/server.crt" "$cid:/tmp/jw-v223-server.crt"
+          docker exec -u root "$cid" sh -c \
+            'chown postgres:postgres /tmp/jw-v223-server.key /tmp/jw-v223-server.crt; chmod 0600 /tmp/jw-v223-server.key; chmod 0644 /tmp/jw-v223-server.crt'
+          # CREATE ROLE collision is deliberately tested below. Keep ERROR events,
+          # but never dump SQL text or bind values containing generated passwords.
+          # This setting touches only this disposable local service container.
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET log_min_error_statement='panic'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET log_parameter_max_length_on_error='0'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='/tmp/jw-v223-server.crt'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_key_file='/tmp/jw-v223-server.key'"
+          psql -X -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl='on'"
+          docker exec -u postgres "$cid" pg_ctl -D /var/lib/postgresql/data reload
+          for i in $(seq 1 15); do
+            if [ "$(psql -X -Atc 'SHOW ssl')" = on ]; then break; fi
+            sleep 1
+          done
+          test "$(psql -X -Atc 'SHOW ssl')" = on
+          test "$(psql -X -Atc 'SHOW log_min_error_statement')" = panic
+          test "$(psql -X -Atc 'SHOW log_parameter_max_length_on_error')" = 0
+          echo "JW_PG_CI_TLS_CA=$certdir/server.crt" >> "$GITHUB_ENV"
+          echo "JW_PG_CI_TLS_SERVER_CERT=$certdir/server.crt" >> "$GITHUB_ENV"
+          echo "JW_PG_CI_TLS_SERVER_KEY=$certdir/server.key" >> "$GITHUB_ENV"
+      - name: Run production V9 validated connection and real HTTPS E2E (74 cases)
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci_cinema_pg_https_v223 | tee v223-validated-tls.log
+          grep -F 'PASS_V223_REAL_VALIDATED_LEGACY_TX_TLS_PG17' v223-validated-tls.log
+          grep -F 'PASS_V223_REAL_HTTPS_74_HTTP_E2E_VERIFIED_TLS' v223-validated-tls.log
+          grep -F 'PASS_V223_HTTPS_UNTRUSTED_CERT_REFUSED' v223-validated-tls.log
+          grep -F 'PASS: 74 checks, 0 failed, expected exactly 74' v223-validated-tls.log
+          test "$(psql -X -Atc "SELECT count(*) FROM pg_roles WHERE rolname='jw_ci_v223_tls_business'")" = 0
+          echo 'PASS_TLS_ROLE_REMOVED_AFTER_SUCCESSFUL_PG17_HTTPS_74_CASES'
+          # Failure injection: invalid CA after disposable role creation must leave ZERO roles.
+          set +e
+          JW_PG_CI_TLS_CA=/tmp/jw-v223-nonexistent-root.pem python3 -m scripts.ci_cinema_pg_validated_tls_e2e_v223 > /tmp/jw-invalid-ca-failure.log 2>&1
+          failure_rc=$?
+          set -e
+          test "$failure_rc" -ne 0
+          grep -F 'FAIL_V223_VALIDATED_TLS_TRUST_ROOT_EXISTS' /tmp/jw-invalid-ca-failure.log
+          test "$(psql -X -Atc "SELECT count(*) FROM pg_roles WHERE rolname='jw_ci_v223_tls_business'")" = 0
+          echo 'PASS_INVALID_CA_FAILURE_OWNED_ROLE_REMOVED_ZERO_RESIDUE'
+          # A pre-existing role is not ours to revoke, even when CI setup collides.
+          psql -X -v ON_ERROR_STOP=1 -c 'CREATE ROLE jw_ci_v223_tls_business NOLOGIN'
+          set +e
+          python3 -m scripts.ci_cinema_pg_validated_tls_e2e_v223 >/tmp/jw-preexisting-role-collision.log 2>&1
+          collision_rc=$?
+          set -e
+          test "$collision_rc" -ne 0
+          grep -E 'DuplicateObject|already exists' /tmp/jw-preexisting-role-collision.log
+          test "$(psql -X -Atc "SELECT count(*) FROM pg_roles WHERE rolname='jw_ci_v223_tls_business' AND NOT rolcanlogin")" = 1
+          psql -X -v ON_ERROR_STOP=1 -c 'DROP ROLE jw_ci_v223_tls_business'
+          echo 'PASS_PREEXISTING_ROLE_PRESERVED_ON_COLLISION_AND_EXPLICIT_TEST_TEARDOWN'
+          echo 'DISPOSABLE PG17 LOOPBACK HTTPS ONLY: Supabase and external HTTPS deployment were not exercised.'

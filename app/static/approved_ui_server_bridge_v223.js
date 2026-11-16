@@ -315,6 +315,104 @@ class Bridge{
     return Object.freeze({bytes,filename:'draft-'+id+'.xlsx',contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   }
 
+  // V22.3 owner-review messenger and administrator actions.
+  // Every request inherits the existing fail-closed cookie, CSRF and session-epoch policy.
+  #v223id(value){return typeof value==='string' && /^[a-f0-9]{32}$/.test(value)}
+  async messengerDirectory(){
+    const epoch=this.#session(), rows=await this.#request('/api/messenger/directory');this.#assertEpoch(epoch);
+    if(!Array.isArray(rows)||rows.length>200||!rows.every(r=>r&&this.#v223id(r.org_id)&&
+      r.org_id!==this.#who.org_id&&typeof r.company_name==='string'&&r.company_name.length<=200))
+      throw new Refused('INVALID_DIRECTORY');
+    return rows.map(r=>Object.freeze({org_id:r.org_id,company_name:r.company_name}));
+  }
+  #v223thread(t,expectedOrg){
+    if(!t||!this.#v223id(t.id)||!this.#v223id(t.other_org_id)||
+      t.other_org_id===this.#who?.org_id||
+      (expectedOrg&&t.other_org_id!==expectedOrg)||
+      typeof t.other_company!=='string'||t.other_company.length>200||
+      t.status!=='active'||!Number.isSafeInteger(t.unread_count)||t.unread_count<0)
+      throw new Refused('BAD_THREAD');
+    return Object.freeze({id:t.id,other_org_id:t.other_org_id,other_company:t.other_company,
+      unread_count:t.unread_count,status:t.status});
+  }
+  async messengerThreads(){
+    const epoch=this.#session(), data=await this.#request('/api/messenger/threads');this.#assertEpoch(epoch);
+    if(!Array.isArray(data)||data.length>200)throw new Refused('INVALID_THREADS');
+    return data.map(x=>this.#v223thread(x));
+  }
+  async messengerCreateThread(recipientOrgId){
+    const epoch=this.#session();
+    if(!this.#v223id(recipientOrgId)||recipientOrgId===this.#who.org_id)
+      throw new Refused('INVALID_RECIPIENT');
+    const data=await this.#request('/api/messenger/threads','POST',{recipient_org_id:recipientOrgId},true);
+    this.#assertEpoch(epoch);return this.#v223thread(data,recipientOrgId);
+  }
+  async messengerMessages(threadId,expectedPeerOrgId){
+    const epoch=this.#session();if(!this.#v223id(threadId))throw new Refused('INVALID_THREAD_ID');
+    if(expectedPeerOrgId!==undefined && !this.#v223id(expectedPeerOrgId))throw new Refused('INVALID_PEER');
+    const data=await this.#request('/api/messenger/threads/'+threadId+'/messages');this.#assertEpoch(epoch);
+    if(!Array.isArray(data)||data.length>100||!data.every(m=>
+      m&&this.#v223id(m.id)&&m.connection_id===threadId&&
+      this.#v223id(m.sender_org)&&typeof m.mine==='boolean'&&
+      m.mine===(m.sender_org===this.#who.org_id)&&
+      (!expectedPeerOrgId||m.sender_org===this.#who.org_id||m.sender_org===expectedPeerOrgId)&&
+      typeof m.body==='string'&&m.body.length<=2000&&
+      ['text','order'].includes(m.kind)))throw new Refused('INVALID_MESSAGES');
+    return data.map(m=>Object.freeze({id:m.id,body:m.body,mine:m.mine,kind:m.kind,sender_org:m.sender_org}));
+  }
+  async messengerSend(threadId,text,requestId){
+    const epoch=this.#session();
+    if(!this.#v223id(threadId)||typeof text!=='string'||!text.trim()||text.length>2000||
+      typeof requestId!=='string'||!/^[a-f0-9]{32}$/.test(requestId))
+      throw new Refused('INVALID_MESSAGE_INPUT');
+    const r=await this.#request('/api/messenger/threads/'+threadId+'/messages','POST',
+      {content:text,request_id:requestId},true);this.#assertEpoch(epoch);
+    if(!r||!this.#v223id(r.id)||!Number.isSafeInteger(r.version)||r.version<1)
+      throw new Refused('INVALID_MESSAGE_RECEIPT');
+    return Object.freeze({id:r.id,version:r.version});
+  }
+  async messengerMarkRead(threadId,messageId){
+    const epoch=this.#session();
+    if(!this.#v223id(threadId)||!this.#v223id(messageId))throw new Refused('INVALID_READ_ID');
+    const r=await this.#request('/api/messenger/threads/'+threadId+'/read','POST',
+      {last_message_id:messageId},true);this.#assertEpoch(epoch);
+    if(!r||r.status!=='read')throw new Refused('INVALID_READ_RESULT');
+    return Object.freeze({status:'read'});
+  }
+  async securityManageOverview(){
+    const epoch=this.#session();if(this.#who.role!=='admin')throw new Refused('ADMIN_ONLY');
+    const r=await this.#request('/api/security/overview');this.#assertEpoch(epoch);
+    if(!r||!Array.isArray(r.users)||!Array.isArray(r.sessions)||!Array.isArray(r.events)||
+      typeof r.db_row_level_security_enabled!=='boolean'||
+      !Number.isSafeInteger(r.mfa_enabled_user_count)||r.mfa_enabled_user_count<0||
+      !r.users.every(u=>u&&this.#v223id(u.id)&&typeof u.name==='string'&&
+        ['admin','member'].includes(u.role)&&(u.disabled_at===null||typeof u.disabled_at==='string'))||
+      !r.sessions.every(s=>s&&this.#v223id(s.id)&&typeof s.is_current==='boolean'))
+      throw new Refused('INVALID_SECURITY');
+    return Object.freeze({users:r.users.map(u=>Object.freeze({id:u.id,name:u.name,
+        role:u.role,disabled_at:u.disabled_at})),
+      sessions:r.sessions.map(s=>Object.freeze({id:s.id,is_current:s.is_current})),
+      events:r.events.map(()=>Object.freeze({})),
+      mfa_enabled_user_count:r.mfa_enabled_user_count,
+      db_row_level_security_enabled:r.db_row_level_security_enabled});
+  }
+  async securitySetStaffActive(userId,enable,adminPassword){
+    const epoch=this.#session();if(this.#who.role!=='admin')throw new Refused('ADMIN_ONLY');
+    if(!this.#v223id(userId)||userId===this.#who.id||typeof enable!=='boolean'||
+      typeof adminPassword!=='string'||!adminPassword||adminPassword.length>1000)
+      throw new Refused('INVALID_STAFF_ACTION');
+    const path='/api/security/users/'+userId+(enable?'/enable':'/disable');
+    const r=await this.#request(path,'POST',{admin_password:adminPassword},true);this.#assertEpoch(epoch);
+    if(!r||r.ok!==true)throw new Refused('INVALID_STAFF_RESPONSE');
+    return Object.freeze({ok:true});
+  }
+  async securityRevokeSession(sessionId){
+    const epoch=this.#session();if(this.#who.role!=='admin')throw new Refused('ADMIN_ONLY');
+    if(!this.#v223id(sessionId))throw new Refused('INVALID_SESSION_ID');
+    const r=await this.#request('/api/security/sessions/'+sessionId+'/revoke','POST',undefined,true);
+    this.#assertEpoch(epoch);if(!r||r.ok!==true)throw new Refused('INVALID_REVOKE_RESPONSE');
+    return Object.freeze({ok:true});
+  }
   async list(name){
     const epoch=this.#session();
     if(!['customers','quotes','orders','invoices'].includes(name))throw new Refused('UNSUPPORTED_API');
