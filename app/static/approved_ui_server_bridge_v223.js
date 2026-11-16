@@ -110,6 +110,100 @@ class Bridge{
   }
 
 
+  // Invoice, original quotation/order reconciliation, settlement and payments
+  // are the protected core's source of truth. No client-side balance arithmetic.
+  #invoiceFinancialReceipt(data,invoiceId){
+    const isId=x=>typeof x==='string'&&/^[a-f0-9]{32}$/.test(x);
+    if(!data||typeof data!=='object'||Array.isArray(data)||
+       data.id!==invoiceId||data.org_id!==this.#who?.org_id||
+       !isId(data.order_id)||!isId(data.customer_id)||
+       typeof data.doc_no!=='string'||!data.doc_no.startsWith('I-')||
+       typeof data.due_date!=='string'||
+       !data.money||!Number.isSafeInteger(data.money.total)||data.money.total<0||
+       !Number.isSafeInteger(data.paid)||data.paid<0||
+       !Number.isSafeInteger(data.balance)||data.balance<0||
+       !Array.isArray(data.payments)||data.payments.length>1000||
+       !data.payments.every(p=>p&&isId(p.id)&&
+         Number.isSafeInteger(p.amount)&&p.amount>0&&
+         typeof p.reference==='string'&&p.reference.length>=8&&
+         (p.reversed_at===null||typeof p.reversed_at==='string')))
+      throw new Refused('INVALID_FINANCIAL_RECEIPT');
+    return Object.freeze({...data,payments:Object.freeze(data.payments.map(p=>Object.freeze({...p})))});
+  }
+  async financeInvoice(invoiceId){
+    const epoch=this.#session();
+    if(typeof invoiceId!=='string'||!/^[a-f0-9]{32}$/.test(invoiceId))
+      throw new Refused('INVALID_INVOICE_ID');
+    const data=await this.#request('/api/invoices/'+invoiceId);
+    this.#assertEpoch(epoch);
+    return this.#invoiceFinancialReceipt(data,invoiceId);
+  }
+  async financeReconcile(orderId,expectedInvoice){
+    const epoch=this.#session();
+    if(typeof orderId!=='string'||!/^[a-f0-9]{32}$/.test(orderId))
+      throw new Refused('INVALID_ORDER_ID');
+    const d=await this.#request('/api/reconciliation/'+orderId);
+    this.#assertEpoch(epoch);
+    if(!d||d.has_invoice!==true||
+       !d.invoice_money||!Number.isSafeInteger(d.invoice_money.total)||
+       !d.order_money||!Number.isSafeInteger(d.order_money.total)||
+       !d.quote_money||!Number.isSafeInteger(d.quote_money.total)||
+       !Array.isArray(d.quote_to_order)||!Array.isArray(d.order_to_invoice)||
+       d.order_to_invoice.length>500||d.quote_to_order.length>500||
+       typeof d.review_state!=='string'||
+       (expectedInvoice&&d.invoice_money.total!==expectedInvoice.money.total))
+      throw new Refused('INVALID_RECONCILIATION');
+    return Object.freeze({...d,quote_to_order:Object.freeze(d.quote_to_order),
+      order_to_invoice:Object.freeze(d.order_to_invoice)});
+  }
+  async financePay(invoiceId,invoice,reference,amount,paidAt){
+    const epoch=this.#session();
+    if(typeof invoiceId!=='string'||!/^[a-f0-9]{32}$/.test(invoiceId)||
+       invoice?.id!==invoiceId||invoice?.org_id!==this.#who?.org_id||
+       typeof reference!=='string'||reference.trim().length<8||
+       reference.trim().length>100||!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(reference.trim())||
+       !Number.isSafeInteger(amount)||amount<=0||
+       typeof paidAt!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(paidAt))
+      throw new Refused('INVALID_PAYMENT_INPUT');
+    const duplicate=invoice.payments.find(p=>p.reference===reference.trim());
+    if(duplicate){
+      if(duplicate.reversed_at!==null||duplicate.amount!==amount||
+         duplicate.paid_at!==paidAt||duplicate.note!=='')
+        throw new Refused('PAYMENT_REFERENCE_CONFLICT');
+      return await this.financeInvoice(invoiceId);
+    }
+    if(amount>invoice.balance)throw new Refused('INVALID_PAYMENT_INPUT');
+    const receipt=await this.#request('/api/invoices/'+invoiceId+'/payments','POST',
+      {reference:reference.trim(),amount,paid_at:paidAt,note:''},true);
+    this.#assertEpoch(epoch);
+    this.#invoiceFinancialReceipt(receipt,invoiceId);
+    const latest=await this.financeInvoice(invoiceId);
+    this.#assertEpoch(epoch);
+    if(latest.paid!==receipt.paid||latest.balance!==receipt.balance||
+       !latest.payments.some(p=>p.reference===reference.trim()&&
+         p.amount===amount&&p.reversed_at===null))
+      throw new Refused('PAYMENT_READBACK_MISMATCH');
+    return latest;
+  }
+  async financeReverse(invoiceId,invoice,paymentId){
+    const epoch=this.#session();
+    if(this.#who?.role!=='admin')throw new Refused('ADMIN_ONLY');
+    if(typeof invoiceId!=='string'||!/^[a-f0-9]{32}$/.test(invoiceId)||
+       invoice?.id!==invoiceId||invoice?.org_id!==this.#who.org_id||
+       typeof paymentId!=='string'||!/^[a-f0-9]{32}$/.test(paymentId)||
+       !invoice.payments.some(p=>p.id===paymentId&&p.reversed_at===null))
+      throw new Refused('INVALID_PAYMENT_REVERSAL');
+    const receipt=await this.#request('/api/invoices/'+invoiceId+'/payments/'+paymentId+
+      '/reverse','POST',undefined,true);
+    this.#assertEpoch(epoch);
+    this.#invoiceFinancialReceipt(receipt,invoiceId);
+    const latest=await this.financeInvoice(invoiceId);
+    this.#assertEpoch(epoch);
+    if(latest.balance!==receipt.balance||latest.paid!==receipt.paid||
+       !latest.payments.some(p=>p.id===paymentId&&typeof p.reversed_at==='string'))
+      throw new Refused('REVERSAL_READBACK_MISMATCH');
+    return latest;
+  }
   // Immutable trade statement conversion: a server-side snapshot of a fulfilled order.
   // This is not a tax invoice and never modifies the source order or makes payments.
   // Tenant-scoped list of finalized, immutable internal trade statements.

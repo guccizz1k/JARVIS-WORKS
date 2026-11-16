@@ -293,6 +293,59 @@ def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
             assert a.post(origin+'/api/orders/'+oid+'/status',headers=headers_a,
                           json={'status':'fulfilled'}).status_code==200
 
+            # Real review TLS, full order -> invoice -> payment -> reversal
+            # -> server reconciliation using the original protected ledger.
+            invoice_create=a.post(origin+'/api/invoices/from-order',headers=headers_a,
+                json={'order_id':oid,'due_date':'2099-12-31'})
+            assert invoice_create.status_code==201,invoice_create.status_code
+            issued_invoice=invoice_create.json()
+            invoice_id=issued_invoice['id']
+            assert issued_invoice['money']['total']==3300
+            assert issued_invoice['balance']==3300
+            invoice_recon=a.get(origin+'/api/reconciliation/'+oid)
+            assert invoice_recon.status_code==200
+            assert invoice_recon.json()['order_money']['total']==3300
+            assert invoice_recon.json()['invoice_money']['total']==3300
+            payment_url=origin+'/api/invoices/'+invoice_id+'/payments'
+            from app.main import today as jw_today
+            payment_payload={'reference':'HTTPS-PAY-ORDER-0001','amount':1100,
+                             'paid_at':jw_today(),'note':''}
+            assert a.post(payment_url,json=payment_payload).status_code==403
+            assert b.get(origin+'/api/invoices/'+invoice_id).status_code==404
+            assert b.post(payment_url,headers=headers_b,json=payment_payload).status_code==404
+            first=a.post(payment_url,headers=headers_a,json=payment_payload)
+            assert first.status_code==201,first.status_code
+            assert first.json()['paid']==1100 and first.json()['balance']==2200
+            repeat=a.post(payment_url,headers=headers_a,json=payment_payload)
+            assert repeat.status_code==201,repeat.status_code
+            assert repeat.json()['paid']==1100
+            assert len(repeat.json()['payments'])==1
+            assert a.post(payment_url,headers=headers_a,
+                json={**payment_payload,'amount':1200}).status_code==409
+            assert a.post(payment_url,headers=headers_a,
+                json={**payment_payload,'reference':'HTTPS-PAY-OVER-0001','amount':2201}).status_code==409
+            remainder=a.post(payment_url,headers=headers_a,json={
+                **payment_payload,'reference':'HTTPS-PAY-ORDER-0002','amount':2200})
+            assert remainder.status_code==201,remainder.status_code
+            assert remainder.json()['paid']==3300 and remainder.json()['balance']==0
+            latest_invoice=a.get(origin+'/api/invoices/'+invoice_id)
+            assert latest_invoice.status_code==200
+            assert latest_invoice.json()['payment_status']=='paid'
+            target_payment=next(p for p in latest_invoice.json()['payments']
+                                if p['reference']=='HTTPS-PAY-ORDER-0002')
+            reverse_url=payment_url+'/'+target_payment['id']+'/reverse'
+            assert a.post(reverse_url).status_code==403
+            assert b.post(reverse_url,headers=headers_b).status_code==404
+            reversed_payment=a.post(reverse_url,headers=headers_a)
+            assert reversed_payment.status_code==200,reversed_payment.status_code
+            assert reversed_payment.json()['paid']==1100
+            assert reversed_payment.json()['balance']==2200
+            assert a.post(reverse_url,headers=headers_a).status_code==409
+            assert a.post(payment_url,headers=headers_a,json={
+                **payment_payload,'reference':'HTTPS-PAY-ORDER-0002',
+                'amount':2200}).status_code==409
+            assert a.get(origin+'/api/reconciliation/'+oid).json()['order_to_invoice']==[]
+
             # An unrelated company can neither enumerate thread nor read messages.
             from app.main import hash_password, now
             other_org = uuid.uuid4().hex

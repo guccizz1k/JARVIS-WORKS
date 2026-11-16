@@ -458,6 +458,16 @@ function start(){
             }
             const invoices=await fetched('invoices');
             if(token!==epoch)return;
+            if(key==='money'){
+              if(!g.JWOwnerFinanceReview){
+                actions.append(t('p','jw-review-unwired','입금·정산 서버 원장 모듈이 없습니다.'));
+              }else{
+                await g.JWOwnerFinanceReview.render({
+                  bridge,view:actions,isCurrent:()=>token===epoch
+                });
+                if(token!==epoch)return;
+              }
+            }
             const unpaid=invoices.filter(r=>typeof r.balance==='number'&&r.balance>0);
             if(unpaid.length){
               form('청구서 입금 기록',[

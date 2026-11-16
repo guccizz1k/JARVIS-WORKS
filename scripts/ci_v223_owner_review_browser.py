@@ -240,6 +240,69 @@ def main():
                                                     '/status',headers=csrf,json={'status':'fulfilled'})
                                                 assert fulfilled.status_code==200
                                             print(f'PASS_V223_REAL_{engine.upper()}_{width}_ORDER_EDIT_ACK_HTTPS',flush=True)
+                                            # Real UI: invoice creation, payment and admin reversal.
+                                            # Reload money to include the newly fulfilled order.
+                                            if width < 600:
+                                                page.locator('.jw-owner-bottomnav button[data-action=show-all]').click()
+                                                page.locator('.jw-owner-menu-grid button[data-page="money"]').click()
+                                            else:
+                                                page.locator('.jw-review-nav button[data-page="money"]').click()
+                                            invoice_form=page.locator('form.jw-review-action-form').filter(
+                                                has=page.locator('h4',has_text='납품 완료 수주에서 청구서 생성')).first
+                                            invoice_form.wait_for(timeout=20000)
+                                            invoice_form.locator('select[aria-label="납품 완료 수주"]').select_option(
+                                                browser_order_id)
+                                            invoice_form.locator('input[aria-label="입금기한"]').fill('2099-12-31')
+                                            invoice_form.locator('button[type=submit]').click()
+                                            page.locator('.jw-review-finance-panel').wait_for(timeout=20000)
+                                            invoices=page.evaluate("""async () => {
+                                               const response=await fetch('/api/invoices',{
+                                                 credentials:'same-origin',cache:'no-store'});
+                                               if(!response.ok)throw Error('invoice list HTTP '+response.status);
+                                               return response.json();
+                                            }""")
+                                            matching=[x for x in invoices if x['order_id']==browser_order_id]
+                                            assert len(matching)==1,(engine,width,'INVOICE_NOT_CREATED',matching)
+                                            current_invoice=matching[0]
+                                            invoice_id=current_invoice['id']
+                                            finance=page.locator('.jw-review-finance-panel')
+                                            finance.get_by_role('button',
+                                                name=current_invoice['doc_no']+' · 입금·정산 확인').click()
+                                            finance.get_by_text('원본 수주·청구·입금 원장 대조 완료',
+                                                exact=False).wait_for(timeout=16000)
+                                            payment_form=finance.locator('form.jw-review-action-form').last
+                                            payment_form.locator('input[aria-label="입금 고유 요청번호"]').fill(
+                                                f'BRW-PAY-{engine.upper()}-{width}')
+                                            payment_form.locator('input[aria-label="입금액(원)"]').fill('3300')
+                                            page.once('dialog',lambda dialog:dialog.accept())
+                                            payment_form.locator('button[type=submit]').click()
+                                            finance.get_by_text('입금 처리·원장 잔액 재조회 완료',
+                                                exact=False).wait_for(timeout=20000)
+                                            paid_invoice=page.evaluate("""async invoiceId => {
+                                               const response=await fetch('/api/invoices/'+invoiceId,{
+                                                 credentials:'same-origin',cache:'no-store'});
+                                               if(!response.ok)throw Error('invoice detail HTTP '+response.status);
+                                               return response.json();
+                                            }""",invoice_id)
+                                            assert paid_invoice['paid']==3300,(engine,width,'PAID')
+                                            assert paid_invoice['balance']==0,(engine,width,'BALANCE')
+                                            page.once('dialog',lambda dialog:dialog.accept())
+                                            finance.get_by_role('button',name='입금 반제 · BRW-PAY-'+
+                                                engine.upper()+'-'+str(width)).click()
+                                            finance.get_by_text('입금 반제 및 서버 원장 재조회 완료',
+                                                exact=False).wait_for(timeout=20000)
+                                            after_reverse=page.evaluate("""async invoiceId => {
+                                               const response=await fetch('/api/invoices/'+invoiceId,{
+                                                 credentials:'same-origin',cache:'no-store'});
+                                               if(!response.ok)throw Error('invoice reversal readback '+response.status);
+                                               return response.json();
+                                            }""",invoice_id)
+                                            assert after_reverse['paid']==0,(engine,width,'REVERSAL_TOTAL')
+                                            assert after_reverse['balance']==3300,(engine,width,'REVERSAL_BALANCE')
+                                            assert len(after_reverse['payments'])==1
+                                            assert after_reverse['payments'][0]['reversed_at']
+                                            print(f'PASS_V223_REAL_{engine.upper()}_{width}_INVOICE_PAYMENT_REVERSAL_HTTPS',flush=True)
+
                                         if route == 'partners':
                                             # Real user path: create in the approved UI, edit with
                                             # CAS, verify authenticated server state. No mocks.
