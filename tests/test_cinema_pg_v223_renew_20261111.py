@@ -30,7 +30,8 @@ def test_proposal_is_expiry_only_and_previous_approved_sql_is_preserved():
                      if not line.lstrip().startswith("--"))
     assert code.count(NEW_LIMIT) == 1
     assert code.count("ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until';") == 1
-    assert "interval ''24 hours''" in code
+    assert "interval ''5 hours''" in code
+    assert "24 hours" not in code
     assert "interval ''7 days''" not in code
     assert "BEGIN;" in code and "COMMIT;" in code
 
