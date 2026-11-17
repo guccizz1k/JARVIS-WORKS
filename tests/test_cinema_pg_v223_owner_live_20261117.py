@@ -495,5 +495,50 @@ class PriorChildJsonFailureCategories(unittest.TestCase):
             "exit_code=1\n--- stderr (tail) ---\n"), ["STDOUT_TAIL_NOT_STORED"])
 
 
+
+class ClosureProofFailClosed(unittest.TestCase):
+    """A wrong password must never masquerade as a closed PostgreSQL role."""
+
+    def test_server_nologin_only(self):
+        from scripts import ci_cinema_pg_v223_codespace_run as live
+        cases = (
+            ("FATAL: role \"jw_backup_ro\" is not permitted to log in", "28000", "auth_rejected"),
+            ("FATAL: password authentication failed for user jw_backup_ro", "28P01", "bad_credentials"),
+            ("password authentication failed", "28P01", "bad_credentials"),
+            ("unrecognized server authentication error", "28000", "auth_unverified"),
+            ("SSL error: certificate verify failed", None, "tls_failure"),
+            ("could not translate host name", None, "network_failure"),
+            ("connection timed out", None, "timeout"),
+            ("unknown secret=DO_NOT_SHOW", None, "unknown"),
+        )
+        for message, state, expected in cases:
+            with self.subTest(expected=expected):
+                error = Exception(message)
+                error.sqlstate = state
+                self.assertEqual(live.classify_login_failure_detail(error), expected)
+                self.assertEqual(live.classify_login_failure(error),
+                                 "auth_rejected" if expected == "auth_rejected" else "transport_or_unknown")
+
+    def test_owner_labels_never_print_exception_secrets(self):
+        import io
+        from contextlib import redirect_stdout
+        for reason, label in (("bad_credentials", "BAD_CREDENTIALS"),
+                              ("tls_failure", "TLS_FAILURE"),
+                              ("network_failure", "NETWORK_FAILURE"),
+                              ("timeout", "TIMEOUT"),
+                              ("auth_unverified", "AUTH_REFUSAL_UNVERIFIED")):
+            with self.subTest(reason=reason), patch.object(d, "check_sources"), \
+                 patch.object(d.existing, "check_private_inputs"), \
+                 patch.object(d, "load_dashboard_ca"), patch.object(d, "read_password_file"), \
+                 patch.object(d.existing, "stage_prove_closed",
+                              side_effect=d.existing.Blocked("new_login_refusal_not_verified: reason=" + reason +
+                                                            "; password=DO_NOT_SHOW")):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    result = d.check_closed_read_only()
+                self.assertEqual(result, 2)
+                self.assertIn("ROLE_CLOSURE_" + label, out.getvalue())
+                self.assertNotIn("DO_NOT_SHOW", out.getvalue())
+
 if __name__=="__main__":
     unittest.main()
