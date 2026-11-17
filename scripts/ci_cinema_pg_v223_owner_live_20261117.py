@@ -147,6 +147,19 @@ def check_live_admin_state() -> None:
             raise Blocked("backup_role_can_write")
 
 
+def verify_local_disposable_started() -> None:
+    """Verify and restart ONLY the known owner-local PG17 if it was stopped.
+
+    The original mobile readiness helper verifies Docker name, postgres:17
+    image and strict 127.0.0.1:55432 mapping before any start. Never replace,
+    recreate or reset a target, and never contact the source database here.
+    """
+    from scripts.ci_cinema_pg_go import ensure_local_docker_daemon, start_verified_disposable
+    ensure_local_docker_daemon()
+    if not start_verified_disposable():
+        raise Blocked("approved_local_pg17_container_unavailable")
+
+
 def preflight() -> None:
     # Emit fixed stage labels, not raw exceptions (which can embed a DSN,
     # password, host or file path). This prevents another opaque BLOCKED report.
@@ -158,6 +171,9 @@ def preflight() -> None:
         ("AES_KEY", load_key),
         ("CA_TLS", load_dashboard_ca),
         ("BACKUP_AUTH", read_password_file),
+        # A Codespace can suspend an already-verified Docker container between
+        # owner interactions. The target identity is checked BEFORE restarting.
+        ("LOCAL_PG17_DOCKER", verify_local_disposable_started),
         ("LOCAL_PG17_TARGET", existing.stage_target),
         ("ADMIN_READONLY", check_live_admin_state),
     ):
