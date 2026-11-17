@@ -566,9 +566,13 @@ def probe_admin_closure_catalog_read_only() -> str:
         if (type(state[0]) is not bool or type(state[1]) is not bool
                 or type(sessions[0]) is not int):
             return "CATALOG_TYPE_UNVERIFIED"
-        if state == (False, True) and sessions == (0,):
-            return "CATALOG_CLOSED_NO_SESSIONS"
-        return "CATALOG_NOT_CLOSED"
+        if state[0] is True:
+            return "ROLE_LOGIN_ENABLED"
+        if sessions[0] != 0:
+            return "ROLE_ACTIVE_SESSIONS_PRESENT"
+        if state[1] is False:
+            return "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE"
+        return "CATALOG_CLOSED_NO_SESSIONS"
     except psycopg.Error:
         return "ADMIN_CONNECTION_OR_QUERY_FAILED"
     except (TypeError, ValueError, IndexError, KeyError, OSError):
