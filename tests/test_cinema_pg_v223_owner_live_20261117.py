@@ -610,6 +610,8 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
 
 
 class PostgresTlsTests(unittest.TestCase):
+    from unittest.mock import MagicMock
+
     def test_preflight_rejects_unverified_tls_and_bad_port(self):
         self.assertEqual(d.probe_pg_tls_read_only({"host": "private.example", "sslmode": "require", "sslrootcert": "/tmp/ca"}), "TLS_PREFLIGHT_UNSUPPORTED")
         self.assertEqual(d.probe_pg_tls_read_only({"host": "private.example", "sslmode": "verify-full", "sslrootcert": "/tmp/ca", "port": 70000}), "TLS_INVALID_PORT")
