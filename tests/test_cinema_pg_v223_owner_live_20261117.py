@@ -197,5 +197,64 @@ class LocalTargetRecovery(unittest.TestCase):
             source.assert_not_called()
 
 
+class OwnerPrivateDiagnosis(unittest.TestCase):
+    def test_diagnostic_reports_only_machine_code_never_secrets(self):
+        import io
+        from contextlib import redirect_stdout
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            log = home / ".local/share/jw-v223-restore/last_backup_error.log"
+            log.parent.mkdir(parents=True)
+            secret = "password=DO_NOT_DISPLAY_THIS_SECRET"
+            log.write_text("exit_code=1\n--- stderr (tail) ---\n"
+                           "BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED: " + secret)
+            log.chmod(0o600)
+            stream = io.StringIO()
+            with patch.dict(w.os.environ, {"CODESPACES": "true"}), \
+                 patch.object(w.Path, "home", return_value=home), \
+                 redirect_stdout(stream):
+                code = w.diagnose_owner_only()
+            self.assertEqual(code,0)
+            self.assertIn("B2_DIAG BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED", stream.getvalue())
+            self.assertNotIn(secret,stream.getvalue())
+
+    def test_diagnosis_rejects_symlink_and_world_readable_private_logs(self):
+        import io
+        from contextlib import redirect_stdout
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        with tempfile.TemporaryDirectory() as t:
+            home=Path(t)
+            log=home / ".local/share/jw-v223-restore/last_backup_error.log"
+            log.parent.mkdir(parents=True)
+            log.write_text("FAIL_V223_UNEXPECTED_FatalException\n")
+            log.chmod(0o644)
+            stream=io.StringIO()
+            with patch.dict(w.os.environ, {"CODESPACES": "true"}), \
+                 patch.object(w.Path, "home", return_value=home), \
+                 redirect_stdout(stream):
+                self.assertEqual(w.diagnose_owner_only(),2)
+            self.assertIn("ERROR_LOG_ACCESS_REFUSED",stream.getvalue())
+
+    def test_diagnosis_cannot_claim_full_pass_from_raw_failure_data(self):
+        import io
+        from contextlib import redirect_stdout
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        with tempfile.TemporaryDirectory() as t:
+            home=Path(t)
+            log=home / ".local/share/jw-v223-restore/last_backup_error.log"
+            log.parent.mkdir(parents=True)
+            log.write_text("--- stderr (tail) ---\n"
+                "external error: could not connect; FAKE PASS\n")
+            log.chmod(0o600)
+            stream=io.StringIO()
+            with patch.dict(w.os.environ, {"CODESPACES": "true"}), \
+                 patch.object(w.Path, "home", return_value=home), \
+                 redirect_stdout(stream):
+                self.assertEqual(w.diagnose_owner_only(),0)
+            self.assertIn("UNCLASSIFIED_BACKUP_FAILURE",stream.getvalue())
+            self.assertNotIn("FAKE PASS",stream.getvalue())
+
+
 if __name__=="__main__":
     unittest.main()
