@@ -356,6 +356,56 @@ def run_live() -> int:
     return 0 if good else 2
 
 
+def classify_client_exception_kind(error: BaseException) -> str:
+    """Fixed, secret-free client-side category. Never proves NOLOGIN."""
+    import errno
+    import socket
+    from collections import deque
+
+    pending = deque([error])
+    seen = set()
+    labels = set()
+    for _ in range(12):
+        if not pending:
+            break
+        current = pending.popleft()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, socket.gaierror):
+            labels.add("DNS_ERROR")
+        elif isinstance(current, TimeoutError):
+            labels.add("TIMEOUT")
+        elif isinstance(current, ConnectionRefusedError):
+            labels.add("TCP_REFUSED")
+        elif isinstance(current, ConnectionResetError):
+            labels.add("TCP_RESET")
+        elif isinstance(current, BrokenPipeError):
+            labels.add("TCP_BROKEN_PIPE")
+        elif isinstance(current, OSError):
+            if current.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH):
+                labels.add("NETWORK_UNREACHABLE")
+            else:
+                labels.add("OTHER_OS_ERROR")
+        module = type(current).__module__
+        name = type(current).__name__
+        if module == "psycopg" or module.startswith("psycopg."):
+            if name in ("OperationalError", "InterfaceError"):
+                labels.add("PSYCOPG_CONNECTION_ERROR")
+            elif name == "InvalidPassword":
+                labels.add("PSYCOPG_BAD_CREDENTIALS")
+            elif name == "InvalidAuthorizationSpecification":
+                labels.add("PSYCOPG_AUTH_UNVERIFIED")
+            else:
+                labels.add("PSYCOPG_OTHER")
+        for child in (getattr(current, "__cause__", None), getattr(current, "__context__", None)):
+            if isinstance(child, BaseException) and id(child) not in seen:
+                pending.append(child)
+    if not labels:
+        return "UNCLASSIFIED"
+    return "_AND_".join(sorted(labels))
+
+
 def diagnose_closure_read_only() -> int:
     """Bounded non-mutating diagnostic; NEVER treats classification as closure proof."""
     for label, check in (("SOURCE_PIN", check_sources),
@@ -380,8 +430,10 @@ def diagnose_closure_read_only() -> int:
         print("DIAGNOSTIC SQLSTATE_FAMILY_" + family)
         print("DIAGNOSTIC SERVER_PRIMARY_" + ("PRESENT" if isinstance(primary, str) and bool(primary) else "ABSENT"))
         print("DIAGNOSTIC ERROR_CATEGORY_" + existing.classify_login_failure_detail(error).upper())
-    except BaseException:
+        print("DIAGNOSTIC CLIENT_EXCEPTION_" + classify_client_exception_kind(error))
+    except BaseException as error:
         print("DIAGNOSTIC NON_PSYCOPG_EXCEPTION")
+        print("DIAGNOSTIC CLIENT_EXCEPTION_" + classify_client_exception_kind(error))
     # This action does not claim closure, even if the error looks like NOLOGIN.
     print("DIAGNOSTIC_ONLY_CLOSURE_NOT_PROVEN")
     print("NO_ROLE_CHANGE_NO_BACKUP")
