@@ -273,6 +273,15 @@ def check_closed_read_only() -> int:
                         'auth_unverified': 'AUTH_REFUSAL_UNVERIFIED',
                         'unknown': 'AUTH_REFUSAL_UNVERIFIED',
                     }.get(reason, 'AUTH_REFUSAL_UNVERIFIED')
+                    # Emit only fixed reason labels, never libpq error text or secrets.
+                    print('DIAGNOSTIC ROLE_CLOSURE_REASON_'+{
+                        'network_failure': 'NETWORK',
+                        'tls_failure': 'TLS',
+                        'timeout': 'TIMEOUT',
+                        'bad_credentials': 'BAD_CREDENTIALS',
+                        'auth_unverified': 'AUTH_UNVERIFIED',
+                        'unknown': 'UNKNOWN',
+                    }.get(reason, 'UNKNOWN'))
             print('BLOCKED ROLE_CLOSURE_'+code)
             print('NO_ROLE_CHANGE_NO_BACKUP')
             return 2
