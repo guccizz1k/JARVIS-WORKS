@@ -140,7 +140,7 @@ def inspect_source_pin() -> int:
             git("hash-object", path) == git("rev-parse", "HEAD:" + path)
             for path in git("diff", "--name-only", BASE_SHA, "HEAD").splitlines())),
         ("ROLE_SQL_CONTRACT", lambda: (
-            ROLE_SQL.read_text(encoding="utf-8").count("2026-11-17 14:30:00+09") == 1
+            ROLE_SQL.read_text(encoding="utf-8").count("2026-11-20 16:00:00+09") == 1
             and "interval ''5 hours''" in ROLE_SQL.read_text(encoding="utf-8")
             and "ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN" in
             ROLE_SQL.read_text(encoding="utf-8"))),
