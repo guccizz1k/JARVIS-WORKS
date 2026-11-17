@@ -5,6 +5,9 @@ No live source mutation except the explicitly approved, short-lived LOGIN/VALID
 UNTIL on existing jw_backup_ro, followed by mandatory NOLOGIN/session termination.
 Actual pg_dump + encrypted independent PG17 restore are delegated to the PINNED
 existing scripts.pg_backup_v223 engine. Never print DSNs, keys or row data.
+
+The ``closed`` action performs only authentication-refusal/catalog checks;
+it never activates or revokes a role and never invokes backup/restore.
 """
 from __future__ import annotations
 
@@ -198,6 +201,36 @@ def preflight() -> None:
             raise Blocked("PREFLIGHT_" + label) from None
 
 
+def check_closed_read_only() -> int:
+    """Verify closure independently; never activate/revoke a role or run backup.
+
+    Approval-window checks apply to activation, not to this bounded read-only
+    authentication refusal + catalog verification. Keep source/private/TLS pins.
+    """
+    for label,check in (('SOURCE_PIN',check_sources),
+                        ('PRIVATE_INPUTS',existing.check_private_inputs),
+                        ('CA_TLS',load_dashboard_ca),('BACKUP_AUTH',read_password_file),
+                        ('PROOF',existing.stage_prove_closed)):
+        try:
+            check()
+        except Exception as error:
+            code=label
+            if label=='PROOF' and isinstance(error,existing.Blocked):
+                message=str(error)
+                if message.startswith('NEW LOGIN STILL WORKS'):
+                    code='NEW_LOGIN_ACCEPTED'
+                elif message.startswith('role not closed:'):
+                    code='CATALOG_NOT_CLOSED'
+                elif message.startswith('new_login_refusal_not_verified:'):
+                    code='AUTH_REFUSAL_UNVERIFIED'
+            print('BLOCKED ROLE_CLOSURE_'+code)
+            print('NO_ROLE_CHANGE_NO_BACKUP')
+            return 2
+    print('PASS ROLE_CLOSED_AND_NEW_LOGIN_REFUSED_READONLY')
+    print('NO_ROLE_CHANGE_NO_BACKUP')
+    return 0
+
+
 def run_live() -> int:
     attempted = False
     passed = True
@@ -266,8 +299,10 @@ def run_live() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run"))
+    parser.add_argument("action", choices=("check", "run", "closed"))
     args = parser.parse_args()
+    if args.action == 'closed':
+        return check_closed_read_only()
     if args.action == "run":
         try:
             return run_live()

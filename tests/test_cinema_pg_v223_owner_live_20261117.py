@@ -104,6 +104,27 @@ class FailClosedOrdering(unittest.TestCase):
 
 
 class ErrorVisibility(unittest.TestCase):
+    def test_readonly_closure_proof_never_activates_revokes_or_backs_up(self):
+        import io
+        from contextlib import redirect_stdout
+        cases=(None,'NEW LOGIN STILL WORKS after revocation',
+               'role not closed: sessions=1 can_login=True',
+               'new_login_refusal_not_verified: private.example password=PRIVATE',
+               'unclassified private failure password=PRIVATE')
+        for failure in cases:
+            with self.subTest(failure=failure), \
+                 patch.object(d,'check_sources'),patch.object(d.existing,'check_private_inputs'), \
+                 patch.object(d,'load_dashboard_ca'),patch.object(d,'read_password_file'), \
+                 patch.object(d.existing,'stage_prove_closed',side_effect=d.existing.Blocked(failure) if failure else None), \
+                 patch.object(d.existing,'psql') as activate,patch.object(d.existing,'stage_revoke') as revoke, \
+                 patch.object(d.existing,'stage_backup') as backup:
+                stream=io.StringIO()
+                with redirect_stdout(stream):code=d.check_closed_read_only()
+                self.assertEqual(code,2 if failure else 0)
+                self.assertNotIn('PRIVATE',stream.getvalue())
+                self.assertIn('NO_ROLE_CHANGE_NO_BACKUP',stream.getvalue())
+                activate.assert_not_called();revoke.assert_not_called();backup.assert_not_called()
+
     def test_reviewed_backup_fix_pins_reject_tampered_allowed_paths(self):
         for corrupted in ('scripts/pg_backup_v223.py','scripts/ci_cinema_pg_guard.py',
                           'scripts/ci_cinema_pg_v223_codespace_run.py'):

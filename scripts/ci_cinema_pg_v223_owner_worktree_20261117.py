@@ -373,7 +373,7 @@ def diagnose_owner_only() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run", "diagnose"))
+    parser.add_argument("action", choices=("check", "run", "diagnose", "closed"))
     args = parser.parse_args(argv)
     try:
         commit = verify_input_checkout()
