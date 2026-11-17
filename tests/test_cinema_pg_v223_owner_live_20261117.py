@@ -609,6 +609,39 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
             kwargs.assert_not_called()
 
 
+class PostgresTlsTests(unittest.TestCase):
+    def test_preflight_rejects_unverified_tls_and_bad_port(self):
+        self.assertEqual(d.probe_pg_tls_read_only({"host": "private.example", "sslmode": "require", "sslrootcert": "/tmp/ca"}), "TLS_PREFLIGHT_UNSUPPORTED")
+        self.assertEqual(d.probe_pg_tls_read_only({"host": "private.example", "sslmode": "verify-full", "sslrootcert": "/tmp/ca", "port": 70000}), "TLS_INVALID_PORT")
+
+    def test_verified_tls_without_database_login(self):
+        from unittest.mock import MagicMock
+        options = {"host": "private.example", "port": 5432, "sslmode": "verify-full", "sslrootcert": "/tmp/ca"}
+        sock = MagicMock()
+        sock.recv.return_value = b"S"
+        secure = MagicMock()
+        secure.version.return_value = "TLSv1.3"
+        ctx = MagicMock()
+        ctx.wrap_socket.return_value.__enter__.return_value = secure
+        with patch("ssl.create_default_context", return_value=ctx) as create, patch("socket.create_connection") as connect:
+            connect.return_value.__enter__.return_value = sock
+            self.assertEqual(d.probe_pg_tls_read_only(options), "TLS_VERIFIED")
+            create.assert_called_once_with(cafile="/tmp/ca")
+            ctx.wrap_socket.assert_called_once_with(sock, server_hostname="private.example")
+            self.assertEqual(sock.sendall.call_args.args[0], bytes.fromhex("0000000804d2162f"))
+
+    def test_certificate_failure_is_redacted(self):
+        import ssl
+        options = {"host": "private.example", "sslmode": "verify-full", "sslrootcert": "/tmp/ca"}
+        sock = MagicMock()
+        sock.recv.return_value = b"S"
+        ctx = MagicMock()
+        ctx.wrap_socket.side_effect = ssl.SSLCertVerificationError("PRIVATE_HOST_AND_PASSWORD")
+        with patch("ssl.create_default_context", return_value=ctx), patch("socket.create_connection") as connect:
+            connect.return_value.__enter__.return_value = sock
+            self.assertEqual(d.probe_pg_tls_read_only(options), "TLS_CERT_VERIFY_FAILED")
+
+
 class PostgresSslRequestTests(unittest.TestCase):
     def test_supported_rejected_and_no_response(self):
         from unittest.mock import MagicMock
