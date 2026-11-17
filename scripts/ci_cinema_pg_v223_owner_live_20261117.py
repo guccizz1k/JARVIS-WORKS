@@ -356,12 +356,46 @@ def run_live() -> int:
     return 0 if good else 2
 
 
+def diagnose_closure_read_only() -> int:
+    """Bounded non-mutating diagnostic; NEVER treats classification as closure proof."""
+    for label, check in (("SOURCE_PIN", check_sources),
+                         ("PRIVATE_INPUTS", existing.check_private_inputs),
+                         ("CA_TLS", load_dashboard_ca),
+                         ("BACKUP_AUTH", read_password_file)):
+        try:
+            check()
+        except BaseException:
+            print("BLOCKED DIAGNOSTIC_PREFLIGHT_" + label)
+            print("NO_ROLE_CHANGE_NO_BACKUP")
+            return 2
+    try:
+        import psycopg
+        with psycopg.connect(**existing.login_kwargs()):
+            print("DIAGNOSTIC NEW_LOGIN_ACCEPTED")
+    except psycopg.Error as error:
+        state = getattr(error, "sqlstate", None)
+        diag = getattr(error, "diag", None)
+        primary = getattr(diag, "message_primary", None) if diag is not None else None
+        family = state[:2] if isinstance(state, str) and len(state) == 5 and state[:2] in ("08", "28") else "OTHER_OR_ABSENT"
+        print("DIAGNOSTIC SQLSTATE_FAMILY_" + family)
+        print("DIAGNOSTIC SERVER_PRIMARY_" + ("PRESENT" if isinstance(primary, str) and bool(primary) else "ABSENT"))
+        print("DIAGNOSTIC ERROR_CATEGORY_" + existing.classify_login_failure_detail(error).upper())
+    except BaseException:
+        print("DIAGNOSTIC NON_PSYCOPG_EXCEPTION")
+    # This action does not claim closure, even if the error looks like NOLOGIN.
+    print("DIAGNOSTIC_ONLY_CLOSURE_NOT_PROVEN")
+    print("NO_ROLE_CHANGE_NO_BACKUP")
+    return 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run", "closed", "inspect"))
+    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose"))
     args = parser.parse_args()
     if args.action == 'inspect':
         return inspect_source_pin()
+    if args.action == 'diagnose':
+        return diagnose_closure_read_only()
     if args.action == 'closed':
         return check_closed_read_only()
     if args.action == "run":
