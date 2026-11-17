@@ -358,5 +358,79 @@ class FailureRootCauseClassification(unittest.TestCase):
         self.assertNotIn("password_sensitive_value", str(w.classify_private_backup_log_details(raw)))
 
 
+class PriorChildJsonFailureCategories(unittest.TestCase):
+    """Uses synthetic scrubbed owner-only logs, never real Supabase data."""
+    def test_complete_mismatch_list_reports_only_categories(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        raw = (
+            "exit_code=1\n--- stdout (tail) ---\n"
+            '"restore_verified": false,\n'
+            '"signature_mismatches": ["acl:internal_customer_sensitive",'
+            '"rows:supersecret_source_row"],\n'
+            '"tables": 65,\n'
+            '"verdict": "FAIL: restored database differs from source",\n'
+            '"wrong_key_rejected": true\n'
+            "--- stderr (tail) ---\n"
+        )
+        result = w.extract_backup_summary_indicators(raw)
+        self.assertIn("MISMATCH_ACL", result)
+        self.assertIn("MISMATCH_ROWS", result)
+        self.assertIn("VERDICT_REPORTED_FAIL", result)
+        self.assertIn("FLAG_NOT_TRUE_RESTORE_VERIFIED", result)
+        self.assertIn("TABLE_COUNT_REPORTED_65", result)
+        self.assertNotIn("supersecret", str(result))
+        self.assertNotIn("internal_customer", str(result))
+
+    def test_unparseable_truncated_list_never_guesses_category(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        raw = (
+            "exit_code=1\n--- stdout (tail) ---\n"
+            '"signature_mismatches": ["rows:PII data that was cut\n'
+            '"verdict": "FAIL: restored database differs from source"\n'
+            "--- stderr (tail) ---\n"
+        )
+        result = w.extract_backup_summary_indicators(raw)
+        self.assertIn("SIGNATURE_MISMATCHES_TAIL_INCOMPLETE", result)
+        self.assertIn("VERDICT_REPORTED_FAIL", result)
+        self.assertNotIn("MISMATCH_ROWS", result)
+        self.assertNotIn("PII", str(result))
+
+    def test_reported_pass_can_never_be_treated_as_verified_pass(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        raw = (
+            'exit_code=1\n--- stdout (tail) ---\n'
+            '"signature_mismatches": [],\n'
+            '"tables": 65,\n'
+            '"verdict": "PASS",\n'
+            '"wrong_key_rejected": true\n'
+            '--- stderr (tail) ---\n'
+        )
+        result = w.extract_backup_summary_indicators(raw)
+        self.assertIn("VERDICT_REPORTED_PASS_NOT_VERIFIED", result)
+        self.assertIn("SIGNATURE_MISMATCHES_REPORTED_NONE", result)
+        self.assertNotIn("PASS", result)
+
+    def test_false_required_flags_can_be_read_without_exposing_extra_fields(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        raw = (
+            'exit_code=1\n--- stdout (tail) ---\n'
+            '"tamper_rejected": false,\n'
+            '"partial_dump_restore_rejected": null,\n'
+            '"unexpected_key": "secret_DO_NOT_SHOW",\n'
+            '"verdict": "PARTIAL: check failed"\n'
+            '--- stderr (tail) ---\n'
+        )
+        result = w.extract_backup_summary_indicators(raw)
+        self.assertIn("FLAG_NOT_TRUE_TAMPER_REJECTED", result)
+        self.assertIn("FLAG_NOT_TRUE_PARTIAL_DUMP_RESTORE_REJECTED", result)
+        self.assertIn("VERDICT_REPORTED_INCOMPLETE", result)
+        self.assertNotIn("DO_NOT_SHOW", str(result))
+
+    def test_absent_stdout_does_not_claim_root_cause(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        self.assertEqual(w.extract_backup_summary_indicators(
+            "exit_code=1\n--- stderr (tail) ---\n"), ["STDOUT_TAIL_NOT_STORED"])
+
+
 if __name__=="__main__":
     unittest.main()
