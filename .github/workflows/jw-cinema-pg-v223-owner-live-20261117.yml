@@ -1,0 +1,89 @@
+name: JW V22.3 P1->P0 2026-11-17 owner authorization regression (DISPOSABLE ONLY)
+on:
+  push:
+    branches:
+      - review/jw-v223-p1p0-b2b3-20261117
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  negative-and-disposable-pg17:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-only-no-user-data
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 3s --health-timeout 3s --health-retries 12
+    env:
+      PGPASSWORD: ci-only-no-user-data
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preserve reviewed parent, original UI and all source engines
+        run: |
+          git merge-base --is-ancestor f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD
+          git diff --exit-code f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD -- app db scripts/pg_backup_v223.py scripts/ci_cinema_pg_guard.py scripts/ci_cinema_pg_v223_codespace_run.py
+          python3 -m py_compile scripts/ci_cinema_pg_v223_owner_live_20261117.py tests/test_cinema_pg_v223_owner_live_20261117.py
+      - name: Install independent test prerequisites
+        run: python3 -m pip install --disable-pip-version-check -r requirements-postgres-check.txt cryptography
+      - name: Test expiry, fail-closed ordering and mandatory revocation without live database
+        run: python3 -m unittest discover -s tests -p 'test_cinema_pg_v223_owner_live_20261117.py' -v
+      - name: Actual disposable PostgreSQL 17 role guard negative tests and bounded positive path
+        run: |
+          docker run --rm --network host -e PGPASSWORD postgres:17 psql --version
+          python3 - <<'PY'
+          import os,subprocess
+          from datetime import datetime,timedelta,timezone
+          from zoneinfo import ZoneInfo
+          import psycopg
+          dsn="postgresql://postgres:ci-only-no-user-data@127.0.0.1:5432/postgres"
+          with psycopg.connect(dsn,autocommit=True) as db:
+              assert db.execute("SHOW server_version_num").fetchone()[0].startswith("17")
+              db.execute("CREATE ROLE jw_backup_ro NOLOGIN BYPASSRLS CONNECTION LIMIT 2 PASSWORD 'ci-only-credential'")
+              db.execute("ALTER ROLE jw_backup_ro VALID UNTIL '2026-11-12 00:00:00+00'")
+              db.execute("CREATE SCHEMA jw_dev")
+              for i in range(65):
+                  db.execute(f"CREATE TABLE jw_dev.t_{i:02} (id integer primary key)")
+              db.execute("GRANT USAGE ON SCHEMA jw_dev TO jw_backup_ro")
+              db.execute("GRANT SELECT ON ALL TABLES IN SCHEMA jw_dev TO jw_backup_ro")
+          def invoke(until):
+              return subprocess.run([
+                  "docker","run","--rm","--network","host",
+                  "-e","PGPASSWORD",
+                  "-v",os.environ["GITHUB_WORKSPACE"]+":/code:ro",
+                  "postgres:17","psql","-X","-v","ON_ERROR_STOP=1",
+                  "-v","valid_until="+until,"-h","127.0.0.1",
+                  "-U","postgres","-d","postgres",
+                  "-f","/code/scripts/review/cinema_pg_v223_backup_role_20261117.sql"
+              ],capture_output=True,text=True,timeout=55).returncode
+          try:
+              assert invoke("2026-11-17 19:30:00+09") != 0, "over-five-hour or approval-cap activation accepted"
+              assert invoke("2026-11-12 00:00:00+00") != 0, "expired activation accepted"
+              deadline=datetime(2026,11,17,14,30,tzinfo=ZoneInfo("Asia/Seoul"))
+              now=datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+              if now < deadline-timedelta(minutes=4):
+                  until=(now+timedelta(minutes=3)).strftime("%Y-%m-%d %H:%M:%S+09")
+                  assert invoke(until)==0, "bounded role activation denied during approved period"
+                  with psycopg.connect(dsn) as db:
+                      assert db.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname='jw_backup_ro'").fetchone()[0] is True
+                  print("PASS disposable PG17 positive bounded role activation")
+              else:
+                  assert invoke("2026-11-17 14:30:00+09") != 0, "expired absolute approval accepted"
+                  print("PASS disposable PG17 expired absolute limit fail-closed (window elapsed; no positive activation)")
+          finally:
+              with psycopg.connect(dsn,autocommit=True) as db:
+                  db.execute("ALTER ROLE jw_backup_ro NOLOGIN")
+                  assert db.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname='jw_backup_ro'").fetchone()[0] is False
+          print("PASS disposable PG17 denial and revocation; REAL SOURCE NOT TOUCHED")
+          PY
