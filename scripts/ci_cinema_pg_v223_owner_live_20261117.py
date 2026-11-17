@@ -45,6 +45,7 @@ ALLOWED_NEW = frozenset({
     'scripts/pg_backup_v223.py',
     'scripts/ci_cinema_pg_guard.py',
     'tests/test_cinema_pg_v223_constraint_canonical.py',
+    'tests/test_cinema_pg_v223_acl_canonical.py',
     'scripts/ci_cinema_pg_v223_constraint_gate.py',
     '.github/workflows/jw-v223-jarvis-operational-20261116.yml',
 })

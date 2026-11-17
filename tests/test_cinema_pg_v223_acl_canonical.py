@@ -14,4 +14,11 @@ def test_acl_signature_uses_effective_grants_not_raw_oids():
     assert "c.relacl)::text" not in q
 
 def test_constraint_gate_remains_strict():
-    assert "pg_get_constraintdef(k.oid)" in SIGNATURE_QUERIES["constraints"]
+    query = SIGNATURE_QUERIES["constraints"]
+    # PostgreSQL owns precedence-aware rendering; client-side stripping of
+    # parentheses or filtering to CHECK-only would weaken the gate.
+    assert "md5(pg_get_constraintdef(k.oid, true))" in query
+    assert "FROM pg_constraint k JOIN pg_class c" in query
+    assert "k.contype" not in query
+    assert "regexp_replace" not in query
+    assert "replace(" not in query
