@@ -27,7 +27,7 @@ from scripts.pg_backup_v223 import load_key
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_SHA = "f6bd82cfeb127025aa35bbf591b3b984cc947716"
-BRANCH = "review/jw-v223-p1p0-b2b3-20261117"
+BRANCH = "review/jw-v223-source-pin-integrated-20261117"
 KST = ZoneInfo("Asia/Seoul")
 OWNER_DEADLINE = datetime(2026, 11, 17, 14, 30, tzinfo=KST)
 MAX_WINDOW = timedelta(hours=4, minutes=59)
@@ -37,6 +37,7 @@ ROLE_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_20261117.sql"
 REVIEWED_BACKUP_FIX_BLOBS = {
     'scripts/pg_backup_v223.py':'d6578569100f88c7d2d3f493fdb06bbe3374c64f',
     'scripts/ci_cinema_pg_guard.py':'2805ab4be2fb22221d96752fc4316af50b0bb653',
+    'scripts/ci_cinema_pg_v223_codespace_run.py':'220df3d99d78ccb37bac1185b847eb06944850bd',
 }
 # Only these paths may differ from the latest already reviewed/CI-passing code.
 ALLOWED_NEW = frozenset({
@@ -45,6 +46,7 @@ ALLOWED_NEW = frozenset({
     "tests/test_cinema_pg_v223_owner_live_20261117.py",
     ".github/workflows/jw-cinema-pg-v223-owner-live-20261117.yml",
     "scripts/ci_cinema_pg_v223_owner_worktree_20261117.py",
+    "scripts/ci_cinema_pg_v223_codespace_run.py",
     'scripts/pg_backup_v223.py',
     'scripts/ci_cinema_pg_guard.py',
     'tests/test_cinema_pg_v223_constraint_canonical.py',
