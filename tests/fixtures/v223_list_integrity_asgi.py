@@ -35,6 +35,8 @@ def synthetic_browser_console():
 <pre id="result"></pre></main>
 <script>
 async function check(mode) {
+  document.getElementById('status').textContent = 'loading';
+  document.getElementById('result').textContent = '';
   const response = await fetch('/api/quotes?mode=' + mode, {credentials:'same-origin'});
   const payload = await response.json();
   document.getElementById('status').textContent = String(response.status);
