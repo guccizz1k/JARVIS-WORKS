@@ -129,9 +129,16 @@ def _source_tagged(body: Any, source: str) -> list[dict]:
     if not isinstance(body, list) or len(body) > 10000:
         raise CutoverRefused("unexpected_list_shape", 503)
     output = []
+    seen_ids: set[str] = set()
     for row in body:
         if not isinstance(row, dict) or not isinstance(row.get("id"), str):
             raise CutoverRefused("unexpected_list_shape", 503)
+        # A faulty upstream JOIN or pagination replay must never turn one
+        # business document into two rows in a merged financial list.
+        # Reject the entire result rather than silently deduplicate it.
+        if row["id"] in seen_ids:
+            raise CutoverRefused("duplicate_list_record_id", 503)
+        seen_ids.add(row["id"])
         if source == "pg" and parse_home(row["id"]) != "pg":
             raise CutoverRefused("invalid_pg_record_home", 503)
         if source == "legacy" and parse_home(row["id"]) != "legacy":
