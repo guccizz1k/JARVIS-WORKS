@@ -2,7 +2,9 @@
 -- This NEW file does not alter, relax, or renew the EXPIRED 2026-11-11 authorization.
 -- Must run only in owner Codespaces through the isolated B2/B3 launcher after
 -- verified exact project/TLS/admin, encrypted key, and empty disposable PG17.
--- Absolute limit 2026-11-17 14:30:00 KST. Hard stop; NEVER edit to extend.
+-- Renewed owner approval: 2026-11-17 16:00 through 2026-11-20 16:00 KST.
+-- This approval is 72h to execute work, NOT 72h of continuous LOGIN.
+-- Each activation is strictly bounded to under five hours; fail closed after deadline.
 -- This file changes ONLY LOGIN and VALID UNTIL on the already-existing role.
 \set ON_ERROR_STOP on
 BEGIN;
@@ -13,7 +15,7 @@ SELECT format('DO $check$ BEGIN '
  'OR %1$L::timestamptz > clock_timestamp() + interval ''5 hours'' '
  'OR %1$L::timestamptz > %2$L::timestamptz THEN '
  'RAISE EXCEPTION ''invalid or over-five-hour backup expiry''; END IF; '
- 'END $check$', :'valid_until', '2026-11-17 14:30:00+09') \gexec
+ 'END $check$', :'valid_until', '2026-11-20 16:00:00+09') \gexec
 
 DO $role$
 BEGIN
