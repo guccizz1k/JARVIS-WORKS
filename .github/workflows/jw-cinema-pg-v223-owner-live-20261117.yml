@@ -4,6 +4,7 @@ on:
     branches:
       - review/jw-v223-p1p0-b2b3-20261117
       - review/codex-v223-full-audit-20261117
+      - review/jw-v223-p1-nologin-proof-20261117
   workflow_dispatch:
 permissions:
   contents: read
@@ -34,7 +35,9 @@ jobs:
       - name: Preserve reviewed parent, original UI and all source engines
         run: |
           git merge-base --is-ancestor f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD
-          git diff --exit-code f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD -- app db tests/test_v223_pg_backup.py scripts/ci_cinema_pg_v223_codespace_run.py
+          git diff --exit-code f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD -- app db tests/test_v223_pg_backup.py
+          # The P1 classifier is the only original engine intentionally changed in this isolated branch.
+          python3 -m py_compile scripts/ci_cinema_pg_v223_codespace_run.py
           test "$(git hash-object scripts/pg_backup_v223.py)" = d6578569100f88c7d2d3f493fdb06bbe3374c64f
           test "$(git hash-object scripts/ci_cinema_pg_guard.py)" = 2805ab4be2fb22221d96752fc4316af50b0bb653
           python3 -m py_compile scripts/ci_cinema_pg_v223_owner_live_20261117.py tests/test_cinema_pg_v223_owner_live_20261117.py
