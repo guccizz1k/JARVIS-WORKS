@@ -86,7 +86,7 @@ def check_sources() -> None:
         if git("hash-object", path) != git("rev-parse", "HEAD:" + path):
             raise Blocked("review_file_not_exact_head")
     text = ROLE_SQL.read_text(encoding="utf-8")
-    if (text.count("2026-11-17 14:30:00+09") != 2
+    if (text.count("2026-11-17 14:30:00+09") != 1
         or "interval ''5 hours''" not in text
         or "ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN" not in text
         or "BEGIN;" not in text or "COMMIT;" not in text):
