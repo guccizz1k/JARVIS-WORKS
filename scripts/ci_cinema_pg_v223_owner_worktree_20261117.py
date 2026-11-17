@@ -205,6 +205,476 @@ def classify_private_backup_log_details(raw: str) -> list[str]:
     return list(dict.fromkeys(categories))[:10] or ["UNCLASSIFIED_BACKUP_FAILURE"]
 
 
+def extract_backup_summary_indicators(raw: str) -> list[str]:
+    """Inspect only the *existing scrubbed* child JSON tail without leaking it.
+
+    The stored stdout is intentionally truncated to 2000 chars, so a complete
+    JSON document usually cannot be reconstructed. Only a complete JSON array
+    of mismatch entries and fixed-schema scalar values are considered. Every
+    label is a diagnostic HINT, not an attestation of restored/source parity.
+    Never emit any user-controlled string or source object identifier.
+    """
+    import json
+
+    if "--- stdout (tail) ---" not in raw:
+        return ["STDOUT_TAIL_NOT_STORED"]
+    out = raw.split("--- stdout (tail) ---", 1)[1].split("--- stderr (tail) ---", 1)[0]
+    if len(out) > 2300:
+        return ["STDOUT_TAIL_UNEXPECTED_LENGTH"]
+    result: list[str] = []
+    status = re.search(r'(?m)^\s*"verdict"\s*:\s*("(?:[^"\\]|\\.)*")\s*,?\s*
+    """Offline owner-private failure analysis; no source role or network action.
+
+    Output contains ONLY fixed diagnostic categories. It never prints raw error
+    data, user identifiers, source table names, credentials or ciphertext.
+    """
+    if os.environ.get("CODESPACES") != "true":
+        print("BLOCKED OWNER_CODESPACE_REQUIRED")
+        return 2
+    base = Path.home() / ".local" / "share" / "jw-v223-restore"
+    path = base / "last_backup_error.log"
+    try:
+        if path.is_symlink() or not path.is_file():
+            print("B2_DIAG NO_PROTECTED_ERROR_LOG")
+            return 2
+        st = path.stat()
+        if st.st_uid != os.getuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO) or st.st_size > 16384:
+            print("B2_DIAG ERROR_LOG_ACCESS_REFUSED")
+            return 2
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeError):
+        print("B2_DIAG ERROR_LOG_UNREADABLE")
+        return 2
+    label, mode = classify_private_backup_log(raw)
+    print("B2_DIAG", label)
+    # More granular, still allowlisted labels. Never copy file text.
+    for category in classify_private_backup_log_details(raw):
+        print("B2_DETAIL", category)
+    for category in extract_backup_summary_indicators(raw):
+        print("B2_REPORT", category)
+    # Identify stale logs relative to the latest PRIVATE run receipt without
+    # disclosing its name, content or timestamps in the public response.
+    try:
+        reports = [p for p in base.glob("owner_b2b3_20261117_*.json")
+                   if p.is_file() and not p.is_symlink()
+                   and p.stat().st_uid == os.getuid()
+                   and not p.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)]
+        if reports:
+            latest = max(reports, key=lambda p: p.stat().st_mtime_ns)
+            print("B2_LOG_RECENCY",
+                  "PREDATES_LAST_OWNER_RUN" if path.stat().st_mtime_ns + 10_000_000_000 <
+                  latest.stat().st_mtime_ns else "CONSISTENT_WITH_LAST_OWNER_RUN")
+            print("PRIVATE_RUN_SUMMARY", "PRESENT")
+            # Private receipts are not verified evidence. Only show fixed
+            # status labels with REPORTED_ / NOT_CONFIRMED prefixes.
+            st = latest.stat()
+            if st.st_size <= 16384:
+                import json
+                receipt = json.loads(latest.read_text(encoding="utf-8"))
+                if isinstance(receipt, dict):
+                    print("OWNER_INCIDENT_VERDICT",
+                          "BLOCKED" if receipt.get("verdict") == "BLOCKED" else "NOT_CONFIRMED")
+                    stages = receipt.get("stages", {})
+                    if isinstance(stages, dict):
+                        for name in ("temporary_login", "restricted_tls_login",
+                                     "real_encrypted_backup_independent_restore",
+                                     "revoke", "closed_verified"):
+                            print("OWNER_STAGE", name,
+                                  "REPORTED_PASS" if stages.get(name) == "PASS" else "NOT_CONFIRMED")
+    except (OSError, ValueError):
+        print("B2_LOG_RECENCY UNAVAILABLE")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("check", "run", "diagnose"))
+    args = parser.parse_args(argv)
+    try:
+        commit = verify_input_checkout()
+    except (Blocked, OSError, subprocess.TimeoutExpired) as exc:
+        print("BLOCKED ORIGINAL_CHECKOUT_" + type(exc).__name__)
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 2
+
+    # Diagnose does NOT open a worktree, read credentials, or contact Supabase.
+    if args.action == "diagnose":
+        return diagnose_owner_only()
+
+    # The original owner workspace can be dirty; it remains completely untouched.
+    parent = Path(tempfile.mkdtemp(prefix="jw-v223-p1p0-isolated-"))
+    isolated = parent / "checkout"
+    attached = False
+    try:
+        cmd = subprocess.run(
+            ["git", "worktree", "add", "--detach", "--quiet",
+             str(isolated), commit],
+            cwd=ROOT, capture_output=True, text=True, timeout=100, check=False,
+        )
+        if cmd.returncode:
+            print("BLOCKED CANNOT_CREATE_ISOLATED_WORKTREE")
+            return 2
+        attached = True
+
+        # Double-check the detached checkout before letting it read credentials.
+        if (git("rev-parse", "HEAD", cwd=isolated) != commit
+                or git("status", "--porcelain", "--untracked-files=all", cwd=isolated)):
+            print("BLOCKED ISOLATED_SOURCE_SHA_OR_CLEANLINESS")
+            return 2
+
+        print("PASS CLEAN_ISOLATED_EXACT_SHA; ORIGINAL_WORKTREE_PRESERVED", flush=True)
+        # Preserve stdin and stdout: the owner must approve explicitly on their
+        # own terminal; no secret appears in argv or in this wrapper's logs.
+        child = subprocess.run(
+            [sys.executable, "-m", DRIVER, args.action],
+            cwd=isolated, stdin=None, stdout=None, stderr=None, check=False,
+        )
+        return child.returncode if child.returncode == 0 else 2
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("BLOCKED ISOLATED_EXECUTOR_" + type(exc).__name__)
+        return 2
+    finally:
+        if attached:
+            # Without --force this refuses to erase any unknown/untracked owner
+            # data that an interrupted child may have left in the isolated tree.
+            try:
+                done = subprocess.run(
+                    ["git", "worktree", "remove", str(isolated)],
+                    cwd=ROOT, capture_output=True, text=True,
+                    timeout=50, check=False,
+                )
+                if done.returncode:
+                    print("ISOLATED_WORKTREE_PRESERVED_FOR_INSPECTION")
+            except (OSError, subprocess.TimeoutExpired):
+                print("ISOLATED_WORKTREE_PRESERVED_FOR_INSPECTION")
+        try:
+            parent.rmdir()  # only remove an empty directory; no recursive delete
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+, out)
+    if status:
+        try:
+            value = json.loads(status.group(1))
+            if value == "PASS":
+                result.append("VERDICT_REPORTED_PASS_NOT_VERIFIED")
+            elif isinstance(value, str) and value.startswith("FAIL"):
+                result.append("VERDICT_REPORTED_FAIL")
+            elif isinstance(value, str) and value.startswith(("PARTIAL", "NOT_", "BLOCKED")):
+                result.append("VERDICT_REPORTED_INCOMPLETE")
+            else:
+                result.append("VERDICT_OTHER")
+        except (ValueError, TypeError):
+            result.append("VERDICT_UNREADABLE")
+    else:
+        result.append("VERDICT_MISSING_FROM_SCRUBBED_TAIL")
+
+    # Names are a fixed whitelist: no SQL identifiers, raw values, contents or
+    # row data ever printed. False/true labels mean ONLY that the stored child
+    # transcript claimed them; the original subprocess did NOT pass.
+    flags = (
+        "restore_verified", "source_identity_verified", "source_role_least_privilege",
+        "target_proven_ephemeral", "snapshot_consistent", "wrong_key_rejected",
+        "decrypt_sha256_matches", "partial_dump_restore_rejected",
+        "tamper_rejected", "truncation_rejected", "source_is_real_dev_db",
+    )
+    for field in flags:
+        match = re.search(r'(?m)^\s*"' + re.escape(field) + r'"\s*:\s*(true|false|null)\s*,?\s*
+    """Offline owner-private failure analysis; no source role or network action.
+
+    Output contains ONLY fixed diagnostic categories. It never prints raw error
+    data, user identifiers, source table names, credentials or ciphertext.
+    """
+    if os.environ.get("CODESPACES") != "true":
+        print("BLOCKED OWNER_CODESPACE_REQUIRED")
+        return 2
+    base = Path.home() / ".local" / "share" / "jw-v223-restore"
+    path = base / "last_backup_error.log"
+    try:
+        if path.is_symlink() or not path.is_file():
+            print("B2_DIAG NO_PROTECTED_ERROR_LOG")
+            return 2
+        st = path.stat()
+        if st.st_uid != os.getuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO) or st.st_size > 16384:
+            print("B2_DIAG ERROR_LOG_ACCESS_REFUSED")
+            return 2
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeError):
+        print("B2_DIAG ERROR_LOG_UNREADABLE")
+        return 2
+    label, mode = classify_private_backup_log(raw)
+    print("B2_DIAG", label)
+    # More granular, still allowlisted labels. Never copy file text.
+    for category in classify_private_backup_log_details(raw):
+        print("B2_DETAIL", category)
+    # Identify stale logs relative to the latest PRIVATE run receipt without
+    # disclosing its name, content or timestamps in the public response.
+    try:
+        reports = [p for p in base.glob("owner_b2b3_20261117_*.json")
+                   if p.is_file() and not p.is_symlink()
+                   and p.stat().st_uid == os.getuid()
+                   and not p.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)]
+        if reports:
+            latest = max(reports, key=lambda p: p.stat().st_mtime_ns)
+            print("B2_LOG_RECENCY",
+                  "PREDATES_LAST_OWNER_RUN" if path.stat().st_mtime_ns + 10_000_000_000 <
+                  latest.stat().st_mtime_ns else "CONSISTENT_WITH_LAST_OWNER_RUN")
+            print("PRIVATE_RUN_SUMMARY", "PRESENT")
+            # Private receipts are not verified evidence. Only show fixed
+            # status labels with REPORTED_ / NOT_CONFIRMED prefixes.
+            st = latest.stat()
+            if st.st_size <= 16384:
+                import json
+                receipt = json.loads(latest.read_text(encoding="utf-8"))
+                if isinstance(receipt, dict):
+                    print("OWNER_INCIDENT_VERDICT",
+                          "BLOCKED" if receipt.get("verdict") == "BLOCKED" else "NOT_CONFIRMED")
+                    stages = receipt.get("stages", {})
+                    if isinstance(stages, dict):
+                        for name in ("temporary_login", "restricted_tls_login",
+                                     "real_encrypted_backup_independent_restore",
+                                     "revoke", "closed_verified"):
+                            print("OWNER_STAGE", name,
+                                  "REPORTED_PASS" if stages.get(name) == "PASS" else "NOT_CONFIRMED")
+    except (OSError, ValueError):
+        print("B2_LOG_RECENCY UNAVAILABLE")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("check", "run", "diagnose"))
+    args = parser.parse_args(argv)
+    try:
+        commit = verify_input_checkout()
+    except (Blocked, OSError, subprocess.TimeoutExpired) as exc:
+        print("BLOCKED ORIGINAL_CHECKOUT_" + type(exc).__name__)
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 2
+
+    # Diagnose does NOT open a worktree, read credentials, or contact Supabase.
+    if args.action == "diagnose":
+        return diagnose_owner_only()
+
+    # The original owner workspace can be dirty; it remains completely untouched.
+    parent = Path(tempfile.mkdtemp(prefix="jw-v223-p1p0-isolated-"))
+    isolated = parent / "checkout"
+    attached = False
+    try:
+        cmd = subprocess.run(
+            ["git", "worktree", "add", "--detach", "--quiet",
+             str(isolated), commit],
+            cwd=ROOT, capture_output=True, text=True, timeout=100, check=False,
+        )
+        if cmd.returncode:
+            print("BLOCKED CANNOT_CREATE_ISOLATED_WORKTREE")
+            return 2
+        attached = True
+
+        # Double-check the detached checkout before letting it read credentials.
+        if (git("rev-parse", "HEAD", cwd=isolated) != commit
+                or git("status", "--porcelain", "--untracked-files=all", cwd=isolated)):
+            print("BLOCKED ISOLATED_SOURCE_SHA_OR_CLEANLINESS")
+            return 2
+
+        print("PASS CLEAN_ISOLATED_EXACT_SHA; ORIGINAL_WORKTREE_PRESERVED", flush=True)
+        # Preserve stdin and stdout: the owner must approve explicitly on their
+        # own terminal; no secret appears in argv or in this wrapper's logs.
+        child = subprocess.run(
+            [sys.executable, "-m", DRIVER, args.action],
+            cwd=isolated, stdin=None, stdout=None, stderr=None, check=False,
+        )
+        return child.returncode if child.returncode == 0 else 2
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("BLOCKED ISOLATED_EXECUTOR_" + type(exc).__name__)
+        return 2
+    finally:
+        if attached:
+            # Without --force this refuses to erase any unknown/untracked owner
+            # data that an interrupted child may have left in the isolated tree.
+            try:
+                done = subprocess.run(
+                    ["git", "worktree", "remove", str(isolated)],
+                    cwd=ROOT, capture_output=True, text=True,
+                    timeout=50, check=False,
+                )
+                if done.returncode:
+                    print("ISOLATED_WORKTREE_PRESERVED_FOR_INSPECTION")
+            except (OSError, subprocess.TimeoutExpired):
+                print("ISOLATED_WORKTREE_PRESERVED_FOR_INSPECTION")
+        try:
+            parent.rmdir()  # only remove an empty directory; no recursive delete
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+, out)
+        if match and match.group(1) != "true":
+            result.append("FLAG_NOT_TRUE_" + field.upper())
+
+    key = re.search(r'"signature_mismatches"\s*:\s*', out)
+    if key:
+        try:
+            value, _ = json.JSONDecoder().raw_decode(out[key.end():].lstrip())
+            if isinstance(value, list) and len(value) <= 100000:
+                result.append("SIGNATURE_MISMATCHES_REPORTED_" + ("NONE" if not value else "PRESENT"))
+                allowed = ("tables", "policies", "functions", "triggers",
+                           "indexes", "constraints", "acl", "rows", "schema")
+                for category in allowed:
+                    if any(isinstance(item, str) and item.startswith(category + ":") for item in value):
+                        result.append("MISMATCH_" + category.upper())
+                if value and not any(x.startswith("MISMATCH_") for x in result):
+                    result.append("MISMATCH_UNRECOGNIZED_CATEGORY")
+            else:
+                result.append("SIGNATURE_MISMATCHES_INVALID")
+        except (ValueError, TypeError):
+            result.append("SIGNATURE_MISMATCHES_TAIL_INCOMPLETE")
+    else:
+        result.append("SIGNATURE_MISMATCHES_NOT_IN_LOG_TAIL")
+
+    # Only non-sensitive fixed numeric scalar fields are disclosed.
+    tables = re.search(r'(?m)^\s*"tables"\s*:\s*(\d{1,5})\s*,?\s*
+    """Offline owner-private failure analysis; no source role or network action.
+
+    Output contains ONLY fixed diagnostic categories. It never prints raw error
+    data, user identifiers, source table names, credentials or ciphertext.
+    """
+    if os.environ.get("CODESPACES") != "true":
+        print("BLOCKED OWNER_CODESPACE_REQUIRED")
+        return 2
+    base = Path.home() / ".local" / "share" / "jw-v223-restore"
+    path = base / "last_backup_error.log"
+    try:
+        if path.is_symlink() or not path.is_file():
+            print("B2_DIAG NO_PROTECTED_ERROR_LOG")
+            return 2
+        st = path.stat()
+        if st.st_uid != os.getuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO) or st.st_size > 16384:
+            print("B2_DIAG ERROR_LOG_ACCESS_REFUSED")
+            return 2
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeError):
+        print("B2_DIAG ERROR_LOG_UNREADABLE")
+        return 2
+    label, mode = classify_private_backup_log(raw)
+    print("B2_DIAG", label)
+    # More granular, still allowlisted labels. Never copy file text.
+    for category in classify_private_backup_log_details(raw):
+        print("B2_DETAIL", category)
+    # Identify stale logs relative to the latest PRIVATE run receipt without
+    # disclosing its name, content or timestamps in the public response.
+    try:
+        reports = [p for p in base.glob("owner_b2b3_20261117_*.json")
+                   if p.is_file() and not p.is_symlink()
+                   and p.stat().st_uid == os.getuid()
+                   and not p.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)]
+        if reports:
+            latest = max(reports, key=lambda p: p.stat().st_mtime_ns)
+            print("B2_LOG_RECENCY",
+                  "PREDATES_LAST_OWNER_RUN" if path.stat().st_mtime_ns + 10_000_000_000 <
+                  latest.stat().st_mtime_ns else "CONSISTENT_WITH_LAST_OWNER_RUN")
+            print("PRIVATE_RUN_SUMMARY", "PRESENT")
+            # Private receipts are not verified evidence. Only show fixed
+            # status labels with REPORTED_ / NOT_CONFIRMED prefixes.
+            st = latest.stat()
+            if st.st_size <= 16384:
+                import json
+                receipt = json.loads(latest.read_text(encoding="utf-8"))
+                if isinstance(receipt, dict):
+                    print("OWNER_INCIDENT_VERDICT",
+                          "BLOCKED" if receipt.get("verdict") == "BLOCKED" else "NOT_CONFIRMED")
+                    stages = receipt.get("stages", {})
+                    if isinstance(stages, dict):
+                        for name in ("temporary_login", "restricted_tls_login",
+                                     "real_encrypted_backup_independent_restore",
+                                     "revoke", "closed_verified"):
+                            print("OWNER_STAGE", name,
+                                  "REPORTED_PASS" if stages.get(name) == "PASS" else "NOT_CONFIRMED")
+    except (OSError, ValueError):
+        print("B2_LOG_RECENCY UNAVAILABLE")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("check", "run", "diagnose"))
+    args = parser.parse_args(argv)
+    try:
+        commit = verify_input_checkout()
+    except (Blocked, OSError, subprocess.TimeoutExpired) as exc:
+        print("BLOCKED ORIGINAL_CHECKOUT_" + type(exc).__name__)
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 2
+
+    # Diagnose does NOT open a worktree, read credentials, or contact Supabase.
+    if args.action == "diagnose":
+        return diagnose_owner_only()
+
+    # The original owner workspace can be dirty; it remains completely untouched.
+    parent = Path(tempfile.mkdtemp(prefix="jw-v223-p1p0-isolated-"))
+    isolated = parent / "checkout"
+    attached = False
+    try:
+        cmd = subprocess.run(
+            ["git", "worktree", "add", "--detach", "--quiet",
+             str(isolated), commit],
+            cwd=ROOT, capture_output=True, text=True, timeout=100, check=False,
+        )
+        if cmd.returncode:
+            print("BLOCKED CANNOT_CREATE_ISOLATED_WORKTREE")
+            return 2
+        attached = True
+
+        # Double-check the detached checkout before letting it read credentials.
+        if (git("rev-parse", "HEAD", cwd=isolated) != commit
+                or git("status", "--porcelain", "--untracked-files=all", cwd=isolated)):
+            print("BLOCKED ISOLATED_SOURCE_SHA_OR_CLEANLINESS")
+            return 2
+
+        print("PASS CLEAN_ISOLATED_EXACT_SHA; ORIGINAL_WORKTREE_PRESERVED", flush=True)
+        # Preserve stdin and stdout: the owner must approve explicitly on their
+        # own terminal; no secret appears in argv or in this wrapper's logs.
+        child = subprocess.run(
+            [sys.executable, "-m", DRIVER, args.action],
+            cwd=isolated, stdin=None, stdout=None, stderr=None, check=False,
+        )
+        return child.returncode if child.returncode == 0 else 2
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print("BLOCKED ISOLATED_EXECUTOR_" + type(exc).__name__)
+        return 2
+    finally:
+        if attached:
+            # Without --force this refuses to erase any unknown/untracked owner
+            # data that an interrupted child may have left in the isolated tree.
+            try:
+                done = subprocess.run(
+                    ["git", "worktree", "remove", str(isolated)],
+                    cwd=ROOT, capture_output=True, text=True,
+                    timeout=50, check=False,
+                )
+                if done.returncode:
+                    print("ISOLATED_WORKTREE_PRESERVED_FOR_INSPECTION")
+            except (OSError, subprocess.TimeoutExpired):
+                print("ISOLATED_WORKTREE_PRESERVED_FOR_INSPECTION")
+        try:
+            parent.rmdir()  # only remove an empty directory; no recursive delete
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+, out)
+    if tables:
+        result.append("TABLE_COUNT_REPORTED_" + ("65" if tables.group(1) == "65" else "NOT_65"))
+    return result[:20]
+
+
 def diagnose_owner_only() -> int:
     """Offline owner-private failure analysis; no source role or network action.
 
