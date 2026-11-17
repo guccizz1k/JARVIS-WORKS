@@ -531,6 +531,50 @@ def classify_postgres_route(options: dict) -> str:
     return "UNKNOWN"
 
 
+def probe_admin_closure_catalog_read_only() -> str:
+    """Read-only management catalog check; not equivalent to login refusal proof.
+
+    Never display the admin DSN or raw exception. Require the exact expected
+    database, authenticated admin role and PG17 before interpreting results.
+    """
+    import psycopg
+    dsn = os.environ.get("JW_PG_ADMIN_DSN")
+    if not dsn:
+        return "ADMIN_DSN_MISSING"
+    try:
+        with psycopg.connect(dsn, connect_timeout=8, autocommit=True) as conn:
+            identity = conn.execute(
+                "SELECT current_user,current_database(),"
+                "current_setting('server_version_num')::int"
+            ).fetchone()
+            if (not isinstance(identity, (tuple, list)) or len(identity) != 3
+                    or identity[0] != "postgres" or identity[1] != "postgres"
+                    or type(identity[2]) is not int or not 170000 <= identity[2] < 180000):
+                return "ADMIN_IDENTITY_UNVERIFIED"
+            with conn.transaction():
+                conn.execute("SET TRANSACTION READ ONLY")
+                state = conn.execute(
+                    "SELECT rolcanlogin,rolvaliduntil <= now() "
+                    "FROM pg_roles WHERE rolname = %s", ("jw_backup_ro",)
+                ).fetchone()
+                sessions = conn.execute(
+                    "SELECT count(*) FROM pg_stat_activity WHERE usename = %s",
+                    ("jw_backup_ro",)
+                ).fetchone()
+        if state is None or sessions is None:
+            return "ROLE_OR_SESSIONS_UNVERIFIED"
+        if (type(state[0]) is not bool or type(state[1]) is not bool
+                or type(sessions[0]) is not int):
+            return "CATALOG_TYPE_UNVERIFIED"
+        if state == (False, True) and sessions == (0,):
+            return "CATALOG_CLOSED_NO_SESSIONS"
+        return "CATALOG_NOT_CLOSED"
+    except psycopg.Error:
+        return "ADMIN_CONNECTION_OR_QUERY_FAILED"
+    except (TypeError, ValueError, IndexError, KeyError, OSError):
+        return "ADMIN_CATALOG_UNVERIFIED"
+
+
 def diagnose_closure_read_only() -> int:
     """Bounded non-mutating diagnostic; NEVER treats classification as closure proof."""
     for label, check in (("SOURCE_PIN", check_sources),
@@ -546,6 +590,7 @@ def diagnose_closure_read_only() -> int:
     try:
         options = existing.login_kwargs()
         print("DIAGNOSTIC CONNECTION_ROUTE_" + classify_postgres_route(options))
+        print("DIAGNOSTIC ADMIN_" + probe_admin_closure_catalog_read_only())
         print("DIAGNOSTIC TRANSPORT_" + probe_transport_read_only(options))
         print("DIAGNOSTIC PG_SSL_REQUEST_" + probe_pg_ssl_request_read_only(options))
         print("DIAGNOSTIC PG_TLS_" + probe_pg_tls_read_only(options))
