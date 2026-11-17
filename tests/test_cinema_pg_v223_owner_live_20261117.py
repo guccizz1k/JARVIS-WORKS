@@ -103,5 +103,68 @@ class FailClosedOrdering(unittest.TestCase):
         self.assertEqual(len(report["stages"]),5)
 
 
+class ErrorVisibility(unittest.TestCase):
+    def test_private_exception_is_never_echoed_from_preflight(self):
+        with patch.object(d, "check_sources", side_effect=RuntimeError("password=INTERNAL_SUPER_SECRET")):
+            with self.assertRaises(d.Blocked) as ctx:
+                d.preflight()
+        self.assertEqual(str(ctx.exception), "PREFLIGHT_SOURCE_PIN")
+        self.assertNotIn("INTERNAL_SUPER_SECRET", str(ctx.exception))
+
+    def test_detached_checkout_is_only_approved_if_exact_remote_sha(self):
+        sha = "f" * 40
+        def fake_git(*args):
+            if args == ("branch", "--show-current"):
+                return ""
+            if args == ("rev-parse", "HEAD"):
+                return sha
+            if args == ("rev-parse", "refs/remotes/origin/" + d.BRANCH):
+                return "e" * 40
+            return ""
+        with patch.dict(d.os.environ, {"CODESPACES": "true"}), patch.object(d, "git", side_effect=fake_git):
+            with self.assertRaisesRegex(d.Blocked, "remote_sha_mismatch"):
+                d.check_sources()
+
+
+class OwnerWorktree(unittest.TestCase):
+    def test_dirty_report_is_preserved_while_clean_detached_executor_runs(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        with tempfile.TemporaryDirectory() as t:
+            parent = Path(t) / "only_ours"
+            parent.mkdir()
+            important = Path(t) / "pg17_rls_gate_result.txt"
+            important.write_text("critical existing owner QA results")
+            sha = "e" * 40
+            def fake_git(*args, **kwargs):
+                if args == ("rev-parse", "HEAD"):
+                    return sha
+                if args[0] == "status":
+                    return ""
+                return sha
+            seen = []
+            def fake_run(argv, **kwargs):
+                seen.append((argv, kwargs))
+                return SimpleNamespace(returncode=0)
+            with patch.object(w, "verify_input_checkout", return_value=sha), \
+                 patch.object(w.tempfile, "mkdtemp", return_value=str(parent)), \
+                 patch.object(w, "git", side_effect=fake_git), \
+                 patch.object(w.subprocess, "run", side_effect=fake_run):
+                self.assertEqual(w.main(["check"]), 0)
+            self.assertEqual(important.read_text(), "critical existing owner QA results")
+            self.assertEqual(len(seen), 3)
+            self.assertEqual(seen[0][0][1:4], ["worktree", "add", "--detach"])
+            self.assertEqual(seen[1][0][-1], "check")
+            self.assertEqual(seen[2][0][1:3], ["worktree", "remove"])
+            self.assertFalse(any("reset" in args or "stash" in args or "clean" in args for args, _ in seen))
+
+    def test_wrong_branch_never_creates_isolated_checkout(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        with patch.dict(w.os.environ, {"CODESPACES": "true"}), \
+             patch.object(w, "git", return_value="wrong"), \
+             patch.object(w.subprocess, "run") as launch:
+            self.assertEqual(w.main(["run"]), 2)
+            launch.assert_not_called()
+
+
 if __name__=="__main__":
     unittest.main()
