@@ -39,6 +39,19 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check -r requirements-postgres-check.txt cryptography
       - name: Test expiry, fail-closed ordering and mandatory revocation without live database
         run: python3 -m unittest discover -s tests -p 'test_cinema_pg_v223_owner_live_20261117.py' -v
+      - name: Restart only a verified stopped disposable PG17 and preserve existing volume
+        run: |
+          docker run -d --name jw-v223-restore --restart no \
+            -e POSTGRES_PASSWORD=ci-only-local-target \
+            -p 127.0.0.1:55432:5432 postgres:17
+          docker stop jw-v223-restore
+          CODESPACES=true python3 - <<'PY'
+          from scripts.ci_cinema_pg_go import start_verified_disposable
+          assert start_verified_disposable(), "previously stopped owner-local target did not safely restart"
+          print("PASS stopped verified disposable PG17 recovered without recreation")
+          PY
+          docker inspect --format '{{.State.Running}}' jw-v223-restore | grep -Fx true
+          docker rm -f jw-v223-restore
       - name: Actual disposable PostgreSQL 17 role guard negative tests and bounded positive path
         run: |
           docker run --rm --network host -e PGPASSWORD postgres:17 psql --version
