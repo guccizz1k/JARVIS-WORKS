@@ -1,0 +1,68 @@
+name: JW V22.3 A-only merged list integrity isolated QA
+on:
+  push:
+    branches:
+      - review/jw-v223-a-list-integrity-20261117
+    paths:
+      - app/pg_cinema_list_integrity_v223.py
+      - tests/test_pg_cinema_list_integrity_v223.py
+      - .github/workflows/jw-v223-a-list-integrity-20261117.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: jw-v223-a-list-integrity
+  cancel-in-progress: true
+jobs:
+  opt-in-duplicate-list-qa:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JW_ENV: test
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout isolated review candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Preserve original engine, UI and exact permitted diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor b8ee382e6c0fd856c1537d3997c07deef21b69e5 HEAD
+          test "$(git hash-object app/pg_cinema_cutover_front_v223.py)" = ef22d1663a328369e30df038856207734fe3de09
+          test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67
+          test "$(git hash-object app/static/cinema/JARVIS_WORKS_CINEMA.html)" = 9bedf97fe718a94f07861e23670685af00619ca8
+          python - <<'PY'
+          import subprocess
+          old = "b8ee382e6c0fd856c1537d3997c07deef21b69e5"
+          changed = set(subprocess.check_output(
+              ["git","diff","--name-only",old,"HEAD"],text=True
+          ).splitlines())
+          expected = {
+              "app/pg_cinema_list_integrity_v223.py",
+              "tests/test_pg_cinema_list_integrity_v223.py",
+              ".github/workflows/jw-v223-a-list-integrity-20261117.yml",
+          }
+          assert changed == expected, (changed, expected)
+          print("PASS protected original engines/UI byte-identical; isolated diff only")
+          PY
+          python -m py_compile app/pg_cinema_list_integrity_v223.py tests/test_pg_cinema_list_integrity_v223.py
+      - name: Install existing pinned project test requirements
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
+      - name: Run real CutoverFront composition plus existing boundary regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q -p no:cacheprovider --strict-markers \
+            tests/test_pg_cinema_list_integrity_v223.py \
+            tests/test_cinema_pg_cutover_front_v223.py \
+            tests/test_cinema_pg_cutover_merged_header_boundary_v223.py \
+            tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py
+          echo 'PASS isolated duplicate-ID guard and original cutover boundary regressions'
