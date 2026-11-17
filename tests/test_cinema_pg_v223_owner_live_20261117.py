@@ -21,16 +21,16 @@ class Deadline(unittest.TestCase):
 
     def test_relative_limit_is_below_five_hours(self):
         self.assertEqual(d.MAX_WINDOW, timedelta(hours=4,minutes=59))
-        instant = datetime(2026,11,17,9,0,tzinfo=KST)
-        self.assertEqual(d.expiry_value(instant),"2026-11-17 13:59:00+09")
+        instant = datetime(2026,11,18,9,0,tzinfo=KST)
+        self.assertEqual(d.expiry_value(instant),"2026-11-18 13:59:00+09")
 
     def test_deadline_clips_relative_limit(self):
-        instant = datetime(2026,11,17,14,29,tzinfo=KST)
-        self.assertEqual(d.expiry_value(instant),"2026-11-17 14:30:00+09")
+        instant = datetime(2026,11,20,15,59,tzinfo=KST)
+        self.assertEqual(d.expiry_value(instant),"2026-11-20 16:00:00+09")
 
     def test_sql_alters_only_valid_until_login(self):
         text = d.ROLE_SQL.read_text()
-        self.assertEqual(text.count("2026-11-17 14:30:00+09"),1)
+        self.assertEqual(text.count("2026-11-20 16:00:00+09"),1)
         self.assertIn("interval ''5 hours''",text)
         self.assertIn("ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN",text)
         self.assertIn("NOT rolcanlogin",text)
@@ -63,7 +63,7 @@ class FailClosedOrdering(unittest.TestCase):
     def drive(self, psql_return=0, fail_backup=False):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(d,"preflight"), \
-                 patch.object(d,"expiry_value",return_value="2026-11-17 12:00:00+09"), \
+                 patch.object(d,"expiry_value",return_value="2026-11-18 12:00:00+09"), \
                  patch.object(d.sys,"stdin",SimpleNamespace(isatty=lambda:True)), \
                  patch("builtins.input",return_value="YES"), \
                  patch.object(d.existing,"psql",return_value=SimpleNamespace(returncode=psql_return)) as ps, \
