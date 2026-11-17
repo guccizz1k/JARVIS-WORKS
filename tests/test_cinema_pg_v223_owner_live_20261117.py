@@ -561,3 +561,50 @@ class SourcePinInspectionSafety(unittest.TestCase):
             # Inspection must not call the approval/activation code.
             self.assertIn(d.inspect_source_pin(), (0, 2))
 
+
+
+class ClosureDiagnosticReadOnly(unittest.TestCase):
+    def test_probe_never_runs_mutating_backup_functions(self):
+        import io
+        import sys
+        from contextlib import redirect_stdout
+        class FakeError(Exception):
+            sqlstate = "28000"
+            diag = SimpleNamespace(message_primary="role is not permitted to log in")
+        class FakePsycopg:
+            Error = FakeError
+            @staticmethod
+            def connect(**kwargs):
+                raise FakeError("password=SECRET host=PRIVATE")
+        with patch.object(d, "check_sources"), \
+             patch.object(d.existing, "check_private_inputs"), \
+             patch.object(d, "load_dashboard_ca"), \
+             patch.object(d, "read_password_file"), \
+             patch.object(d.existing, "login_kwargs", return_value={}), \
+             patch.object(d.existing, "classify_login_failure_detail", return_value="auth_rejected"), \
+             patch.dict(sys.modules, {"psycopg": FakePsycopg}), \
+             patch.object(d.existing, "psql") as psql, \
+             patch.object(d.existing, "stage_revoke") as revoke, \
+             patch.object(d.existing, "stage_backup") as backup:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(d.diagnose_closure_read_only(), 2)
+            self.assertIn("DIAGNOSTIC SQLSTATE_FAMILY_28", output.getvalue())
+            self.assertIn("DIAGNOSTIC_ONLY_CLOSURE_NOT_PROVEN", output.getvalue())
+            self.assertNotIn("SECRET", output.getvalue())
+            self.assertNotIn("PRIVATE", output.getvalue())
+            psql.assert_not_called()
+            revoke.assert_not_called()
+            backup.assert_not_called()
+
+    def test_probe_fails_closed_before_network_on_missing_inputs(self):
+        with patch.object(d, "check_sources", side_effect=RuntimeError("password=SECRET")), \
+             patch.object(d.existing, "login_kwargs") as kwargs:
+            import io
+            from contextlib import redirect_stdout
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(d.diagnose_closure_read_only(), 2)
+            self.assertNotIn("SECRET", out.getvalue())
+            kwargs.assert_not_called()
+
