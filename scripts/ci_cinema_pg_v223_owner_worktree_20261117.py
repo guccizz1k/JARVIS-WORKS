@@ -82,74 +82,133 @@ def classify_private_backup_log(raw: str) -> tuple[str, str]:
     return "UNCLASSIFIED_BACKUP_FAILURE", "NO_MATCH"
 
 
-def diagnose_owner_only() -> int:
-    """Read-only private incident triage. No DB access, login or backup.
+def classify_private_backup_log(raw: str) -> list[str]:
+    """Return ONLY hard-coded diagnostic labels, never source substrings.
 
-    This output is deliberately limited to known code labels, immutable
-    stage names and status enums. Never print raw logs, exception text,
-    file paths, DSNs, hostnames, key material or table/customer names.
+    The error log is already scrubbed by the protected original engine. Even
+    so, its contents are untrusted, and arbitrary exception/error text must
+    never reach the user console or a GitHub artifact.
+    """
+    allowed = frozenset((
+        "BLOCKED_V223_BACKUP_AUTH_FAILED",
+        "BLOCKED_V223_BACKUP_BAD_CHUNK_LENGTH",
+        "BLOCKED_V223_BACKUP_BAD_HEADER",
+        "BLOCKED_V223_BACKUP_KEY_INVALID",
+        "BLOCKED_V223_BACKUP_KEY_MUST_BE_32_BYTES",
+        "BLOCKED_V223_BACKUP_KEY_REQUIRED",
+        "BLOCKED_V223_BACKUP_TRUNCATED",
+        "BLOCKED_V223_BAD_SCHEMA_NAME",
+        "BLOCKED_V223_DSN_MUST_BE_POSTGRESQL_URL",
+        "BLOCKED_V223_ENCRYPTED_ARTIFACT_TOO_SHORT",
+        "BLOCKED_V223_INVALID_CATALOG_IDENTIFIER",
+        "BLOCKED_V223_MARKER_REFUSED_CLUSTER_NOT_EMPTY",
+        "BLOCKED_V223_OUTPUT_EXISTS_OR_SYMLINK",
+        "BLOCKED_V223_PARTIAL_DUMP_SOURCE_TRUNCATED",
+        "BLOCKED_V223_REAL_SOURCE_HOST_NOT_VERIFIED",
+        "BLOCKED_V223_SIGNATURE_STATEMENT_TIMEOUT",
+        "BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED",
+        "BLOCKED_V223_SOURCE_REQUIRES_VERIFY_FULL_AND_ROOT_CERT",
+        "BLOCKED_V223_SOURCE_ROLE_NOT_LEAST_PRIVILEGE",
+        "BLOCKED_V223_TABLE_OVER_ROW_CAP",
+        "BLOCKED_V223_TABLE_TOO_LARGE_FOR_ROW_DIGEST",
+        "BLOCKED_V223_TARGET_EQUALS_SOURCE",
+        "BLOCKED_V223_TARGET_MUST_BE_LOCAL",
+        "BLOCKED_V223_TARGET_NOT_DECLARED_EPHEMERAL",
+        "BLOCKED_V223_TARGET_NOT_PROVEN_EPHEMERAL",
+        "BLOCKED_V223_TOKEN_REQUIRED_MIN_16_CHARS",
+        "BLOCKED_V223_TOOL_VERSION_UNKNOWN",
+        "BLOCKED_V223_UNKNOWN_NEGATIVE_TEST",
+        "FAIL_V223_BACKUP_DECRYPT_HASH_MISMATCH",
+        "FAIL_V223_INTERRUPTED_BY_SIGNAL",
+    ))
+    categories = []
+    stderr = raw.split("--- stderr (tail) ---", 1)[-1] if "--- stderr (tail) ---" in raw else ""
+    stdout = raw.split("--- stdout (tail) ---", 1)[-1].split("--- stderr (tail) ---", 1)[0] if "--- stdout (tail) ---" in raw else ""
+    matches = set(re.findall(r"\b(?:BLOCKED_V223|FAIL_V223)_[A-Za-z0-9_]+\b", stderr))
+    valid = sorted(matches & allowed)
+    if valid:
+        categories.extend("CODE_" + item for item in valid[:4])
+    if "FAIL_V223_UNEXPECTED_" in stderr:
+        # Only known exception classes, even if the arbitrary suffix contains
+        # potentially sensitive text. No copy of that suffix is ever printed.
+        fixed = (
+            "OperationalError", "ProgrammingError", "IntegrityError",
+            "UndefinedTable", "UndefinedFunction", "ValueError",
+            "TypeError", "KeyError", "PermissionError", "TimeoutExpired",
+            "TimeoutError", "AttributeError", "FileNotFoundError",
+            "UnicodeDecodeError", "IndexError", "AssertionError",
+        )
+        kind = next((name for name in fixed if
+                     re.search(r"\bFAIL_V223_UNEXPECTED_" + name + r"\b", stderr)), None)
+        categories.append("UNEXPECTED_" + kind if kind else "UNEXPECTED_OTHER_CLASS")
+    patterns = (
+        ("PG_DUMP", r"\bpg_dump\b"),
+        ("PG_RESTORE", r"\bpg_restore\b"),
+        ("SOURCE_SNAPSHOT", r"\bpg_export_snapshot\b|invalid snapshot"),
+        ("TLS_OR_CERTIFICATE", r"\bSSL\b|\bTLS\b|certificate verify"),
+        ("AUTHENTICATION", r"password authentication failed|authentication failed"),
+        ("PERMISSION_DENIED", r"permission denied|must be owner"),
+        ("NETWORK_OR_DNS", r"connection refused|could not connect|name or service not known|temporary failure in name resolution"),
+        ("SQL_SYNTAX", r"\bsyntax error\b"),
+        ("TIMEOUT", r"\btimeout\b|timed out"),
+        ("CONCURRENT_DDL", r"lock timeout|canceling statement due to lock"),
+    )
+    for label, pattern in patterns:
+        if re.search(pattern, stderr, flags=re.IGNORECASE):
+            categories.append("PATTERN_" + label)
+    # A JSON report's presence/absence is diagnostic but NOT proof of PASS.
+    if '"signature_mismatches"' in stdout:
+        categories.append("STDOUT_SIGNATURE_CHECK_PRESENT")
+    if '"verdict"' in stdout:
+        categories.append("STDOUT_VERDICT_FIELD_PRESENT")
+    if re.search(r"(?m)^exit_code=(?:1|2|3)\s*$", raw):
+        categories.append("CHILD_NONZERO_EXIT")
+    if not stderr.strip():
+        categories.append("CHILD_STDERR_EMPTY")
+    return list(dict.fromkeys(categories))[:10] or ["UNCLASSIFIED_BACKUP_FAILURE"]
+
+
+def diagnose_owner_only() -> int:
+    """Offline owner-private failure analysis; no source role or network action.
+
+    Output contains ONLY fixed diagnostic categories. It never prints raw error
+    data, user identifiers, source table names, credentials or ciphertext.
     """
     if os.environ.get("CODESPACES") != "true":
         print("BLOCKED OWNER_CODESPACE_REQUIRED")
         return 2
-    private = Path.home() / ".local" / "share" / "jw-v223-restore"
-    log_path = private / "last_backup_error.log"
+    base = Path.home() / ".local" / "share" / "jw-v223-restore"
+    path = base / "last_backup_error.log"
     try:
-        if log_path.is_symlink() or not log_path.is_file():
+        if path.is_symlink() or not path.is_file():
             print("B2_DIAG NO_PROTECTED_ERROR_LOG")
             return 2
-        st = log_path.stat()
-        if (st.st_uid != os.getuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
-                or st.st_size > 16384):
+        st = path.stat()
+        if st.st_uid != os.getuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO) or st.st_size > 16384:
             print("B2_DIAG ERROR_LOG_ACCESS_REFUSED")
             return 2
-        raw = log_path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8")
     except (OSError, ValueError, UnicodeError):
         print("B2_DIAG ERROR_LOG_UNREADABLE")
         return 2
-
-    label, certainty = classify_private_backup_log(raw)
-    print("B2_DIAG", label)
-    print("B2_DIAG_CLASS", certainty)
-    m = re.search(r"(?m)^exit_code=([0-9]{1,3})$", raw)
-    if m:
-        print("B2_CHILD_EXIT", m.group(1) if m.group(1) in {"0","1","2","124","126","127","137","139","143"} else "OTHER")
-    else:
-        print("B2_CHILD_EXIT", "UNKNOWN")
-    print("B2_LOG_HAS_STDERR", "YES" if raw.split("--- stderr (tail) ---",1)[-1].strip() else "NO")
-    # Stage outcomes are from our private, structured summary only, NOT
-    # the raw untrusted backup log and NOT proof of DR success.
-    permitted = ("temporary_login", "restricted_tls_login",
-                 "real_encrypted_backup_independent_restore",
-                 "revoke", "closed_verified")
-    candidates = sorted(private.glob("owner_b2b3_20261117_*.json"), reverse=True)
-    if not candidates:
-        print("OWNER_INCIDENT_REPORT", "ABSENT")
-        return 0
-    candidate = candidates[0]
+    categories = classify_private_backup_log(raw)
+    for category in categories:
+        print("B2_DIAG", category)
+    # Identify stale logs relative to the latest PRIVATE run receipt without
+    # disclosing its name, content or timestamps in the public response.
     try:
-        if candidate.is_symlink() or not candidate.is_file():
-            raise ValueError("invalid owner report")
-        st = candidate.stat()
-        if (st.st_uid != os.getuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
-                or st.st_size > 16384):
-            raise ValueError("unsafe owner report")
-        import json
-        report = json.loads(candidate.read_text(encoding="utf-8"))
-        if not isinstance(report, dict):
-            raise ValueError("invalid owner report")
-        print("OWNER_INCIDENT_REPORT", "PRESENT")
-        status = report.get("verdict")
-        print("OWNER_INCIDENT_VERDICT", "BLOCKED" if status != "PASS" else "CLAIMED_PASS_NOT_REVERIFIED")
-        stages = report.get("stages")
-        if not isinstance(stages, dict):
-            stages = {}
-        for stage in permitted:
-            print("OWNER_STAGE", stage, "REPORTED_PASS" if stages.get(stage) == "PASS" else "NOT_CONFIRMED")
-        lag = st.st_mtime - log_path.stat().st_mtime
-        print("B2_LOG_RELATION", "POSSIBLY_STALE" if lag > 180 or lag < -60 else "NEAR_OWNER_RUN")
-    except (OSError, ValueError, UnicodeError, TypeError):
-        print("OWNER_INCIDENT_REPORT", "UNREADABLE_OR_UNSAFE")
+        reports = [p for p in base.glob("owner_b2b3_20261117_*.json")
+                   if p.is_file() and not p.is_symlink()
+                   and p.stat().st_uid == os.getuid()
+                   and not p.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)]
+        if reports:
+            latest = max(reports, key=lambda p: p.stat().st_mtime_ns)
+            print("B2_LOG_RECENCY",
+                  "PREDATES_LAST_OWNER_RUN" if path.stat().st_mtime_ns + 10_000_000_000 <
+                  latest.stat().st_mtime_ns else "CONSISTENT_WITH_LAST_OWNER_RUN")
+            print("PRIVATE_RUN_SUMMARY", "PRESENT")
+    except (OSError, ValueError):
+        print("B2_LOG_RECENCY UNAVAILABLE")
     return 0
 
 
