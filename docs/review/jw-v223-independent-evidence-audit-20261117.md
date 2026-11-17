@@ -5,7 +5,7 @@ Read-only GitHub API review; pinned source SHA `e4adbdef9f5a792e5a88cdf8fb8d8844
 
 ## Reproduced GitHub facts
 - Source tree: 1,199 entries; app/ 129, tests/ 301, scripts/ 272, db/ 13.
-- Compared against `3e67f942f9fdc9bc7df91070c9e7710d4c8ec019`: 50 commits ahead, 0 behind. The diff includes 31 paths, notably `app/owner_review_app_v223.py`, `app/pg_cinema_legacy_api_v1.py`, `app/static/approved_ui_operational_v223.js`, workflow files and backup scripts.
+- Compared against `3e67f942f9fdc9bc7df91070c9e7710d4c8ec019`: 50 commits ahead, 0 behind. The diff includes 32 paths, notably `app/owner_review_app_v223.py`, `app/pg_cinema_legacy_api_v1.py`, `app/static/approved_ui_operational_v223.js`, workflow files and backup scripts.
 - Latest owner-authorization regression run [44004926575](https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/44004926575): completed success on pinned SHA. Its single job tests **disposable** PG17 negative/positive paths; it does not exercise authenticated Render E2E, the live backup, independent restore, or the complete regression suite.
 - Issue [#142](https://github.com/guccizz1k/JARVIS-WORKS/issues/142) remains open.
 - Earlier synthetic full-regression evidence at [43967909027](https://github.com/guccizz1k/JARVIS-WORKS/actions/runs/43967909027) was on a **different SHA** (`e130c944...`); it is not evidence of a complete regression on the pinned SHA.
@@ -37,4 +37,4 @@ Read-only GitHub API review; pinned source SHA `e4adbdef9f5a792e5a88cdf8fb8d8844
 5. Keep release NO-GO until every gate has evidence. Do not weaken the guard or suppress tests to obtain PASS.
 
 ## Status
-**Independent GitHub audit: PASS (read-only source and CI inspection). Product release: BLOCKED.** No database change, secret access, deployment, or test execution was performed by this audit.
+**Independent GitHub evidence inspection: PARTIAL (selected source and CI inspected; no complete source-code audit, full test execution, independent reproduction, or live evidence verification). Product release: BLOCKED.** No database change, secret access, deployment, or test execution was performed by this audit.
