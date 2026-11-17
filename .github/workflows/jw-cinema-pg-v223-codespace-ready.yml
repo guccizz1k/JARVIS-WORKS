@@ -53,7 +53,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python -I scripts/ci_cinema_pg_guard.py
           python -m py_compile scripts/ci_cinema_pg_v223_codespace_run.py scripts/ci_cinema_pg_v223_codespace_bootstrap.py scripts/ci_cinema_pg_v223_codespace_check.py scripts/ci_cinema_pg_u.py scripts/ci_cinema_pg_go.py tests/test_cinema_pg_go.py
-          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47' 'pytest>=8,<10'
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=50.0.2,<51' 'pytest>=8,<10'
           python -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_codespace_run.py tests/test_cinema_pg_v223_codespace_check.py tests/test_cinema_pg_v223_backup_role_renew_gate.py tests/test_cinema_pg_u.py tests/test_cinema_pg_go.py
       - name: PG17 client tooling through the existing bootstrap (no database)
         run: |
@@ -99,7 +99,7 @@ jobs:
           python -I scripts/ci_cinema_pg_guard.py
           # This runner has PG17 client tools, not a local server. Server-level PG17 checks run in disposable-DB workflows.
           psql --version | grep -E 'PostgreSQL\) 17\.'
-          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47' 'pytest>=8,<10'
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=50.0.2,<51' 'pytest>=8,<10'
           python -c 'import psycopg; print("psycopg", psycopg.__version__)'
       - name: Launcher unit tests (fake drivers, including each reproduced defect)
         run: python -m pytest -q -p no:cacheprovider --noconftest tests/test_cinema_pg_v223_codespace_run.py

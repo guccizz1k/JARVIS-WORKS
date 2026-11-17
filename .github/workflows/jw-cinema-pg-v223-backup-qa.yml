@@ -134,7 +134,7 @@ jobs:
           test "$(docker ps --filter ancestor=postgres:17 -q | wc -l)" -ge 2
       - name: Install Python PG17 test dependencies
         run: |
-          python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=44,<47' 'pytest>=8,<10'
+          python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=50.0.2,<51' 'pytest>=8,<10'
       - name: Use PostgreSQL 17 client binaries from official ephemeral Docker image
         run: |
           set -euo pipefail

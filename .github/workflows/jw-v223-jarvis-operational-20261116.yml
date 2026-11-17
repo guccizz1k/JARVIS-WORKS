@@ -60,7 +60,7 @@ jobs:
               baseline='e130c9440ca7572400d7691647773a9acd8059e9'
               subprocess.run(['git','merge-base','--is-ancestor',baseline,'HEAD'],check=True)
               paths=set(subprocess.check_output(['git','diff','--name-only',baseline,'HEAD'],text=True).splitlines())
-              expected={'app/owner_review_app_v223.py','app/static/approved_ui_operational_v223.js','scripts/ci_v223_owner_review_browser.py','tests/test_v223_review_target_boundary.py','tests/test_v223_messenger_selection_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','app/pg_cinema_legacy_api_v1.py','scripts/ci_v223_business_day_gate.py','requirements.txt'}
+              expected={'app/owner_review_app_v223.py','app/static/approved_ui_operational_v223.js','scripts/ci_v223_owner_review_browser.py','tests/test_v223_review_target_boundary.py','tests/test_v223_messenger_selection_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','app/pg_cinema_legacy_api_v1.py','scripts/ci_v223_business_day_gate.py','requirements.txt','.github/workflows/jw-cinema-pg-v223-backup-qa.yml','.github/workflows/jw-cinema-pg-v223-codespaces-prep.yml','.github/workflows/jw-cinema-pg-v223-backup-interrupt.yml','.github/workflows/jw-cinema-pg-v223-codespace-ready.yml'}
               assert subprocess.check_output(['git','hash-object','app/owner_review_app_v223.py'],text=True).strip()=='54a7d3cee87f2a03ef739c6aa2f50087fb8fb029'
               assert subprocess.check_output(['git','hash-object','app/pg_cinema_legacy_api_v1.py'],text=True).strip()=='6df2848478e7f0f65421a609ea8a9c93a01824e8'
           assert paths==expected,(paths,expected)

@@ -57,7 +57,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Python dependencies
-        run: python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=44,<47' 'pytest>=8,<10'
+        run: python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=50.0.2,<51' 'pytest>=8,<10'
       - name: PostgreSQL 17 client tools (native package, else the official image)
         run: |
           set -euo pipefail
@@ -136,7 +136,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Python dependencies
-        run: python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=44,<47' 'pytest>=8,<10'
+        run: python3 -m pip install --disable-pip-version-check 'psycopg[binary]>=3,<4' 'cryptography>=50.0.2,<51' 'pytest>=8,<10'
       - name: PostgreSQL 17 client tools (native package, else the official image)
         run: |
           set -euo pipefail

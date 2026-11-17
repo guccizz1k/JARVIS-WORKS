@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           trap 'docker rm -f jw-v223-restore >/dev/null 2>&1 || true; rm -f "$HOME/.local/share/jw-v223-restore/restore.sh"' EXIT
-          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=44,<47'
+          python -m pip install --disable-pip-version-check -r requirements-postgres-check.txt 'cryptography>=50.0.2,<51'
           python -m unittest discover -s tests -p 'test_cinema_pg_r.py' -v
           python scripts/ci*pg_r.py
           python -m unittest discover -s tests -p 'test_cinema_pg_n.py' -v
