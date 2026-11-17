@@ -27,9 +27,9 @@ from scripts.pg_backup_v223 import load_key
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_SHA = "f6bd82cfeb127025aa35bbf591b3b984cc947716"
-BRANCH = "review/jw-v223-source-pin-integrated-20261117"
+BRANCH = "review/jw-v223-72h-approval-20261117"
 KST = ZoneInfo("Asia/Seoul")
-OWNER_DEADLINE = datetime(2026, 11, 17, 14, 30, tzinfo=KST)
+OWNER_DEADLINE = datetime(2026, 11, 20, 16, 0, tzinfo=KST)
 MAX_WINDOW = timedelta(hours=4, minutes=59)
 ROLE_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_20261117.sql"
 # Reviewed constraint-deparser correction; every other protected engine stays
@@ -110,7 +110,7 @@ def check_sources() -> None:
         if git("hash-object", path) != git("rev-parse", "HEAD:" + path):
             raise Blocked("review_file_not_exact_head")
     text = ROLE_SQL.read_text(encoding="utf-8")
-    if (text.count("2026-11-17 14:30:00+09") != 1
+    if (text.count("2026-11-20 16:00:00+09") != 1
         or "interval ''5 hours''" not in text
         or "ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN" not in text
         or "BEGIN;" not in text or "COMMIT;" not in text):
