@@ -104,6 +104,22 @@ class FailClosedOrdering(unittest.TestCase):
 
 
 class ErrorVisibility(unittest.TestCase):
+    def test_reviewed_backup_fix_pins_reject_tampered_allowed_paths(self):
+        for corrupted in ('scripts/pg_backup_v223.py','scripts/ci_cinema_pg_guard.py',
+                          'scripts/ci_cinema_pg_v223_codespace_run.py'):
+            with self.subTest(corrupted=corrupted):
+                def fake_git(*args):
+                    if args==('branch','--show-current'):return d.BRANCH
+                    if args==('rev-parse','HEAD') or args==('rev-parse','refs/remotes/origin/'+d.BRANCH):return 'a'*40
+                    if args[:2]==('diff','--name-only'):return 'scripts/pg_backup_v223.py\nscripts/ci_cinema_pg_guard.py'
+                    if args and args[0]=='rev-parse' and args[1].startswith('HEAD:'):
+                        name=args[1][5:]
+                        return 'tampered' if name==corrupted else d.REVIEWED_BACKUP_FIX_BLOBS.get(name,'original')
+                    if args and args[0]=='rev-parse':return 'original'
+                    return ''
+                with patch.dict(d.os.environ,{'CODESPACES':'true'}),patch.object(d,'git',side_effect=fake_git):
+                    with self.assertRaisesRegex(d.Blocked,'protected_engine_blob_changed'):d.check_sources()
+
     def test_private_exception_is_never_echoed_from_preflight(self):
         with patch.object(d, "check_sources", side_effect=RuntimeError("password=INTERNAL_SUPER_SECRET")):
             with self.assertRaises(d.Blocked) as ctx:
@@ -257,6 +273,32 @@ class OwnerPrivateDiagnosis(unittest.TestCase):
 
 
 class PrivateIncidentClassification(unittest.TestCase):
+    def test_summary_failure_has_one_reported_comparison_classification(self):
+        import json
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        summary = {'verdict':'PARTIAL: restore not verified','restore_verified':False,
+                   'signature_mismatches':['constraints:PRIVATE_OBJECT'],
+                   'signature_mismatch_diagnostics':{'constraints':{
+                       'missing_in_restore':0,'unexpected_in_restore':0,
+                       'different_definition_or_grants':1}}}
+        raw='exit_code=1\n--- stdout (tail) ---\n'+json.dumps(summary)+'\n--- stderr (tail) ---\n'
+        self.assertEqual(w.classify_private_backup_log(raw),
+                         ('SIGNATURE_COMPARISON_REPORTED_FAILURE','CHILD_SUMMARY_HINT'))
+        hints=w.extract_backup_summary_indicators(raw)
+        self.assertIn('CONSTRAINTS_MISSING_REPORTED_ZERO',hints)
+        self.assertIn('CONSTRAINTS_UNEXPECTED_REPORTED_ZERO',hints)
+        self.assertIn('CONSTRAINTS_DIFFERENT_REPORTED_NONZERO',hints)
+        self.assertNotIn('PRIVATE_OBJECT',str(hints))
+
+    def test_constraint_counts_never_coerce_strings_or_booleans(self):
+        import json
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        raw='--- stdout (tail) ---\n'+json.dumps({'signature_mismatch_diagnostics':{
+            'constraints':{'missing_in_restore':True,'unexpected_in_restore':'PRIVATE',
+                           'different_definition_or_grants':-1}}})+'\n--- stderr (tail) ---\n'
+        hints=w.extract_backup_summary_indicators(raw)
+        self.assertIn('CONSTRAINTS_COUNTS_INVALID_OR_INCOMPLETE',hints)
+        self.assertNotIn('PRIVATE',str(hints))
     def test_nonanchored_engine_error_code_is_safely_extracted(self):
         from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
         label, mode = w.classify_private_backup_log(

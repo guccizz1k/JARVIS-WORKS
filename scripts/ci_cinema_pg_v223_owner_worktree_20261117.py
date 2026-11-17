@@ -116,6 +116,13 @@ def classify_private_backup_log(raw: str) -> tuple[str, str]:
     for label, pattern in patterns:
         if re.search(pattern, stderr, flags=re.I):
             return label, "COARSE_PATTERN"
+    # A nonzero child may return a complete verification verdict with no stderr.
+    # Keep this a REPORTED hint, never an independently verified failure cause.
+    hints = extract_backup_summary_indicators(raw)
+    if ('VERDICT_REPORTED_INCOMPLETE' in hints or 'VERDICT_REPORTED_FAIL' in hints):
+        if 'SIGNATURE_MISMATCHES_REPORTED_PRESENT' in hints:
+            return 'SIGNATURE_COMPARISON_REPORTED_FAILURE', 'CHILD_SUMMARY_HINT'
+        return 'BACKUP_VERDICT_REPORTED_INCOMPLETE', 'CHILD_SUMMARY_HINT'
     return "UNCLASSIFIED_BACKUP_FAILURE", "NO_MATCH"
 
 
@@ -278,7 +285,26 @@ def extract_backup_summary_indicators(raw: str) -> list[str]:
     if tables:
         result.append("TABLE_COUNT_REPORTED_" +
                       ("65" if tables.group(1) == "65" else "NOT_65"))
-    return result[:24]
+    # Counts distinguish missing/extra objects from a definition-only mismatch.
+    # Decode the complete diagnostics object: never infer from an arbitrary
+    # nested field or print an object name/definition from the untrusted log.
+    key = re.search(r'"signature_mismatch_diagnostics"\s*:\s*', out)
+    if key:
+        try:
+            diagnostic, _ = json.JSONDecoder().raw_decode(out[key.end():].lstrip())
+            part = diagnostic.get('constraints') if isinstance(diagnostic, dict) else None
+            fields = (('missing_in_restore','MISSING'),('unexpected_in_restore','UNEXPECTED'),
+                      ('different_definition_or_grants','DIFFERENT'))
+            if (not isinstance(part,dict) or any(type(part.get(name)) is not int or
+                    not 0 <= part[name] <= 100000 for name,_ in fields)):
+                result.append('CONSTRAINTS_COUNTS_INVALID_OR_INCOMPLETE')
+            else:
+                for name,label in fields:
+                    result.append('CONSTRAINTS_'+label+'_REPORTED_'+
+                                  ('ZERO' if part[name]==0 else 'NONZERO'))
+        except (ValueError, TypeError):
+            result.append('CONSTRAINTS_COUNTS_INVALID_OR_INCOMPLETE')
+    return result[:32]
 
 
 def diagnose_owner_only() -> int:

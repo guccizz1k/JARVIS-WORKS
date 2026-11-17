@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - review/jw-v223-p1p0-b2b3-20261117
+      - review/codex-v223-full-audit-20261117
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,12 +34,35 @@ jobs:
       - name: Preserve reviewed parent, original UI and all source engines
         run: |
           git merge-base --is-ancestor f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD
-          git diff --exit-code f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD -- app db scripts/pg_backup_v223.py scripts/ci_cinema_pg_guard.py scripts/ci_cinema_pg_v223_codespace_run.py
+          git diff --exit-code f6bd82cfeb127025aa35bbf591b3b984cc947716 HEAD -- app db tests/test_v223_pg_backup.py scripts/ci_cinema_pg_v223_codespace_run.py
+          test "$(git hash-object scripts/pg_backup_v223.py)" = d6578569100f88c7d2d3f493fdb06bbe3374c64f
+          test "$(git hash-object scripts/ci_cinema_pg_guard.py)" = 2805ab4be2fb22221d96752fc4316af50b0bb653
           python3 -m py_compile scripts/ci_cinema_pg_v223_owner_live_20261117.py tests/test_cinema_pg_v223_owner_live_20261117.py
       - name: Install independent test prerequisites
         run: python3 -m pip install --disable-pip-version-check -r requirements-postgres-check.txt cryptography
       - name: Test expiry, fail-closed ordering and mandatory revocation without live database
         run: python3 -m unittest discover -s tests -p 'test_cinema_pg_v223_owner_live_20261117.py' -v
+      - name: Constraint representation and real mutation regressions
+        run: python3 -m pytest -q -p no:cacheprovider tests/test_cinema_pg_v223_constraint_canonical.py tests/test_v223_pg_backup.py
+      - name: Five varied disposable PG17 dump-encryption-restore and constraint counterexamples
+        env:
+          JW_CINEMA_PG_DISPOSABLE: '1'
+          PGHOST: 127.0.0.1
+          PGPORT: '5432'
+          PGUSER: postgres
+        run: |
+          set -euo pipefail
+          # Use the official PG17 client without depending on runner libc/PG16.
+          # Only generated disposable fixtures are mounted; match the host UID.
+          mkdir -p "$RUNNER_TEMP/pg17-client"
+          for tool in pg_dump pg_restore; do
+            cat > "$RUNNER_TEMP/pg17-client/$tool" <<'SH'
+          #!/bin/sh
+          exec docker run --rm --network host --user "$(id -u):$(id -g)" -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGSSLMODE -e PGSSLROOTCERT postgres:17 "$(basename "$0")" "$@"
+          SH
+            chmod 700 "$RUNNER_TEMP/pg17-client/$tool"
+          done
+          PATH="$RUNNER_TEMP/pg17-client:$PATH" python3 -m scripts.ci_cinema_pg_v223_constraint_gate
       - name: Restart only a verified stopped disposable PG17 and preserve existing volume
         run: |
           docker run -d --name jw-v223-restore --restart no \

@@ -4,6 +4,7 @@ on:
     branches:
       - review/jw-v223-jarvis-p2-operational-20261116
       - review/codex-v223-independent-20261117
+      - review/codex-v223-full-audit-20261117
     paths:
       - app/**
       - tests/**
@@ -11,6 +12,9 @@ on:
       - scripts/ci_v223_stage_readonly.py
       - scripts/ci_v223_vault_offline_restore.py
       - scripts/ci_v223_vault_offline_synthetic.py
+      - scripts/pg_backup_v223.py
+      - scripts/ci_cinema_pg_v223*.py
+      - scripts/ci_cinema_pg_guard.py
       - .github/workflows/jw-v223-jarvis-operational-20261116.yml
   workflow_dispatch:
 permissions:
@@ -44,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$GITHUB_REF_NAME" in
-            review/jw-v223-jarvis-p2-operational-20261116|review/codex-v223-independent-20261117) ;;
+            review/jw-v223-jarvis-p2-operational-20261116|review/codex-v223-independent-20261117|review/codex-v223-full-audit-20261117) ;;
             *) echo 'Unapproved review branch'; exit 1 ;;
           esac
           git merge-base --is-ancestor d91ebf00c63012a78845d094afbd15be0deefd1c HEAD
@@ -63,6 +67,13 @@ jobs:
               expected={'app/owner_review_app_v223.py','app/static/approved_ui_operational_v223.js','scripts/ci_v223_owner_review_browser.py','tests/test_v223_review_target_boundary.py','tests/test_v223_messenger_selection_node.cjs','.github/workflows/jw-v223-jarvis-operational-20261116.yml','app/pg_cinema_legacy_api_v1.py','scripts/ci_v223_business_day_gate.py','requirements.txt','.github/workflows/jw-cinema-pg-v223-backup-qa.yml','.github/workflows/jw-cinema-pg-v223-codespaces-prep.yml','.github/workflows/jw-cinema-pg-v223-backup-interrupt.yml','.github/workflows/jw-cinema-pg-v223-codespace-ready.yml'}
               assert subprocess.check_output(['git','hash-object','app/owner_review_app_v223.py'],text=True).strip()=='54a7d3cee87f2a03ef739c6aa2f50087fb8fb029'
               assert subprocess.check_output(['git','hash-object','app/pg_cinema_legacy_api_v1.py'],text=True).strip()=='6df2848478e7f0f65421a609ea8a9c93a01824e8'
+          elif os.environ['GITHUB_REF_NAME']=='review/codex-v223-full-audit-20261117':
+              baseline='e4adbdef9f5a792e5a88cdf8fb8d8844c2b768ad'
+              subprocess.run(['git','merge-base','--is-ancestor',baseline,'HEAD'],check=True)
+              paths=set(subprocess.check_output(['git','diff','--name-only',baseline,'HEAD'],text=True).splitlines())
+              expected={'.github/workflows/jw-cinema-pg-v223-owner-live-20261117.yml','.github/workflows/jw-v223-jarvis-operational-20261116.yml','scripts/ci_cinema_pg_guard.py','scripts/ci_cinema_pg_v223_owner_live_20261117.py','scripts/ci_cinema_pg_v223_owner_worktree_20261117.py','scripts/ci_cinema_pg_v223_constraint_gate.py','scripts/pg_backup_v223.py','tests/test_cinema_pg_v223_owner_live_20261117.py','tests/test_cinema_pg_v223_constraint_canonical.py'}
+              for path,blob in {'scripts/pg_backup_v223.py':'d6578569100f88c7d2d3f493fdb06bbe3374c64f','scripts/ci_cinema_pg_guard.py':'2805ab4be2fb22221d96752fc4316af50b0bb653'}.items():
+                  assert subprocess.check_output(['git','hash-object',path],text=True).strip()==blob
           assert paths==expected,(paths,expected)
           PY
           test "$(git hash-object app/main.py)" = 775f500c8a7549d434ce196a8e0763aea33e1c67

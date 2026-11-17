@@ -29,6 +29,12 @@ KST = ZoneInfo("Asia/Seoul")
 OWNER_DEADLINE = datetime(2026, 11, 17, 14, 30, tzinfo=KST)
 MAX_WINDOW = timedelta(hours=4, minutes=59)
 ROLE_SQL = ROOT / "scripts/review/cinema_pg_v223_backup_role_20261117.sql"
+# Reviewed constraint-deparser correction; every other protected engine stays
+# at BASE_SHA. These are exact blobs, not a path-only exemption.
+REVIEWED_BACKUP_FIX_BLOBS = {
+    'scripts/pg_backup_v223.py':'d6578569100f88c7d2d3f493fdb06bbe3374c64f',
+    'scripts/ci_cinema_pg_guard.py':'2805ab4be2fb22221d96752fc4316af50b0bb653',
+}
 # Only these paths may differ from the latest already reviewed/CI-passing code.
 ALLOWED_NEW = frozenset({
     "scripts/review/cinema_pg_v223_backup_role_20261117.sql",
@@ -36,6 +42,11 @@ ALLOWED_NEW = frozenset({
     "tests/test_cinema_pg_v223_owner_live_20261117.py",
     ".github/workflows/jw-cinema-pg-v223-owner-live-20261117.yml",
     "scripts/ci_cinema_pg_v223_owner_worktree_20261117.py",
+    'scripts/pg_backup_v223.py',
+    'scripts/ci_cinema_pg_guard.py',
+    'tests/test_cinema_pg_v223_constraint_canonical.py',
+    'scripts/ci_cinema_pg_v223_constraint_gate.py',
+    '.github/workflows/jw-v223-jarvis-operational-20261116.yml',
 })
 SOURCE_PINNED = (
     "scripts/pg_backup_v223.py",
@@ -84,7 +95,10 @@ def check_sources() -> None:
     if any(line != "?? .github/supabase-root-2021.cer" for line in dirty):
         raise Blocked("uncommitted_or_unexpected_file")
     for path in SOURCE_PINNED:
-        if git("rev-parse", "HEAD:" + path) != git("rev-parse", BASE_SHA + ":" + path):
+        expected = REVIEWED_BACKUP_FIX_BLOBS.get(path)
+        if expected is None:
+            expected = git("rev-parse", BASE_SHA + ":" + path)
+        if git("rev-parse", "HEAD:" + path) != expected:
             raise Blocked("protected_engine_blob_changed")
     for path in changed:
         if git("hash-object", path) != git("rev-parse", "HEAD:" + path):

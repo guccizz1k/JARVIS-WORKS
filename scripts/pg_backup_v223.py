@@ -323,7 +323,11 @@ SIGNATURE_QUERIES = {
                    JOIN pg_namespace n ON n.oid=c.relnamespace
                    WHERE n.nspname=%(s)s AND NOT t.tgisinternal ORDER BY 1""",
     "indexes": """SELECT indexname, md5(indexdef) FROM pg_indexes WHERE schemaname=%(s)s ORDER BY 1""",
-    "constraints": """SELECT c.relname||'.'||k.conname, md5(pg_get_constraintdef(k.oid))
+    # PostgreSQL's precedence-aware output removes display-only associative
+    # AND grouping introduced by catalog history/reparse. Keep the entire
+    # definition (including validation/deferrability); never strip parentheses
+    # or ignore constraint mismatches in client code.
+    "constraints": """SELECT c.relname||'.'||k.conname, md5(pg_get_constraintdef(k.oid, true))
                       FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
                       JOIN pg_namespace n ON n.oid=c.relnamespace
                       WHERE n.nspname=%(s)s ORDER BY 1""",
