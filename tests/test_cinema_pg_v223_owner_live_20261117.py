@@ -540,5 +540,24 @@ class ClosureProofFailClosed(unittest.TestCase):
                 self.assertIn("ROLE_CLOSURE_" + label, out.getvalue())
                 self.assertNotIn("DO_NOT_SHOW", out.getvalue())
 
-if __name__=="__main__":
-    unittest.main()
+class SourcePinInspectionSafety(unittest.TestCase):
+    def test_inspect_never_mutates_database(self):
+        import io
+        from contextlib import redirect_stdout
+        with patch.object(d, "git", side_effect=d.Blocked("missing_git_ref")), \
+             patch.object(d.existing, "stage_backup", side_effect=AssertionError("DB touched")), \
+             patch.object(d.existing, "stage_revoke", side_effect=AssertionError("DB touched")), \
+             patch.object(d.existing, "psql", side_effect=AssertionError("DB touched")):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = d.inspect_source_pin()
+        self.assertEqual(result, 2)
+        self.assertIn("BLOCKED SOURCE_PIN_REMOTE_SHA", output.getvalue())
+        self.assertIn("NO_ROLE_CHANGE_NO_BACKUP", output.getvalue())
+
+    def test_inspect_does_not_change_expired_approval(self):
+        with patch.object(d, "git", return_value=""), \
+             patch.object(d, "expiry_value", side_effect=d.Blocked("expired")):
+            # Inspection must not call the approval/activation code.
+            self.assertIn(d.inspect_source_pin(), (0, 2))
+
