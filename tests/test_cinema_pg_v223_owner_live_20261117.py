@@ -30,7 +30,7 @@ class Deadline(unittest.TestCase):
 
     def test_sql_alters_only_valid_until_login(self):
         text = d.ROLE_SQL.read_text()
-        self.assertEqual(text.count("2026-11-17 14:30:00+09"),2)
+        self.assertEqual(text.count("2026-11-17 14:30:00+09"),1)
         self.assertIn("interval ''5 hours''",text)
         self.assertIn("ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN",text)
         self.assertIn("NOT rolcanlogin",text)
