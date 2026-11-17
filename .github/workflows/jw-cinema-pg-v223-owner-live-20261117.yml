@@ -5,6 +5,7 @@ on:
       - review/jw-v223-p1p0-b2b3-20261117
       - review/codex-v223-full-audit-20261117
       - review/jw-v223-p1-nologin-proof-20261117
+      - review/jw-v223-source-pin-diagnostics-20261117
   workflow_dispatch:
 permissions:
   contents: read
