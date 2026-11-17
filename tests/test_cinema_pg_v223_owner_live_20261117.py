@@ -609,6 +609,33 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
             kwargs.assert_not_called()
 
 
+class TransportProbeTests(unittest.TestCase):
+    def test_dns_failure_without_disclosing_hostname(self):
+        import socket
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror(-2, "PRIVATE_HOST")):
+            self.assertEqual(d.probe_transport_read_only({"host": "PRIVATE_HOST", "port": 5432}), "DNS_ERROR")
+
+    def test_tcp_timeout_without_disclosing_secrets(self):
+        with patch("socket.getaddrinfo", return_value=[object()]), \
+             patch("socket.create_connection", side_effect=TimeoutError("password=SECRET")):
+            self.assertEqual(d.probe_transport_read_only({"host": "private.example", "port": 5432}), "TCP_TIMEOUT")
+
+    def test_tcp_success_without_authentication(self):
+        from unittest.mock import MagicMock
+        socket_handle = MagicMock()
+        with patch("socket.getaddrinfo", return_value=[object()]), \
+             patch("socket.create_connection") as connect:
+            connect.return_value.__enter__.return_value = socket_handle
+            self.assertEqual(d.probe_transport_read_only({"host": "private.example", "port": 5432}), "TCP_REACHABLE")
+            connect.assert_called_once_with(("private.example", 5432), timeout=3.0)
+
+    def test_invalid_host_and_port_never_contact_network(self):
+        with patch("socket.getaddrinfo") as resolver:
+            self.assertEqual(d.probe_transport_read_only({"host": "/tmp/.s.PGSQL.5432"}), "UNSUPPORTED_HOST")
+            self.assertEqual(d.probe_transport_read_only({"host": "private.example", "port": "bad"}), "INVALID_PORT")
+            resolver.assert_not_called()
+
+
 class ClosureClientExceptionDiagnostics(unittest.TestCase):
     def test_nested_timeout_classified_without_secrets(self):
         import socket
