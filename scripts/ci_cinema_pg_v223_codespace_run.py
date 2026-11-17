@@ -112,17 +112,32 @@ def scrub(text: str, environ: dict | None = None) -> str:
 
 
 def classify_login_failure(exc: BaseException) -> str:
-    """``auth_rejected`` only when the SERVER answered the login with an authentication/authorization refusal.
-    DNS, TCP, TLS, timeouts and anything unrecognised are ``transport_or_unknown`` and prove nothing about the role."""
+    """A role is closed only when the server explicitly refuses login for NOLOGIN."""
+    return "auth_rejected" if classify_login_failure_detail(exc) == "auth_rejected" else "transport_or_unknown"
+
+
+def classify_login_failure_detail(exc: BaseException) -> str:
+    """Return a non-secret code. A wrong password or generic 28xxx is not proof of NOLOGIN."""
     state = getattr(exc, "sqlstate", None)
-    if isinstance(state, str) and state.startswith("28"):
-        return "auth_rejected"
-    text = str(exc).lower()
-    if "fatal:" in text:
-        after = text.split("fatal:", 1)[1]
-        if any(mark in after for mark in ("not permitted to log in", "password authentication failed", "authentication failed")):
+    message = str(exc).lower()
+    if "fatal:" in message:
+        fatal = message.split("fatal:", 1)[1]
+        if "role" in fatal and "not permitted to log in" in fatal:
             return "auth_rejected"
-    return "transport_or_unknown"
+    if state == "28P01" or "password authentication failed" in message:
+        return "bad_credentials"
+    if isinstance(state, str) and state.startswith("28"):
+        return "auth_unverified"
+    if any(term in message for term in ("certificate verify failed", "certificate verify", "ssl error", "tls handshake", "ssl syscall")):
+        return "tls_failure"
+    if any(term in message for term in ("timed out", "timeout expired", "operation timed out")):
+        return "timeout"
+    if (isinstance(state, str) and state.startswith("08")) or any(term in message for term in (
+            "name or service not known", "temporary failure in name resolution",
+            "could not translate host name", "nodename nor servname", "connection refused",
+            "network is unreachable", "no route to host")):
+        return "network_failure"
+    return "unknown"
 
 
 def now() -> datetime:
@@ -436,7 +451,7 @@ def stage_prove_closed() -> dict:
     """Measured, not assumed. Closed needs ALL of: the server rejects a new login (an authentication refusal, not a DNS/TCP/TLS
     failure), the admin sees ``rolcanlogin`` false, and zero sessions for the role."""
     import psycopg
-    refusal, attempts = "none", 0
+    refusal, attempts, diagnostic = "none", 0, "unknown"
     for attempts in range(1, REVOKE_ATTEMPTS + 1):
         try:
             with psycopg.connect(**login_kwargs()):
@@ -444,18 +459,20 @@ def stage_prove_closed() -> dict:
         except Blocked:
             raise
         except psycopg.Error as exc:
-            refusal = classify_login_failure(exc)
+            diagnostic = classify_login_failure_detail(exc)
+            refusal = "auth_rejected" if diagnostic == "auth_rejected" else "transport_or_unknown"
         if refusal == "auth_rejected":
             break
-        time.sleep(RETRY_PAUSE_S)
+        if attempts < REVOKE_ATTEMPTS:
+            time.sleep(RETRY_PAUSE_S)
     with psycopg.connect(os.environ["JW_PG_ADMIN_DSN"], connect_timeout=8, autocommit=True) as conn:
         sessions = conn.execute("SELECT count(*) FROM pg_stat_activity WHERE usename = %s", (ROLE,)).fetchone()[0]
         can_login = conn.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname = %s", (ROLE,)).fetchone()[0]
     if sessions != 0 or can_login:
         raise Blocked(f"role not closed: sessions={sessions} can_login={can_login}")
     if refusal != "auth_rejected":
-        raise Blocked("new_login_refusal_not_verified: the login attempt failed for a network/TLS/unknown reason, not because the "
-                      f"server rejected the role ({attempts} attempts); the role looks closed from the admin side only")
+        raise Blocked("new_login_refusal_not_verified: reason=" + diagnostic +
+                      f"; attempts={attempts}; admin catalog shows role closed, but new-login refusal is unverified")
     return {"new_login_refused": True, "refusal": refusal, "active_sessions": 0, "rolcanlogin": False}
 
 
