@@ -609,6 +609,28 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
             kwargs.assert_not_called()
 
 
+class PostgresSslRequestTests(unittest.TestCase):
+    def test_supported_rejected_and_no_response(self):
+        from unittest.mock import MagicMock
+        for answer, expected in ((b"S", "PG_SSL_SUPPORTED"), (b"N", "PG_SSL_REJECTED"), (b"", "PG_NO_RESPONSE"), (b"X", "PG_UNEXPECTED_RESPONSE")):
+            sock = MagicMock()
+            sock.recv.return_value = answer
+            with patch("socket.create_connection") as connect:
+                connect.return_value.__enter__.return_value = sock
+                self.assertEqual(d.probe_pg_ssl_request_read_only({"host": "private.example", "port": 5432}), expected)
+                self.assertEqual(sock.sendall.call_args.args[0], b"\\x00\\x00\\x00\\x08\\x04\\xd2\\x16\\x2f")
+
+    def test_timeout_redacted(self):
+        with patch("socket.create_connection", side_effect=TimeoutError("SECRET_PASSWORD")):
+            self.assertEqual(d.probe_pg_ssl_request_read_only({"host": "private.example"}), "PG_HANDSHAKE_TIMEOUT")
+
+    def test_invalid_input_does_not_connect(self):
+        with patch("socket.create_connection") as connect:
+            self.assertEqual(d.probe_pg_ssl_request_read_only({"host": "/tmp/socket"}), "UNSUPPORTED_HOST")
+            self.assertEqual(d.probe_pg_ssl_request_read_only({"host": "private.example", "port": 70000}), "INVALID_PORT")
+            connect.assert_not_called()
+
+
 class TransportProbeTests(unittest.TestCase):
     def test_dns_failure_without_disclosing_hostname(self):
         import socket
