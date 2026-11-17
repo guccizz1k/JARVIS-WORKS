@@ -111,9 +111,9 @@ jobs:
                   "-f","/code/scripts/review/cinema_pg_v223_backup_role_20261117.sql"
               ],capture_output=True,text=True,timeout=55).returncode
           try:
-              assert invoke("2026-11-17 19:30:00+09") != 0, "over-five-hour or approval-cap activation accepted"
+              assert invoke("2026-11-20 20:59:00+09") != 0, "over-five-hour or approval-cap activation accepted"
               assert invoke("2026-11-12 00:00:00+00") != 0, "expired activation accepted"
-              deadline=datetime(2026,11,17,14,30,tzinfo=ZoneInfo("Asia/Seoul"))
+              deadline=datetime(2026,11,20,16,0,tzinfo=ZoneInfo("Asia/Seoul"))
               now=datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
               if now < deadline-timedelta(minutes=4):
                   until=(now+timedelta(minutes=3)).strftime("%Y-%m-%d %H:%M:%S+09")
@@ -122,7 +122,7 @@ jobs:
                       assert db.execute("SELECT rolcanlogin FROM pg_roles WHERE rolname='jw_backup_ro'").fetchone()[0] is True
                   print("PASS disposable PG17 positive bounded role activation")
               else:
-                  assert invoke("2026-11-17 14:30:00+09") != 0, "expired absolute approval accepted"
+                  assert invoke("2026-11-20 16:00:00+09") != 0, "expired absolute approval accepted"
                   print("PASS disposable PG17 expired absolute limit fail-closed (window elapsed; no positive activation)")
           finally:
               with psycopg.connect(dsn,autocommit=True) as db:
