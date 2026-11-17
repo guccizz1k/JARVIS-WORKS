@@ -744,12 +744,107 @@ def catalog_closure_read_only() -> int:
     return 0 if result == "CATALOG_CLOSED_NO_SESSIONS" else 2
 
 
+def classify_origin_nologin_refusal(error: BaseException) -> str:
+    """Only origin PostgreSQL SQLSTATE 28000 + exact role text proves NOLOGIN.
+
+    An SQLSTATE family alone, bad password, missing server diagnostics or a
+    pooler error is never enough. Never return raw server text or DSNs.
+    """
+    state = getattr(error, "sqlstate", None)
+    diag = getattr(error, "diag", None)
+    primary = getattr(diag, "message_primary", None) if diag is not None else None
+    expected = 'role "' + existing.ROLE + '" is not permitted to log in'
+    if state == "28000" and primary == expected:
+        return "ORIGIN_NOLOGIN_REFUSAL_VERIFIED"
+    if state == "28P01":
+        return "BAD_CREDENTIALS_NOT_PROOF"
+    if isinstance(state, str) and state.startswith("28"):
+        return "AUTH_ERROR_NOT_NOLOGIN_PROOF"
+    if isinstance(state, str) and state.startswith("08"):
+        return "NETWORK_ERROR_NOT_PROOF"
+    return "ORIGIN_AUTH_UNVERIFIED"
+
+
+def verify_origin_direct_closed_read_only() -> int:
+    """Direct PG17 auth-refusal evidence; no SQL through the role, no mutations.
+
+    This command intentionally does not use Supavisor. Its origin host is the
+    known project's documented direct Postgres endpoint, and verify-full
+    authenticates it to the operator-imported CA. Requires verified owner-local
+    password and independent admin catalog checks before and after the attempt.
+    """
+    for label, check in (
+        ("SOURCE_PIN", check_sources),
+        ("CA_TLS", load_dashboard_ca),
+        ("BACKUP_AUTH", read_password_file),
+    ):
+        try:
+            check()
+        except BaseException:
+            print("BLOCKED ORIGIN_PREFLIGHT_" + label)
+            print("NO_ROLE_CHANGE_NO_BACKUP")
+            return 2
+
+    accepted_catalog_states = frozenset((
+        "CATALOG_CLOSED_NO_SESSIONS",
+        "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE",
+    ))
+    before = probe_admin_closure_catalog_read_only()
+    print("DIAGNOSTIC ADMIN_BEFORE_" + before)
+    if before not in accepted_catalog_states:
+        print("BLOCKED ORIGIN_ADMIN_NOT_CLOSED")
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 2
+
+    origin_options = {
+        "host": "db." + existing.PROJECT_REF + ".supabase.co",
+        "port": 5432,
+        "dbname": "postgres",
+        "user": existing.ROLE,
+        "password": read_password_file(),
+        "sslmode": "verify-full",
+        "sslrootcert": str(existing.CERT_FILE),
+        "connect_timeout": 8,
+    }
+    if classify_postgres_route(origin_options) != "SUPABASE_DIRECT_CANDIDATE":
+        print("BLOCKED ORIGIN_ENDPOINT_UNVERIFIED")
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 2
+
+    import psycopg
+    try:
+        # Never issue SQL or print an exception (which can contain a secret).
+        with psycopg.connect(**origin_options):
+            print("URGENT ORIGIN_DIRECT_NEW_LOGIN_ACCEPTED")
+            print("NO_ROLE_CHANGE_NO_BACKUP")
+            return 2
+    except psycopg.Error as error:
+        result = classify_origin_nologin_refusal(error)
+    except BaseException:
+        result = "ORIGIN_CONNECT_UNVERIFIED"
+    print("DIAGNOSTIC ORIGIN_DIRECT_" + result)
+
+    after = probe_admin_closure_catalog_read_only()
+    print("DIAGNOSTIC ADMIN_AFTER_" + after)
+    if result == "ORIGIN_NOLOGIN_REFUSAL_VERIFIED" and after in accepted_catalog_states:
+        print("PASS ORIGIN_DIRECT_NOLOGIN_AND_ADMIN_ZERO_SESSIONS")
+        if after == "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE":
+            print("NOTICE VALID_UNTIL_FUTURE_NOLOGIN_STILL_ENFORCED")
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 0
+    print("BLOCKED ORIGIN_CLOSURE_NOT_VERIFIED")
+    print("NO_ROLE_CHANGE_NO_BACKUP")
+    return 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose", "catalog", "startup"))
+    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose", "catalog", "startup", "origin-closed"))
     args = parser.parse_args()
     if args.action == 'inspect':
         return inspect_source_pin()
+    if args.action == 'origin-closed':
+        return verify_origin_direct_closed_read_only()
     if args.action == 'startup':
         return startup_diagnostic_read_only()
     if args.action == 'catalog':
