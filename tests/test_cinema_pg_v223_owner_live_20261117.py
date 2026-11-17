@@ -609,6 +609,30 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
             kwargs.assert_not_called()
 
 
+class CatalogCommandTests(unittest.TestCase):
+    def test_catalog_only_never_proves_login_refusal(self):
+        with patch.object(d, "check_sources"), \
+             patch.object(d, "probe_admin_closure_catalog_read_only",
+                          return_value="CATALOG_CLOSED_NO_SESSIONS"), \
+             patch("builtins.print") as output:
+            self.assertEqual(d.catalog_closure_read_only(), 0)
+        lines = [call.args[0] for call in output.call_args_list]
+        self.assertIn("CATALOG_ONLY_NEW_LOGIN_REFUSAL_NOT_PROVEN", lines)
+        self.assertIn("NO_ROLE_CHANGE_NO_BACKUP", lines)
+
+    def test_catalog_failure_is_blocked(self):
+        with patch.object(d, "check_sources"), \
+             patch.object(d, "probe_admin_closure_catalog_read_only",
+                          return_value="CATALOG_NOT_CLOSED"):
+            self.assertEqual(d.catalog_closure_read_only(), 2)
+
+    def test_source_pin_blocks_before_admin_contact(self):
+        with patch.object(d, "check_sources", side_effect=d.Blocked("unsafe")), \
+             patch.object(d, "probe_admin_closure_catalog_read_only") as probe:
+            self.assertEqual(d.catalog_closure_read_only(), 2)
+            probe.assert_not_called()
+
+
 class AdminClosureCatalogTests(unittest.TestCase):
     def test_missing_admin_dsn_is_blocked(self):
         with patch.dict(d.os.environ, {}, clear=True):
