@@ -256,5 +256,71 @@ class OwnerPrivateDiagnosis(unittest.TestCase):
             self.assertNotIn("FAKE PASS",stream.getvalue())
 
 
+class PrivateIncidentClassification(unittest.TestCase):
+    def test_nonanchored_engine_error_code_is_safely_extracted(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        label, mode = w.classify_private_backup_log(
+            "exit_code=1\n--- stderr (tail) ---\nWARNING: retry; "
+            "FAIL_V223_UNEXPECTED_OperationalError: password=PRIVATE\n"
+        )
+        self.assertEqual((label, mode), ("FAIL_V223_UNEXPECTED_OperationalError", "ENGINE_MACHINE_CODE"))
+
+    def test_unclassified_log_maps_to_fixed_categories(self):
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        examples = (
+            ("pg_dump: error: connection failed; secret=abc", "DUMP_ENGINE_ERROR"),
+            ("pg_restore: fatal: cannot open file", "RESTORE_ENGINE_ERROR"),
+            ("could not translate host name a.secret.host", "DNS_OR_TCP_CONNECT"),
+            ("certificate verify failed", "TLS_OR_CERTIFICATE"),
+            ("permission denied for schema secret_internal", "DATABASE_PERMISSION"),
+            ("No space left on device", "STORAGE_CAPACITY"),
+            ("Traceback (most recent call last):", "PYTHON_EXCEPTION"),
+        )
+        for raw, expected in examples:
+            with self.subTest(expected=expected):
+                category, mode = w.classify_private_backup_log(raw)
+                self.assertEqual((category,mode), (expected,"COARSE_PATTERN"))
+
+    def test_report_stages_are_redacted_and_incident_never_claims_pass(self):
+        import io,json
+        from contextlib import redirect_stdout
+        from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            directory = home / ".local/share/jw-v223-restore"
+            directory.mkdir(parents=True)
+            log = directory / "last_backup_error.log"
+            log.write_text("exit_code=1\n--- stderr (tail) ---\n"
+                           "pg_restore error: secret key and customer names\n")
+            log.chmod(0o600)
+            report = directory / "owner_b2b3_20261117_112000Z.json"
+            report.write_text(json.dumps({
+                "verdict": "BLOCKED",
+                "stages": {
+                    "temporary_login": "PASS",
+                    "restricted_tls_login": "PASS",
+                    "revoke": "PASS",
+                    "closed_verified": "blocked secret path",
+                    "unexpected": "SECRET_KEY_SHOULD_NOT_LEAK"
+                },
+                "secret": "hidden-in-report"
+            }))
+            report.chmod(0o600)
+            stream=io.StringIO()
+            with patch.dict(w.os.environ,{"CODESPACES":"true"}),\
+                 patch.object(w.Path,"home",return_value=home),\
+                 redirect_stdout(stream):
+                result=w.diagnose_owner_only()
+            shown=stream.getvalue()
+            self.assertEqual(result,0)
+            self.assertIn("B2_DIAG RESTORE_ENGINE_ERROR",shown)
+            self.assertIn("OWNER_INCIDENT_VERDICT BLOCKED",shown)
+            self.assertIn("OWNER_STAGE temporary_login REPORTED_PASS",shown)
+            self.assertIn("OWNER_STAGE closed_verified NOT_CONFIRMED",shown)
+            self.assertNotIn("secret key",shown)
+            self.assertNotIn("hidden-in-report",shown)
+            self.assertNotIn("SECRET_KEY_SHOULD_NOT_LEAK",shown)
+
+
 if __name__=="__main__":
     unittest.main()
