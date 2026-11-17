@@ -579,6 +579,116 @@ def probe_admin_closure_catalog_read_only() -> str:
         return "ADMIN_CATALOG_UNVERIFIED"
 
 
+def classify_pg_startup_frame(kind: bytes, payload: bytes) -> str:
+    """Coarse, bounded PostgreSQL v3 first-message classifier; never closure proof.
+
+    The peer may be a pooler. No untrusted server string is returned/logged.
+    """
+    import struct
+    if kind == b"R":
+        if len(payload) < 4:
+            return "STARTUP_MALFORMED_AUTH"
+        auth_code = struct.unpack("!I", payload[:4])[0]
+        if auth_code == 0:
+            return "STARTUP_AUTH_OK_UNVERIFIED"
+        if auth_code in (3, 5, 7, 8, 9, 10, 11, 12):
+            return "STARTUP_AUTH_CHALLENGE"
+        return "STARTUP_AUTH_UNKNOWN"
+    if kind == b"E":
+        if not payload.endswith(b"\x00") or len(payload) > 8192:
+            return "STARTUP_MALFORMED_ERROR"
+        codes = [field[1:] for field in payload.split(b"\x00") if field.startswith(b"C")]
+        if len(codes) != 1 or len(codes[0]) != 5:
+            return "STARTUP_ERROR_UNVERIFIED"
+        if codes[0].startswith(b"28"):
+            return "STARTUP_SQLSTATE_28_UNVERIFIED"
+        if codes[0].startswith(b"08"):
+            return "STARTUP_SQLSTATE_08_UNVERIFIED"
+        return "STARTUP_OTHER_ERROR"
+    return "STARTUP_UNEXPECTED_MESSAGE"
+
+
+def probe_pg_startup_read_only(options: dict) -> str:
+    """Verified TLS and one PostgreSQL StartupMessage; never send a password/SQL.
+
+    Result identifies the first protocol stage only. The peer may be a pooler;
+    it cannot constitute evidence that the origin role refused LOGIN.
+    """
+    import socket
+    import ssl
+    import struct
+    host, user = options.get("host"), options.get("user")
+    if (not isinstance(host, str) or not host or host.startswith("/") or "," in host
+            or not isinstance(user, str) or not user or "\x00" in user
+            or len(user.encode("utf-8")) > 256
+            or options.get("sslmode") != "verify-full"):
+        return "STARTUP_PREFLIGHT_UNSUPPORTED"
+    try:
+        port = int(options.get("port", 5432))
+        if not 1 <= port <= 65535:
+            return "STARTUP_INVALID_PORT"
+        context = ssl.create_default_context(cafile=options["sslrootcert"])
+        context.check_hostname = True
+        context.verify_mode = ssl.CERT_REQUIRED
+    except (OSError, KeyError, TypeError, ValueError, OverflowError, ssl.SSLError):
+        return "STARTUP_TLS_PREFLIGHT_FAILED"
+
+    def receive_exact(sock, count: int) -> bytes:
+        result = bytearray()
+        while len(result) < count:
+            chunk = sock.recv(count - len(result))
+            if not chunk:
+                raise EOFError
+            result.extend(chunk)
+        return bytes(result)
+
+    params = b"user\x00" + user.encode("utf-8") + b"\x00database\x00postgres\x00\x00"
+    packet = struct.pack("!II", len(params) + 8, 196608) + params
+    try:
+        with socket.create_connection((host, port), timeout=4.0) as raw:
+            raw.settimeout(4.0)
+            raw.sendall(struct.pack("!II", 8, 80877103))
+            if receive_exact(raw, 1) != b"S":
+                return "STARTUP_SSL_NOT_ACCEPTED"
+            with context.wrap_socket(raw, server_hostname=host) as secure:
+                secure.settimeout(4.0)
+                secure.sendall(packet)
+                kind = receive_exact(secure, 1)
+                size = struct.unpack("!I", receive_exact(secure, 4))[0]
+                if not 4 <= size <= 8196:
+                    return "STARTUP_FRAME_INVALID"
+                return classify_pg_startup_frame(kind, receive_exact(secure, size - 4))
+    except ssl.SSLCertVerificationError:
+        return "STARTUP_TLS_CERT_FAILED"
+    except ssl.SSLError:
+        return "STARTUP_TLS_HANDSHAKE_FAILED"
+    except TimeoutError:
+        return "STARTUP_TIMEOUT"
+    except (OSError, EOFError, ValueError, struct.error):
+        return "STARTUP_IO_ERROR"
+
+
+def startup_diagnostic_read_only() -> int:
+    """No password, no login, no SQL, no backup, no role changes."""
+    for label, check in (("SOURCE_PIN", check_sources), ("CA_TLS", load_dashboard_ca)):
+        try:
+            check()
+        except BaseException:
+            print("BLOCKED STARTUP_PREFLIGHT_" + label)
+            print("NO_ROLE_CHANGE_NO_BACKUP")
+            return 2
+    opts = {
+        "host": existing.HOST, "port": existing.PORT,
+        "user": existing.ROLE + "." + existing.PROJECT_REF,
+        "sslmode": "verify-full", "sslrootcert": str(existing.CERT_FILE),
+    }
+    print("DIAGNOSTIC CONNECTION_ROUTE_" + classify_postgres_route(opts))
+    print("DIAGNOSTIC PG_" + probe_pg_startup_read_only(opts))
+    print("STARTUP_ONLY_ORIGIN_ROLE_REFUSAL_NOT_PROVEN")
+    print("NO_ROLE_CHANGE_NO_BACKUP")
+    return 2
+
+
 def diagnose_closure_read_only() -> int:
     """Bounded non-mutating diagnostic; NEVER treats classification as closure proof."""
     for label, check in (("SOURCE_PIN", check_sources),
@@ -636,10 +746,12 @@ def catalog_closure_read_only() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose", "catalog"))
+    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose", "catalog", "startup"))
     args = parser.parse_args()
     if args.action == 'inspect':
         return inspect_source_pin()
+    if args.action == 'startup':
+        return startup_diagnostic_read_only()
     if args.action == 'catalog':
         return catalog_closure_read_only()
     if args.action == 'diagnose':
