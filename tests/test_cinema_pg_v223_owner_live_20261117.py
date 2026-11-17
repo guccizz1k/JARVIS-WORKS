@@ -609,6 +609,27 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
             kwargs.assert_not_called()
 
 
+class RouteClassificationTests(unittest.TestCase):
+    def test_pooler_route_detected_without_secrets(self):
+        self.assertEqual(d.classify_postgres_route({
+            "host": "aws-0-ap-northeast-2.pooler.supabase.com",
+            "user": "jw_backup_ro.projectref",
+            "password": "DO_NOT_PRINT",
+        }), "SUPABASE_POOLER")
+
+    def test_direct_candidate_is_not_proof(self):
+        self.assertEqual(d.classify_postgres_route({
+            "host": "db.projectref.supabase.co",
+            "user": "jw_backup_ro",
+        }), "SUPABASE_DIRECT_CANDIDATE")
+
+    def test_unknown_routes_fail_closed(self):
+        self.assertEqual(d.classify_postgres_route({
+            "host": "custom.internal", "user": "jw_backup_ro",
+        }), "UNKNOWN")
+        self.assertEqual(d.classify_postgres_route({}), "UNKNOWN")
+
+
 class PostgresTlsTests(unittest.TestCase):
 
     def test_preflight_rejects_unverified_tls_and_bad_port(self):
