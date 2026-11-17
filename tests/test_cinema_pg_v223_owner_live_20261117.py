@@ -618,7 +618,7 @@ class PostgresSslRequestTests(unittest.TestCase):
             with patch("socket.create_connection") as connect:
                 connect.return_value.__enter__.return_value = sock
                 self.assertEqual(d.probe_pg_ssl_request_read_only({"host": "private.example", "port": 5432}), expected)
-                self.assertEqual(sock.sendall.call_args.args[0], b"\\x00\\x00\\x00\\x08\\x04\\xd2\\x16\\x2f")
+                self.assertEqual(sock.sendall.call_args.args[0], bytes.fromhex("0000000804d2162f"))
 
     def test_timeout_redacted(self):
         with patch("socket.create_connection", side_effect=TimeoutError("SECRET_PASSWORD")):
