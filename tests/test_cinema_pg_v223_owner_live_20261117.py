@@ -216,7 +216,7 @@ class OwnerPrivateDiagnosis(unittest.TestCase):
                  redirect_stdout(stream):
                 code = w.diagnose_owner_only()
             self.assertEqual(code,0)
-            self.assertIn("B2_DIAG CODE_BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED", stream.getvalue())
+            self.assertIn("B2_DETAIL CODE_BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED", stream.getvalue())
             self.assertNotIn(secret,stream.getvalue())
 
     def test_diagnosis_rejects_symlink_and_world_readable_private_logs(self):
@@ -327,7 +327,7 @@ class FailureRootCauseClassification(unittest.TestCase):
         from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
         raw = ("exit_code=1\n--- stderr (tail) ---\n"
                "FAIL_V223_UNEXPECTED_OperationalError\npassword=VERY_SECRET")
-        categories = w.classify_private_backup_log(raw)
+        categories = w.classify_private_backup_log_details(raw)
         self.assertIn("UNEXPECTED_OperationalError", categories)
         self.assertIn("CHILD_NONZERO_EXIT", categories)
         self.assertNotIn("VERY_SECRET", str(categories))
@@ -337,7 +337,7 @@ class FailureRootCauseClassification(unittest.TestCase):
         raw = ("exit_code=1\n--- stdout (tail) ---\n"
                "customer_private_identifiers\n--- stderr (tail) ---\n"
                "pg_dump: error: connection refused 192.0.2.1 password=LEAK")
-        categories = w.classify_private_backup_log(raw)
+        categories = w.classify_private_backup_log_details(raw)
         self.assertIn("PATTERN_PG_DUMP", categories)
         self.assertIn("PATTERN_NETWORK_OR_DNS", categories)
         self.assertNotIn("LEAK", str(categories))
@@ -346,7 +346,7 @@ class FailureRootCauseClassification(unittest.TestCase):
     def test_summary_verdict_with_empty_stderr_not_misreported_pass(self):
         from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
         raw = 'exit_code=1\n--- stdout (tail) ---\n{"verdict":"FAIL","signature_mismatches":["rows:sensitive"]}\n--- stderr (tail) ---\n'
-        categories = w.classify_private_backup_log(raw)
+        categories = w.classify_private_backup_log_details(raw)
         self.assertIn("STDOUT_VERDICT_FIELD_PRESENT", categories)
         self.assertIn("STDOUT_SIGNATURE_CHECK_PRESENT", categories)
         self.assertIn("CHILD_STDERR_EMPTY", categories)
@@ -355,7 +355,7 @@ class FailureRootCauseClassification(unittest.TestCase):
     def test_pretend_secret_in_machine_code_suffix_is_not_disclosed(self):
         from scripts import ci_cinema_pg_v223_owner_worktree_20261117 as w
         raw = '--- stderr (tail) ---\nBLOCKED_V223_UNLISTED_password_sensitive_value\n'
-        self.assertNotIn("password_sensitive_value", str(w.classify_private_backup_log(raw)))
+        self.assertNotIn("password_sensitive_value", str(w.classify_private_backup_log_details(raw)))
 
 
 if __name__=="__main__":
