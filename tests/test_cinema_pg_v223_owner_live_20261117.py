@@ -680,6 +680,71 @@ class AdminClosureCatalogTests(unittest.TestCase):
         self.assertEqual(verdict, "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE")
 
 
+class OriginNetworkProbeTests(unittest.TestCase):
+    def test_only_pinned_origin_is_contacted(self):
+        with patch("socket.getaddrinfo") as lookup:
+            result = d.probe_origin_ip_network_read_only("example.org")
+            self.assertEqual(result["DNS"], "ENDPOINT_NOT_PINNED")
+            lookup.assert_not_called()
+
+    def test_ipv6_only_unreachable_is_distinct_from_auth(self):
+        import errno
+        import socket
+        host = "db." + d.existing.PROJECT_REF + ".supabase.co"
+        addresses = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "",
+                      ("::1", 5432, 0, 0))]
+        with patch("socket.getaddrinfo", return_value=addresses), \
+             patch("socket.socket") as socket_factory:
+            connection = socket_factory.return_value.__enter__.return_value
+            connection.connect.side_effect = OSError(errno.ENETUNREACH,
+                                                    "SECRET_NETWORK_INFO")
+            result = d.probe_origin_ip_network_read_only(host)
+        self.assertEqual(result, {"DNS": "IPV6_ONLY",
+                                  "IPV4": "NO_DNS_RECORD",
+                                  "IPV6": "IP_ROUTE_UNAVAILABLE"})
+
+    def test_ipv4_reachable_classifies_without_login(self):
+        import socket
+        host = "db." + d.existing.PROJECT_REF + ".supabase.co"
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                      ("127.0.0.1", 5432))]
+        with patch("socket.getaddrinfo", return_value=addresses), \
+             patch("socket.socket") as socket_factory:
+            result = d.probe_origin_ip_network_read_only(host)
+        self.assertEqual(result["DNS"], "IPV4_ONLY")
+        self.assertEqual(result["IPV4"], "TCP_REACHABLE")
+        self.assertEqual(result["IPV6"], "NO_DNS_RECORD")
+        socket_factory.return_value.__enter__.return_value.connect.assert_called_once()
+
+    def test_dns_failure_is_redacted(self):
+        import socket
+        host = "db." + d.existing.PROJECT_REF + ".supabase.co"
+        with patch("socket.getaddrinfo",
+                   side_effect=socket.gaierror(-2, "PRIVATE_IP SECRET")):
+            self.assertEqual(d.probe_origin_ip_network_read_only(host),
+                             {"DNS": "LOOKUP_FAILED", "IPV4": "NOT_RUN",
+                              "IPV6": "NOT_RUN"})
+
+    def test_network_only_command_never_proves_closure(self):
+        with patch.object(d, "check_sources"), \
+             patch.object(d, "load_dashboard_ca"), \
+             patch.object(d, "probe_origin_ip_network_read_only",
+                          return_value={"DNS": "IPV6_ONLY", "IPV4": "NO_DNS_RECORD",
+                                        "IPV6": "IP_ROUTE_UNAVAILABLE"}), \
+             patch("builtins.print") as output:
+            self.assertEqual(d.origin_network_diagnostic_read_only(), 2)
+        lines = [item.args[0] for item in output.call_args_list]
+        self.assertIn("DIAGNOSTIC ORIGIN_NET_IPV6_IP_ROUTE_UNAVAILABLE", lines)
+        self.assertIn("ORIGIN_NETWORK_ONLY_NEW_LOGIN_REFUSAL_NOT_PROVEN", lines)
+        self.assertIn("NO_ROLE_CHANGE_NO_BACKUP", lines)
+
+    def test_network_probe_does_not_bypass_source_integrity(self):
+        with patch.object(d, "check_sources", side_effect=d.Blocked("dirty")), \
+             patch.object(d, "probe_origin_ip_network_read_only") as net:
+            self.assertEqual(d.origin_network_diagnostic_read_only(), 2)
+            net.assert_not_called()
+
+
 class OriginDirectClosureTests(unittest.TestCase):
     def test_only_exact_origin_role_denial_is_proof(self):
         good = SimpleNamespace(
