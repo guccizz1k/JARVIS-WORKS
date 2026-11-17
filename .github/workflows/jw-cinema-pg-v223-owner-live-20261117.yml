@@ -39,7 +39,7 @@ jobs:
           test "$(git hash-object scripts/ci_cinema_pg_guard.py)" = 2805ab4be2fb22221d96752fc4316af50b0bb653
           python3 -m py_compile scripts/ci_cinema_pg_v223_owner_live_20261117.py tests/test_cinema_pg_v223_owner_live_20261117.py
       - name: Install independent test prerequisites
-        run: python3 -m pip install --disable-pip-version-check -r requirements-postgres-check.txt cryptography
+        run: python3 -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt
       - name: Test expiry, fail-closed ordering and mandatory revocation without live database
         run: python3 -m unittest discover -s tests -p 'test_cinema_pg_v223_owner_live_20261117.py' -v
       - name: Constraint representation and real mutation regressions
