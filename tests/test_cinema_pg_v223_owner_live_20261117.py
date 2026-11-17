@@ -609,6 +609,47 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
             kwargs.assert_not_called()
 
 
+class AdminClosureCatalogTests(unittest.TestCase):
+    def test_missing_admin_dsn_is_blocked(self):
+        with patch.dict(d.os.environ, {}, clear=True):
+            self.assertEqual(d.probe_admin_closure_catalog_read_only(), "ADMIN_DSN_MISSING")
+
+    def _run_with_rows(self, rows):
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.side_effect = rows
+        with patch.dict(d.os.environ, {"JW_PG_ADMIN_DSN": "fake"}):
+            with patch("psycopg.connect", return_value=conn):
+                verdict = d.probe_admin_closure_catalog_read_only()
+        return verdict, conn
+
+    def test_readonly_admin_catalog_closed(self):
+        verdict, conn = self._run_with_rows([
+            ("postgres", "postgres", 170011), (False, True), (0,)
+        ])
+        self.assertEqual(verdict, "CATALOG_CLOSED_NO_SESSIONS")
+        self.assertIn("SET TRANSACTION READ ONLY",
+                      [item.args[0] for item in conn.execute.call_args_list])
+
+    def test_untrusted_admin_identity_is_blocked(self):
+        verdict, conn = self._run_with_rows([
+            ("other", "postgres", 170011)
+        ])
+        self.assertEqual(verdict, "ADMIN_IDENTITY_UNVERIFIED")
+
+    def test_login_enabled_is_not_closed(self):
+        verdict, conn = self._run_with_rows([
+            ("postgres", "postgres", 170011), (True, False), (0,)
+        ])
+        self.assertEqual(verdict, "CATALOG_NOT_CLOSED")
+
+    def test_active_session_is_not_closed(self):
+        verdict, conn = self._run_with_rows([
+            ("postgres", "postgres", 170011), (False, True), (1,)
+        ])
+        self.assertEqual(verdict, "CATALOG_NOT_CLOSED")
+
+
 class RouteClassificationTests(unittest.TestCase):
     def test_pooler_route_detected_without_secrets(self):
         self.assertEqual(d.classify_postgres_route({
