@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from zoneinfo import ZoneInfo
 from scripts import ci_cinema_pg_v223_owner_live_20261117 as d
 
@@ -610,7 +610,6 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
 
 
 class PostgresTlsTests(unittest.TestCase):
-    from unittest.mock import MagicMock
 
     def test_preflight_rejects_unverified_tls_and_bad_port(self):
         self.assertEqual(d.probe_pg_tls_read_only({"host": "private.example", "sslmode": "require", "sslrootcert": "/tmp/ca"}), "TLS_PREFLIGHT_UNSUPPORTED")
