@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -51,9 +53,51 @@ def verify_input_checkout() -> str:
     return current
 
 
+def diagnose_owner_only() -> int:
+    """Read *only* the already-scrubbed owner-private error file.
+
+    Never echo raw logs, paths, stdout, SQL error messages, DSNs, keys, table
+    names or records. Regex begins at stderr line start and returns only a
+    bounded machine identifier; otherwise use UNCLASSIFIED.
+    """
+    if os.environ.get("CODESPACES") != "true":
+        print("BLOCKED OWNER_CODESPACE_REQUIRED")
+        return 2
+    path = Path.home() / ".local" / "share" / "jw-v223-restore" / "last_backup_error.log"
+    try:
+        if path.is_symlink() or not path.is_file():
+            print("B2_DIAG NO_PROTECTED_ERROR_LOG")
+            return 2
+        st = path.stat()
+        if st.st_uid != os.getuid() or st.st_mode & (stat.S_IRWXG | stat.S_IRWXO) or st.st_size > 16384:
+            print("B2_DIAG ERROR_LOG_ACCESS_REFUSED")
+            return 2
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, ValueError, UnicodeError):
+        print("B2_DIAG ERROR_LOG_UNREADABLE")
+        return 2
+    tail = raw.split("--- stderr (tail) ---", 1)[-1] if "--- stderr (tail) ---" in raw else ""
+    found = re.search(r"(?m)^(BLOCKED_V223_[A-Za-z0-9_]+|FAIL_V223_[A-Za-z0-9_]+)", tail)
+    code = found.group(1)[:110] if found else "UNCLASSIFIED_BACKUP_FAILURE"
+    print("B2_DIAG", code)
+    # Private summary is optional. Only an allowlisted outcome may be shown.
+    from scripts.ci_cinema_pg_v223_codespace_run import SUMMARY_FILE
+    if SUMMARY_FILE.is_file() and not SUMMARY_FILE.is_symlink():
+        try:
+            st = SUMMARY_FILE.stat()
+            if st.st_uid == os.getuid() and not st.st_mode & (stat.S_IRWXG | stat.S_IRWXO) and st.st_size <= 16384:
+                import json
+                summary = json.loads(SUMMARY_FILE.read_text(encoding="utf-8"))
+                if isinstance(summary, dict):
+                    print("PRIVATE_RUN_SUMMARY", "PRESENT")
+        except (OSError, ValueError, UnicodeError):
+            pass
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run"))
+    parser.add_argument("action", choices=("check", "run", "diagnose"))
     args = parser.parse_args(argv)
     try:
         commit = verify_input_checkout()
@@ -61,6 +105,10 @@ def main(argv: list[str] | None = None) -> int:
         print("BLOCKED ORIGINAL_CHECKOUT_" + type(exc).__name__)
         print("NO_ROLE_CHANGE_NO_BACKUP")
         return 2
+
+    # Diagnose does NOT open a worktree, read credentials, or contact Supabase.
+    if args.action == "diagnose":
+        return diagnose_owner_only()
 
     # The original owner workspace can be dirty; it remains completely untouched.
     parent = Path(tempfile.mkdtemp(prefix="jw-v223-p1p0-isolated-"))
