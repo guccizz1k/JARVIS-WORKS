@@ -680,6 +680,116 @@ class AdminClosureCatalogTests(unittest.TestCase):
         self.assertEqual(verdict, "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE")
 
 
+class OriginDirectClosureTests(unittest.TestCase):
+    def test_only_exact_origin_role_denial_is_proof(self):
+        good = SimpleNamespace(
+            sqlstate="28000",
+            diag=SimpleNamespace(message_primary='role "jw_backup_ro" is not permitted to log in'),
+        )
+        self.assertEqual(d.classify_origin_nologin_refusal(good),
+                         "ORIGIN_NOLOGIN_REFUSAL_VERIFIED")
+        for state, message in (
+            ("28000", 'role "other" is not permitted to log in'),
+            ("28000", "tenant not found"),
+            ("28P01", 'role "jw_backup_ro" is not permitted to log in'),
+            ("08006", 'role "jw_backup_ro" is not permitted to log in'),
+            (None, 'role "jw_backup_ro" is not permitted to log in'),
+        ):
+            error = SimpleNamespace(sqlstate=state,
+                                    diag=SimpleNamespace(message_primary=message))
+            self.assertNotEqual(d.classify_origin_nologin_refusal(error),
+                                "ORIGIN_NOLOGIN_REFUSAL_VERIFIED")
+        self.assertEqual(d.classify_origin_nologin_refusal(
+            SimpleNamespace(sqlstate="28000", diag=None)),
+            "AUTH_ERROR_NOT_NOLOGIN_PROOF")
+
+    def _mock_environment(self):
+        return [
+            patch.object(d, "check_sources"),
+            patch.object(d, "load_dashboard_ca"),
+            patch.object(d, "read_password_file", return_value="FAKE_PASSWORD_ONLY"),
+        ]
+
+    def test_direct_origin_rejection_and_admin_catalog_is_pass(self):
+        import psycopg
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for item in self._mock_environment():
+                stack.enter_context(item)
+            admin = stack.enter_context(patch.object(
+                d, "probe_admin_closure_catalog_read_only",
+                side_effect=["ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE",
+                             "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE"]))
+            stack.enter_context(patch.object(
+                d, "classify_origin_nologin_refusal",
+                return_value="ORIGIN_NOLOGIN_REFUSAL_VERIFIED"))
+            connect = stack.enter_context(
+                patch("psycopg.connect",
+                      side_effect=psycopg.OperationalError("secret=DO_NOT_PRINT")))
+            output = stack.enter_context(patch("builtins.print"))
+            self.assertEqual(d.verify_origin_direct_closed_read_only(), 0)
+        args = connect.call_args.kwargs
+        self.assertEqual(args["host"], "db." + d.existing.PROJECT_REF + ".supabase.co")
+        self.assertEqual(args["user"], d.existing.ROLE)
+        self.assertEqual(args["sslmode"], "verify-full")
+        self.assertEqual(args["port"], 5432)
+        self.assertEqual(admin.call_count, 2)
+        printed = "\n".join(str(item.args[0]) for item in output.call_args_list)
+        self.assertIn("PASS ORIGIN_DIRECT_NOLOGIN_AND_ADMIN_ZERO_SESSIONS", printed)
+        self.assertIn("NOTICE VALID_UNTIL_FUTURE_NOLOGIN_STILL_ENFORCED", printed)
+        self.assertNotIn("DO_NOT_PRINT", printed)
+        self.assertNotIn("FAKE_PASSWORD_ONLY", printed)
+
+    def test_direct_origin_unknown_auth_is_blocked(self):
+        import psycopg
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for item in self._mock_environment():
+                stack.enter_context(item)
+            stack.enter_context(patch.object(
+                d, "probe_admin_closure_catalog_read_only",
+                side_effect=["CATALOG_CLOSED_NO_SESSIONS", "CATALOG_CLOSED_NO_SESSIONS"]))
+            stack.enter_context(patch.object(
+                d, "classify_origin_nologin_refusal",
+                return_value="BAD_CREDENTIALS_NOT_PROOF"))
+            stack.enter_context(patch("psycopg.connect",
+                                     side_effect=psycopg.OperationalError("private")))
+            self.assertEqual(d.verify_origin_direct_closed_read_only(), 2)
+
+    def test_successful_login_is_urgent_and_never_pass(self):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for item in self._mock_environment():
+                stack.enter_context(item)
+            check = stack.enter_context(patch.object(
+                d, "probe_admin_closure_catalog_read_only",
+                return_value="CATALOG_CLOSED_NO_SESSIONS"))
+            conn = MagicMock()
+            connect = stack.enter_context(patch("psycopg.connect", return_value=conn))
+            self.assertEqual(d.verify_origin_direct_closed_read_only(), 2)
+            self.assertEqual(check.call_count, 1)
+            connect.assert_called_once()
+            conn.execute.assert_not_called()
+
+    def test_unclosed_admin_blocks_before_direct_auth(self):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for item in self._mock_environment():
+                stack.enter_context(item)
+            stack.enter_context(patch.object(
+                d, "probe_admin_closure_catalog_read_only",
+                return_value="ROLE_LOGIN_ENABLED"))
+            connect = stack.enter_context(patch("psycopg.connect"))
+            self.assertEqual(d.verify_origin_direct_closed_read_only(), 2)
+            connect.assert_not_called()
+
+    def test_dirty_worktree_blocks_before_direct_auth(self):
+        with patch.object(d, "check_sources", side_effect=d.Blocked("dirty")), \
+             patch("psycopg.connect") as connect:
+            self.assertEqual(d.verify_origin_direct_closed_read_only(), 2)
+            connect.assert_not_called()
+
+
 class PgStartupFrameTests(unittest.TestCase):
     def test_authentication_sasl_is_only_challenge(self):
         self.assertEqual(d.classify_pg_startup_frame(b"R", b"\x00\x00\x00\x0a"),
