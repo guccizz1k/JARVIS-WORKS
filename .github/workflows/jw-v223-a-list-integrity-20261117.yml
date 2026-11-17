@@ -6,6 +6,8 @@ on:
     paths:
       - app/pg_cinema_list_integrity_v223.py
       - tests/test_pg_cinema_list_integrity_v223.py
+      - tests/fixtures/v223_list_integrity_asgi.py
+      - scripts/ci_v223_list_integrity_browser.py
       - .github/workflows/jw-v223-a-list-integrity-20261117.yml
   workflow_dispatch:
 permissions:
@@ -48,6 +50,8 @@ jobs:
           expected = {
               "app/pg_cinema_list_integrity_v223.py",
               "tests/test_pg_cinema_list_integrity_v223.py",
+              "tests/fixtures/v223_list_integrity_asgi.py",
+              "scripts/ci_v223_list_integrity_browser.py",
               ".github/workflows/jw-v223-a-list-integrity-20261117.yml",
           }
           assert changed == expected, (changed, expected)
@@ -66,3 +70,22 @@ jobs:
             tests/test_cinema_pg_cutover_merged_header_boundary_v223.py \
             tests/test_cinema_pg_v223_fail_closed_cookie_and_merged_outage.py
           echo 'PASS isolated duplicate-ID guard and original cutover boundary regressions'
+      - name: Install disposable Chromium and WebKit browsers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'playwright>=1.50,<2'
+          python -m playwright install --with-deps chromium webkit
+      - name: Real Chromium and WebKit local HTTPS boundary E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          JW_ENV=test JW_NO_EXTERNAL_DATABASE=1 python -m scripts.ci_v223_list_integrity_browser
+      - name: Preserve synthetic-only browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-v223-a-list-integrity-synthetic-browser
+          path: artifacts/v223-a-list-integrity/*.png
+          if-no-files-found: ignore
+          retention-days: 3
