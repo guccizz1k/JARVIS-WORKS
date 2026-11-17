@@ -608,3 +608,55 @@ class ClosureDiagnosticReadOnly(unittest.TestCase):
             self.assertNotIn("SECRET", out.getvalue())
             kwargs.assert_not_called()
 
+
+class ClosureClientExceptionDiagnostics(unittest.TestCase):
+    def test_nested_timeout_classified_without_secrets(self):
+        import socket
+        secret = "password=NEVER_PRINT_THIS"
+        outer = RuntimeError(secret)
+        outer.__cause__ = TimeoutError(secret)
+        self.assertEqual(d.classify_client_exception_kind(outer), "TIMEOUT")
+
+    def test_dns_exception_is_distinct_from_auth(self):
+        import socket
+        error = socket.gaierror(-2, "host=NEVER_PRINT_THIS")
+        self.assertEqual(d.classify_client_exception_kind(error), "DNS_ERROR")
+
+    def test_unknown_exception_fails_closed(self):
+        self.assertEqual(d.classify_client_exception_kind(Exception("password=SECRET")), "UNCLASSIFIED")
+
+    def test_exception_cycle_bounded(self):
+        a, b = RuntimeError("secret"), RuntimeError("secret2")
+        a.__cause__ = b
+        b.__cause__ = a
+        self.assertEqual(d.classify_client_exception_kind(a), "UNCLASSIFIED")
+
+    def test_diagnostic_prints_only_fixed_classification(self):
+        import io
+        import sys
+        from contextlib import redirect_stdout
+        class FakeError(Exception):
+            sqlstate = None
+            diag = None
+        class FakePsycopg:
+            Error = FakeError
+            @staticmethod
+            def connect(**kwargs):
+                err = FakeError("password=NEVER_PRINT_THIS host=PRIVATE")
+                err.__cause__ = TimeoutError("password=NEVER_PRINT_THIS")
+                raise err
+        with patch.object(d, "check_sources"), \
+             patch.object(d.existing, "check_private_inputs"), \
+             patch.object(d, "load_dashboard_ca"), \
+             patch.object(d, "read_password_file"), \
+             patch.object(d.existing, "login_kwargs", return_value={}), \
+             patch.object(d.existing, "classify_login_failure_detail", return_value="unknown"), \
+             patch.dict(sys.modules, {"psycopg": FakePsycopg}):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(d.diagnose_closure_read_only(), 2)
+            output = out.getvalue()
+            self.assertIn("DIAGNOSTIC CLIENT_EXCEPTION_TIMEOUT", output)
+            self.assertIn("DIAGNOSTIC_ONLY_CLOSURE_NOT_PROVEN", output)
+            self.assertNotIn("NEVER_PRINT_THIS", output)
+            self.assertNotIn("PRIVATE", output)
