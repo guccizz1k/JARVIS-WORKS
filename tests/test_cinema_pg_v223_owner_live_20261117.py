@@ -680,6 +680,61 @@ class AdminClosureCatalogTests(unittest.TestCase):
         self.assertEqual(verdict, "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE")
 
 
+class PgStartupFrameTests(unittest.TestCase):
+    def test_authentication_sasl_is_only_challenge(self):
+        self.assertEqual(d.classify_pg_startup_frame(b"R", b"\x00\x00\x00\x0a"),
+                         "STARTUP_AUTH_CHALLENGE")
+
+    def test_authentication_ok_does_not_prove_role_closed(self):
+        self.assertEqual(d.classify_pg_startup_frame(b"R", b"\x00\x00\x00\x00"),
+                         "STARTUP_AUTH_OK_UNVERIFIED")
+
+    def test_sqlstate_28_from_pooler_is_not_proof(self):
+        self.assertEqual(d.classify_pg_startup_frame(
+            b"E", b"SERROR\x00C28000\x00Mrole not permitted to log in\x00\x00"),
+            "STARTUP_SQLSTATE_28_UNVERIFIED")
+
+    def test_network_sqlstate_is_not_proof(self):
+        self.assertEqual(d.classify_pg_startup_frame(
+            b"E", b"SERROR\x00C08006\x00Mconnection failed\x00\x00"),
+            "STARTUP_SQLSTATE_08_UNVERIFIED")
+
+    def test_incomplete_or_forged_errors_are_blocked(self):
+        self.assertEqual(d.classify_pg_startup_frame(b"E", b"C28000"),
+                         "STARTUP_MALFORMED_ERROR")
+        self.assertEqual(d.classify_pg_startup_frame(b"E", b"C28000\x00C28000\x00"),
+                         "STARTUP_ERROR_UNVERIFIED")
+        self.assertEqual(d.classify_pg_startup_frame(b"R", b"\x00"),
+                         "STARTUP_MALFORMED_AUTH")
+        self.assertEqual(d.classify_pg_startup_frame(b"K", b"payload"),
+                         "STARTUP_UNEXPECTED_MESSAGE")
+
+    def test_probe_preflight_refuses_missing_tls_and_bad_user(self):
+        self.assertEqual(d.probe_pg_startup_read_only({"host": "db.example", "user": "x"}),
+                         "STARTUP_PREFLIGHT_UNSUPPORTED")
+        self.assertEqual(d.probe_pg_startup_read_only({
+            "host": "db.example", "user": "invalid\x00user", "sslmode": "verify-full",
+        }), "STARTUP_PREFLIGHT_UNSUPPORTED")
+
+    def test_startup_command_never_claims_closed(self):
+        with patch.object(d, "check_sources"), \
+             patch.object(d, "load_dashboard_ca"), \
+             patch.object(d, "probe_pg_startup_read_only",
+                          return_value="STARTUP_AUTH_CHALLENGE") as probe, \
+             patch("builtins.print") as output:
+            self.assertEqual(d.startup_diagnostic_read_only(), 2)
+            probe.assert_called_once()
+        lines = [item.args[0] for item in output.call_args_list]
+        self.assertIn("STARTUP_ONLY_ORIGIN_ROLE_REFUSAL_NOT_PROVEN", lines)
+        self.assertIn("NO_ROLE_CHANGE_NO_BACKUP", lines)
+
+    def test_startup_pin_blocks_before_network(self):
+        with patch.object(d, "check_sources", side_effect=d.Blocked("bad")), \
+             patch.object(d, "probe_pg_startup_read_only") as probe:
+            self.assertEqual(d.startup_diagnostic_read_only(), 2)
+            probe.assert_not_called()
+
+
 class RouteClassificationTests(unittest.TestCase):
     def test_pooler_route_detected_without_secrets(self):
         self.assertEqual(d.classify_postgres_route({
