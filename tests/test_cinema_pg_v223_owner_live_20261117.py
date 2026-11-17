@@ -773,6 +773,9 @@ class OriginDirectClosureTests(unittest.TestCase):
             patch.object(d, "check_sources"),
             patch.object(d, "load_dashboard_ca"),
             patch.object(d, "read_password_file", return_value="FAKE_PASSWORD_ONLY"),
+            patch.object(d, "probe_origin_ip_network_read_only",
+                         return_value={"DNS": "IPV6_ONLY", "IPV4": "NO_DNS_RECORD",
+                                       "IPV6": "TCP_REACHABLE"}),
         ]
 
     def test_direct_origin_rejection_and_admin_catalog_is_pass(self):
@@ -835,6 +838,48 @@ class OriginDirectClosureTests(unittest.TestCase):
             self.assertEqual(check.call_count, 1)
             connect.assert_called_once()
             conn.execute.assert_not_called()
+
+    def test_missing_ipv6_route_skips_login_and_keeps_gate_blocked(self):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for item in self._mock_environment()[:-1]:
+                stack.enter_context(item)
+            admin = stack.enter_context(patch.object(
+                d, "probe_admin_closure_catalog_read_only",
+                return_value="ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE"))
+            stack.enter_context(patch.object(
+                d, "probe_origin_ip_network_read_only",
+                return_value={"DNS": "IPV6_ONLY", "IPV4": "NO_DNS_RECORD",
+                              "IPV6": "IP_ROUTE_UNAVAILABLE"}))
+            connect = stack.enter_context(patch("psycopg.connect"))
+            output = stack.enter_context(patch("builtins.print"))
+            self.assertEqual(d.verify_origin_direct_closed_read_only(), 2)
+        connect.assert_not_called()
+        admin.assert_called_once()
+        lines = [item.args[0] for item in output.call_args_list]
+        self.assertIn("BLOCKED ORIGIN_IPV6_ROUTE_UNAVAILABLE", lines)
+        self.assertIn("ORIGIN_LOGIN_REFUSAL_NOT_TESTED", lines)
+        self.assertNotIn("PASS ORIGIN_DIRECT_NOLOGIN_AND_ADMIN_ZERO_SESSIONS", lines)
+
+    def test_unresolved_origin_dns_blocks_before_auth(self):
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            for item in self._mock_environment()[:-1]:
+                stack.enter_context(item)
+            stack.enter_context(patch.object(
+                d, "probe_admin_closure_catalog_read_only",
+                return_value="CATALOG_CLOSED_NO_SESSIONS"))
+            stack.enter_context(patch.object(
+                d, "probe_origin_ip_network_read_only",
+                return_value={"DNS": "LOOKUP_FAILED", "IPV4": "NOT_RUN",
+                              "IPV6": "NOT_RUN"}))
+            connect = stack.enter_context(patch("psycopg.connect"))
+            output = stack.enter_context(patch("builtins.print"))
+            self.assertEqual(d.verify_origin_direct_closed_read_only(), 2)
+        connect.assert_not_called()
+        lines = [item.args[0] for item in output.call_args_list]
+        self.assertIn("BLOCKED ORIGIN_NETWORK_UNAVAILABLE", lines)
+
 
     def test_unclosed_admin_blocks_before_direct_auth(self):
         from contextlib import ExitStack
