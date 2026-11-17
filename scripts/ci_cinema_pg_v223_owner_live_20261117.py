@@ -615,12 +615,29 @@ def diagnose_closure_read_only() -> int:
     return 2
 
 
+def catalog_closure_read_only() -> int:
+    """Owner-safe, read-only catalog evidence. Never claims auth-refusal proof."""
+    try:
+        check_sources()
+    except BaseException:
+        print("BLOCKED CATALOG_SOURCE_PIN")
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 2
+    result = probe_admin_closure_catalog_read_only()
+    print("DIAGNOSTIC ADMIN_" + result)
+    print("CATALOG_ONLY_NEW_LOGIN_REFUSAL_NOT_PROVEN")
+    print("NO_ROLE_CHANGE_NO_BACKUP")
+    return 0 if result == "CATALOG_CLOSED_NO_SESSIONS" else 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose"))
+    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose", "catalog"))
     args = parser.parse_args()
     if args.action == 'inspect':
         return inspect_source_pin()
+    if args.action == 'catalog':
+        return catalog_closure_read_only()
     if args.action == 'diagnose':
         return diagnose_closure_read_only()
     if args.action == 'closed':
