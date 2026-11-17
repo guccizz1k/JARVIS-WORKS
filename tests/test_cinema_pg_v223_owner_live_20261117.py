@@ -166,5 +166,36 @@ class OwnerWorktree(unittest.TestCase):
             launch.assert_not_called()
 
 
+class LocalTargetRecovery(unittest.TestCase):
+    def test_verified_target_restarts_only_when_approved(self):
+        with patch("scripts.ci_cinema_pg_go.ensure_local_docker_daemon") as daemon, \
+             patch("scripts.ci_cinema_pg_go.start_verified_disposable", return_value=True) as startup:
+            d.verify_local_disposable_started()
+        daemon.assert_called_once()
+        startup.assert_called_once()
+
+    def test_unrecognized_target_fails_closed(self):
+        with patch("scripts.ci_cinema_pg_go.ensure_local_docker_daemon"), \
+             patch("scripts.ci_cinema_pg_go.start_verified_disposable", return_value=False):
+            with self.assertRaisesRegex(d.Blocked, "approved_local_pg17_container_unavailable"):
+                d.verify_local_disposable_started()
+
+    def test_target_refused_before_marker_or_source_login(self):
+        with patch.object(d, "check_sources"), \
+             patch.object(d, "expiry_value"), \
+             patch.object(d.existing, "check_tools"), \
+             patch.object(d.existing, "check_private_inputs"), \
+             patch.object(d, "load_key"), \
+             patch.object(d, "load_dashboard_ca"), \
+             patch.object(d, "read_password_file"), \
+             patch.object(d, "verify_local_disposable_started", side_effect=d.Blocked("bad image")), \
+             patch.object(d.existing, "stage_target") as marker, \
+             patch.object(d, "check_live_admin_state") as source:
+            with self.assertRaisesRegex(d.Blocked, "PREFLIGHT_LOCAL_PG17_DOCKER"):
+                d.preflight()
+            marker.assert_not_called()
+            source.assert_not_called()
+
+
 if __name__=="__main__":
     unittest.main()
