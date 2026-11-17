@@ -665,13 +665,19 @@ class AdminClosureCatalogTests(unittest.TestCase):
         verdict, conn = self._run_with_rows([
             ("postgres", "postgres", 170011), (True, False), (0,)
         ])
-        self.assertEqual(verdict, "CATALOG_NOT_CLOSED")
+        self.assertEqual(verdict, "ROLE_LOGIN_ENABLED")
 
     def test_active_session_is_not_closed(self):
         verdict, conn = self._run_with_rows([
             ("postgres", "postgres", 170011), (False, True), (1,)
         ])
-        self.assertEqual(verdict, "CATALOG_NOT_CLOSED")
+        self.assertEqual(verdict, "ROLE_ACTIVE_SESSIONS_PRESENT")
+
+    def test_future_expiry_is_not_full_catalog_closure(self):
+        verdict, conn = self._run_with_rows([
+            ("postgres", "postgres", 170011), (False, False), (0,)
+        ])
+        self.assertEqual(verdict, "ROLE_NOLOGIN_ZERO_SESSIONS_EXPIRY_FUTURE")
 
 
 class RouteClassificationTests(unittest.TestCase):
