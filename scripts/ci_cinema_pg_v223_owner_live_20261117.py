@@ -889,6 +889,20 @@ def verify_origin_direct_closed_read_only() -> int:
         print("NO_ROLE_CHANGE_NO_BACKUP")
         return 2
 
+    # The origin is IPv6-only on the current project. Never misclassify a
+    # missing network route as an authentication refusal; stop before using
+    # locally stored credentials to attempt a connection.
+    origin_network = probe_origin_ip_network_read_only(origin_options["host"])
+    print("DIAGNOSTIC ORIGIN_DNS_" + origin_network["DNS"])
+    if origin_network["IPV4"] != "TCP_REACHABLE" and origin_network["IPV6"] != "TCP_REACHABLE":
+        print("BLOCKED ORIGIN_IPV6_ROUTE_UNAVAILABLE" if (
+            origin_network["DNS"] == "IPV6_ONLY" and
+            origin_network["IPV6"] == "IP_ROUTE_UNAVAILABLE"
+        ) else "BLOCKED ORIGIN_NETWORK_UNAVAILABLE")
+        print("ORIGIN_LOGIN_REFUSAL_NOT_TESTED")
+        print("NO_ROLE_CHANGE_NO_BACKUP")
+        return 2
+
     import psycopg
     try:
         # Never issue SQL or print an exception (which can contain a secret).
