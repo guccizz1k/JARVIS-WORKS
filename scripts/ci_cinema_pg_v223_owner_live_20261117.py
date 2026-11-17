@@ -744,6 +744,84 @@ def catalog_closure_read_only() -> int:
     return 0 if result == "CATALOG_CLOSED_NO_SESSIONS" else 2
 
 
+def probe_origin_ip_network_read_only(host: str, port: int = 5432) -> dict:
+    """Probe DNS A/AAAA and a single bounded TCP address per family.
+
+    No login, password, SQL, IP addresses, hostnames, OS messages or secrets
+    appear in returned telemetry. A network success NEVER proves role closure.
+    """
+    import errno
+    import socket
+
+    if (host != "db." + existing.PROJECT_REF + ".supabase.co"
+            or type(port) is not int or port != 5432):
+        return {"DNS": "ENDPOINT_NOT_PINNED", "IPV4": "NOT_RUN", "IPV6": "NOT_RUN"}
+
+    try:
+        addresses = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return {"DNS": "LOOKUP_FAILED", "IPV4": "NOT_RUN", "IPV6": "NOT_RUN"}
+    except (OSError, ValueError, TypeError):
+        return {"DNS": "LOOKUP_UNVERIFIED", "IPV4": "NOT_RUN", "IPV6": "NOT_RUN"}
+
+    unique = {}
+    for family, socktype, proto, _canonical, sockaddr in addresses:
+        if family in (socket.AF_INET, socket.AF_INET6) and family not in unique:
+            unique[family] = (socktype, proto, sockaddr)
+
+    v4 = socket.AF_INET in unique
+    v6 = socket.AF_INET6 in unique
+    dns = ("DUAL_STACK" if v4 and v6 else "IPV6_ONLY" if v6 else
+           "IPV4_ONLY" if v4 else "NO_IP_RECORD")
+
+    def connect_one(family):
+        if family not in unique:
+            return "NO_DNS_RECORD"
+        socktype, proto, sockaddr = unique[family]
+        try:
+            with socket.socket(family, socktype, proto) as conn:
+                conn.settimeout(3.0)
+                conn.connect(sockaddr)
+            return "TCP_REACHABLE"
+        except TimeoutError:
+            return "TCP_TIMEOUT"
+        except ConnectionRefusedError:
+            return "TCP_REFUSED"
+        except OSError as exc:
+            if exc.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH,
+                             errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT):
+                return "IP_ROUTE_UNAVAILABLE"
+            return "TCP_IO_ERROR"
+
+    return {"DNS": dns,
+            "IPV4": connect_one(socket.AF_INET),
+            "IPV6": connect_one(socket.AF_INET6)}
+
+
+def origin_network_diagnostic_read_only() -> int:
+    """Independent Codespaces-origin route and verified TLS probe; no password."""
+    for label, check in (("SOURCE_PIN", check_sources), ("CA_TLS", load_dashboard_ca)):
+        try:
+            check()
+        except BaseException:
+            print("BLOCKED ORIGIN_NET_PREFLIGHT_" + label)
+            print("NO_ROLE_CHANGE_NO_BACKUP")
+            return 2
+    host = "db." + existing.PROJECT_REF + ".supabase.co"
+    net = probe_origin_ip_network_read_only(host)
+    for key in ("DNS", "IPV4", "IPV6"):
+        print("DIAGNOSTIC ORIGIN_NET_" + key + "_" + net[key])
+    if "TCP_REACHABLE" in (net["IPV4"], net["IPV6"]):
+        opts = {"host": host, "port": 5432, "sslmode": "verify-full",
+                "sslrootcert": str(existing.CERT_FILE)}
+        print("DIAGNOSTIC ORIGIN_NET_TLS_" + probe_pg_tls_read_only(opts))
+    else:
+        print("DIAGNOSTIC ORIGIN_NET_TLS_NOT_RUN_NO_TCP")
+    print("ORIGIN_NETWORK_ONLY_NEW_LOGIN_REFUSAL_NOT_PROVEN")
+    print("NO_ROLE_CHANGE_NO_BACKUP")
+    return 2
+
+
 def classify_origin_nologin_refusal(error: BaseException) -> str:
     """Only origin PostgreSQL SQLSTATE 28000 + exact role text proves NOLOGIN.
 
@@ -839,10 +917,12 @@ def verify_origin_direct_closed_read_only() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose", "catalog", "startup", "origin-closed"))
+    parser.add_argument("action", choices=("check", "run", "closed", "inspect", "diagnose", "catalog", "startup", "origin-closed", "origin-net"))
     args = parser.parse_args()
     if args.action == 'inspect':
         return inspect_source_pin()
+    if args.action == 'origin-net':
+        return origin_network_diagnostic_read_only()
     if args.action == 'origin-closed':
         return verify_origin_direct_closed_read_only()
     if args.action == 'startup':
