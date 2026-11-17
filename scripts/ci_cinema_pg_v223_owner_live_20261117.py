@@ -148,15 +148,23 @@ def check_live_admin_state() -> None:
 
 
 def preflight() -> None:
-    check_sources()
-    expiry_value()
-    existing.check_tools()
-    existing.check_private_inputs()
-    load_key()
-    load_dashboard_ca()
-    read_password_file()
-    existing.stage_target()
-    check_live_admin_state()
+    # Emit fixed stage labels, not raw exceptions (which can embed a DSN,
+    # password, host or file path). This prevents another opaque BLOCKED report.
+    for label, check in (
+        ("SOURCE_PIN", check_sources),
+        ("APPROVAL_WINDOW", expiry_value),
+        ("TOOLS", existing.check_tools),
+        ("PRIVATE_INPUTS", existing.check_private_inputs),
+        ("AES_KEY", load_key),
+        ("CA_TLS", load_dashboard_ca),
+        ("BACKUP_AUTH", read_password_file),
+        ("LOCAL_PG17_TARGET", existing.stage_target),
+        ("ADMIN_READONLY", check_live_admin_state),
+    ):
+        try:
+            check()
+        except Exception:
+            raise Blocked("PREFLIGHT_" + label) from None
 
 
 def run_live() -> int:
@@ -168,7 +176,7 @@ def run_live() -> int:
             preflight()
             print("PASS P1_ALL_PREFLIGHT_AND_LIVE_ADMIN_READONLY")
         except BaseException as err:
-            print("BLOCKED PRE_ROLE_PREFLIGHT_" + type(err).__name__)
+            print("BLOCKED " + (str(err) if isinstance(err, Blocked) else "PRE_ROLE_PREFLIGHT_UNEXPECTED_" + type(err).__name__))
             return 2
         # B2/B3 entry has a second no-charge, owner-present and date-limited approval.
         if not sys.stdin.isatty():
@@ -240,7 +248,7 @@ def main() -> int:
         print("P1_READINESS_PASS; NO_ROLE_CHANGE_NO_BACKUP_YET")
         return 0
     except BaseException as err:
-        print("BLOCKED P1_PREFLIGHT_" + type(err).__name__)
+        print("BLOCKED " + (str(err) if isinstance(err, Blocked) else "P1_PREFLIGHT_UNEXPECTED_" + type(err).__name__))
         print("NO_ROLE_CHANGE_NO_BACKUP")
         return 2
 
