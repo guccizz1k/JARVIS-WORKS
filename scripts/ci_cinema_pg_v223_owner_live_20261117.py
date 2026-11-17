@@ -222,7 +222,15 @@ def check_closed_read_only() -> int:
                 elif message.startswith('role not closed:'):
                     code='CATALOG_NOT_CLOSED'
                 elif message.startswith('new_login_refusal_not_verified:'):
-                    code='AUTH_REFUSAL_UNVERIFIED'
+                    reason = message.partition('reason=')[2].partition(';')[0]
+                    code = {
+                        'network_failure': 'NETWORK_FAILURE',
+                        'tls_failure': 'TLS_FAILURE',
+                        'timeout': 'TIMEOUT',
+                        'bad_credentials': 'BAD_CREDENTIALS',
+                        'auth_unverified': 'AUTH_REFUSAL_UNVERIFIED',
+                        'unknown': 'AUTH_REFUSAL_UNVERIFIED',
+                    }.get(reason, 'AUTH_REFUSAL_UNVERIFIED')
             print('BLOCKED ROLE_CLOSURE_'+code)
             print('NO_ROLE_CHANGE_NO_BACKUP')
             return 2
