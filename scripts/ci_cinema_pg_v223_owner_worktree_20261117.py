@@ -54,17 +54,54 @@ def verify_input_checkout() -> str:
 
 
 def classify_private_backup_log(raw: str) -> tuple[str, str]:
-    """Classify prior scrubbed error text into fixed public labels only.
+    """Stable legacy API: report only known finite classifications, never raw text.
 
-    The private log is not copied, returned or uploaded. Error data is
-    untrusted: even labels are diagnostic hints, never evidence of a PASS.
+    Retains the two-element return contract for independent QA consumers.
+    The source log is untrusted even after source-engine redaction.
     """
-    tail = raw.split("--- stderr (tail) ---", 1)[-1] if "--- stderr (tail) ---" in raw else raw
-    m = re.search(r"\b(BLOCKED_V223_[A-Za-z0-9_]{1,90}|FAIL_V223_[A-Za-z0-9_]{1,90})\b", tail)
-    if m:
-        return m.group(1), "ENGINE_MACHINE_CODE"
-    # These are coarse diagnostic categories, not a replacement for actual
-    # error analysis. Never include regex captures from the private file.
+    stderr = raw.split("--- stderr (tail) ---", 1)[-1] if "--- stderr (tail) ---" in raw else raw
+    fixed_engine_codes = frozenset((
+        "BLOCKED_V223_BACKUP_AUTH_FAILED",
+        "BLOCKED_V223_BACKUP_BAD_CHUNK_LENGTH",
+        "BLOCKED_V223_BACKUP_BAD_HEADER",
+        "BLOCKED_V223_BACKUP_KEY_INVALID",
+        "BLOCKED_V223_BACKUP_KEY_MUST_BE_32_BYTES",
+        "BLOCKED_V223_BACKUP_KEY_REQUIRED",
+        "BLOCKED_V223_BACKUP_TRUNCATED",
+        "BLOCKED_V223_BAD_SCHEMA_NAME",
+        "BLOCKED_V223_DSN_MUST_BE_POSTGRESQL_URL",
+        "BLOCKED_V223_ENCRYPTED_ARTIFACT_TOO_SHORT",
+        "BLOCKED_V223_INVALID_CATALOG_IDENTIFIER",
+        "BLOCKED_V223_MARKER_REFUSED_CLUSTER_NOT_EMPTY",
+        "BLOCKED_V223_OUTPUT_EXISTS_OR_SYMLINK",
+        "BLOCKED_V223_PARTIAL_DUMP_SOURCE_TRUNCATED",
+        "BLOCKED_V223_REAL_SOURCE_HOST_NOT_VERIFIED",
+        "BLOCKED_V223_SIGNATURE_STATEMENT_TIMEOUT",
+        "BLOCKED_V223_SOURCE_IDENTITY_NOT_VERIFIED",
+        "BLOCKED_V223_SOURCE_REQUIRES_VERIFY_FULL_AND_ROOT_CERT",
+        "BLOCKED_V223_SOURCE_ROLE_NOT_LEAST_PRIVILEGE",
+        "BLOCKED_V223_TABLE_OVER_ROW_CAP",
+        "BLOCKED_V223_TABLE_TOO_LARGE_FOR_ROW_DIGEST",
+        "BLOCKED_V223_TARGET_EQUALS_SOURCE",
+        "BLOCKED_V223_TARGET_MUST_BE_LOCAL",
+        "BLOCKED_V223_TARGET_NOT_DECLARED_EPHEMERAL",
+        "BLOCKED_V223_TARGET_NOT_PROVEN_EPHEMERAL",
+        "BLOCKED_V223_TOKEN_REQUIRED_MIN_16_CHARS",
+        "BLOCKED_V223_TOOL_VERSION_UNKNOWN",
+        "BLOCKED_V223_UNKNOWN_NEGATIVE_TEST",
+        "FAIL_V223_BACKUP_DECRYPT_HASH_MISMATCH",
+        "FAIL_V223_INTERRUPTED_BY_SIGNAL",
+    ))
+    for candidate in re.findall(r"\b(?:BLOCKED_V223|FAIL_V223)_[A-Za-z0-9_]+\b", stderr):
+        if candidate in fixed_engine_codes:
+            return candidate, "ENGINE_MACHINE_CODE"
+        # Exception class names are finite and reviewed; never return arbitrary suffix.
+        for name in ("OperationalError", "ProgrammingError", "IntegrityError",
+                     "UndefinedTable", "UndefinedFunction", "ValueError", "TypeError",
+                     "KeyError", "AttributeError", "PermissionError", "TimeoutError",
+                     "TimeoutExpired", "FileNotFoundError", "UnicodeDecodeError"):
+            if candidate == "FAIL_V223_UNEXPECTED_" + name:
+                return candidate, "ENGINE_MACHINE_CODE"
     patterns = (
         ("TLS_OR_CERTIFICATE", r"certificate verify failed|certificate validation|ssl[^\n]{0,60}failed|hostname mismatch"),
         ("DNS_OR_TCP_CONNECT", r"could not translate host|name or service not known|connection refused|could not connect to server|connection timed out"),
@@ -77,12 +114,12 @@ def classify_private_backup_log(raw: str) -> tuple[str, str]:
         ("PYTHON_EXCEPTION", r"traceback \(most recent call last\)|syntaxerror|typeerror|valueerror|keyerror"),
     )
     for label, pattern in patterns:
-        if re.search(pattern, tail, flags=re.I):
+        if re.search(pattern, stderr, flags=re.I):
             return label, "COARSE_PATTERN"
     return "UNCLASSIFIED_BACKUP_FAILURE", "NO_MATCH"
 
 
-def classify_private_backup_log(raw: str) -> list[str]:
+def classify_private_backup_log_details(raw: str) -> list[str]:
     """Return ONLY hard-coded diagnostic labels, never source substrings.
 
     The error log is already scrubbed by the protected original engine. Even
@@ -191,9 +228,11 @@ def diagnose_owner_only() -> int:
     except (OSError, ValueError, UnicodeError):
         print("B2_DIAG ERROR_LOG_UNREADABLE")
         return 2
-    categories = classify_private_backup_log(raw)
-    for category in categories:
-        print("B2_DIAG", category)
+    label, mode = classify_private_backup_log(raw)
+    print("B2_DIAG", label)
+    # More granular, still allowlisted labels. Never copy file text.
+    for category in classify_private_backup_log_details(raw):
+        print("B2_DETAIL", category)
     # Identify stale logs relative to the latest PRIVATE run receipt without
     # disclosing its name, content or timestamps in the public response.
     try:
@@ -207,6 +246,22 @@ def diagnose_owner_only() -> int:
                   "PREDATES_LAST_OWNER_RUN" if path.stat().st_mtime_ns + 10_000_000_000 <
                   latest.stat().st_mtime_ns else "CONSISTENT_WITH_LAST_OWNER_RUN")
             print("PRIVATE_RUN_SUMMARY", "PRESENT")
+            # Private receipts are not verified evidence. Only show fixed
+            # status labels with REPORTED_ / NOT_CONFIRMED prefixes.
+            st = latest.stat()
+            if st.st_size <= 16384:
+                import json
+                receipt = json.loads(latest.read_text(encoding="utf-8"))
+                if isinstance(receipt, dict):
+                    print("OWNER_INCIDENT_VERDICT",
+                          "BLOCKED" if receipt.get("verdict") == "BLOCKED" else "NOT_CONFIRMED")
+                    stages = receipt.get("stages", {})
+                    if isinstance(stages, dict):
+                        for name in ("temporary_login", "restricted_tls_login",
+                                     "real_encrypted_backup_independent_restore",
+                                     "revoke", "closed_verified"):
+                            print("OWNER_STAGE", name,
+                                  "REPORTED_PASS" if stages.get(name) == "PASS" else "NOT_CONFIRMED")
     except (OSError, ValueError):
         print("B2_LOG_RECENCY UNAVAILABLE")
     return 0
