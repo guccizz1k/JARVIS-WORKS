@@ -125,7 +125,7 @@ def inspect_source_pin() -> int:
         ("REVIEW_BRANCH", lambda: git("branch", "--show-current") in (BRANCH, "")),
         ("REMOTE_SHA", lambda: git("rev-parse", "HEAD") ==
          git("rev-parse", "refs/remotes/origin/" + BRANCH)),
-        ("BASE_ANCESTRY", lambda: bool(git("merge-base", "--is-ancestor", BASE_SHA, "HEAD") is not None)),
+        ("BASE_ANCESTRY", lambda: git("merge-base", "--is-ancestor", BASE_SHA, "HEAD") == ""),
         ("ALLOWED_PATHS", lambda: bool(
             (paths := set(git("diff", "--name-only", BASE_SHA, "HEAD").splitlines()))
             and paths <= ALLOWED_NEW)),
