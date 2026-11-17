@@ -474,6 +474,50 @@ def probe_pg_ssl_request_read_only(connection_options: dict) -> str:
         return "PG_HANDSHAKE_IO_ERROR"
 
 
+def probe_pg_tls_read_only(connection_options: dict) -> str:
+    """Verify PostgreSQL TLS handshake with the configured CA, without login or SQL."""
+    import socket
+    import ssl
+    import struct
+    host = connection_options.get("host")
+    rootcert = connection_options.get("sslrootcert")
+    mode = connection_options.get("sslmode")
+    if (not isinstance(host, str) or not host or host.startswith("/") or "," in host
+            or mode != "verify-full" or not isinstance(rootcert, str) or not rootcert):
+        return "TLS_PREFLIGHT_UNSUPPORTED"
+    try:
+        port = int(connection_options.get("port", 5432))
+    except (TypeError, ValueError, OverflowError):
+        return "TLS_INVALID_PORT"
+    if not 1 <= port <= 65535:
+        return "TLS_INVALID_PORT"
+    try:
+        context = ssl.create_default_context(cafile=rootcert)
+        context.check_hostname = True
+        context.verify_mode = ssl.CERT_REQUIRED
+    except (OSError, ssl.SSLError, ValueError):
+        return "TLS_CA_LOAD_FAILED"
+    try:
+        with socket.create_connection((host, port), timeout=4.0) as sock:
+            sock.settimeout(4.0)
+            sock.sendall(struct.pack("!II", 8, 80877103))
+            if sock.recv(1) != b"S":
+                return "TLS_SSLREQUEST_NOT_ACCEPTED"
+            with context.wrap_socket(sock, server_hostname=host) as secure:
+                secure.settimeout(4.0)
+                if secure.version() is None:
+                    return "TLS_NO_NEGOTIATED_VERSION"
+                return "TLS_VERIFIED"
+    except ssl.SSLCertVerificationError:
+        return "TLS_CERT_VERIFY_FAILED"
+    except ssl.SSLError:
+        return "TLS_HANDSHAKE_FAILED"
+    except TimeoutError:
+        return "TLS_TIMEOUT"
+    except OSError:
+        return "TLS_IO_ERROR"
+
+
 def diagnose_closure_read_only() -> int:
     """Bounded non-mutating diagnostic; NEVER treats classification as closure proof."""
     for label, check in (("SOURCE_PIN", check_sources),
@@ -490,6 +534,7 @@ def diagnose_closure_read_only() -> int:
         options = existing.login_kwargs()
         print("DIAGNOSTIC TRANSPORT_" + probe_transport_read_only(options))
         print("DIAGNOSTIC PG_SSL_REQUEST_" + probe_pg_ssl_request_read_only(options))
+        print("DIAGNOSTIC PG_TLS_" + probe_pg_tls_read_only(options))
         import psycopg
         with psycopg.connect(**options):
             print("DIAGNOSTIC NEW_LOGIN_ACCEPTED")
