@@ -406,6 +406,38 @@ def classify_client_exception_kind(error: BaseException) -> str:
     return "_AND_".join(sorted(labels))
 
 
+def probe_transport_read_only(connection_options: dict) -> str:
+    """One bounded DNS/TCP probe; no PostgreSQL authentication or SQL."""
+    import socket
+    host = connection_options.get("host")
+    port = connection_options.get("port", 5432)
+    if not isinstance(host, str) or not host or host.startswith("/") or "," in host:
+        return "UNSUPPORTED_HOST"
+    try:
+        port = int(port)
+    except (TypeError, ValueError, OverflowError):
+        return "INVALID_PORT"
+    if not 1 <= port <= 65535:
+        return "INVALID_PORT"
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return "DNS_ERROR"
+    except (OSError, ValueError):
+        return "DNS_UNAVAILABLE"
+    if not addresses:
+        return "DNS_NO_ADDRESSES"
+    try:
+        with socket.create_connection((host, port), timeout=3.0):
+            return "TCP_REACHABLE"
+    except TimeoutError:
+        return "TCP_TIMEOUT"
+    except ConnectionRefusedError:
+        return "TCP_REFUSED"
+    except OSError:
+        return "TCP_UNREACHABLE"
+
+
 def diagnose_closure_read_only() -> int:
     """Bounded non-mutating diagnostic; NEVER treats classification as closure proof."""
     for label, check in (("SOURCE_PIN", check_sources),
@@ -419,8 +451,10 @@ def diagnose_closure_read_only() -> int:
             print("NO_ROLE_CHANGE_NO_BACKUP")
             return 2
     try:
+        options = existing.login_kwargs()
+        print("DIAGNOSTIC TRANSPORT_" + probe_transport_read_only(options))
         import psycopg
-        with psycopg.connect(**existing.login_kwargs()):
+        with psycopg.connect(**options):
             print("DIAGNOSTIC NEW_LOGIN_ACCEPTED")
     except psycopg.Error as error:
         state = getattr(error, "sqlstate", None)
