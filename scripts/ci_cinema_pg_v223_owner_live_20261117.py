@@ -518,6 +518,19 @@ def probe_pg_tls_read_only(connection_options: dict) -> str:
         return "TLS_IO_ERROR"
 
 
+def classify_postgres_route(options: dict) -> str:
+    """Public endpoint shape only; no secret, host, or username is printed."""
+    host = options.get("host")
+    user = options.get("user")
+    if not isinstance(host, str) or not isinstance(user, str):
+        return "UNKNOWN"
+    if host.lower().endswith(".pooler.supabase.com") and "." in user:
+        return "SUPABASE_POOLER"
+    if host.lower().startswith("db.") and host.lower().endswith(".supabase.co") and "." not in user:
+        return "SUPABASE_DIRECT_CANDIDATE"
+    return "UNKNOWN"
+
+
 def diagnose_closure_read_only() -> int:
     """Bounded non-mutating diagnostic; NEVER treats classification as closure proof."""
     for label, check in (("SOURCE_PIN", check_sources),
@@ -532,6 +545,7 @@ def diagnose_closure_read_only() -> int:
             return 2
     try:
         options = existing.login_kwargs()
+        print("DIAGNOSTIC CONNECTION_ROUTE_" + classify_postgres_route(options))
         print("DIAGNOSTIC TRANSPORT_" + probe_transport_read_only(options))
         print("DIAGNOSTIC PG_SSL_REQUEST_" + probe_pg_ssl_request_read_only(options))
         print("DIAGNOSTIC PG_TLS_" + probe_pg_tls_read_only(options))
