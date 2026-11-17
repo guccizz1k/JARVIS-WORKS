@@ -35,6 +35,7 @@ ALLOWED_NEW = frozenset({
     "scripts/ci_cinema_pg_v223_owner_live_20261117.py",
     "tests/test_cinema_pg_v223_owner_live_20261117.py",
     ".github/workflows/jw-cinema-pg-v223-owner-live-20261117.yml",
+    "scripts/ci_cinema_pg_v223_owner_worktree_20261117.py",
 })
 SOURCE_PINNED = (
     "scripts/pg_backup_v223.py",
@@ -66,7 +67,10 @@ def check_sources() -> None:
     """Prove the new driver/SQL didn't modify any original engine/UI/database."""
     if os.environ.get("CODESPACES") != "true":
         raise Blocked("approved_codespace_required")
-    if git("branch", "--show-current") != BRANCH:
+    # A detached checkout is supported ONLY when it is the exact current
+    # remote review SHA and its worktree is clean. This enables a temporary
+    # worktree without deleting or stashing the owner\u0027s existing files.
+    if git("branch", "--show-current") not in (BRANCH, ""):
         raise Blocked("wrong_review_branch")
     head = git("rev-parse", "HEAD")
     if git("rev-parse", "refs/remotes/origin/" + BRANCH) != head:
