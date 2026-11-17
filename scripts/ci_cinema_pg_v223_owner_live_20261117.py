@@ -115,6 +115,46 @@ def check_sources() -> None:
         raise Blocked("role_sql_contract_invalid")
 
 
+
+def inspect_source_pin() -> int:
+    """Offline, non-mutating diagnostics; NEVER authorizes check/run/closed."""
+    checks = (
+        ("CODESPACE", lambda: os.environ.get("CODESPACES") == "true"),
+        ("REVIEW_BRANCH", lambda: git("branch", "--show-current") in (BRANCH, "")),
+        ("REMOTE_SHA", lambda: git("rev-parse", "HEAD") ==
+         git("rev-parse", "refs/remotes/origin/" + BRANCH)),
+        ("BASE_ANCESTRY", lambda: bool(git("merge-base", "--is-ancestor", BASE_SHA, "HEAD") is not None)),
+        ("ALLOWED_PATHS", lambda: bool(
+            (paths := set(git("diff", "--name-only", BASE_SHA, "HEAD").splitlines()))
+            and paths <= ALLOWED_NEW)),
+        ("CLEAN_WORKTREE", lambda: all(
+            line == "?? .github/supabase-root-2021.cer"
+            for line in git("status", "--porcelain", "--untracked-files=all").splitlines())),
+        ("PINNED_BLOBS", lambda: all(
+            git("rev-parse", "HEAD:" + path) ==
+            (REVIEWED_BACKUP_FIX_BLOBS.get(path) or git("rev-parse", BASE_SHA + ":" + path))
+            for path in SOURCE_PINNED)),
+        ("REVIEW_FILES", lambda: all(
+            git("hash-object", path) == git("rev-parse", "HEAD:" + path)
+            for path in git("diff", "--name-only", BASE_SHA, "HEAD").splitlines())),
+        ("ROLE_SQL_CONTRACT", lambda: (
+            ROLE_SQL.read_text(encoding="utf-8").count("2026-11-17 14:30:00+09") == 1
+            and "interval ''5 hours''" in ROLE_SQL.read_text(encoding="utf-8")
+            and "ALTER ROLE jw_backup_ro VALID UNTIL :'valid_until' LOGIN" in
+            ROLE_SQL.read_text(encoding="utf-8"))),
+    )
+    failures = 0
+    for name, predicate in checks:
+        try:
+            valid = bool(predicate())
+        except Exception:
+            valid = False
+        print(("PASS " if valid else "BLOCKED ") + "SOURCE_PIN_" + name)
+        failures += not valid
+    print("NO_ROLE_CHANGE_NO_BACKUP")
+    return 2 if failures else 0
+
+
 def expiry_value(at: datetime | None = None) -> str:
     current = (at or datetime.now(timezone.utc)).astimezone(KST)
     if current >= OWNER_DEADLINE:
@@ -307,8 +347,10 @@ def run_live() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("check", "run", "closed"))
+    parser.add_argument("action", choices=("check", "run", "closed", "inspect"))
     args = parser.parse_args()
+    if args.action == 'inspect':
+        return inspect_source_pin()
     if args.action == 'closed':
         return check_closed_read_only()
     if args.action == "run":
