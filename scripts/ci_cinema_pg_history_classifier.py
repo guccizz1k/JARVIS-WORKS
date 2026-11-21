@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Classify EXACT historic Gitleaks false positives without weakening scanning.
 
-Never suppress an unreviewed finding. All five historical findings below were
-manually mapped to immutable Git blob hashes and synthetic test lines.
+Never suppress an unreviewed finding. Each entry pins an immutable Git blob
+and checks the meaning of the original historical line.
 Gitleaks must still scan --all Git history on every run. The private/redacted
 report stays in a temporary directory and is never uploaded or printed.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -64,12 +65,91 @@ REVIEWED: dict[tuple[str,str,str,int], tuple[str,str]] = {
     ),
 }
 
+
+# Each tuple also pins the scanner columns and the SHA-256 of the original
+# Git line span. A different match on the same line remains unreviewed.
+REVIEWED_MATCHES: dict[tuple[str, str, str, int], tuple[str, str, int, int, str]] = {
+    (
+        "generic-api-key",
+        "008177551274a292b0273fdd45c6afdf0adcea86",
+        ".github/workflows/jw-v223-pg17-s4-real-qa-20261114.yml", 79,
+    ): (
+        "7a604894108c918a8f8da700b5e35d6a2c918c1e",
+        "workflow_git_blob_sha_constant", 23, 85,
+        "521dfce49b5a32d1d52776330220ce900202aa307e2557e51161c700481f7f29",
+    ),
+    (
+        "generic-api-key",
+        "e14166f3fd09795092e803f70bba4ef19ed46d4c",
+        ".github/workflows/jw-v223-tls-74-20261114.yml", 65,
+    ): (
+        "b0a4fff924fdbef4f4665da9a67f83068f304c3b",
+        "workflow_git_blob_sha_constant", 23, 85,
+        "521dfce49b5a32d1d52776330220ce900202aa307e2557e51161c700481f7f29",
+    ),
+    (
+        "generic-api-key",
+        "cdd9b2e6b9335576ab996cee30ee8cbeec7fd6f7",
+        ".github/workflows/jw-v223-exact-sha-274-20261114.yml", 80,
+    ): (
+        "842dabbfb49d6c39b55b98b0c7c98cb4099e62b6",
+        "workflow_git_blob_sha_constant", 23, 85,
+        "521dfce49b5a32d1d52776330220ce900202aa307e2557e51161c700481f7f29",
+    ),
+    (
+        "generic-api-key",
+        "cd081b8d199ba5a70bd79106a7d2eb5569c07bc1",
+        "tests/test_cinema_pg_y_synthetic_restore.py", 110,
+    ): (
+        "50b212bb918989af27e32afa28997c13ce93153a",
+        "postgres_constraint_identifier", 10, 43,
+        "f02e76b66dfe4c5f70ce7ff00953fbf6f9155c68dcb7df519390e62636f4a432",
+    ),
+    (
+        "generic-api-key",
+        "cd081b8d199ba5a70bd79106a7d2eb5569c07bc1",
+        "tests/test_cinema_pg_m.py", 29,
+    ): (
+        "a488fe59cb36ba64efc5b275ddca96152f17008b",
+        "synthetic_parser_fixture", 26, 88,
+        "ef09c6cccb5e9eff725c83a0823b050261aab1a64f2f91f1c63ced71483de2ea",
+    ),
+    (
+        "generic-api-key",
+        "cd081b8d199ba5a70bd79106a7d2eb5569c07bc1",
+        "tests/test_cinema_pg_w.py", 170,
+    ): (
+        "20797127f19252883e7930f248ff7551848385c1",
+        "postgres_constraint_identifier", 10, 34,
+        "0410a48ec65da5689b772f8450893535805f8cf5ce04761c28b8396ceaaf88b7",
+    ),
+    (
+        "generic-api-key",
+        "cd081b8d199ba5a70bd79106a7d2eb5569c07bc1",
+        "tests/test_cinema_pg_w_synthetic_restore.py", 89,
+    ): (
+        "5ca9515698c1c9e0620700d8b10fc18f75b94839",
+        "postgres_constraint_identifier", 10, 43,
+        "f02e76b66dfe4c5f70ce7ff00953fbf6f9155c68dcb7df519390e62636f4a432",
+    ),
+}
+
 def semantic_fixture_guard(kind: str, line: str) -> bool:
     """Check the actual historic line, not a user-supplied finding label."""
     if kind == "git_blob_sha_constant":
         return bool(re.fullmatch(
             r'\s*"tests/test_pg_auth_v85\.py": "[0-9a-f]{40}",\s*', line
         )) and "c7df1d7bb6a749a064ea8b8611ae7df19132a046" in line
+    if kind == "workflow_git_blob_sha_constant":
+        return bool(re.fullmatch(
+            r'\s*"tests/test_pg_auth_v85\.py":"[0-9a-f]{40}",\s*', line
+        )) and "c7df1d7bb6a749a064ea8b8611ae7df19132a046" in line
+    if kind == "postgres_constraint_identifier":
+        return bool(re.fullmatch(r"\s*(?:expected_key|key)\s*=\s*w\.V151_CONSTRAINT_KEY", line))
+    if kind == "synthetic_parser_fixture":
+        return bool(re.fullmatch(
+            r"""\s*"export JW_PG_TARGET_EPHEMERAL_TOKEN='[0-9a-f]{32}'\\n"\s*""", line,
+        ))
     if kind == "synthetic_invalid_test_account":
         return ("client.post('/api/login'" in line
                 and "'third@example.test'" in line
@@ -93,26 +173,40 @@ def exact_classification(row: dict) -> str | None:
         )
     except (KeyError, TypeError, ValueError):
         return None
-    expected = REVIEWED.get(key)
+    if any(type(value) is not str for value in key[:3]):
+        return None
+    match = REVIEWED_MATCHES.get(key)
+    expected = REVIEWED.get(key) if match is None else match[:2]
     if expected is None:
         return None
     blob, kind = expected
+    if match is not None:
+        coordinates = ("StartLine", "EndLine", "StartColumn", "EndColumn")
+        if tuple(row.get(name) for name in coordinates) != (key[3], key[3], match[2], match[3]):
+            return None
+        if any(type(row.get(name)) is not int for name in coordinates):
+            return None
     # Read only the pinned historical commit; no user input reaches a shell.
     try:
         actual = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "rev-parse", f"{key[1]}:{key[2]}"],
+            ["git", "--no-replace-objects", "-C", str(REPO_ROOT), "rev-parse", f"{key[1]}:{key[2]}"],
             capture_output=True, text=True, check=True, timeout=10,
         ).stdout.strip()
         if actual != blob:
             return None
         raw = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "show", f"{key[1]}:{key[2]}"],
+            ["git", "--no-replace-objects", "-C", str(REPO_ROOT), "show", f"{key[1]}:{key[2]}"],
             capture_output=True, check=True, timeout=10,
         ).stdout.decode("utf-8")
         lines = raw.splitlines()
         if not 1 <= key[3] <= len(lines):
             return None
-        if not semantic_fixture_guard(kind, lines[key[3] - 1]):
+        line = lines[key[3] - 1]
+        if match is not None:
+            span = line[match[2] - 1:match[3]]
+            if hashlib.sha256(span.encode("utf-8")).hexdigest() != match[4]:
+                return None
+        if not semantic_fixture_guard(kind, line):
             return None
     except (subprocess.SubprocessError, UnicodeError, OSError):
         return None
@@ -138,6 +232,9 @@ def classify_report(path: Path, scan_exit: int) -> tuple[bool, dict]:
             unreviewed += 1
             continue
         key = tuple(row.get(k) for k in ("RuleID", "Commit", "File", "StartLine"))
+        if any(type(value) is not str for value in key[:3]) or type(key[3]) is not int:
+            unreviewed += 1
+            continue
         if key in seen:
             unreviewed += 1
             continue
