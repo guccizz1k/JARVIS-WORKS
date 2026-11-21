@@ -28,7 +28,7 @@ if [[ "${1:-}" == source ]]; then
     cd "$wrapper"
     wrapper_sha="$(git rev-parse HEAD)"
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-        test "$GITHUB_REF" = refs/heads/review/jw-v223-independent-ci
+        test "$GITHUB_REF" = refs/heads/review/jw-v223-strict-history
         test "$GITHUB_SHA" = "$wrapper_sha"
     fi
     test "$(git show -s --format=%P "$initial_workflow_sha")" = "$candidate_sha $fixture_sha"
