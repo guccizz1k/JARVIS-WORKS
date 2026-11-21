@@ -375,9 +375,9 @@ def rail_open_checks(c, page, tag):
     if tag.endswith("1440"):
         shot(page, "08-rail-open-1440.png")
     page.mouse.move(page.viewport_size["width"] // 2, page.viewport_size["height"] // 2)
-    page.wait_for_timeout(350)
-    c.check(f"{tag}:rail_collapses_again",
-            page.evaluate("document.querySelector('.jw210-rail').getBoundingClientRect().width") < 120)
+    collapsed = "document.querySelector('.jw210-rail').getBoundingClientRect().width < 120"
+    with c.section(f"{tag}:rail_collapses_again"):
+        c.check(f"{tag}:rail_collapses_again", wait_for_js(page, collapsed, timeout=5000))
 
 
 def route_sweep(c, page, tag, capture):
