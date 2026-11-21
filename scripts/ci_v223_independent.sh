@@ -6,6 +6,7 @@ candidate_sha=16b06a8da738de1129382cafc10e2b4b5004c424
 candidate_tree=799088018c637501c89fa5082b63ec7eec254388
 control_sha=e22f66dde4ed552a75ce504147875733d4671ab2
 fixture_sha=0446138c10e52d81d99a7592da06e45af269aa77
+initial_workflow_sha=05ba6c8c0c0ee77d6c9536df009c332ff2839083
 remote_base=b8ee382e6c0fd856c1537d3997c07deef21b69e5
 installer_sha=a3783ef9f7aeeeff655f1f0ac376f6d8edf5b338
 wrapper="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
@@ -30,7 +31,8 @@ if [[ "${1:-}" == source ]]; then
         test "$GITHUB_REF" = refs/heads/review/jw-v223-independent-ci
         test "$GITHUB_SHA" = "$wrapper_sha"
     fi
-    test "$(git show -s --format=%P HEAD)" = "$candidate_sha $fixture_sha"
+    test "$(git show -s --format=%P "$initial_workflow_sha")" = "$candidate_sha $fixture_sha"
+    git merge-base --is-ancestor "$initial_workflow_sha" HEAD
     test "$(git diff --name-only --no-renames "$candidate_sha" HEAD)" = $'.github/workflows/jw-v223-independent-ci.yml\nscripts/ci_v223_independent.sh'
     test -z "$(git status --porcelain)"
     git worktree add --detach "$source_dir" "$candidate_sha"
@@ -75,8 +77,8 @@ case "${1:-}" in
             | tee "$evidence/history-delta.log"
         ;;
     regression)
-        mkdir "$JW_CI_ROOT/test-tmp"
-        export TMPDIR="$JW_CI_ROOT/test-tmp"
+        # The review database guard permits disposable files under /tmp.
+        export TMPDIR="$(mktemp -d /tmp/jw-v223-regression.XXXXXX)"
         export JW_V36_DISPOSABLE_PG17=1
         python -I scripts/jw_v223_pg17_required.py --report "$evidence/pg17-required.xml" | tee "$evidence/pg17-required.log"
         python -m pytest -q -ra --junitxml="$evidence/full.xml" | tee "$evidence/full.log"
