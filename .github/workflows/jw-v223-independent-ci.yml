@@ -2,7 +2,7 @@ name: V22.3 independent exact-candidate CI
 
 on:
   push:
-    branches: [review/jw-v223-independent-ci]
+    branches: [review/jw-v223-strict-history]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   exact-candidate:
-    if: github.ref == 'refs/heads/review/jw-v223-independent-ci'
+    if: github.ref == 'refs/heads/review/jw-v223-strict-history'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -58,7 +58,7 @@ jobs:
           test "$(stat -c '%u:%g:%a' "$RUNNER_TEMP/jw-v223-chrome-sandbox")" = '0:0:4755'
           echo "CHROME_DEVEL_SANDBOX=$RUNNER_TEMP/jw-v223-chrome-sandbox" >> "$GITHUB_ENV"
           docker pull postgres:17
-      - name: Scan incoming Git history with the existing exact-finding classifier
+      - name: Scan incoming and full review history with the exact-finding classifier
         run: |
           set -euo pipefail
           scan_dir="$(mktemp -d "$RUNNER_TEMP/jw-v223-gitleaks.XXXXXX")"

@@ -28,12 +28,12 @@ if [[ "${1:-}" == source ]]; then
     cd "$wrapper"
     wrapper_sha="$(git rev-parse HEAD)"
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-        test "$GITHUB_REF" = refs/heads/review/jw-v223-independent-ci
+        test "$GITHUB_REF" = refs/heads/review/jw-v223-strict-history
         test "$GITHUB_SHA" = "$wrapper_sha"
     fi
     test "$(git show -s --format=%P "$initial_workflow_sha")" = "$candidate_sha $fixture_sha"
     git merge-base --is-ancestor "$initial_workflow_sha" HEAD
-    test "$(git diff --name-only --no-renames "$candidate_sha" HEAD)" = $'.github/workflows/jw-v223-independent-ci.yml\nscripts/ci_v223_independent.sh'
+    test "$(git diff --name-only --no-renames "$candidate_sha" HEAD)" = $'.github/workflows/jw-v223-independent-ci.yml\nscripts/ci_cinema_pg_history_classifier.py\nscripts/ci_v223_independent.sh\ntests/test_cinema_pg_history_new_findings.py'
     test -z "$(git status --porcelain)"
     git worktree add --detach "$source_dir" "$candidate_sha"
     git worktree add -b jw-ci-v222-control "$JW_CI_ROOT/legacy" "$control_sha"
@@ -69,12 +69,24 @@ case "${1:-}" in
         wrapper_sha="$(git -C "$wrapper" rev-parse HEAD)"
         git merge-base --is-ancestor "$remote_base" "$wrapper_sha"
         test "$(git rev-parse --is-shallow-repository)" = false
-        scan_rc=0
-        "$JW_GITLEAKS" git --no-banner --redact --log-opts="$remote_base..$wrapper_sha" \
-            --report-format=json --report-path="$scan_dir/report.json" "$wrapper" \
-            > "$scan_dir/private.log" 2>&1 || scan_rc=$?
-        python -I scripts/ci_cinema_pg_history_classifier.py "$scan_dir/report.json" "$scan_rc" \
-            | tee "$evidence/history-delta.log"
+        # Scan the complete publication ancestry without importing unrelated refs.
+        git init -q "$scan_dir/repository"
+        git -C "$scan_dir/repository" fetch --no-tags "$wrapper" "$wrapper_sha:refs/heads/reviewed"
+        test "$(git -C "$scan_dir/repository" rev-parse --is-shallow-repository)" = false
+        test "$(git -C "$scan_dir/repository" rev-parse refs/heads/reviewed)" = "$wrapper_sha"
+        scan_history() {
+            local label="$1" revision="$2" scan_rc=0
+            "$JW_GITLEAKS" git --no-banner --redact --log-opts="$revision" \
+                --report-format=json --report-path="$scan_dir/$label.json" "$scan_dir/repository" \
+                > "$scan_dir/$label-private.log" 2>&1 || scan_rc=$?
+            python -I "$wrapper/scripts/ci_cinema_pg_history_classifier.py" \
+                "$scan_dir/$label.json" "$scan_rc" | tee "$evidence/history-$label.log"
+        }
+        scan_history delta "$remote_base..$wrapper_sha"
+        scan_history full --all
+        (cd "$wrapper"; python -m pytest -q \
+            tests/test_cinema_pg_history_classifier.py tests/test_cinema_pg_history_new_findings.py \
+            --junitxml="$evidence/history-classifier.xml") | tee "$evidence/history-classifier.log"
         ;;
     regression)
         # The review database guard permits disposable files under /tmp.
