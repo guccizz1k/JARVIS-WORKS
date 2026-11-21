@@ -10,7 +10,7 @@ import base64
 import os
 import sys
 
-from scripts.ci_playwright_cli_smoke import BASE, PROOF, assertion, cli, login, wait_http
+from scripts.ci_playwright_cli_smoke import BASE, PROOF, UI_URL, assertion, cli, login, wait_http
 from io import BytesIO
 from openpyxl import Workbook
 
@@ -191,7 +191,7 @@ def main():
     PROOF.mkdir(parents=True,exist_ok=True)
     opened=False
     try:
-        cli("open",BASE)
+        cli("open",UI_URL)
         opened=True
         login("demo@hanbit.example","V169_A")
         assertion(BROWSER_FLOW.replace("__PYTHON_B64__",base64.b64encode(qxlsx()).decode()),
