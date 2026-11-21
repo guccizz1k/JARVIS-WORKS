@@ -2,7 +2,7 @@ name: V22.3 independent exact-candidate CI
 
 on:
   push:
-    branches: [review/jw-v223-independent-ci]
+    branches: [review/jw-v223-strict-history]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   exact-candidate:
-    if: github.ref == 'refs/heads/review/jw-v223-independent-ci'
+    if: github.ref == 'refs/heads/review/jw-v223-strict-history'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
