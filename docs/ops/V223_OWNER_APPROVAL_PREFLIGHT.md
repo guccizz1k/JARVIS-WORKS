@@ -3,7 +3,7 @@
 The review preflight consumes a signed approval for an independently selected Git
 commit, exact manifest bytes, and one scope. Its success is a local verification
 result. Historical backup, role, workflow, and release entry points retain their
-own approval requirements. This preflight is not wired into a privileged launcher.
+own approval requirements. The review adapter is exercised with disposable local effects.
 
 ## Owner enrollment and signing
 
@@ -53,6 +53,18 @@ after local consumption committed. After a split commit or unverified
 restore, quarantine both files, retain evidence, and have the authorized custodian
 provision a new pair and explicitly enroll its new identity. Obtain a fresh
 challenge and signature. Do not reset counters or backfill events to recover.
+
+## Review adapter binding
+
+Bind `PrivilegedEntry` to the trusted `ReviewPreflight` and a single execute and
+rollback pair during operator configuration. The signed manifest is passed to
+both callbacks as bytes. Supply the current checkpoint from the independent
+authority. The entry dispatches only after confirmed consumption and a final
+expiry check. An execution error invokes the bound rollback and leaves the
+approval consumed. A rollback failure or process death requires reconciliation
+before seeking fresh approval. The review tests use only disposable local
+effects. Live launchers require separate adapter selection and authorization
+for the exact target and rollback.
 
 ## Live acceptance prerequisites
 

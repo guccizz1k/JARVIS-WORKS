@@ -173,3 +173,37 @@ def test_restoring_both_local_stores_cannot_redispatch(review):
         run(review, execute, rollback)
     execute.assert_called_once_with(review[1])
     rollback.assert_not_called()
+
+
+@pytest.mark.parametrize("fail_after_write", [False, True])
+def test_bound_filesystem_adapter(review, tmp_path, fail_after_write):
+    """Dispatch and compensate a real effect in a disposable directory."""
+    gate, manifest, _, _, before = review
+    artifact = tmp_path / "approved-artifact"
+
+    def execute(approved_manifest):
+        assert approval.read_ledger_checkpoint(gate.ledger_db).revision == before.revision + 1
+        with artifact.open("xb") as output:
+            output.write(approved_manifest)
+            output.flush()
+            os.fsync(output.fileno())
+        if fail_after_write:
+            raise OSError("synthetic operation interrupted after write")
+        return artifact
+
+    def rollback(approved_manifest):
+        assert artifact.read_bytes() == approved_manifest
+        artifact.unlink()
+
+    if fail_after_write:
+        with pytest.raises(OSError, match="interrupted after write"):
+            run(review, execute, rollback)
+        assert not artifact.exists()
+    else:
+        assert run(review, execute, rollback) == artifact
+        assert artifact.read_bytes() == manifest
+
+    latest = approval.read_ledger_checkpoint(gate.ledger_db)
+    with pytest.raises(ApprovalError, match="consumed"):
+        run(review, execute, rollback, checkpoint=latest)
+    assert artifact.exists() is (not fail_after_write)
