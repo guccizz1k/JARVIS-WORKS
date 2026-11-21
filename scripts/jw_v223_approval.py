@@ -4,11 +4,13 @@ The caller supplies trusted owner policy, exact manifest bytes, and the full Git
 tree ID resolved from the candidate that would be used. Workers open the same
 explicitly initialized database in an owner-private directory on a local disk.
 The consumption ledger must live in a separate backup and restore domain.
-Restoring both files together defeats snapshot detection. A failed partial
-commit leaves the pair unavailable rather than returning an approval.
+The pair alone cannot detect a coordinated restore. Review preflight also
+requires an independently retained ledger checkpoint. A failed partial commit
+leaves the pair unavailable rather than returning an approval.
 """
 
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -93,7 +95,9 @@ def _create_private_file(path: Path) -> None:
 
 
 def _separate_paths(challenge_db: Path, ledger_db: Path) -> None:
-    if challenge_db.absolute().parent == ledger_db.absolute().parent:
+    challenge_dir = challenge_db.absolute().parent
+    ledger_dir = ledger_db.absolute().parent
+    if challenge_dir.is_relative_to(ledger_dir) or ledger_dir.is_relative_to(challenge_dir):
         raise ApprovalError("consumption ledger requires a separate private directory")
 
 
@@ -127,8 +131,55 @@ def initialize_challenge_store(path: Path, *, ledger_db: Path) -> None:
         raise ApprovalError("cannot initialize challenge store") from exc
 
 
+@dataclass(frozen=True)
+class LedgerCheckpoint:
+    store_id: str
+    revision: int
+    events_sha256: str
+
+
+def _ledger_checkpoint(ledger: sqlite3.Connection, store_id: str, revision: int) -> LedgerCheckpoint:
+    digest = hashlib.sha256()
+    events = ledger.execute("SELECT revision, nonce, event FROM ledger_events ORDER BY revision")
+    for expected_revision, row in enumerate(events, start=1):
+        event_revision, nonce, event = row
+        if (
+            event_revision != expected_revision
+            or type(nonce) is not str or not re.fullmatch(r"[0-9a-f]{64}", nonce)
+            or event not in ("issue", "consume")
+        ):
+            raise ApprovalError("invalid consumption ledger history")
+        digest.update(json.dumps(row, separators=(",", ":")).encode("ascii") + b"\n")
+    return LedgerCheckpoint(store_id, revision, digest.hexdigest())
+
+
+def read_ledger_checkpoint(ledger_path: Path) -> LedgerCheckpoint:
+    """Observe the ledger for trusted custody outside the pair's restore boundary."""
+    with _transaction(ledger_path, label="consumption ledger") as ledger:
+        checkpoint = _ledger_identity(ledger)
+        if len(checkpoint) != 1:
+            raise ApprovalError("invalid consumption ledger identity")
+        return _ledger_checkpoint(ledger, *checkpoint[0])
+
+
+def _ledger_identity(ledger: sqlite3.Connection) -> list:
+    return ledger.execute("""
+        SELECT store_id, COALESCE((SELECT MAX(revision) FROM ledger_events), 0)
+        FROM ledger_identity
+    """).fetchall()
+
+
+@dataclass
+class _LedgerEvent:
+    db: sqlite3.Connection
+    checkpoint: LedgerCheckpoint | None = None
+
+
 @contextmanager
-def _record_event(path: Path | None, ledger_path: Path | None, event: str, nonce: str):
+def _record_event(
+    path: Path | None, ledger_path: Path | None, event: str, nonce: str,
+    expected_checkpoint: LedgerCheckpoint | None,
+):
     if path is None:
         raise ApprovalError("missing challenge store")
     if ledger_path is None:
@@ -137,18 +188,24 @@ def _record_event(path: Path | None, ledger_path: Path | None, event: str, nonce
     # The ledger lock serializes workers through both commits. If the process
     # dies after the local commit, its advanced checkpoint quarantines the pair.
     with _transaction(ledger_path, label="consumption ledger") as ledger:
-        ledger_checkpoint = ledger.execute("""
-            SELECT store_id, COALESCE((SELECT MAX(revision) FROM ledger_events), 0)
-            FROM ledger_identity
-        """).fetchall()
+        ledger_checkpoint = _ledger_identity(ledger)
+        if expected_checkpoint is not None and (
+            len(ledger_checkpoint) != 1
+            or _ledger_checkpoint(ledger, *ledger_checkpoint[0]) != expected_checkpoint
+        ):
+            raise ApprovalError("independent consumption ledger checkpoint mismatch")
         with _transaction(path) as db:
             checkpoint = db.execute("SELECT store_id, revision FROM store_checkpoint").fetchall()
             if len(checkpoint) != 1 or checkpoint != ledger_checkpoint:
                 raise ApprovalError("challenge store and consumption ledger checkpoint mismatch")
-            yield db
-            revision = checkpoint[0][1] + 1
+            pending = _LedgerEvent(db)
+            yield pending
+            store_id, previous_revision = checkpoint[0]
+            revision = previous_revision + 1
             ledger.execute("INSERT INTO ledger_events VALUES (?, ?, ?)", (revision, nonce, event))
             db.execute("UPDATE store_checkpoint SET revision = ?", (revision,))
+            if expected_checkpoint is not None:
+                pending.checkpoint = _ledger_checkpoint(ledger, store_id, revision)
 
 
 def candidate_git_tree(repository: Path, commit: str) -> str:
@@ -206,12 +263,14 @@ class _Request:
 class ApprovalVerifier:
     def __init__(
         self, policy: OwnerPolicy | None = None, *, challenge_db: Path | None = None,
-        ledger_db: Path | None = None,
+        ledger_db: Path | None = None, expected_checkpoint: LedgerCheckpoint | None = None,
     ) -> None:
         self._policy = policy
         self._pid = getpid()
         self._challenge_db = challenge_db.absolute() if challenge_db is not None else None
         self._ledger_db = ledger_db.absolute() if ledger_db is not None else None
+        self._expected_checkpoint = expected_checkpoint
+        self.committed_checkpoint: LedgerCheckpoint | None = None
 
     def _authorized_policy(self, scope: str) -> OwnerPolicy:
         if getpid() != self._pid:
@@ -238,7 +297,10 @@ class ApprovalVerifier:
         pinned_ed25519_key(policy.public_key, policy.fingerprint)
         request = self._request(manifest, git_tree, scope)
         nonce = secrets.token_hex(32)
-        with _record_event(self._challenge_db, self._ledger_db, "issue", nonce) as db:
+        with _record_event(
+            self._challenge_db, self._ledger_db, "issue", nonce, self._expected_checkpoint,
+        ) as event:
+            db = event.db
             now = time()
             challenge = Challenge(nonce, int(now) + _CHALLENGE_TTL_SECONDS)
             db.execute(
@@ -250,6 +312,7 @@ class ApprovalVerifier:
                  request.git_tree, request.scope, _boot_id(), now, monotonic(),
                  challenge.expires_at),
             )
+        self.committed_checkpoint = event.checkpoint
         return challenge
 
     def verify(
@@ -274,7 +337,10 @@ class ApprovalVerifier:
         nonce, expires_at = fields["challenge"], fields["expires_at"]
         if type(nonce) is not str or type(expires_at) is not int:
             raise ApprovalError("invalid challenge or expiry")
-        with _record_event(self._challenge_db, self._ledger_db, "consume", nonce) as db:
+        with _record_event(
+            self._challenge_db, self._ledger_db, "consume", nonce, self._expected_checkpoint,
+        ) as event:
+            db = event.db
             pending = db.execute(
                 """SELECT boot_id, issued_at, issued_monotonic, expires_at
                    FROM approval_challenges
@@ -302,6 +368,7 @@ class ApprovalVerifier:
             )
             if updated.rowcount != 1:
                 raise ApprovalError("challenge consumption failed")
+        self.committed_checkpoint = event.checkpoint
 
     def issue_candidate(self, *, manifest: bytes, repository: Path, commit: str, scope: str) -> Challenge:
         self._authorized_policy(scope)
