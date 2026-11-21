@@ -1,0 +1,87 @@
+name: V22.3 independent exact-candidate CI
+
+on:
+  push:
+    branches: [review/jw-v223-independent-ci]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-candidate:
+    if: github.ref == 'refs/heads/review/jw-v223-independent-ci'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_NO_PAID_MODEL_RUNTIME: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify exact source, both containment policies, and historical fixture
+        run: |
+          export JW_CI_ROOT="$RUNNER_TEMP/jw-v223-independent"
+          echo "JW_CI_ROOT=$JW_CI_ROOT" >> "$GITHUB_ENV"
+          bash scripts/ci_v223_independent.sh source
+      - name: Install existing test prerequisites
+        working-directory: ${{ env.JW_CI_ROOT }}/candidate
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-nanum postgresql-client tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt -r requirements-postgres-check.txt -r requirements-jteam-external-pilot.txt 'PyMuPDF==1.26.7' 'reportlab==4.4.9' 'playwright==1.56.0'
+          python -m playwright install --with-deps chromium webkit
+          python -m venv "$RUNNER_TEMP/jw-v223-semgrep"
+          "$RUNNER_TEMP/jw-v223-semgrep/bin/python" -m pip install --disable-pip-version-check 'semgrep==1.182.1'
+          echo "JW_SEMGREP_BIN=$RUNNER_TEMP/jw-v223-semgrep/bin" >> "$GITHUB_ENV"
+          helper="$(python - <<'PY'
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              path = Path(p.chromium.executable_path).with_name("chrome_sandbox")
+              assert path.is_file() and not path.is_symlink()
+              print(path)
+          PY
+          )"
+          sudo install -o root -g root -m 4755 "$helper" "$RUNNER_TEMP/jw-v223-chrome-sandbox"
+          test "$(stat -c '%u:%g:%a' "$RUNNER_TEMP/jw-v223-chrome-sandbox")" = '0:0:4755'
+          echo "CHROME_DEVEL_SANDBOX=$RUNNER_TEMP/jw-v223-chrome-sandbox" >> "$GITHUB_ENV"
+          docker pull postgres:17
+      - name: Scan incoming Git history with the existing exact-finding classifier
+        run: |
+          set -euo pipefail
+          scan_dir="$(mktemp -d "$RUNNER_TEMP/jw-v223-gitleaks.XXXXXX")"
+          curl -fsSL --retry 2 --max-time 60 -o "$scan_dir/gitleaks.tar.gz" \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_linux_x64.tar.gz
+          echo "79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e  $scan_dir/gitleaks.tar.gz" | sha256sum -c --status
+          tar -xzf "$scan_dir/gitleaks.tar.gz" -C "$scan_dir" gitleaks
+          JW_GITLEAKS="$scan_dir/gitleaks" bash scripts/ci_v223_independent.sh history
+      - name: Full Python and Node regression with mandatory disposable PG17
+        run: bash scripts/ci_v223_independent.sh regression
+      - name: Focused approval and security
+        run: bash scripts/ci_v223_independent.sh security
+      - name: Disposable PostgreSQL 17 SQL, RLS and rollback
+        run: bash scripts/ci_v223_independent.sh postgres
+      - name: Sequential Chromium and WebKit acceptance
+        run: bash scripts/ci_v223_independent.sh browser
+      - name: Preserve evidence and recheck protected source
+        if: always()
+        run: bash scripts/ci_v223_independent.sh evidence
+      - name: Upload local test records and exact source identifiers
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: v223-exact-candidate-${{ github.sha }}
+          path: ${{ env.JW_CI_ROOT }}/evidence/
+          if-no-files-found: error
