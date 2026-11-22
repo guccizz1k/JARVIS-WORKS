@@ -99,7 +99,7 @@ def main() -> int:
         private_receipt()  # original PINNED source SHA, prior backup/restore stages PASS
         result = verify_existing_archive()
         print("P1_LOCAL_ENCRYPTED_ARCHIVE_MATCH_PASS")
-        print("SOURCE_BACKUP_RECEIPT_LINK_PASS")
+        print("PRIOR_RUN_RECEIPT_PRESENT_PASS_NO_CRYPTOGRAPHIC_ARCHIVE_BINDING")
         for key in ("archive_name", "bytes", "sha256", "git_blob_sha1",
                     "destination_repo", "destination_relative_path", "upload_status"):
             print(key.upper(), result[key])
