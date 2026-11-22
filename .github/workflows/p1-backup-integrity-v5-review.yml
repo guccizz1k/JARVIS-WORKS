@@ -1,0 +1,36 @@
+name: P1 backup integrity V5 review
+
+on:
+  push:
+    branches:
+      - review/jw-p1-v5-integrity-20261123
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-p1-v5-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-unit:
+    name: P1 V5 isolated regression (no database)
+    if: github.repository == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout review commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal dependencies
+        run: python -m pip install --disable-pip-version-check 'pytest>=8,<10' 'cryptography>=43,<47'
+      - name: Compile engine and test
+        run: python -m py_compile scripts/pg_backup_v223.py tests/test_p1_backup_integrity_v5.py
+      - name: Run isolated P1 V5 regressions
+        run: python -m pytest -q tests/test_p1_backup_integrity_v5.py
