@@ -264,8 +264,20 @@ def dsn_with_dbname(dsn: str, dbname: str) -> str:
 
 
 def pg_env(opts: dict) -> dict:
-    env = {**os.environ, "PGHOST": opts["host"], "PGPORT": opts["port"],
-           "PGUSER": opts["user"], "PGPASSWORD": opts["password"], "PGDATABASE": opts["dbname"]}
+    """Pass only PostgreSQL connection settings and needed process infrastructure.
+
+    Never inherit the backup encryption key, vault tokens, source/target DSNs,
+    cloud credentials, or unrelated secrets into pg_dump/pg_restore.
+    """
+    safe_parent = (
+        "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "SystemRoot", "WINDIR", "PATHEXT",
+        "USERPROFILE", "LD_LIBRARY_PATH", "DOCKER_HOST", "DOCKER_CONTEXT",
+        "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH",
+    )
+    env = {name: os.environ[name] for name in safe_parent if name in os.environ}
+    env.update(PGHOST=opts["host"], PGPORT=opts["port"], PGUSER=opts["user"],
+               PGPASSWORD=opts["password"], PGDATABASE=opts["dbname"])
     if opts.get("sslmode"):
         env["PGSSLMODE"] = opts["sslmode"]
     if opts.get("sslrootcert"):
