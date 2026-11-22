@@ -21,13 +21,26 @@ def test_preflight_calls_exact_v6_checks():
 def test_original_functions_restored_on_failure():
     original_preflight=live.owner.preflight
     original_expiry=live.owner.expiry_value
+    original_sql=live.owner.ROLE_SQL
+    original_revoke=live.runner.stage_revoke
     with patch.object(live.integration,'install'),patch.object(live.owner,'run_live',side_effect=RuntimeError('abort')):
         with pytest.raises(RuntimeError):
             live.main()
     assert live.owner.preflight is original_preflight
     assert live.owner.expiry_value is original_expiry
+    assert live.owner.ROLE_SQL==original_sql
+    assert live.runner.stage_revoke is original_revoke
 
 def test_live_launcher_never_executes_without_owner_confirmation():
     with patch.object(live.integration,'install'),patch.object(live.owner,'run_live',return_value=2) as run:
         assert live.main()==2
         run.assert_called_once_with()
+
+def test_revocation_restores_expired_baseline():
+    with patch.object(live.integration,'install'), \
+         patch.object(live.runner,'stage_revoke',return_value={'revoke':'applied'}) as original, \
+         patch.object(live.role_expiry,'restore_expired',return_value='EXPIRY_RESTORED') as expire, \
+         patch.object(live.owner,'run_live',side_effect=lambda: live.runner.stage_revoke()):
+        assert live.main()=={'revoke':'applied'}
+        original.assert_called_once()
+        expire.assert_called_once()
