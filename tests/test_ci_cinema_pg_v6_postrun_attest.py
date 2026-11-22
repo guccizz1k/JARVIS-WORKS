@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from scripts import ci_cinema_pg_v6_postrun_attest as a
+from scripts.ci_cinema_pg_v6_provider_log_attest import ProviderProofBlocked
 
 def test_receipt_strict_sha_and_success_stages(tmp_path):
     file=tmp_path/(a.RECEIPT_PREFIX+"20261122.json")
@@ -51,7 +52,7 @@ def test_audit_blocks_transport_without_saving_evidence(tmp_path):
          patch.object(a,"private_receipt",return_value=tmp_path/"receipt.json"), \
          patch.object(a,"independent_proof",return_value="PRIMARY_PG_TRANSPORT_OR_UNRECOGNIZED"), \
          patch("scripts.ci_cinema_pg_v6_provider_log_attest.verify_saved",
-               side_effect=__import__("scripts.ci_cinema_pg_v6_provider_log_attest", fromlist=["ProviderProofBlocked"]).ProviderProofBlocked("invalid_provider_event")):
+               side_effect=ProviderProofBlocked("invalid_provider_event")):
         with pytest.raises(a.AttestationBlocked,match="authentication_refusal"):
             a.audit()
         assert list(tmp_path.glob("v6_postrun_independent_*"))==[]
