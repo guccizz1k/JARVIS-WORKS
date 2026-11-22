@@ -111,8 +111,23 @@ def audit():
     check_live_admin_state() # pinned dev identity; 65 tables; NOLOGIN, expired, zero sessions
     evidence=private_receipt()
     proof=independent_proof()
+    # The pooler and direct TCP paths may both hide auth denials behind their
+    # transport layer. Only allow HISTORICAL provider-log evidence retrieved
+    # independently from Supabase, with its own strict event-pair validation.
+    # This never changes the original runner's BLOCKED verdict.
+    provider_snapshot = None
+    if proof == "PRIMARY_PG_TRANSPORT_OR_UNRECOGNIZED":
+        from scripts.ci_cinema_pg_v6_provider_log_attest import (
+            verify_saved, ProviderProofBlocked,
+        )
+        try:
+            provider_snapshot = verify_saved()
+        except ProviderProofBlocked:
+            raise AttestationBlocked("authentication_refusal_not_verified") from None
+        proof = "HISTORICAL_SUPABASE_PROVIDER_LOG_AUTH_REJECTION"
     check_live_admin_state()
-    if proof not in ("SESSION_POOLER_AUTH_REJECTION","PRIMARY_PG_AUTH_REJECTION"):
+    if proof not in ("SESSION_POOLER_AUTH_REJECTION","PRIMARY_PG_AUTH_REJECTION",
+                     "HISTORICAL_SUPABASE_PROVIDER_LOG_AUTH_REJECTION"):
         raise AttestationBlocked("authentication_refusal_not_verified")
     # Save NEW explicitly supplementary evidence; do NOT alter original BLOCKED receipt.
     import hashlib
@@ -126,6 +141,8 @@ def audit():
         "role_catalog_nologin_expired_no_sessions":True,
         "new_login_refused":True,
         "refusal_method":proof,
+        "provider_log_evidence_is_historical": provider_snapshot is not None,
+        "provider_log_is_cryptographically_signed": False,
         "time_utc":datetime.now(timezone.utc).isoformat(),
         "verdict":"INDEPENDENT_CLOSURE_PASS",
     }
