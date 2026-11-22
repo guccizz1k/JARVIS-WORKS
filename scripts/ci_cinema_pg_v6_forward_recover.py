@@ -38,11 +38,11 @@ def find_listener():
         return None
     if len(rows) != 1 or '127.0.0.1:55433' not in rows[0]:
         raise RecoveryBlocked('unexpected_listener_address_or_count')
-    matches = re.findall(r'pid=(\\d+)', rows[0])
+    matches = re.findall(r'pid=(\d+)', rows[0])
     if len(matches) != 1:
         raise RecoveryBlocked('listener_owner_unknown')
     pid = int(matches[0])
-    argv = command('sudo','-n','cat',f'/proc/{pid}/cmdline').split(b'\\x00')
+    argv = command('sudo','-n','cat',f'/proc/{pid}/cmdline').split(b'\x00')
     argv = [arg.decode('utf-8', 'replace') for arg in argv if arg]
     if not argv or Path(argv[0]).name != 'socat' or argv[1:] != [LISTEN_ARG, EXEC_ARG]:
         raise RecoveryBlocked('foreign_listener_do_not_kill')
@@ -105,8 +105,8 @@ def write_relay(pid):
     flags=os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os,'O_NOFOLLOW',0)
     fd=os.open(RELAY,flags,0o700)
     with os.fdopen(fd,'w') as f:
-        f.write('#!/bin/sh\\nexec /usr/bin/nsenter -t '+str(pid)+
-                ' -n /usr/bin/socat STDIO TCP:127.0.0.1:5432\\n')
+        f.write('#!/bin/sh\nexec /usr/bin/nsenter -t '+str(pid)+
+                ' -n /usr/bin/socat STDIO TCP:127.0.0.1:5432\n')
     os.chmod(RELAY,0o700)
 
 def repair(psycopg,engine):
