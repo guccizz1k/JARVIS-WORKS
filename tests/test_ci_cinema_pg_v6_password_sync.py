@@ -122,7 +122,7 @@ def test_client_tls_proof_overrules_pooler_server_ssl_flag():
     from types import SimpleNamespace
     conn=SimpleNamespace(
         pgconn=SimpleNamespace(ssl_in_use=True),
-        info=SimpleNamespace(dsn_parameters={'sslmode':'verify-full'})
+        info=SimpleNamespace(get_parameters=lambda:{'sslmode':'verify-full'})
     )
     with patch.object(sync,'facts',return_value=True):
         assert sync.verify_baseline(conn) is None
@@ -132,7 +132,7 @@ def test_cleartext_client_rejected_before_role_query():
     from types import SimpleNamespace
     conn=SimpleNamespace(
         pgconn=SimpleNamespace(ssl_in_use=False),
-        info=SimpleNamespace(dsn_parameters={'sslmode':'verify-full'})
+        info=SimpleNamespace(get_parameters=lambda:{'sslmode':'verify-full'})
     )
     with patch.object(sync,'facts') as role:
         with pytest.raises(sync.SyncBlocked,match='admin_client_tls_required'):
@@ -144,7 +144,7 @@ def test_tls_without_host_verification_rejected():
     from types import SimpleNamespace
     conn=SimpleNamespace(
         pgconn=SimpleNamespace(ssl_in_use=True),
-        info=SimpleNamespace(dsn_parameters={'sslmode':'require'})
+        info=SimpleNamespace(get_parameters=lambda:{'sslmode':'require'})
     )
     with patch.object(sync,'facts') as role:
         with pytest.raises(sync.SyncBlocked,match='admin_hostname_verification_required'):
