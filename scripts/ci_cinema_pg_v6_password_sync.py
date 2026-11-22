@@ -83,13 +83,16 @@ def confirm_owner(stdin=None, stdout=None) -> None:
 
 
 def verify_baseline(conn) -> None:
+    # The managed Supavisor pooler may terminate TLS: pg_stat_ssl describes
+    # the pooler -> PostgreSQL hop, NOT the Codespaces -> pooler client hop.
+    # libpq exposes the TLS negotiation of THIS authenticated client socket.
+    if conn.pgconn.ssl_in_use is not True:
+        raise SyncBlocked('admin_client_tls_required')
+    params = conn.info.dsn_parameters
+    if params.get('sslmode') != 'verify-full':
+        raise SyncBlocked('admin_hostname_verification_required')
     if facts(conn) is not True:
         raise SyncBlocked('not_expired_nologin_zero_sessions')
-    tls = conn.execute(
-        'SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()'
-    ).fetchone()
-    if not tls or tls[0] is not True:
-        raise SyncBlocked('admin_tls_required')
 
 
 def apply_password(conn, local_password: str, local_verifier: str, sql_module) -> str:
@@ -126,12 +129,21 @@ def execute_sync(*, input_stream=None, output_stream=None):
     verify_sources()  # exact clean remote SHA, pinned engine blob, reviewed file list
     check_live_admin_state()  # read-only verification incl. 65 tables, privileges
     local_password, local_verifier = local_credential()
-    # Confirm before any mutation, but only AFTER all non-mutation preflights pass.
-    confirm_owner(input_stream, output_stream)
-    check_window()
     import psycopg
     from psycopg import sql
-    with psycopg.connect(os.environ['JW_PG_ADMIN_DSN'], connect_timeout=8) as conn:
+    from scripts.ci_cinema_pg_s import CERT_FILE, load_dashboard_ca
+    # Verify the client->Supavisor hostname and certificate, regardless of
+    # the TLS mode of the managed pooler->PostgreSQL internal hop.
+    load_dashboard_ca()
+    with psycopg.connect(os.environ['JW_PG_ADMIN_DSN'], connect_timeout=8,
+                         sslmode='verify-full', sslrootcert=str(CERT_FILE),
+                         autocommit=True) as conn:
+        # Only ask the user after TLS + role identity have passed.
+        with conn.transaction():
+            conn.execute('SET TRANSACTION READ ONLY')
+            verify_baseline(conn)
+        confirm_owner(input_stream, output_stream)
+        check_window()
         with conn.transaction():
             conn.execute("SET LOCAL lock_timeout='3s'")
             conn.execute("SET LOCAL statement_timeout='12s'")
@@ -158,7 +170,8 @@ def main():
         safe = {'approval_window_closed', 'owner_tty_required', 'owner_confirmation_required',
                 'approved_codespace_only', 'local_verifier_invalid',
                 'local_credential_unsafe',
-                'not_expired_nologin_zero_sessions', 'admin_tls_required',
+                'not_expired_nologin_zero_sessions', 'admin_client_tls_required',
+                'admin_hostname_verification_required',
                 'server_scram_unusable',
                 'postwrite_verifier_mismatch', 'independent_proof_failed'}
         label = str(exc) if isinstance(exc, SyncBlocked) else type(exc).__name__
