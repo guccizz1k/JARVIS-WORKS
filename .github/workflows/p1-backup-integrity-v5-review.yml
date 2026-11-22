@@ -74,7 +74,7 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
           tool="$(basename "$0")"
-          exec docker run --rm --network host -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -e PGSSLMODE -e PGSSLROOTCERT postgres:17 "$tool" "$@"
+          exec docker run --rm --network host --user "$(id -u):$(id -g)" -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -e PGSSLMODE -e PGSSLROOTCERT postgres:17 "$tool" "$@"
           SCRIPT
             chmod +x "$RUNNER_TEMP/jw-pg17-bin/$cli"
           done
