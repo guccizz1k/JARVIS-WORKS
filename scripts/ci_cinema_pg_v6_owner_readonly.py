@@ -24,6 +24,7 @@ ALLOWED=frozenset({
  'scripts/ci_cinema_pg_v6_owner_readonly.py',
  'scripts/ci_cinema_pg_v6_preflight.py',
  'scripts/ci_cinema_pg_v6_owner_live.py',
+ 'scripts/review/cinema_pg_v6_backup_role_20261123.sql',
  'tests/test_ci_cinema_pg_v6_target_adapter.py',
  'tests/test_ci_cinema_pg_v6_target_binding.py',
  'tests/test_ci_cinema_pg_v6_runner_integration.py',
