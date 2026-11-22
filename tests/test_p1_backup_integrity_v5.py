@@ -189,3 +189,40 @@ def test_pg_tool_success_returns_stdout_without_stderr(monkeypatch):
         lambda *args, **kwargs: SimpleNamespace(returncode=0, stderr="sensitive-stderr", stdout="good")
     )
     assert p.run_tool(["pg_dump", "--version"], opts, timeout=5) == "good"
+
+
+@pytest.mark.parametrize("sensitive_name", [
+    "JW_PG_BACKUP_KEY", "JW_PG_SOURCE_DSN", "JW_PG_TARGET_ADMIN_DSN",
+    "JW_PG_TARGET_EPHEMERAL_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+    "AWS_SECRET_ACCESS_KEY", "OPENAI_API_KEY", "DATABASE_URL", "SECRET_KEY",
+])
+def test_pg_child_env_strips_sensitive_tokens(monkeypatch, sensitive_name):
+    """PostgreSQL CLI processes must not inherit unrelated credentials."""
+    monkeypatch.setenv(sensitive_name, "canary-do-not-inherit")
+    opts = dict(host="127.0.0.1", port="55433", user="postgres",
+                password="db-only-test-fixture", dbname="postgres",
+                sslmode="verify-full", sslrootcert="/tmp/test-root-ca.pem")
+    env = p.pg_env(opts)
+    assert sensitive_name not in env
+    assert "canary-do-not-inherit" not in repr(env)
+    assert env["PGHOST"] == opts["host"]
+    assert env["PGPORT"] == opts["port"]
+    assert env["PGUSER"] == opts["user"]
+    assert env["PGPASSWORD"] == opts["password"]
+    assert env["PGDATABASE"] == opts["dbname"]
+    assert env["PGSSLMODE"] == opts["sslmode"]
+    assert env["PGSSLROOTCERT"] == opts["sslrootcert"]
+
+
+def test_pg_child_env_preserves_path_without_inheriting_unused_pg_secrets(monkeypatch):
+    monkeypatch.setenv("PATH", "/synthetic-bin:/usr/bin")
+    monkeypatch.setenv("PGSERVICEFILE", "/tmp/sensitive-service.conf")
+    monkeypatch.setenv("PGPASSFILE", "/tmp/sensitive-passfile")
+    opts = dict(host="localhost", port="5432", user="u", password="synthetic",
+                dbname="d", sslmode="", sslrootcert="")
+    env = p.pg_env(opts)
+    assert env["PATH"] == "/synthetic-bin:/usr/bin"
+    assert "PGSERVICEFILE" not in env
+    assert "PGPASSFILE" not in env
+    assert "PGSSLMODE" not in env
+    assert "PGSSLROOTCERT" not in env
