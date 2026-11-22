@@ -13,9 +13,10 @@ def test_checks_all_readonly_gates():
          patch.object(p,'load_key',fake('key')), \
          patch.object(p,'load_dashboard_ca',fake('ca')), \
          patch.object(p,'read_password_file',fake('auth')), \
+         patch.object(p,'check_scram',fake('scram')), \
          patch.object(p.owner,'check_live_admin_state',fake('admin')):
         assert p.check() is True
-    assert calls==['source_target','tools','private','key','ca','auth','admin']
+    assert calls==['source_target','tools','private','key','ca','auth','scram','admin']
 
 def test_admin_failure_is_blocked_without_leaking():
     with patch.object(p.v6,'check'), \
@@ -24,6 +25,7 @@ def test_admin_failure_is_blocked_without_leaking():
          patch.object(p,'load_key'), \
          patch.object(p,'load_dashboard_ca'), \
          patch.object(p,'read_password_file'), \
+         patch.object(p,'check_scram'), \
          patch.object(p.owner,'check_live_admin_state',side_effect=RuntimeError('private secret')):
         with pytest.raises(v.Blocked,match='PREFLIGHT_ADMIN_READONLY') as exc:
             p.check()
