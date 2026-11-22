@@ -32,5 +32,7 @@ def stage_login():
         code=live.main()
     result=classify(out.getvalue())
     if code!=0 or result!='PASS':
+        # Fixed category only; the original output may contain confidential data.
+        print('V6_RESTRICTED_LOGIN_'+result)
         raise LoginBlocked(result)
     return {'login':'PASS','tables_expected':live.EXPECTED_TABLES}
