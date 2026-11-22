@@ -35,7 +35,10 @@ def main():
         print('NO_ROLE_CHANGE_NO_BACKUP')
         return 0
     except BaseException as e:
-        print('BLOCKED_V6_PREFLIGHT_'+type(e).__name__)
+        label = str(e) if isinstance(e, v6.Blocked) else 'UNEXPECTED_'+type(e).__name__
+        if label not in {'PREFLIGHT_TOOLS','PREFLIGHT_PRIVATE_INPUTS','PREFLIGHT_AES_KEY','PREFLIGHT_CA_TLS','PREFLIGHT_BACKUP_AUTH','PREFLIGHT_ADMIN_READONLY'}:
+            label = 'SOURCE_OR_TARGET_GATE'
+        print('BLOCKED_V6_'+label)
         print('NO_ROLE_CHANGE_NO_BACKUP')
         return 2
 
