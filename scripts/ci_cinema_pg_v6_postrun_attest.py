@@ -143,6 +143,13 @@ def audit():
         "refusal_method":proof,
         "provider_log_evidence_is_historical": provider_snapshot is not None,
         "provider_log_is_cryptographically_signed": False,
+        "provider_log_utc": (provider_snapshot or {}).get("event_utc"),
+        "provider_log_sqlstate": (provider_snapshot or {}).get("sqlstate"),
+        "provider_log_evidence_sha256": (
+            hashlib.sha256(
+                __import__("scripts.ci_cinema_pg_v6_provider_log_attest", fromlist=["EVIDENCE"]).EVIDENCE.read_bytes()
+            ).hexdigest() if provider_snapshot is not None else None
+        ),
         "time_utc":datetime.now(timezone.utc).isoformat(),
         "verdict":"INDEPENDENT_CLOSURE_PASS",
     }
