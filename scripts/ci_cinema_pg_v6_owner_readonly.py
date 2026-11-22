@@ -28,6 +28,7 @@ ALLOWED=frozenset({
  'scripts/ci_cinema_pg_v6_forward_recover.py',
  'scripts/ci_cinema_pg_v6_role_expiry.py',
  'scripts/ci_cinema_pg_v6_credential_probe.py',
+ 'scripts/ci_cinema_pg_v6_password_sync.py',
  'scripts/review/cinema_pg_v6_backup_role_20261123.sql',
  'tests/test_ci_cinema_pg_v6_target_adapter.py',
  'tests/test_ci_cinema_pg_v6_target_binding.py',
@@ -39,6 +40,7 @@ ALLOWED=frozenset({
  'tests/test_ci_cinema_pg_v6_forward_recover.py',
  'tests/test_ci_cinema_pg_v6_role_expiry.py',
  'tests/test_ci_cinema_pg_v6_credential_probe.py',
+ 'tests/test_ci_cinema_pg_v6_password_sync.py',
 })
 
 class Blocked(Exception):pass
