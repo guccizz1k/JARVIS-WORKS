@@ -51,8 +51,8 @@ def test_audit_blocks_transport_without_saving_evidence(tmp_path):
          patch.object(a,"private_receipt",return_value=tmp_path/"receipt.json"), \
          patch.object(a,"independent_proof",return_value="PRIMARY_PG_TRANSPORT_OR_UNRECOGNIZED"), \
          patch("scripts.ci_cinema_pg_v6_provider_log_attest.verify_saved",
-               side_effect=ValueError("invalid or forged evidence")):
-        with pytest.raises((a.AttestationBlocked,ValueError)):
+               side_effect=__import__("scripts.ci_cinema_pg_v6_provider_log_attest", fromlist=["ProviderProofBlocked"]).ProviderProofBlocked("invalid_provider_event")):
+        with pytest.raises(a.AttestationBlocked,match="authentication_refusal"):
             a.audit()
         assert list(tmp_path.glob("v6_postrun_independent_*"))==[]
 
