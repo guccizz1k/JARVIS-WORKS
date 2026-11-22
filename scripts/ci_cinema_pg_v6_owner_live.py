@@ -12,6 +12,7 @@ from scripts import ci_cinema_pg_v6_preflight as checks
 from scripts import ci_cinema_pg_v223_owner_live_20261117 as owner
 from scripts import ci_cinema_pg_v223_codespace_run as runner
 from scripts import ci_cinema_pg_v6_runner_integration as integration
+from scripts import ci_cinema_pg_v6_login_diagnostic as login_diagnostic
 
 KST=ZoneInfo('Asia/Seoul')
 DEADLINE=datetime(2026,11,23,1,0,tzinfo=KST)
@@ -37,15 +38,18 @@ def main():
     original_preflight=owner.preflight
     original_expiry=owner.expiry_value
     original_sql=owner.ROLE_SQL
+    original_login=runner.stage_login
     owner.preflight=preflight
     owner.expiry_value=expiry_value
     owner.ROLE_SQL=checks.v6.ROOT / 'scripts/review/cinema_pg_v6_backup_role_20261123.sql'
+    runner.stage_login=login_diagnostic.stage_login
     try:
         return owner.run_live()
     finally:
         owner.preflight=original_preflight
         owner.expiry_value=original_expiry
         owner.ROLE_SQL=original_sql
+        runner.stage_login=original_login
 
 if __name__=='__main__':
     raise SystemExit(main())
