@@ -157,3 +157,35 @@ def test_real_run_source_contains_restored_hash_and_stream_guard():
     assert 'summary["signature_digest_matches"]' in src
     assert 'summary["restore_verified"]' in src
     assert 'summary["signature_component_sha256"]' in src
+
+
+@pytest.mark.parametrize("tool, status", [("pg_dump", 1), ("pg_restore", 2)])
+def test_pg_tool_stderr_never_leaks(monkeypatch, tool, status):
+    """A failed PostgreSQL utility must never copy arbitrary stderr into logs."""
+    from types import SimpleNamespace
+    opts = dict(host="127.0.0.1", port="55433", user="postgres",
+                password="unpublished-fixture-password", dbname="postgres",
+                sslmode="", sslrootcert="")
+    sensitive = "CREATE FUNCTION secret AS 'private-row'; postgresql://u:password@db"
+    def fake_run(*args, **kwargs):
+        assert kwargs["capture_output"] is True
+        return SimpleNamespace(returncode=status, stderr=sensitive, stdout="")
+    monkeypatch.setattr(p.subprocess, "run", fake_run)
+    with pytest.raises(p.BackupError) as exc:
+        p.run_tool([tool, "--version"], opts, timeout=5)
+    message = str(exc.value)
+    assert message == f"FAIL_V223_{tool.upper()}_EXIT_{status}"
+    for forbidden in ("private-row", "password", "CREATE FUNCTION", "postgresql://"):
+        assert forbidden not in message
+
+
+def test_pg_tool_success_returns_stdout_without_stderr(monkeypatch):
+    from types import SimpleNamespace
+    opts = dict(host="127.0.0.1", port="55433", user="postgres",
+                password="synthetic-fixture", dbname="postgres",
+                sslmode="", sslrootcert="")
+    monkeypatch.setattr(
+        p.subprocess, "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stderr="sensitive-stderr", stdout="good")
+    )
+    assert p.run_tool(["pg_dump", "--version"], opts, timeout=5) == "good"
