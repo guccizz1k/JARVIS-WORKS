@@ -17,6 +17,7 @@ from scripts import ci_cinema_pg_v6_owner_readonly as gate
 from scripts import ci_cinema_pg_v223_codespace_run as runner
 from scripts.ci_cinema_pg_v223_owner_live_20261117 import check_live_admin_state
 from scripts.ci_cinema_pg_s import CERT_FILE, load_dashboard_ca
+from scripts.ci_cinema_pg_v6_provider_log_attest import EVIDENCE as PROVIDER_EVIDENCE
 
 SUCCESSFUL_BACKUP_SHA = "175fb490bc2a3236db4d14026c5ca9c2f268729a"
 DIRECT_HOST = "db.rvymwwzclagvljnofyss.supabase.co"
@@ -147,7 +148,7 @@ def audit():
         "provider_log_sqlstate": (provider_snapshot or {}).get("sqlstate"),
         "provider_log_evidence_sha256": (
             hashlib.sha256(
-                __import__("scripts.ci_cinema_pg_v6_provider_log_attest", fromlist=["EVIDENCE"]).EVIDENCE.read_bytes()
+                PROVIDER_EVIDENCE.read_bytes()
             ).hexdigest() if provider_snapshot is not None else None
         ),
         "time_utc":datetime.now(timezone.utc).isoformat(),
