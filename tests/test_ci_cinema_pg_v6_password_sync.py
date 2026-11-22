@@ -116,3 +116,37 @@ def test_expired_window_blocks_before_sources_and_secrets():
         with pytest.raises(sync.SyncBlocked,match='approval_window_closed'):
             sync.execute_sync()
         verify.assert_not_called()
+
+
+def test_client_tls_proof_overrules_pooler_server_ssl_flag():
+    from types import SimpleNamespace
+    conn=SimpleNamespace(
+        pgconn=SimpleNamespace(ssl_in_use=True),
+        info=SimpleNamespace(dsn_parameters={'sslmode':'verify-full'})
+    )
+    with patch.object(sync,'facts',return_value=True):
+        assert sync.verify_baseline(conn) is None
+
+
+def test_cleartext_client_rejected_before_role_query():
+    from types import SimpleNamespace
+    conn=SimpleNamespace(
+        pgconn=SimpleNamespace(ssl_in_use=False),
+        info=SimpleNamespace(dsn_parameters={'sslmode':'verify-full'})
+    )
+    with patch.object(sync,'facts') as role:
+        with pytest.raises(sync.SyncBlocked,match='admin_client_tls_required'):
+            sync.verify_baseline(conn)
+        role.assert_not_called()
+
+
+def test_tls_without_host_verification_rejected():
+    from types import SimpleNamespace
+    conn=SimpleNamespace(
+        pgconn=SimpleNamespace(ssl_in_use=True),
+        info=SimpleNamespace(dsn_parameters={'sslmode':'require'})
+    )
+    with patch.object(sync,'facts') as role:
+        with pytest.raises(sync.SyncBlocked,match='admin_hostname_verification_required'):
+            sync.verify_baseline(conn)
+        role.assert_not_called()
