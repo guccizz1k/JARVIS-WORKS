@@ -226,3 +226,36 @@ def test_pg_child_env_preserves_path_without_inheriting_unused_pg_secrets(monkey
     assert "PGPASSFILE" not in env
     assert "PGSSLMODE" not in env
     assert "PGSSLROOTCERT" not in env
+
+
+def test_version_probe_does_not_inherit_credentials(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setenv("JW_PG_BACKUP_KEY", "canary-backup-key")
+    monkeypatch.setenv("GITHUB_TOKEN", "canary-github-token")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "canary-cloud-secret")
+    seen = []
+    def fake_run(args, **kwargs):
+        seen.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stderr="", stdout="pg_dump (PostgreSQL) 17.11")
+    monkeypatch.setattr(p.subprocess, "run", fake_run)
+    assert p.tool_major("pg_dump") == 17
+    assert len(seen) == 1
+    args, kwargs = seen[0]
+    assert args == ["pg_dump", "--version"]
+    for name in ("JW_PG_BACKUP_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY"):
+        assert name not in kwargs["env"]
+    assert "PGPASSWORD" not in kwargs["env"]
+    assert "PATH" in kwargs["env"]
+
+
+def test_pg_tool_env_allowlist_is_shared_with_version_probe(monkeypatch):
+    """Keep a single source of truth for safe subprocess environment."""
+    monkeypatch.setenv("JW_PG_SOURCE_DSN", "secret-dsn-canary")
+    parent = p._pg_process_base_env()
+    opts = dict(host="127.0.0.1", port="55433", user="postgres",
+                password="synthetic-fixture", dbname="postgres",
+                sslmode="", sslrootcert="")
+    env = p.pg_env(opts)
+    assert "JW_PG_SOURCE_DSN" not in parent
+    assert "JW_PG_SOURCE_DSN" not in env
+    assert all(env[name] == value for name, value in parent.items())
