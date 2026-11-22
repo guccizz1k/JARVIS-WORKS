@@ -1,0 +1,48 @@
+{
+  "schema": "jarvis-works.v6.provider-auth-refusal-evidence.v1",
+  "project_id": "rvymwwzclagvljnofyss",
+  "project_name": "jarvis-works-dev",
+  "db_name": "postgres",
+  "pg_version_num": 170011,
+  "original_backup_run_sha": "175fb490bc2a3236db4d14026c5ca9c2f268729a",
+  "original_runner_verdict": "BLOCKED",
+  "source": "Supabase connected query_logs (postgres_logs) and execute_sql, independently retrieved on 2026-11-23 KST",
+  "cryptographically_provider_signed": false,
+  "log_query_window_utc": {
+    "start": "2026-11-22T14:15:00Z",
+    "end": "2026-11-22T14:22:00Z"
+  },
+  "log_events": [
+    {
+      "timestamp": "2026-11-22T14:17:51.129000Z",
+      "source": "postgres_logs",
+      "user": "jw_backup_ro",
+      "severity": "FATAL",
+      "sqlstate": "57P01",
+      "session_id": "6b02f96d.31fae7",
+      "message": "terminating connection due to administrator command"
+    },
+    {
+      "timestamp": "2026-11-22T14:17:51.137000Z",
+      "source": "postgres_logs",
+      "user": "jw_backup_ro",
+      "severity": "FATAL",
+      "sqlstate": "28000",
+      "session_id": "6b02f98f.31fafe",
+      "message": "role \"jw_backup_ro\" is not permitted to log in"
+    }
+  ],
+  "catalog_observation": {
+    "role": "jw_backup_ro",
+    "can_login": false,
+    "password_expired": true,
+    "active_sessions": 0,
+    "bypassrls": true,
+    "superuser": false,
+    "createrole": false,
+    "createdb": false,
+    "replication": false,
+    "connection_limit": 2
+  },
+  "scope": "Historical provider-log evidence independently retrieved; original B2_B3_BLOCKED receipt retained, not an automatic rewrite to official ALL PASS."
+}
