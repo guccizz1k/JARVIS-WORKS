@@ -3,7 +3,7 @@ import pytest
 from scripts import ci_cinema_pg_v6_owner_readonly as v
 
 def test_manifest_exact():
-    assert len(v.ALLOWED)==23
+    assert len(v.ALLOWED)==25
     assert 'scripts/pg_backup_v223.py' not in v.ALLOWED
     assert 'scripts/ci_cinema_pg_v223_codespace_run.py' not in v.ALLOWED
 
