@@ -88,7 +88,7 @@ def verify_baseline(conn) -> None:
     # libpq exposes the TLS negotiation of THIS authenticated client socket.
     if conn.pgconn.ssl_in_use is not True:
         raise SyncBlocked('admin_client_tls_required')
-    params = conn.info.dsn_parameters
+    params = conn.info.get_parameters()
     if params.get('sslmode') != 'verify-full':
         raise SyncBlocked('admin_hostname_verification_required')
     if facts(conn) is not True:
