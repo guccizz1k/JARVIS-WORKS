@@ -49,8 +49,10 @@ def test_audit_blocks_transport_without_saving_evidence(tmp_path):
     with patch.object(a.gate,"verify_sources"), \
          patch.object(a,"check_live_admin_state"), \
          patch.object(a,"private_receipt",return_value=tmp_path/"receipt.json"), \
-         patch.object(a,"independent_proof",return_value="PRIMARY_PG_TRANSPORT_OR_UNRECOGNIZED"):
-        with pytest.raises(a.AttestationBlocked,match="authentication_refusal"):
+         patch.object(a,"independent_proof",return_value="PRIMARY_PG_TRANSPORT_OR_UNRECOGNIZED"), \
+         patch("scripts.ci_cinema_pg_v6_provider_log_attest.verify_saved",
+               side_effect=ValueError("invalid or forged evidence")):
+        with pytest.raises((a.AttestationBlocked,ValueError)):
             a.audit()
         assert list(tmp_path.glob("v6_postrun_independent_*"))==[]
 
@@ -69,3 +71,24 @@ def test_main_does_not_claim_pass_without_proof(capsys):
     output=capsys.readouterr().out
     assert "NO_FALSE_PASS_NO_BACKUP_RETRY" in output
     assert "V6_POSTRUN_INDEPENDENT_CLOSURE_PASS" not in output
+
+def test_historical_provider_log_can_close_transport_only_as_supplement(tmp_path):
+    evidence=tmp_path/"original.json"
+    evidence.write_text('{"original":"BLOCKED"}')
+    with patch.object(a.gate,"verify_sources"), \
+         patch.object(a.gate,"git",return_value="reviewed-sha"), \
+         patch.object(a,"check_live_admin_state"), \
+         patch.object(a,"private_receipt",return_value=evidence), \
+         patch.object(a.runner,"SUMMARY_FILE",tmp_path/"summary.json"), \
+         patch.object(a,"independent_proof",return_value="PRIMARY_PG_TRANSPORT_OR_UNRECOGNIZED"), \
+         patch("scripts.ci_cinema_pg_v6_provider_log_attest.verify_saved",
+               return_value={"sqlstate":"28000","provider_signed":False}):
+        result=a.audit()
+    assert result=="HISTORICAL_SUPABASE_PROVIDER_LOG_AUTH_REJECTION"
+    new=list(tmp_path.glob("v6_postrun_independent_*.json"))
+    assert len(new)==1
+    receipt=json.loads(new[0].read_text())
+    assert receipt["original_verdict"]=="BLOCKED"
+    assert receipt["provider_log_evidence_is_historical"] is True
+    assert receipt["provider_log_is_cryptographically_signed"] is False
+    assert receipt["verdict"]=="INDEPENDENT_CLOSURE_PASS"
