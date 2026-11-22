@@ -23,11 +23,13 @@ ALLOWED=frozenset({
  'scripts/ci_cinema_pg_v6_runner_integration.py',
  'scripts/ci_cinema_pg_v6_owner_readonly.py',
  'scripts/ci_cinema_pg_v6_preflight.py',
+ 'scripts/ci_cinema_pg_v6_owner_live.py',
  'tests/test_ci_cinema_pg_v6_target_adapter.py',
  'tests/test_ci_cinema_pg_v6_target_binding.py',
  'tests/test_ci_cinema_pg_v6_runner_integration.py',
  'tests/test_ci_cinema_pg_v6_owner_readonly.py',
  'tests/test_ci_cinema_pg_v6_preflight.py',
+ 'tests/test_ci_cinema_pg_v6_owner_live.py',
 })
 
 class Blocked(Exception):pass
