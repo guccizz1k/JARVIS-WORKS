@@ -21,11 +21,10 @@ def checked_target_config(psycopg, backup_module):
     if old['JW_PG_CI_ALLOW'] != 'ONLY_EPHEMERAL_LOCAL_DATABASE':
         raise BindingBlocked('ephemeral_guard_disabled')
     gate.prove_target(psycopg, parsed['password'], old['JW_PG_TARGET_EPHEMERAL_TOKEN'], backup_module)
-    from psycopg.conninfo import make_conninfo
-    dsn = make_conninfo(host='127.0.0.1', port=gate.PORT,
-                        dbname='postgres', user='postgres',
-                        password=parsed['password'], sslmode='disable',
-                        connect_timeout=5)
+    from urllib.parse import quote
+    dsn = ('postgresql://postgres:' + quote(parsed['password'], safe='')
+           + '@127.0.0.1:' + str(gate.PORT)
+           + '/postgres?sslmode=disable&connect_timeout=5')
     return {
         'JW_PG_TARGET_ADMIN_DSN': dsn,
         'JW_PG_TARGET_EPHEMERAL_TOKEN': old['JW_PG_TARGET_EPHEMERAL_TOKEN'],
