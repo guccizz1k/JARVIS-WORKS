@@ -301,8 +301,10 @@ def run_tool(args: list[str], opts: dict, timeout: int) -> str:
     result = subprocess.run(args, env=pg_env(opts), capture_output=True, text=True,
                             timeout=timeout)
     if result.returncode != 0:
-        detail = redact(result.stderr.strip()[-400:], opts["password"])
-        raise BackupError(f"FAIL_V223_{Path(args[0]).name.upper()}_EXIT_{result.returncode}: {detail}")
+        # pg_dump/pg_restore stderr can include full SQL definitions, literal
+        # data, DSNs, or connection details. Public CI must never print it.
+        # The stable tool name and exit status are sufficient as a safe signal.
+        raise BackupError(f"FAIL_V223_{Path(args[0]).name.upper()}_EXIT_{result.returncode}")
     return result.stdout
 
 
