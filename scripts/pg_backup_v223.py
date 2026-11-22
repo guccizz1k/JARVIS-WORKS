@@ -409,44 +409,67 @@ def fetch_signature(connection, schema: str) -> dict:
     return sig
 
 
+def _signature_groups(rows: list) -> dict:
+    """Preserve duplicates and variants in signature rows."""
+    from collections import Counter, defaultdict
+    groups = defaultdict(Counter)
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or not row:
+            raise ValueError("INVALID_SIGNATURE_ROW")
+        label = str(row[0])
+        groups[label][json.dumps(row, sort_keys=True, default=str, ensure_ascii=False)] += 1
+    return groups
+
+
+def canonical_signature(sig: dict) -> dict:
+    """Normalize SQL row order without changing row multiplicities."""
+    return {
+        key: sorted(value, key=lambda row: json.dumps(row, sort_keys=True, default=str, ensure_ascii=False))
+        if isinstance(value, list) else value
+        for key, value in sig.items()
+    }
+
+
 def diff_signatures(source: dict, restored: dict) -> list[str]:
-    """Return mismatch labels only (names, never values)."""
+    """Return mismatch labels, never object definitions or row values."""
     problems = []
     for key in sorted(set(source) | set(restored)):
-        if source.get(key) == restored.get(key):
+        if key not in source or key not in restored:
+            problems.append(key)
             continue
-        if isinstance(source.get(key), dict) and isinstance(restored.get(key), dict):
-            names = sorted(k for k in set(source[key]) | set(restored[key])
-                           if source[key].get(k) != restored[key].get(k))
-            problems.extend(f"{key}:{name}" for name in names)
-        elif isinstance(source.get(key), list) and isinstance(restored.get(key), list):
-            a = {row[0]: row for row in source[key]}
-            b = {row[0]: row for row in restored[key]}
-            names = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
-            problems.extend(f"{key}:{name}" for name in names)
+        a, b = source[key], restored[key]
+        if isinstance(a, list) and isinstance(b, list):
+            x, y = _signature_groups(a), _signature_groups(b)
+            problems.extend(
+                f"{key}:{_safe_label(name)}"
+                for name in sorted(set(x) | set(y), key=str)
+                if x.get(name) != y.get(name)
+            )
+        elif a == b:
+            continue
+        elif isinstance(a, dict) and isinstance(b, dict):
+            problems.extend(
+                f"{key}:{_safe_label(name)}"
+                for name in sorted(set(a) | set(b), key=str)
+                if name not in a or name not in b or a[name] != b[name]
+            )
         else:
             problems.append(key)
     return problems
 
 
 def diagnose_signature_mismatches(source: dict, restored: dict) -> dict:
-    """Bounded, content-free comparison evidence; never change the PASS gate.
-
-    Classify missing objects separately from differing signatures. ACL values
-    and constraint definitions are deliberately not exposed to logs.
-    """
+    """Count mismatches while retaining duplicate object names."""
     result = {}
     for category in ("constraints", "acl"):
-        a = {row[0]: row[1:] for row in source.get(category, [])}
-        b = {row[0]: row[1:] for row in restored.get(category, [])}
-        common = set(a) & set(b)
-        changed = {name for name in common if a[name] != b[name]}
+        a = _signature_groups(source.get(category, []))
+        b = _signature_groups(restored.get(category, []))
         result[category] = {
-            "source_objects": len(a),
-            "restored_objects": len(b),
-            "missing_in_restore": len(set(a) - set(b)),
-            "unexpected_in_restore": len(set(b) - set(a)),
-            "different_definition_or_grants": len(changed),
+            "source_objects": sum(sum(counts.values()) for counts in a.values()),
+            "restored_objects": sum(sum(counts.values()) for counts in b.values()),
+            "missing_in_restore": sum(sum(a[name].values()) for name in a.keys() - b.keys()),
+            "unexpected_in_restore": sum(sum(b[name].values()) for name in b.keys() - a.keys()),
+            "different_definition_or_grants": sum(a[name] != b[name] for name in a.keys() & b.keys()),
         }
     return result
 
@@ -719,7 +742,8 @@ def verdict(summary: dict) -> str:
     # backup was restored. Require independent execution evidence as well.
     required_evidence = ("source_identity_verified", "source_role_least_privilege",
                          "target_proven_ephemeral", "snapshot_consistent",
-                         "restore_verified", "decrypt_sha256_matches")
+                         "restore_verified", "decrypt_sha256_matches",
+                         "signature_digest_matches", "archive_sha256_matches")
     if not all(summary.get(k) is True for k in required_evidence):
         return "PARTIAL: source, snapshot, decrypt or actual restore not verified"
     if summary.get("signature_mismatches") != []:
@@ -822,6 +846,15 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             summary["source_identity_verified"] = (not real_source or
                         identity_verified(identity_checks or {}))
         summary["encrypt"] = encrypt_file(plain, enc, key)
+        digest = hashlib.sha256()
+        with enc.open("rb") as ciphertext:
+            for chunk in iter(lambda: ciphertext.read(1 << 20), b""):
+                digest.update(chunk)
+        summary["archive_sha256"] = digest.hexdigest()
+        summary["archive_sha256_matches"] = (
+            summary["archive_sha256"] == summary["encrypt"]["cipher_sha256"])
+        if not summary["archive_sha256_matches"]:
+            raise BackupError("FAIL_V223_CIPHERTEXT_HASH_MISMATCH")
         summary["dump_bytes"] = plain.stat().st_size
         plain.unlink()
         # negative tests on the ENCRYPTED artifact (never on the only copy)
@@ -863,7 +896,25 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             restored_sig = fetch_signature(tconn, schema)
         summary["signature_mismatches"] = diff_signatures(src_sig, restored_sig)
         summary["signature_mismatch_diagnostics"] = diagnose_signature_mismatches(src_sig, restored_sig)
-        summary["restore_verified"] = not summary["signature_mismatches"]
+        summary["restored_signature_sha256"] = signature_digest(restored_sig)
+        source_canonical = canonical_signature(src_sig)
+        restored_canonical = canonical_signature(restored_sig)
+        summary["canonical_source_sha256"] = signature_digest(source_canonical)
+        summary["canonical_restored_sha256"] = signature_digest(restored_canonical)
+        summary["signature_digest_matches"] = (
+            summary["canonical_source_sha256"] == summary["canonical_restored_sha256"])
+        summary["restore_verified"] = (
+            not summary["signature_mismatches"] and summary["signature_digest_matches"])
+        summary["signature_component_sha256"] = {
+            side: {name: signature_digest({name: value}) for name, value in canonical.items()}
+            for side, canonical in (("source", source_canonical), ("restored", restored_canonical))
+        }
+        source_components = summary["signature_component_sha256"]["source"]
+        restored_components = summary["signature_component_sha256"]["restored"]
+        summary["signature_component_mismatch_categories"] = sorted(
+            name for name in set(source_components) | set(restored_components)
+            if source_components.get(name) != restored_components.get(name)
+        )
         summary["tables"] = len(src_sig["tables"])
         summary["signature_sha256"] = signature_digest(src_sig)
         # A truncated archive can still pass `pg_restore --list` because its
