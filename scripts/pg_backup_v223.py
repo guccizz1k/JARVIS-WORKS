@@ -263,19 +263,20 @@ def dsn_with_dbname(dsn: str, dbname: str) -> str:
                        parts.query, parts.fragment))
 
 
-def pg_env(opts: dict) -> dict:
-    """Pass only PostgreSQL connection settings and needed process infrastructure.
-
-    Never inherit the backup encryption key, vault tokens, source/target DSNs,
-    cloud credentials, or unrelated secrets into pg_dump/pg_restore.
-    """
+def _pg_process_base_env() -> dict:
+    """Minimal process environment, shared by pg tools and version checks."""
     safe_parent = (
         "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE",
         "SSL_CERT_FILE", "SSL_CERT_DIR", "SystemRoot", "WINDIR", "PATHEXT",
         "USERPROFILE", "LD_LIBRARY_PATH", "DOCKER_HOST", "DOCKER_CONTEXT",
         "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH",
     )
-    env = {name: os.environ[name] for name in safe_parent if name in os.environ}
+    return {name: os.environ[name] for name in safe_parent if name in os.environ}
+
+
+def pg_env(opts: dict) -> dict:
+    """Pass only required PG settings; never pass backup/vault/cloud secrets."""
+    env = _pg_process_base_env()
     env.update(PGHOST=opts["host"], PGPORT=opts["port"], PGUSER=opts["user"],
                PGPASSWORD=opts["password"], PGDATABASE=opts["dbname"])
     if opts.get("sslmode"):
@@ -296,7 +297,8 @@ def parse_tool_major(out: str) -> int | None:
 
 
 def tool_major(tool: str) -> int:
-    out = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=15).stdout
+    out = subprocess.run([tool, "--version"], env=_pg_process_base_env(),
+                         capture_output=True, text=True, timeout=15).stdout
     major = parse_tool_major(out)
     if major is None:
         raise BackupError("BLOCKED_V223_TOOL_VERSION_UNKNOWN")
