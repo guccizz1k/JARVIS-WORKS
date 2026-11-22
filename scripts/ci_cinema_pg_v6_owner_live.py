@@ -36,13 +36,16 @@ def main():
     integration.install(runner,psycopg,engine)
     original_preflight=owner.preflight
     original_expiry=owner.expiry_value
+    original_sql=owner.ROLE_SQL
     owner.preflight=preflight
     owner.expiry_value=expiry_value
+    owner.ROLE_SQL=checks.v6.ROOT / 'scripts/review/cinema_pg_v6_backup_role_20261123.sql'
     try:
         return owner.run_live()
     finally:
         owner.preflight=original_preflight
         owner.expiry_value=original_expiry
+        owner.ROLE_SQL=original_sql
 
 if __name__=='__main__':
     raise SystemExit(main())
