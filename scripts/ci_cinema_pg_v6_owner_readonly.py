@@ -30,6 +30,8 @@ ALLOWED=frozenset({
  'scripts/ci_cinema_pg_v6_credential_probe.py',
  'scripts/ci_cinema_pg_v6_password_sync.py',
  'scripts/ci_cinema_pg_v6_postrun_attest.py',
+ 'scripts/ci_cinema_pg_v6_provider_log_attest.py',
+ 'evidence/jarvisworks/v6_20261122_server_login_refusal.json',
  'scripts/review/cinema_pg_v6_backup_role_20261123.sql',
  'tests/test_ci_cinema_pg_v6_target_adapter.py',
  'tests/test_ci_cinema_pg_v6_target_binding.py',
@@ -43,6 +45,7 @@ ALLOWED=frozenset({
  'tests/test_ci_cinema_pg_v6_credential_probe.py',
  'tests/test_ci_cinema_pg_v6_password_sync.py',
  'tests/test_ci_cinema_pg_v6_postrun_attest.py',
+ 'tests/test_ci_cinema_pg_v6_provider_log_attest.py',
 })
 
 class Blocked(Exception):pass
