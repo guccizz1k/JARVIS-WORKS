@@ -247,15 +247,61 @@ def read_table(matrix):
     if not rows:raise DocumentError('품목 데이터가 없습니다')
     return rows
 
+def _validate_xlsx_package(archive: zipfile.ZipFile) -> None:
+    """Reject ambiguous and invisible XLSX parts before openpyxl reads them.
+
+    Customer originals are untrusted. ZIP/OPC part names are canonicalized for
+    ambiguity detection; archived content is never extracted to disk.
+    Existing document size limits remain unchanged.
+    """
+    parts=archive.infolist()
+    if len(parts)>1500 or sum(x.file_size for x in parts)>30*1024*1024:
+        raise DocumentError('압축 해제 시 용량 또는 항목이 과도한 엑셀입니다')
+    if any(x.file_size>20*1024*1024 for x in parts):
+        raise DocumentError('압축 내 파일이 너무 큽니다')
+    seen=set()
+    relationships=[]
+    forbidden_prefixes=('xl/embeddings/', 'xl/activex/', 'xl/externallinks/',
+                        'xl/querytables/', 'xl/webextensions/', 'xl/connections.xml')
+    for item in parts:
+        path=item.filename
+        # Reject path ambiguity, ZIP symlinks and unsupported/encrypted members.
+        # OOXML part-name identity is case-insensitive, unlike ZIP filenames.
+        if (not path or path.startswith('/') or '\\' in path or
+                any(part in ('', '.', '..') for part in path.rstrip('/').split('/'))):
+            raise DocumentError('엑셀 내부 경로가 올바르지 않습니다')
+        canonical=path.rstrip('/').casefold()
+        if canonical in seen:
+            raise DocumentError('엑셀 내부 구성요소가 중복되어 원본이 모호합니다')
+        seen.add(canonical)
+        if (item.flag_bits & 1 or
+                item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) or
+                (item.create_system==3 and (item.external_attr >> 16) & 0o170000 == 0o120000)):
+            raise DocumentError('지원하지 않는 압축 방식 또는 엑셀 내부 연결입니다')
+        if ('vbaproject' in canonical or
+                canonical.startswith(forbidden_prefixes)):
+            raise DocumentError('매크로·외부 링크·숨은 첨부 개체는 지원하지 않습니다')
+        if canonical.endswith('.rels'):
+            relationships.append(item)
+    # A TargetMode=External relationship is invisible to the preview when
+    # openpyxl's keep_links=False. It may refer to another workbook or source.
+    from xml.etree import ElementTree as ET
+    for part in relationships:
+        try:
+            root=ET.fromstring(archive.read(part))
+        except (ET.ParseError, RuntimeError, ValueError):
+            raise DocumentError('엑셀 연결 관계를 해석할 수 없습니다') from None
+        for link in root.iter():
+            for attr,value in link.attrib.items():
+                if (attr.split('}')[-1].casefold()=='targetmode'
+                        and str(value).strip().casefold()=='external'):
+                    raise DocumentError('외부 파일 연결이 포함된 엑셀은 자동 등록할 수 없습니다')
+
+
 def excel_extract(raw, *, allow_missing=False):
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as z:
-            parts=z.infolist()
-            if len(parts)>1500 or sum(x.file_size for x in parts)>30*1024*1024:
-                raise DocumentError('압축 해제 시 용량 또는 항목이 과도한 엑셀입니다')
-            if any(x.file_size>20*1024*1024 for x in parts):raise DocumentError('압축 내 파일이 너무 큽니다')
-            if any('vbaProject' in x.filename or 'externalLinks/' in x.filename for x in parts):
-                raise DocumentError('매크로 또는 외부 링크 문서는 지원하지 않습니다')
+            _validate_xlsx_package(z)
         wb=load_workbook(io.BytesIO(raw),read_only=False,data_only=False,keep_links=False)
     except DocumentError:raise
     except Exception as exc:raise DocumentError('유효한 .xlsx 파일이 아닙니다') from exc
