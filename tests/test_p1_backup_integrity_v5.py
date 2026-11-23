@@ -475,3 +475,100 @@ def test_v2_format_does_not_reuse_legacy_nonce_layout():
     prefix = b"abcdefgh"
     assert p._nonce(prefix, 7) == prefix + bytes((0, 0, 0, 7))
     assert p._aad(7, True) != p._aad(7, True, p.MAGIC_LEGACY)
+
+
+# Offline archive verification — no source DB, no network, no plaintext files.
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("size", [0, 1, 1048577])
+def test_offline_archive_authenticated_sha_and_format(tmp_path: Path, legacy, size):
+    payload = (b"synthetic-private-archive" * ((size // 25) + 1))[:size]
+    plain, cipher = tmp_path / "plain", tmp_path / "archive"
+    plain.write_bytes(payload)
+    key = p.AESGCM.generate_key(bit_length=256)
+    if legacy:
+        _make_legacy_v1_fixture(cipher, payload, key)
+        version = 1
+    else:
+        p.encrypt_file(plain, cipher, key)
+        version = 2
+    cipher.chmod(0o600)
+    result = p.audit_encrypted_archive(
+        cipher, hashlib.sha256(cipher.read_bytes()).hexdigest(), key,
+        hashlib.sha256(payload).hexdigest())
+    assert result["format_version"] == version
+    assert result["authenticated_decryption"] is True
+    assert result["cipher_sha256_matches"] is True
+    assert result["plain_sha256_matches"] is True
+    assert result["historical_source_proven"] is False
+    assert result["external_storage_proven"] is False
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["archive", "plain"]
+
+
+@pytest.mark.parametrize("reason", ["wrong_key", "wrong_hash", "wrong_plain_hash", "tamper", "truncate"])
+def test_offline_archive_fails_closed_on_integrity_faults(tmp_path: Path, reason):
+    plain, archive = tmp_path / "plain", tmp_path / "archive"
+    plain.write_bytes(b"standalone-audit-canary" * 200)
+    key = p.AESGCM.generate_key(bit_length=256)
+    p.encrypt_file(plain, archive, key)
+    archive.chmod(0o600)
+    expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+    expected_plain = hashlib.sha256(plain.read_bytes()).hexdigest()
+    if reason == "wrong_key":
+        key = p.AESGCM.generate_key(bit_length=256)
+    elif reason == "wrong_hash":
+        expected = "0" * 64
+    elif reason == "wrong_plain_hash":
+        expected_plain = "f" * 64
+    else:
+        data = bytearray(archive.read_bytes())
+        if reason == "tamper":
+            data[-8] ^= 1
+        else:
+            del data[-1]
+        archive.write_bytes(data)
+        archive.chmod(0o600)
+        expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+    with pytest.raises(p.BackupError):
+        p.audit_encrypted_archive(archive, expected, key, expected_plain)
+
+
+@pytest.mark.parametrize("bad_hash", ["", "SHA:invalid", "0" * 63, "Z" * 64])
+def test_offline_archive_must_have_trusted_independent_digest(tmp_path: Path, bad_hash):
+    archive = tmp_path / "none"
+    with pytest.raises(p.BackupError, match="EXPECTED_SHA256_REQUIRED"):
+        p.audit_encrypted_archive(archive, bad_hash, b"0" * 32)
+
+
+def test_offline_archive_rejects_symlink_and_world_readable(tmp_path: Path):
+    plain, archive = tmp_path / "plain", tmp_path / "archive"
+    plain.write_bytes(b"synthetic-only")
+    key = p.AESGCM.generate_key(bit_length=256)
+    p.encrypt_file(plain, archive, key)
+    expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+    archive.chmod(0o644)
+    with pytest.raises(p.BackupError, match="PRIVATE_0600"):
+        p.audit_encrypted_archive(archive, expected, key)
+    archive.chmod(0o600)
+    link = tmp_path / "symlink"
+    link.symlink_to(archive)
+    with pytest.raises(p.BackupError, match="ARCHIVE_SYMLINK"):
+        p.audit_encrypted_archive(link, expected, key)
+
+
+def test_offline_archive_cli_reports_without_paths_or_keys(tmp_path: Path, monkeypatch, capsys):
+    plain, archive = tmp_path / "plain", tmp_path / "archive"
+    plain.write_bytes(b"test-only" * 200)
+    key = p.AESGCM.generate_key(bit_length=256)
+    p.encrypt_file(plain, archive, key)
+    archive.chmod(0o600)
+    import base64
+    monkeypatch.setenv("JW_PG_ARCHIVE_PATH", str(archive))
+    monkeypatch.setenv("JW_PG_EXPECT_ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest())
+    monkeypatch.setenv("JW_PG_BACKUP_KEY", base64.urlsafe_b64encode(key).decode())
+    assert p.main(["audit-archive"]) == 0
+    out = capsys.readouterr().out
+    assert "offline_archive_verification" in out
+    assert str(archive) not in out
+    assert base64.urlsafe_b64encode(key).decode() not in out
+    assert "external_storage_proven" in out
+    assert "historical_source_proven" in out

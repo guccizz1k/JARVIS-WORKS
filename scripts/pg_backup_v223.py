@@ -1063,6 +1063,106 @@ def _safe_dsn_password(dsn: str) -> str:
         return ""
 
 
+
+def audit_encrypted_archive(path: Path, expected_cipher_sha256: str, key: bytes,
+                            expected_plain_sha256: str = "") -> dict:
+    """Read-only, single-pass authenticated archive audit; never writes plaintext.
+
+    The expected SHA must come from an *independent* trusted receipt. This only
+    authenticates an archive under the supplied key. It does NOT prove that the
+    historical development DB was the source or that the file is stored offsite.
+    """
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_cipher_sha256 or ""):
+        raise BackupError("BLOCKED_V223_ARCHIVE_EXPECTED_SHA256_REQUIRED")
+    if expected_plain_sha256 and not re.fullmatch(r"[0-9a-f]{64}", expected_plain_sha256):
+        raise BackupError("BLOCKED_V223_PLAINTEXT_EXPECTED_SHA256_INVALID")
+    if not isinstance(key, bytes) or len(key) != 32:
+        raise BackupError("BLOCKED_V223_BACKUP_KEY_MUST_BE_32_BYTES")
+    path = Path(path)
+    if path.is_symlink():
+        raise BackupError("BLOCKED_V223_ARCHIVE_SYMLINK")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        with os.fdopen(fd, "rb") as fin:
+            mode = os.fstat(fin.fileno())
+            if not stat.S_ISREG(mode.st_mode) or (stat.S_IMODE(mode.st_mode) & 0o777) != 0o600:
+                raise BackupError("BLOCKED_V223_ARCHIVE_NOT_PRIVATE_0600")
+            if hasattr(os, "getuid") and mode.st_uid != os.getuid():
+                raise BackupError("BLOCKED_V223_ARCHIVE_UNEXPECTED_OWNER")
+            digest_cipher, digest_plain = hashlib.sha256(), hashlib.sha256()
+            def take(size: int) -> bytes:
+                data = fin.read(size)
+                digest_cipher.update(data)
+                return data
+            magic = take(len(MAGIC))
+            if magic not in (MAGIC, MAGIC_LEGACY):
+                raise BackupError("BLOCKED_V223_BACKUP_BAD_HEADER")
+            prefix_len = 8 if magic == MAGIC else 4
+            prefix = take(prefix_len)
+            if len(prefix) != prefix_len:
+                raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
+            aes = AESGCM(key)
+            index = 0
+            while True:
+                length_data = take(4)
+                if len(length_data) != 4:
+                    raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
+                length = struct.unpack(">I", length_data)[0]
+                if not 16 <= length <= MAX_CHUNK_CIPHERTEXT:
+                    raise BackupError("BLOCKED_V223_BACKUP_BAD_CHUNK_LENGTH")
+                blob = take(length)
+                if len(blob) != length:
+                    raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
+                # The final flag is included in authenticated AAD. Peeking does
+                # not hash twice; the next length read will absorb the byte.
+                next_byte = fin.read(1)
+                final = not next_byte
+                if next_byte:
+                    fin.seek(-1, os.SEEK_CUR)
+                try:
+                    digest_plain.update(aes.decrypt(
+                        _nonce(prefix, index), blob, _aad(index, final, magic)))
+                except InvalidTag:
+                    raise BackupError("BLOCKED_V223_BACKUP_AUTH_FAILED") from None
+                index += 1
+                if final:
+                    break
+            if not __import__("hmac").compare_digest(
+                    digest_cipher.hexdigest(), expected_cipher_sha256):
+                raise BackupError("BLOCKED_V223_ARCHIVE_SHA256_MISMATCH")
+            if expected_plain_sha256 and not __import__("hmac").compare_digest(
+                    digest_plain.hexdigest(), expected_plain_sha256):
+                raise BackupError("BLOCKED_V223_PLAINTEXT_SHA256_MISMATCH")
+            return {"format_version": 2 if magic == MAGIC else 1,
+                    "chunks": index, "cipher_sha256_matches": True,
+                    "authenticated_decryption": True,
+                    "plain_sha256_matches": True if expected_plain_sha256 else None,
+                    "external_storage_proven": False, "historical_source_proven": False}
+    except BaseException:
+        # The audit does not create, modify or delete any on-disk archive.
+        raise
+
+
+def audit_archive_cli() -> int:
+    """Offline-only; prints labels, never raw keys, paths, DSNs or row data."""
+    try:
+        result = audit_encrypted_archive(
+            Path(os.environ.get("JW_PG_ARCHIVE_PATH", "")),
+            os.environ.get("JW_PG_EXPECT_ARCHIVE_SHA256", ""),
+            load_key(),
+            os.environ.get("JW_PG_EXPECT_PLAINTEXT_SHA256", ""),
+        )
+    except BackupError as exc:
+        print(str(exc).split(":")[0], file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print("FAIL_V223_ARCHIVE_AUDIT_" + type(exc).__name__, file=sys.stderr)
+        return 1
+    print(json.dumps({"offline_archive_verification": "PASS",
+                      **result}, sort_keys=True))
+    return 0
+
+
 def mark_target() -> int:
     """``mark-target``: plant the ephemeral marker in the disposable restore cluster."""
     target, token = os.environ.get("JW_PG_TARGET_ADMIN_DSN", ""), os.environ.get(EPHEMERAL_TOKEN_ENV, "")
@@ -1082,12 +1182,14 @@ def mark_target() -> int:
 
 
 def main(argv: list[str]) -> int:
+    if argv == ["audit-archive"]:
+        return audit_archive_cli()
     if argv == ["mark-target"]:
         return mark_target()
     if len(argv) != 1 or argv[0] != "run":
         print("usage: JW_PG_SOURCE_DSN=... JW_PG_TARGET_ADMIN_DSN=... JW_PG_BACKUP_KEY=... "
               "JW_PG_TARGET_EPHEMERAL_TOKEN=... JW_PG_REAL_SOURCE=1 "
-              "python -m scripts.pg_backup_v223 [mark-target|run]", file=sys.stderr)
+              "python -m scripts.pg_backup_v223 [mark-target|run|audit-archive]", file=sys.stderr)
         return 2
     source, target = os.environ.get("JW_PG_SOURCE_DSN", ""), os.environ.get("JW_PG_TARGET_ADMIN_DSN", "")
     secrets = [_safe_dsn_password(d) for d in (source, target) if d]
