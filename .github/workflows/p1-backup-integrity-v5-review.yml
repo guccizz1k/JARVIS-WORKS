@@ -115,3 +115,39 @@ jobs:
           python -m py_compile app/owner_review_app_v223.py app/owner_review_public_qa_guard_v223.py scripts/pg_backup_v223.py scripts/p1_owner_offline_restore_v223.py
           python -m pytest --noconftest -q tests/test_v223_public_qa_gate.py tests/test_v223_review_isolation.py tests/test_v223_owner_approved_ui_pin.py tests/test_v223_order_review.py tests/test_v223_review_target_boundary.py tests/test_v223_owner_visual_server.py tests/test_v223_approved_review_server.py
           node --test tests/test_v223_review_operational_panels.cjs
+
+  integrated-owner-browser:
+    name: V22.3 integrated real-browser HTTPS business flow (synthetic only)
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event_name == 'pull_request' && github.base_ref == 'review/jw-v223-render-qa-pinned-20261122'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+    steps:
+      - name: Checkout exact integration review SHA, no stored GitHub token
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up isolated Python browser runner
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test-only dependencies and pinned Chromium/WebKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt 'playwright==1.56.0'
+          python -m playwright install --with-deps chromium webkit
+      - name: Execute existing genuine browser UI, HTTPS and transaction checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$JW_ENV" = review
+          test "$JW_NO_EXTERNAL_DATABASE" = 1
+          python -m scripts.ci_v223_owner_review_browser
+      - name: Explicit environment boundary
+        if: always()
+        run: echo 'Only ephemeral localhost TLS, synthetic SQLite, Chromium/WebKit; no Render, production DB, external key, backup or live release.'
