@@ -1,5 +1,6 @@
 """Owner private ciphertext readback synthetic Git objects only, no network."""
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 import pytest
@@ -333,8 +334,9 @@ def test_readonly_gh_rest_binary_cipher_sha256_and_git_blob_integrity(monkeypatc
           "content":base64.b64encode(raw).decode()}
     monkeypatch.setattr(vault,"_vault_api_json",lambda *a,**kw:good)
     assert vault._vault_api_blob_sha256(sha)==(hashlib.sha256(raw).hexdigest(),len(raw))
+    good["content"]=base64.b64encode(b"X"+raw[1:]).decode()
     with pytest.raises(vault.Blocked,match="GIT_BLOB_HASH_MISMATCH"):
-        vault._vault_api_blob_sha256("0"*40)
+        vault._vault_api_blob_sha256(sha)
     good["content"]="z%%%notbase64"
     with pytest.raises(vault.Blocked,match="BASE64_INVALID"):
         vault._vault_api_blob_sha256(sha)
