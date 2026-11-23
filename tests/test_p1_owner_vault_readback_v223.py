@@ -87,3 +87,206 @@ def test_cli_can_pass_readback_without_misrepresenting_release(monkeypatch,capsy
     assert '"overall":"BLOCKED"' in out
     assert '"independent_key_escrow_verified":false' in out
     assert vault.main(["other"])==2
+
+
+
+def test_duplicate_remote_ciphertext_paths_are_valid_but_duplicate_paths_fail():
+    # 2026-11-23 real private vault metadata: four encrypted paths,
+    # three unique blobs. The original parser mistakenly rejected this.
+    a=b"a"*40
+    b=b"b"*40
+    entry=lambda sha,name:b"100644 blob "+sha+b"\t"+name+b"\0"
+    valid=entry(a,b"archives/one.jwpgbk")+entry(a,b"backups/two.jwpgbk")+entry(b,b"backups/three.jwpgbk")
+    assert vault.remote_blobs(valid)==["a"*40,"a"*40,"b"*40]
+    with pytest.raises(vault.Blocked):
+        vault.remote_blobs(entry(a,b"archives/one.jwpgbk")*2)
+
+
+def test_private_vault_manifest_mode_compares_local_git_hashes_without_auth(tmp_path,monkeypatch):
+    repo,local_file,sha,_=repo_fixture(tmp_path)
+    monkeypatch.setenv("CODESPACES","true")
+    monkeypatch.setenv("JW_PG_VAULT_READBACK_ACK",vault.ACK)
+    monkeypatch.setenv(vault.PINNED_ENV,"a"*40)
+    monkeypatch.setenv(vault.MANIFEST_ENV,",".join([sha,sha,"b"*40]))
+    monkeypatch.setattr(vault.owner,"discover_owner_archive",lambda:([local_file],"FOUND_ONE"))
+    monkeypatch.setattr(vault.owner,"_private_cipher_file",lambda p:Path(p)==local_file)
+    out=vault.manifest_diagnostic()
+    assert out["manifest_diagnostic"]=="PASS_LOCAL_HASH_COMPARISON_EXECUTED"
+    assert out["provider_file_entry_count"]==3
+    assert out["provider_unique_git_blob_count"]==2
+    assert out["provider_duplicate_content_entries"]==1
+    assert out["provider_git_blob_id_matched_local_count"]==1
+    assert out["provider_ciphertext_sha256_readback"]=="NOT_RUN"
+    assert out["overall"]=="BLOCKED"
+    assert vault.main(["diagnose-manifest"])==0
+
+
+def test_manifest_mode_rejects_untrusted_metadata_or_missing_consent(monkeypatch):
+    monkeypatch.setenv("CODESPACES","true")
+    monkeypatch.delenv("JW_PG_VAULT_READBACK_ACK",raising=False)
+    assert vault.manifest_diagnostic()["blocker"]=="EXPLICIT_READBACK_APPROVAL_REQUIRED"
+    monkeypatch.setenv("JW_PG_VAULT_READBACK_ACK",vault.ACK)
+    monkeypatch.setenv(vault.PINNED_ENV,"c"*40)
+    for metadata in ("", "not-a-blob", "a"*39, "z"*40):
+        monkeypatch.setenv(vault.MANIFEST_ENV,metadata)
+        assert vault.manifest_diagnostic()["blocker"]=="TRUSTED_REMOTE_BLOB_LIST_REQUIRED"
+
+
+def test_git_auth_probe_distinguishes_helper_vs_gh_cli_without_exposing_tokens(monkeypatch):
+    import subprocess
+    monkeypatch.setenv("CODESPACES","true")
+    monkeypatch.setenv("JW_PG_VAULT_READBACK_ACK",vault.ACK)
+    monkeypatch.setattr(vault.shutil,"which",lambda x:"/usr/bin/"+x)
+    monkeypatch.setattr(vault,"git",lambda *a,**kw:subprocess.CompletedProcess([],128,b"",b"authentication failed token=secret"))
+    def fake_run(cmd,**kw):
+        assert "gh"==cmd[0] and kw["stdout"]==subprocess.PIPE
+        return subprocess.CompletedProcess(cmd,0,b"true\n",b"")
+    monkeypatch.setattr(subprocess,"run",fake_run)
+    result=vault.auth_probe()
+    assert result["auth_diagnostic"]=="GIT_HELPER_USING_DIFFERENT_CREDENTIALS"
+    assert "secret" not in str(result)
+    assert vault.main(["diagnose-auth"])==0
+
+
+def test_approved_gh_token_retrieval_missing_permissions_fails_closed(monkeypatch,tmp_path):
+    import subprocess
+    monkeypatch.setenv("GH_TOKEN","synthetic-token-not-real")
+    monkeypatch.setattr(vault.shutil,"which",lambda x:"/usr/bin/"+x)
+    monkeypatch.setattr(vault,"git",lambda *a,**kw:subprocess.CompletedProcess([],128,b"",b"no access"))
+    monkeypatch.setattr(subprocess,"run",lambda cmd,**kw:subprocess.CompletedProcess(cmd,1,b"",b"not found"))
+    with pytest.raises(vault.Blocked,match="GH_TOKEN_MISSING_PRIVATE_VAULT_CONTENTS_READ"):
+        vault._clone_with_approved_credentials(tmp_path,tmp_path/"temporary_checkout")
+
+
+
+def test_duplicate_remote_blob_paths_cannot_falsely_make_11_complete(monkeypatch,tmp_path):
+    sha="a"*40
+    monkeypatch.setattr(vault,"remote_sha256",lambda repo,x:("b"*64,10))
+    out=vault.compare([sha,sha],{sha:"b"*64,"c"*40:"d"*64},tmp_path)
+    assert out["remote_ciphertext_count"]==2
+    assert out["remote_unique_ciphertext_count"]==1
+    assert out["remote_duplicate_content_entries"]==1
+    assert out["remote_full_sha256_readback_matches"]==2
+    assert out["remote_unique_full_sha256_matches"]==1
+    assert out["local_archives_not_offsite"]==1
+    assert out["all_11_archives_offsite"] is False
+
+
+def test_gh_cli_can_be_authorized_without_extra_token_env(monkeypatch,tmp_path):
+    import subprocess
+    monkeypatch.delenv("GH_TOKEN",raising=False)
+    monkeypatch.setattr(vault.shutil,"which",lambda x:"/usr/bin/"+x)
+    monkeypatch.setattr(vault,"git",lambda *a,**kw:subprocess.CompletedProcess([],128,b"",b""))
+    called=[]
+    def fake_run(cmd,**kw):
+        called.append(cmd[:2])
+        if cmd[:2]==["gh","api"]:
+            return subprocess.CompletedProcess(cmd,0,b"true\n",b"")
+        if cmd[:2]==["gh","repo"]:
+            return subprocess.CompletedProcess(cmd,0,b"",b"")
+        raise AssertionError("unknown command")
+    monkeypatch.setattr(subprocess,"run",fake_run)
+    vault._clone_with_approved_credentials(tmp_path,tmp_path/"testclone")
+    assert called==[["gh","api"],["gh","repo"]]
+
+
+
+def test_real_one_shot_codespaces_cli_offline_manifest_synthetic_11_archives(tmp_path):
+    """End-to-end invoke the EXACT mobile owner's diagnostic module command.
+
+    No Codespaces authentication, no network, no secret, no owner backups.
+    Fixture recreates original owner archive discovery layout and permissions.
+    """
+    import json
+    import os
+    import sys
+    root=tmp_path/"isolated-owner"
+    backup_root=root/".local"/"share"/"jw-v223-restore"/"backups"
+    folder=backup_root/"jw_v223_synthetic-only"
+    folder.mkdir(parents=True,mode=0o700)
+    backup_root.chmod(0o700)
+    folder.chmod(0o700)
+    shas=[]
+    for i in range(11):
+        file=folder/f"synthetic-{i:02d}.jwpgbk"
+        data=b"JWPGBK1\n"+f"NON_CUSTOMER_TEST_{i:02d}".encode()*2
+        file.write_bytes(data)
+        file.chmod(0o600)
+        blob=hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
+        shas.append(blob)
+    env=os.environ.copy()
+    env.update({
+        "HOME":str(root),
+        "CODESPACES":"true",
+        "JW_PG_VAULT_READBACK_ACK":vault.ACK,
+        vault.PINNED_ENV:"c"*40,
+        vault.MANIFEST_ENV:",".join([shas[0],shas[1],shas[2],shas[0]]),
+        "PYTHONDONTWRITEBYTECODE":"1",
+    })
+    result=subprocess.run(
+        [sys.executable,"-m","scripts.p1_owner_vault_readback_v223",
+         "diagnose-manifest"],
+        env=env,check=False,capture_output=True,text=True,timeout=30)
+    assert result.returncode==0, (result.returncode,result.stdout[:200])
+    report=json.loads(result.stdout)
+    assert report["local_archive_count"]==11
+    assert report["manifest_diagnostic"]=="PASS_LOCAL_HASH_COMPARISON_EXECUTED"
+    assert report["provider_file_entry_count"]==4
+    assert report["provider_unique_git_blob_count"]==3
+    assert report["provider_duplicate_content_entries"]==1
+    assert report["provider_git_blob_id_matched_local_count"]==3
+    assert report["owner_archives_not_in_provider_manifest"]==8
+    assert report["provider_ciphertext_sha256_readback"]=="NOT_RUN"
+    assert report["overall"]=="BLOCKED"
+    assert all(sha not in result.stdout for sha in shas)
+    assert str(root) not in result.stdout
+
+
+
+def test_diagnose_all_auth_blocked_still_finishes_local_manifest_without_false_pass(monkeypatch,capsys):
+    local={"manifest_diagnostic":"PASS_LOCAL_HASH_COMPARISON_EXECUTED",
+           "provider_file_entry_count":4, "provider_unique_git_blob_count":3,
+           "provider_git_blob_id_matched_local_count":2,"overall":"BLOCKED"}
+    monkeypatch.setattr(vault,"manifest_diagnostic",lambda:local.copy())
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+       "auth_diagnostic":"CODESPACE_CREDENTIAL_CANNOT_READ_PRIVATE_VAULT",
+       "git_read_only_private_access":"BLOCKED",
+       "gh_cli_private_api_access":"BLOCKED"})
+    def no_remote():raise AssertionError("unauthorized archive download attempted")
+    monkeypatch.setattr(vault,"audit",no_remote)
+    assert vault.main(["diagnose-all"])==0
+    import json
+    report=json.loads(capsys.readouterr().out)
+    assert report["remote_readback"]=="NOT_RUN_AUTHORIZATION_REQUIRED"
+    assert report["overall"]=="BLOCKED"
+    assert report["provider_unique_git_blob_count"]==3
+
+
+def test_diagnose_all_authorized_attempts_exact_remote_readback_but_never_releases(monkeypatch,capsys):
+    monkeypatch.setattr(vault,"manifest_diagnostic",lambda:{
+       "manifest_diagnostic":"PASS_LOCAL_HASH_COMPARISON_EXECUTED","overall":"BLOCKED"})
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+       "auth_diagnostic":"GIT_HELPER_USING_DIFFERENT_CREDENTIALS"})
+    calls=[]
+    def readback():
+       calls.append(1)
+       return {"remote_readback":"PASS_MATCHED_REMOTE_CIPHERTEXT",
+               "remote_full_sha256_readback_matches":4,
+               "remote_unique_full_sha256_matches":3,
+               "all_11_archives_offsite":False,"overall":"BLOCKED"}
+    monkeypatch.setattr(vault,"audit",readback)
+    assert vault.main(["diagnose-all"])==0
+    assert calls==[1]
+    import json
+    x=json.loads(capsys.readouterr().out)
+    assert x["remote_full_sha256_readback_matches"]==4
+    assert x["all_11_archives_offsite"] is False
+    assert x["overall"]=="BLOCKED"
+
+
+def test_diagnose_all_halts_before_remote_on_unsafe_local_evidence(monkeypatch):
+    monkeypatch.setattr(vault,"manifest_diagnostic",lambda:{
+      "manifest_diagnostic":"BLOCKED","blocker":"UNSAFE_LOCAL_ARCHIVE"})
+    monkeypatch.setattr(vault,"auth_probe",lambda:(_ for _ in ()).throw(
+       AssertionError("must not contact remote")))
+    assert vault.main(["diagnose-all"])==1
