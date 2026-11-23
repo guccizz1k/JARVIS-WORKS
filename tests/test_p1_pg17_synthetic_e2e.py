@@ -273,3 +273,106 @@ def test_actual_pg17_constraint_reparse_restore_and_semantic_mutation(tmp_path: 
             dst.execute("DROP SCHEMA IF EXISTS jw_p1_canonical_probe CASCADE")
             src.execute("DROP SCHEMA IF EXISTS jw_p1_canonical_probe CASCADE")
     assert dump.exists()
+
+
+
+def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs(tmp_path: Path, monkeypatch):
+    """One-step REAL synthetic PG17 test matching the owner's 65-table shape.
+
+    Includes nested CHECK, FK, FORCE RLS and a policy to a source-only role.
+    The local offline restorer must create this role as NOLOGIN INSIDE the
+    disposable Docker container, then full-data restore and remove it.
+    Nothing touches the user's private backup or any remote database.
+    """
+    import shutil
+    import os
+    from psycopg import sql
+    from scripts import p1_owner_one_shot_v223 as owner
+    from scripts import p1_owner_offline_restore_v223 as offline
+
+    db = "jw_p1_ci65_" + os.urandom(5).hex()
+    role = "jw_p1_ci65_policy_" + os.urandom(3).hex()
+    source_admin = psycopg.connect(SOURCE, autocommit=True)
+    created_db = False
+    created_role = False
+    try:
+        source_admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
+        created_role = True
+        source_admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db)))
+        created_db = True
+        source_db = backup.dsn_with_dbname(SOURCE, db)
+        with psycopg.connect(source_db, autocommit=True) as conn:
+            conn.execute("CREATE SCHEMA jw_dev")
+            conn.execute("""
+                CREATE TABLE jw_dev.parent (
+                    id integer PRIMARY KEY,
+                    name text NOT NULL,
+                    CONSTRAINT parent_check CHECK (
+                        (length(name) >= 2 AND length(name) <= 120)
+                        AND name=btrim(name))
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE jw_dev.child (
+                    id integer PRIMARY KEY,
+                    parent_id integer REFERENCES jw_dev.parent(id) DEFERRABLE INITIALLY DEFERRED,
+                    label text CHECK (length(label) <= 120)
+                )
+            """)
+            for i in range(63):
+                conn.execute(sql.SQL(
+                    "CREATE TABLE jw_dev.{} (id integer PRIMARY KEY, payload text NOT NULL)"
+                ).format(sql.Identifier(f"item_{i}")))
+            conn.execute("ALTER TABLE jw_dev.parent ENABLE ROW LEVEL SECURITY")
+            conn.execute("ALTER TABLE jw_dev.parent FORCE ROW LEVEL SECURITY")
+            conn.execute(sql.SQL(
+                "CREATE POLICY allow_owner ON jw_dev.parent FOR SELECT TO {} USING (true)"
+            ).format(sql.Identifier(role)))
+            conn.execute("INSERT INTO jw_dev.parent VALUES (1,'synthetic')")
+            conn.execute("INSERT INTO jw_dev.child VALUES (1,1,'synthetic')")
+            for i in range(63):
+                conn.execute(sql.SQL(
+                    "INSERT INTO jw_dev.{} VALUES (1,'synthetic')"
+                ).format(sql.Identifier(f"item_{i}")))
+            tables = backup.fetch_signature(conn, "jw_dev")["tables"]
+            assert len(tables) == 65
+        dump_path = tmp_path / "ci65.custom"
+        key = bytes(range(32))
+        opts = backup.parse_dsn(source_db)
+        backup.run_tool(["pg_dump", "--format=custom", "--schema=jw_dev",
+                         "--no-owner", "--file", str(dump_path)],
+                        opts, timeout=90)
+        root = tmp_path / "owner-only" / "backups"
+        root.mkdir(mode=0o700, parents=True)
+        nested = root / "jw_v223_ci"
+        nested.mkdir(mode=0o700)
+        encrypted = nested / "synthetic.jwpgbk"
+        backup.encrypt_file(dump_path, encrypted, key)
+        encrypted.chmod(0o600)
+        dump_path.unlink()
+        monkeypatch.setattr(owner, "_owner_backup_dir", lambda: root)
+        monkeypatch.setenv("CODESPACES", "true")
+        monkeypatch.setenv("JW_PG_BACKUP_KEY", base64.urlsafe_b64encode(key).decode())
+        monkeypatch.setenv("JW_PG_OFFLINE_RESTORE_ACK", offline.ACK)
+        result = offline.run_offline()
+        safe = {k: result.get(k) for k in (
+            "blocker", "offline_restore_execution", "offline_restored_archive_count",
+            "offline_65_table_archive_count", "failure_categories",
+            "container_removed", "disposable_constraint_signature_groups")}
+        assert result["offline_restore_execution"] == "PASS_LOCAL_ONLY", safe
+        assert result["offline_restored_archive_count"] == 1, safe
+        assert result["offline_65_table_archive_count"] == 1, safe
+        assert result["offline_restore_failure_count"] == 0, safe
+        assert result["container_removed"] == "PASS", safe
+        assert result["disposable_constraint_signature_groups"] == 1
+        assert result["historic_real_source_identity_verified"] is False
+        assert result["remote_storage_proven"] is False
+        assert result["overall"] == "BLOCKED"
+        assert role not in str(result), "never expose source-only role names"
+    finally:
+        if created_db:
+            source_admin.execute(
+                sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(db)))
+        if created_role:
+            source_admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+        source_admin.close()
