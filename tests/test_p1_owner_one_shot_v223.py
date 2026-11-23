@@ -274,3 +274,12 @@ def test_discovery_does_not_scan_outside_known_owner_dir(tmp_path: Path, monkeyp
     (root / "jw_v223_outside").symlink_to(outside, target_is_directory=True)
     monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
     assert one.discover_owner_archive() == ([], "NO_PRIVATE_CIPHERTEXT_FOUND")
+
+
+def test_diagnose_replaces_generic_archive_path_error_with_real_discovery(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: tmp_path / "absent")
+    result = one.diagnose_one_shot({})
+    assert result["blocker"] == "PRIVATE_BACKUP_DIRECTORY_ABSENT_OR_UNSAFE"
+    assert "ARCHIVE_PATH_REQUIRED" not in result["blockers"]
+    assert result["diagnostic_execution"] == "PASS"
+    assert result["overall"] == "BLOCKED"

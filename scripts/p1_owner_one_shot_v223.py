@@ -246,8 +246,14 @@ def diagnose_one_shot(environ: dict[str, str] | None = None) -> dict[str, object
             env["JW_PG_OWNER_RECEIPT_PATH"] = receipt
 
     report = execute_one_shot(env)
-    if report.get("blocker") and report["blocker"] not in blockers:
-        blockers.insert(0, str(report["blocker"]))
+    primary = str(report.get("blocker") or "")
+    # When no path was supplied, the older first-failure checker says only
+    # ARCHIVE_PATH_REQUIRED. Report the actual bounded discovery result
+    # instead; do not make the owner repeat the same manual path input.
+    if (primary and not (primary == "ARCHIVE_PATH_REQUIRED"
+                         and not env.get("JW_PG_ARCHIVE_PATH"))
+            and primary not in blockers):
+        blockers.insert(0, primary)
     if report.get("private_receipt_metadata") != "PRESENT_NOT_INDEPENDENTLY_VERIFIED":
         blockers.append("OWNER_PRIVATE_RECEIPT_NOT_DISCOVERED")
     blockers.extend((
@@ -257,6 +263,7 @@ def diagnose_one_shot(environ: dict[str, str] | None = None) -> dict[str, object
     ))
     # Stable, deduplicated, fixed-code labels; no paths, hashes, keys or rows.
     report["blockers"] = list(dict.fromkeys(blockers))
+    report["blocker"] = report["blockers"][0] if report["blockers"] else "NO_BLOCKERS"
     report["diagnostic_execution"] = "PASS"
     report["archive_discovery"] = discovery
     report["discovered_private_archive_count"] = count
