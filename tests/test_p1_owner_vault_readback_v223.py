@@ -240,3 +240,53 @@ def test_real_one_shot_codespaces_cli_offline_manifest_synthetic_11_archives(tmp
     assert report["overall"]=="BLOCKED"
     assert all(sha not in result.stdout for sha in shas)
     assert str(root) not in result.stdout
+
+
+
+def test_diagnose_all_auth_blocked_still_finishes_local_manifest_without_false_pass(monkeypatch,capsys):
+    local={"manifest_diagnostic":"PASS_LOCAL_HASH_COMPARISON_EXECUTED",
+           "provider_file_entry_count":4, "provider_unique_git_blob_count":3,
+           "provider_git_blob_id_matched_local_count":2,"overall":"BLOCKED"}
+    monkeypatch.setattr(vault,"manifest_diagnostic",lambda:local.copy())
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+       "auth_diagnostic":"CODESPACE_CREDENTIAL_CANNOT_READ_PRIVATE_VAULT",
+       "git_read_only_private_access":"BLOCKED",
+       "gh_cli_private_api_access":"BLOCKED"})
+    def no_remote():raise AssertionError("unauthorized archive download attempted")
+    monkeypatch.setattr(vault,"audit",no_remote)
+    assert vault.main(["diagnose-all"])==0
+    import json
+    report=json.loads(capsys.readouterr().out)
+    assert report["remote_readback"]=="NOT_RUN_AUTHORIZATION_REQUIRED"
+    assert report["overall"]=="BLOCKED"
+    assert report["provider_unique_git_blob_count"]==3
+
+
+def test_diagnose_all_authorized_attempts_exact_remote_readback_but_never_releases(monkeypatch,capsys):
+    monkeypatch.setattr(vault,"manifest_diagnostic",lambda:{
+       "manifest_diagnostic":"PASS_LOCAL_HASH_COMPARISON_EXECUTED","overall":"BLOCKED"})
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+       "auth_diagnostic":"GIT_HELPER_USING_DIFFERENT_CREDENTIALS"})
+    calls=[]
+    def readback():
+       calls.append(1)
+       return {"remote_readback":"PASS_MATCHED_REMOTE_CIPHERTEXT",
+               "remote_full_sha256_readback_matches":4,
+               "remote_unique_full_sha256_matches":3,
+               "all_11_archives_offsite":False,"overall":"BLOCKED"}
+    monkeypatch.setattr(vault,"audit",readback)
+    assert vault.main(["diagnose-all"])==0
+    assert calls==[1]
+    import json
+    x=json.loads(capsys.readouterr().out)
+    assert x["remote_full_sha256_readback_matches"]==4
+    assert x["all_11_archives_offsite"] is False
+    assert x["overall"]=="BLOCKED"
+
+
+def test_diagnose_all_halts_before_remote_on_unsafe_local_evidence(monkeypatch):
+    monkeypatch.setattr(vault,"manifest_diagnostic",lambda:{
+      "manifest_diagnostic":"BLOCKED","blocker":"UNSAFE_LOCAL_ARCHIVE"})
+    monkeypatch.setattr(vault,"auth_probe",lambda:(_ for _ in ()).throw(
+       AssertionError("must not contact remote")))
+    assert vault.main(["diagnose-all"])==1

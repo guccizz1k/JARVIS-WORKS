@@ -329,18 +329,56 @@ def audit()->dict:
         result["blocker"]="SAFE_VAULT_READBACK_ERROR"
     return result
 
+def diagnose_all()->dict:
+    """One-shot owner workflow; fail-closed evidence, no token or data printed."""
+    report=manifest_diagnostic()
+    if report.get("manifest_diagnostic")!="PASS_LOCAL_HASH_COMPARISON_EXECUTED":
+        return report
+    authorization=auth_probe()
+    for key in (
+        "auth_diagnostic", "git_read_only_private_access",
+        "gh_cli_private_api_access", "gh_token_environment_present",
+        "source_github_token_present",
+    ):
+        if key in authorization:
+            report[key]=authorization[key]
+    if authorization.get("auth_diagnostic") in (
+        "PASS_PRIVATE_VAULT_GIT_READ", "GIT_HELPER_USING_DIFFERENT_CREDENTIALS"
+    ):
+        actual=audit()
+        for key,value in actual.items():
+            if key in ("remote_readback", "remote_ciphertext_count",
+                       "remote_unique_ciphertext_count",
+                       "remote_duplicate_content_entries",
+                       "remote_full_sha256_readback_matches",
+                       "remote_unique_full_sha256_matches",
+                       "remote_unmatched_ciphertext_count",
+                       "local_archives_not_offsite",
+                       "all_11_archives_offsite", "temporary_clone_removed",
+                       "blocker"):
+                report[key]=value
+    else:
+        report["remote_readback"]="NOT_RUN_AUTHORIZATION_REQUIRED"
+    # Never upgrade historical backup origin, key escrow or launch.
+    report["overall"]="BLOCKED"
+    return report
+
+
 def main(argv:list[str]|None=None)->int:
     args=sys.argv[1:] if argv is None else argv
-    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"]):
-        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth]",file=sys.stderr)
+    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"], ["diagnose-all"]):
+        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth|diagnose-all]",file=sys.stderr)
         return 2
     try:
         result=(auth_probe() if args==["diagnose-auth"] else
-                manifest_diagnostic() if args==["diagnose-manifest"] else audit())
+                manifest_diagnostic() if args==["diagnose-manifest"] else
+                diagnose_all() if args==["diagnose-all"] else audit())
     except Exception:
         print('{"remote_readback":"BLOCKED","overall":"BLOCKED","blocker":"SAFE_FAIL_CLOSED"}')
         return 1
     print(json.dumps(result,sort_keys=True,separators=(",",":")))
+    if args==["diagnose-all"]:
+        return 0 if result.get("manifest_diagnostic")=="PASS_LOCAL_HASH_COMPARISON_EXECUTED" else 1
     if args==["diagnose-auth"]:
         return 0 if result.get("auth_diagnostic") not in ("BLOCKED",None) else 1
     if args==["diagnose-manifest"]:
