@@ -1,0 +1,96 @@
+name: P1 backup integrity V5 review
+
+on:
+  push:
+    branches:
+      - review/jw-p1-v5-pr147-clean-20261123
+  # Allows GitHub to publish Checks on a separately approved Draft PR.
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jw-p1-v5-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-unit:
+    name: P1 V5 isolated regression (no database)
+    if: github.repository == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout review commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal dependencies
+        run: python -m pip install --disable-pip-version-check 'pytest>=8,<10' 'cryptography>=43,<47'
+      - name: Compile engine and test
+        run: python -m py_compile scripts/pg_backup_v223.py tests/test_p1_backup_integrity_v5.py
+      - name: Run isolated P1 V5 regressions
+        run: python -m pytest -q tests/test_p1_backup_integrity_v5.py
+
+  synthetic-pg17-restore:
+    name: PG17 synthetic backup and isolated restore (no production data)
+    if: github.repository == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout review commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated test dependencies
+        run: python -m pip install --disable-pip-version-check 'pytest>=8,<10' 'cryptography>=43,<47' 'psycopg[binary]>=3.2,<4'
+      - name: Launch two disposable PostgreSQL 17 instances on loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name jw-p1-source -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=synthetic_only_change_not_needed postgres:17
+          docker run -d --name jw-p1-target -p 127.0.0.1:55433:5432 -e POSTGRES_PASSWORD=synthetic_only_change_not_needed postgres:17
+          for attempt in $(seq 1 40); do
+            if docker exec jw-p1-source pg_isready -U postgres -d postgres >/dev/null && docker exec jw-p1-target pg_isready -U postgres -d postgres >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Expose PostgreSQL 17 client tools through ephemeral containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/jw-pg17-bin"
+          for cli in pg_dump pg_restore; do
+            cat > "$RUNNER_TEMP/jw-pg17-bin/$cli" <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          tool="$(basename "$0")"
+          exec docker run --rm --network host --user "$(id -u):$(id -g)" -v /tmp:/tmp -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -e PGSSLMODE -e PGSSLROOTCERT postgres:17 "$tool" "$@"
+          SCRIPT
+            chmod +x "$RUNNER_TEMP/jw-pg17-bin/$cli"
+          done
+          echo "$RUNNER_TEMP/jw-pg17-bin" >> "$GITHUB_PATH"
+      - name: Verify client and isolated test entrypoints
+        run: |
+          pg_dump --version
+          pg_restore --version
+          python -m py_compile scripts/pg_backup_v223.py tests/test_p1_pg17_synthetic_e2e.py
+      - name: Run actual PG17 synthetic source to disposable target restore
+        run: python -m pytest -q tests/test_p1_pg17_synthetic_e2e.py
+      - name: Remove disposable PostgreSQL 17 instances
+        if: always()
+        shell: bash
+        run: docker rm -f jw-p1-source jw-p1-target >/dev/null 2>&1 || true
