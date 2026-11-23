@@ -90,3 +90,39 @@ def test_encrypted_or_symlink_member_denied_before_workbook_parse():
 
 def test_original_document_to_settlement_source_not_changed():
     assert extract("test.xlsx",make_xlsx())["record_type"]=="order"
+
+
+def test_malformed_xlsx_http_preview_rejects_without_db_changes(tmp_path, monkeypatch):
+    """Real review adapter HTTP boundary: reject before preview/order writes."""
+    from fastapi.testclient import TestClient
+    from app import main as core
+    from app.owner_review_app_v223 import app as qa_app
+
+    for name,value in {
+        "JW_ENV":"review",
+        "JW_ROOT_UI":"owner-visual-review",
+        "JW_APPROVED_UI_REVIEW":"ISOLATED_REVIEW_ONLY",
+        "JW_NO_EXTERNAL_DATABASE":"1",
+        "DEMO_SEED":"1",
+    }.items():
+        monkeypatch.setenv(name,value)
+    monkeypatch.delenv("JW_PUBLIC_QA_MODE",raising=False)
+    monkeypatch.setattr(core,"DB_PATH",tmp_path/"xlsx_validation_http.db")
+    with TestClient(qa_app,base_url="https://testserver") as client:
+        login=client.post("/api/login",json={
+            "email":"demo@hanbit.example","password":"Demo!2026secure"})
+        assert login.status_code==200
+        token=login.cookies.get(core.SESSION_COOKIE)
+        assert token
+        auth={"Cookie":core.SESSION_COOKIE+"="+token,
+              "X-CSRF-Token":login.json()["csrf_token"]}
+        original_queue=client.get("/api/imports/queue",headers=auth)
+        original_orders=client.get("/api/orders",headers=auth)
+        assert original_queue.status_code==original_orders.status_code==200
+        forged=modified_package("XL/WORKBOOK.XML")
+        rejected=client.post("/api/imports/preview",headers=auth,
+            files={"file":("ambiguous.xlsx",forged,
+                           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+        assert rejected.status_code==422
+        assert client.get("/api/imports/queue",headers=auth).json()==original_queue.json()
+        assert client.get("/api/orders",headers=auth).json()==original_orders.json()
