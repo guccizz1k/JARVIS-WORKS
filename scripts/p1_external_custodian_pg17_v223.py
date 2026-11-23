@@ -12,6 +12,8 @@ a signed historical source snapshot, or production release readiness.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -57,6 +59,8 @@ def preflight(env=None):
         return "EXTERNAL_KEY_PIPE_APPROVAL_REQUIRED"
     if not clean.SHA1.fullmatch(env.get("JW_PG_CLEANROOM_VAULT_SHA","")):
         return "EXACT_PRIVATE_VAULT_COMMIT_REQUIRED"
+    if not clean.SHA256.fullmatch(env.get("JW_WORM_OWNER_SCOPE_SHA256", "")):
+        return "INDEPENDENT_OWNER_SCOPE_PIN_REQUIRED"
     if shutil.which("docker") is None:
         return "DOCKER_CLI_UNAVAILABLE"
     if (env.get("DOCKER_HOST") and
@@ -78,6 +82,25 @@ def preflight(env=None):
     except (OSError,subprocess.SubprocessError):
         return "LOCAL_DOCKER_DAEMON_UNAVAILABLE"
     return "PASS"
+
+
+def _require_owner_scope(pairs, pin):
+    """Bind exactly eleven distinct Git blobs to the separate owner approval."""
+    if not isinstance(pin, str) or not clean.SHA256.fullmatch(pin):
+        raise Blocked("INDEPENDENT_OWNER_SCOPE_PIN_REQUIRED")
+    if (len(pairs) != MAX_ARCHIVES or
+            any(not isinstance(p, (tuple, list)) or len(p) != 2 or
+                not isinstance(p[0], str) or not clean.SHA1.fullmatch(p[0]) or
+                not isinstance(p[1], str) or not clean.SHA256.fullmatch(p[1])
+                for p in pairs)):
+        raise Blocked("OWNER_SCOPE_INVALID_MANIFEST")
+    blobs = [p[0] for p in pairs]
+    if len(set(blobs)) != MAX_ARCHIVES:
+        raise Blocked("OWNER_SCOPE_DUPLICATE_ARCHIVE")
+    body = "JW-WORM-OWNER-SCOPE-V1\n" + "\n".join(sorted(blobs)) + "\n"
+    actual = hashlib.sha256(body.encode("ascii")).hexdigest()
+    if not hmac.compare_digest(actual, pin):
+        raise Blocked("OWNER_SCOPE_PIN_MISMATCH")
 
 
 def decrypt_verified(cipher: bytes, key: bytes) -> bytearray:
@@ -131,6 +154,7 @@ def decrypt_verified(cipher: bytes, key: bytes) -> bytearray:
 def run() -> dict[str, object]:
     result={
         "external_pg17_restore":"BLOCKED",
+        "owner_scope_pin_checked":False,
         "verified_provider_cipher_count":0,
         "restored_pg17_archive_count":0,
         "restored_65_table_archive_count":0,
@@ -153,7 +177,9 @@ def run() -> dict[str, object]:
     key=None
     try:
         pin,key,pairs=clean._inputs()
-        if len(pairs)!=MAX_ARCHIVES or not set(x[0] for x in pairs)<=clean._head_tree(pin):
+        _require_owner_scope(pairs, os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""))
+        result["owner_scope_pin_checked"]=True
+        if not set(x[0] for x in pairs)<=clean._head_tree(pin):
             raise Blocked("PINNED_PRIVATE_VAULT_OBJECT_SET_INVALID")
         name="jw-p1-external-pg17-"+secrets.token_hex(8)
         created=offline._docker([

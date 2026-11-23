@@ -41,10 +41,13 @@ def test_eleven_synthetic_external_ciphers_really_restore_pg17(monkeypatch):
         assert dump.startswith(b"PGDMP")
         from tests.test_p1_external_custodian_pg17_v223 import cipher
         key=b"S"*32
-        candidates=[cipher(key,dump,legacy=(i%2==1)) for i in range(11)]
+        candidates=[cipher(key,dump,legacy=(i%2==1),nonce_seed=i+1) for i in range(11)]
         # The backup and vault are fakes; real Docker and actual pg_restore are NOT.
         import hashlib
-        ids=[hashlib.sha1(x).hexdigest() for x in candidates]
+        ids=[hashlib.sha1(b"blob "+str(len(x)).encode()+b"\0"+x).hexdigest() for x in candidates]
+        assert len(set(ids))==11
+        scope=hashlib.sha256(("JW-WORM-OWNER-SCOPE-V1\n"+"\n".join(sorted(ids))+"\n").encode()).hexdigest()
+        monkeypatch.setenv("JW_WORM_OWNER_SCOPE_SHA256", scope)
         pairs=list(zip(ids,[hashlib.sha256(x).hexdigest() for x in candidates]))
         known=dict(zip(ids,candidates))
         monkeypatch.setattr(ext,"preflight",lambda:"PASS")
@@ -56,6 +59,7 @@ def test_eleven_synthetic_external_ciphers_really_restore_pg17(monkeypatch):
         assert report["restored_pg17_archive_count"]==11
         assert report["restored_65_table_archive_count"]==11
         assert report["verified_provider_cipher_count"]==11
+        assert report["owner_scope_pin_checked"] is True
         assert report["disposable_pg17_removed"]=="PASS"
         assert report["decrypted_dump_written_to_host"] is False
         assert report["independent_key_custody"]=="NOT_ATTESTED"
