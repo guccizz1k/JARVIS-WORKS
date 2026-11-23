@@ -1,0 +1,80 @@
+name: V223 final hosted synthetic E2E disarmed HTTPS protection check
+
+on:
+  push:
+    branches:
+      - review/jw-v223-post-selftest-readonly-20261123
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-readonly:
+    name: Real Render TLS health and anonymous Basic guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Probe fixed existing free isolated QA without credentials or mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import ssl
+          import time
+          import urllib.error
+          import urllib.request
+          
+          BASE = "https://jw-v223-qa-pinned-20261122.onrender.com"
+          PATHS = ("/", "/api/me", "/api/config", "/api/customers",
+                   "/api/automation/statements")
+          
+          class DenyRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, msg, headers, newurl):
+                  return None
+          
+          opener = urllib.request.build_opener(
+              urllib.request.ProxyHandler({}),
+              urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+              DenyRedirect(),
+          )
+          
+          def status(path):
+              req=urllib.request.Request(BASE+path, headers={
+                  "Accept":"application/json", "Cache-Control":"no-store",
+                  "User-Agent":"JW-Isolated-ReadOnly-HTTPS-Proof/1"})
+              try:
+                  with opener.open(req, timeout=25) as res:
+                      code, headers = res.status, res.headers
+                      payload = res.read(4096) if path == "/api/health" else b""
+                      return code, headers, payload
+              except urllib.error.HTTPError as e:
+                  return e.code, e.headers, b""
+          
+          for attempt in range(12):
+              try:
+                  code,headers,payload=status("/api/health")
+                  if code==200 and json.loads(payload).get("status")=="ok":
+                      print("PASS_HOSTED_RENDER_HEALTH_TLS_200",flush=True)
+                      break
+              except (urllib.error.URLError,TimeoutError,ValueError,ssl.SSLError):
+                  pass
+              if attempt==11:
+                  raise AssertionError("BLOCKED_HOSTED_HEALTH_TLS_NOT_VERIFIED")
+              time.sleep(12)
+          
+          for path in PATHS:
+              code,headers,_=status(path)
+              assert code==401,("PUBLIC_BASIC_AUTH_BYPASS_OR_UNEXPECTED_HTTP",path,code)
+              assert headers.get("WWW-Authenticate","").startswith("Basic "), (
+                  "PUBLIC_BASIC_CHALLENGE_MISSING",path)
+              assert "no-store" in headers.get("Cache-Control","").lower(), (
+                  "PUBLIC_AUTH_RESPONSE_MUST_NOT_CACHE",path)
+              assert headers.get("X-Content-Type-Options","")=="nosniff", (
+                  "PUBLIC_BASIC_DENIAL_NOSNIFF_MISSING",path)
+              print("PASS_HOSTED_RENDER_ANONYMOUS_DENIAL_"+path.replace("/","_").strip("_").upper(),
+                    flush=True)
+          
+          print("PASS_HOSTED_RENDER_HTTPS_ANONYMOUS_GUARD_6_PROBES_NO_WRITES",flush=True)
+          
+          PY
