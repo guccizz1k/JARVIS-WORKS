@@ -27,6 +27,9 @@ class Blocked(RuntimeError):
 
 def git(args:list[str],cwd:Path|None=None,timeout:int=60):
     env=os.environ.copy()
+    # Never forward the vault-specific Codespaces secret to general Git
+    # operations, including the source-repository credential helper.
+    env.pop("JW_VAULT_READ_TOKEN",None)
     env.update(GIT_TERMINAL_PROMPT="0",GIT_LFS_SKIP_SMUDGE="1",
                GIT_TRACE="0",GIT_CURL_VERBOSE="0",GIT_PAGER="cat")
     try:
@@ -207,7 +210,14 @@ def _vault_cli_env()->dict[str,str]:
     persisted, elevated or modified. Original process env is unchanged.
     """
     env=os.environ.copy()
+    # Existing Codespaces token must remain intact in the user's actual
+    # environment. For this VAULT GH CLI child alone, avoid source token
+    # precedence, and favor an optional repository-scoped, read-only
+    # Codespaces secret without altering other GitHub workflows.
     env.pop("GITHUB_TOKEN",None)
+    vault_token=env.pop("JW_VAULT_READ_TOKEN",None)
+    if vault_token:
+        env["GH_TOKEN"]=vault_token
     env.update(GH_PROMPT_DISABLED="1",GH_NO_UPDATE_NOTIFIER="1",
                GIT_TERMINAL_PROMPT="0")
     return env
@@ -325,6 +335,7 @@ def auth_probe()->dict:
             "git_read_only_private_access":"NOT_RUN",
             "gh_cli_private_api_access":"NOT_RUN",
             "gh_token_environment_present":bool(os.environ.get("GH_TOKEN")),
+            "vault_read_token_present":bool(os.environ.get("JW_VAULT_READ_TOKEN")),
             "source_github_token_present":bool(os.environ.get("GITHUB_TOKEN"))}
     if os.environ.get("CODESPACES","").lower()!="true":
         result["blocker"]="OWNER_CODESPACE_REQUIRED";return result
@@ -460,6 +471,25 @@ def audit()->dict:
         result["blocker"]="SAFE_VAULT_READBACK_ERROR"
     return result
 
+def diagnose_remote()->dict:
+    """One-call complete credential classification + authorized readback only.
+
+    This independent owner-only check doesn't need the already-proven
+    provider blob metadata input. The CLI exit is a diagnostic completion,
+    NEVER a false offsite/retention/origin PASS.
+    """
+    diagnostic=auth_probe()
+    if diagnostic.get("auth_diagnostic") in (
+        "PASS_PRIVATE_VAULT_GIT_READ", "GIT_HELPER_USING_DIFFERENT_CREDENTIALS"
+    ):
+        recovered=audit()
+        diagnostic.update(recovered)
+    else:
+        diagnostic["remote_readback"]="NOT_RUN_AUTHORIZATION_REQUIRED"
+    diagnostic["overall"]="BLOCKED"
+    return diagnostic
+
+
 def diagnose_all()->dict:
     """One-shot owner workflow; fail-closed evidence, no token or data printed."""
     report=manifest_diagnostic()
@@ -469,7 +499,7 @@ def diagnose_all()->dict:
     for key in (
         "auth_diagnostic", "git_read_only_private_access",
         "gh_cli_private_api_access", "gh_token_environment_present",
-        "source_github_token_present",
+        "vault_read_token_present", "source_github_token_present",
     ):
         if key in authorization:
             report[key]=authorization[key]
@@ -497,17 +527,20 @@ def diagnose_all()->dict:
 
 def main(argv:list[str]|None=None)->int:
     args=sys.argv[1:] if argv is None else argv
-    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"], ["diagnose-all"]):
-        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth|diagnose-all]",file=sys.stderr)
+    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"], ["diagnose-all"], ["diagnose-remote"]):
+        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth|diagnose-all|diagnose-remote]",file=sys.stderr)
         return 2
     try:
         result=(auth_probe() if args==["diagnose-auth"] else
                 manifest_diagnostic() if args==["diagnose-manifest"] else
-                diagnose_all() if args==["diagnose-all"] else audit())
+                diagnose_all() if args==["diagnose-all"] else
+                diagnose_remote() if args==["diagnose-remote"] else audit())
     except Exception:
         print('{"remote_readback":"BLOCKED","overall":"BLOCKED","blocker":"SAFE_FAIL_CLOSED"}')
         return 1
     print(json.dumps(result,sort_keys=True,separators=(",",":")))
+    if args==["diagnose-remote"]:
+        return 0 if result.get("auth_diagnostic") not in ("BLOCKED",None) else 1
     if args==["diagnose-all"]:
         return 0 if result.get("manifest_diagnostic")=="PASS_LOCAL_HASH_COMPARISON_EXECUTED" else 1
     if args==["diagnose-auth"]:

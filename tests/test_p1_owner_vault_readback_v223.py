@@ -399,3 +399,66 @@ def test_gh_api_refuses_using_untrusted_host_and_suppresses_all_stderr(monkeypat
     assert vault._vault_api_json("repos/guccizz1k/jw-backup-vault-261111/git/ref/heads/main")=={"private":True}
     with pytest.raises(vault.Blocked,match="ENDPOINT_INVALID"):
         vault._vault_api_json("repos/other/unsafe/data")
+
+
+
+def test_vault_only_codespaces_fine_grained_secret_does_not_replace_source_token(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN","SOURCE_ONLY_PLACEHOLDER")
+    monkeypatch.setenv("JW_VAULT_READ_TOKEN","VAULT_READ_ONLY_PLACEHOLDER")
+    monkeypatch.delenv("GH_TOKEN",raising=False)
+    child=vault._vault_cli_env()
+    assert child["GH_TOKEN"]=="VAULT_READ_ONLY_PLACEHOLDER"
+    assert "JW_VAULT_READ_TOKEN" not in child
+    assert "GITHUB_TOKEN" not in child
+    assert os.environ["GITHUB_TOKEN"]=="SOURCE_ONLY_PLACEHOLDER"
+    assert os.environ["JW_VAULT_READ_TOKEN"]=="VAULT_READ_ONLY_PLACEHOLDER"
+
+
+def test_vault_specific_token_never_passes_into_git_clone_process(monkeypatch):
+    import subprocess
+    monkeypatch.setenv("JW_VAULT_READ_TOKEN","PRIVATE_VAULT_READ_PLACEHOLDER")
+    def fake(cmd,**kwargs):
+        assert "JW_VAULT_READ_TOKEN" not in kwargs["env"]
+        assert kwargs["stderr"]==subprocess.DEVNULL
+        return subprocess.CompletedProcess(cmd,128,b"",b"not permitted")
+    monkeypatch.setattr(subprocess,"run",fake)
+    result=vault.git(["ls-remote","--heads",vault.VAULT,"main"])
+    assert result.returncode==128
+
+
+
+def test_diagnose_remote_one_shot_wont_read_archive_if_private_auth_denied(monkeypatch,capsys):
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+        "auth_diagnostic":"CODESPACE_CREDENTIAL_CANNOT_READ_PRIVATE_VAULT",
+        "git_read_only_private_access":"BLOCKED",
+        "gh_cli_private_api_access":"BLOCKED"})
+    monkeypatch.setattr(vault,"audit",lambda:(_ for _ in ()).throw(
+        AssertionError("unauthorized remote download attempted")))
+    assert vault.main(["diagnose-remote"])==0
+    import json
+    report=json.loads(capsys.readouterr().out)
+    assert report["remote_readback"]=="NOT_RUN_AUTHORIZATION_REQUIRED"
+    assert report["overall"]=="BLOCKED"
+
+
+def test_diagnose_remote_authorized_calls_actual_cipher_readback_but_not_release(monkeypatch,capsys):
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+        "auth_diagnostic":"GIT_HELPER_USING_DIFFERENT_CREDENTIALS",
+        "gh_cli_private_api_access":"PASS"})
+    calls=[]
+    def recovered():
+        calls.append(1)
+        return {"remote_readback":"PASS_MATCHED_REMOTE_CIPHERTEXT",
+                "remote_unique_full_sha256_matches":2,
+                "local_archives_not_offsite":9,
+                "all_11_archives_offsite":False,
+                "overall":"BLOCKED"}
+    monkeypatch.setattr(vault,"audit",recovered)
+    assert vault.main(["diagnose-remote"])==0
+    import json
+    result=json.loads(capsys.readouterr().out)
+    assert calls==[1]
+    assert result["remote_unique_full_sha256_matches"]==2
+    assert result["local_archives_not_offsite"]==9
+    assert result["all_11_archives_offsite"] is False
+    assert result["overall"]=="BLOCKED"
