@@ -26,7 +26,12 @@ jobs:
       - name: Checkout review commit
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Confirm exact reviewed source SHA
+        env:
+          JW_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$JW_EXPECTED_SHA"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -47,7 +52,12 @@ jobs:
       - name: Checkout review commit
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Confirm exact reviewed source SHA
+        env:
+          JW_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$JW_EXPECTED_SHA"
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -103,7 +113,12 @@ jobs:
       - name: Checkout exact review candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Confirm exact reviewed source SHA
+        env:
+          JW_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$JW_EXPECTED_SHA"
       - name: Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -130,7 +145,12 @@ jobs:
       - name: Checkout exact integration review SHA, no stored GitHub token
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Confirm exact reviewed source SHA
+        env:
+          JW_EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$JW_EXPECTED_SHA"
       - name: Set up isolated Python browser runner
         uses: actions/setup-python@v5
         with:
