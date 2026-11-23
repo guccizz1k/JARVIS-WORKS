@@ -145,3 +145,65 @@ def test_cli_rejects_other_actions_no_network(monkeypatch):
     monkeypatch.setattr(c,"verify",lambda:(_ for _ in ()).throw(
         AssertionError("must not invoke verify")))
     assert c.main(["upload"])==2
+
+# New, scope-specific gate: the existing proof authenticated only record 0.
+# A replaced provider blob plus a correspondingly updated manifest could pass
+# even though a later record was not decryptable with the independent key.
+def _multichunk_candidate(key, index=4, bad_tag=False, bad_length=False, legacy=False):
+    magic=b"JWPGBK1\n" if legacy else b"JWPGBK2\n"
+    prefix=index.to_bytes(4 if legacy else 8,"big")
+    raw=bytearray(magic+prefix)
+    for counter,plain in enumerate((b"PGDMP"+b"header"*24,b"second PG backup chunk")):
+        nonce=prefix+struct.pack(">Q" if legacy else ">I",counter)
+        aad=magic+struct.pack(">QB",counter,int(counter==1))
+        encrypted=bytearray(AESGCM(key).encrypt(nonce,plain,aad))
+        if counter==1 and bad_tag:
+            encrypted[-1]^=1
+        if counter==1 and bad_length:
+            encrypted=encrypted[:8]
+        raw.extend(struct.pack(">I",len(encrypted)))
+        raw.extend(encrypted)
+    return bytes(raw)
+
+
+def _replace_manifest_archive(manifest,store,raw,index=4):
+    digest=hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()
+    store[digest]=raw
+    manifest["archives"][index]={"blob_sha1":digest,
+        "cipher_sha256":hashlib.sha256(raw).hexdigest()}
+
+
+def test_new_second_record_aead_corruption_fails_closed_even_with_matching_manifest(monkeypatch):
+    key,manifest,store=fixture(monkeypatch)
+    _replace_manifest_archive(manifest,store,_multichunk_candidate(key,bad_tag=True))
+    result=run_with_pipes(monkeypatch,key,manifest)
+    assert result["cleanroom_cryptographic_key_proof"]=="BLOCKED"
+    assert result["remote_cipher_authentication_count"]==4
+    assert result["blocker"]=="ESCROW_RECOVERY_KEY_AUTHENTICATION_FAILED"
+
+
+def test_new_second_record_too_short_fails_closed_even_with_matching_manifest(monkeypatch):
+    key,manifest,store=fixture(monkeypatch)
+    _replace_manifest_archive(manifest,store,_multichunk_candidate(key,bad_length=True))
+    result=run_with_pipes(monkeypatch,key,manifest)
+    assert result["cleanroom_cryptographic_key_proof"]=="BLOCKED"
+    assert result["remote_cipher_authentication_count"]==4
+    assert result["blocker"]=="ENCRYPTED_RECORD_LENGTH_INVALID"
+
+
+def test_new_valid_two_record_v2_accepted_without_claiming_external_custody(monkeypatch):
+    key,manifest,store=fixture(monkeypatch)
+    _replace_manifest_archive(manifest,store,_multichunk_candidate(key))
+    result=run_with_pipes(monkeypatch,key,manifest)
+    assert result["cleanroom_cryptographic_key_proof"]=="PASS_11_REMOTE_CIPHERS_AUTHENTICATED"
+    assert result["remote_cipher_authentication_count"]==11
+    assert result["independent_external_key_custody"]=="NOT_VERIFIED"
+    assert result["overall"]=="BLOCKED"
+
+
+def test_new_valid_legacy_v1_two_record_archive_preserved(monkeypatch):
+    key,manifest,store=fixture(monkeypatch)
+    _replace_manifest_archive(manifest,store,_multichunk_candidate(key,legacy=True))
+    result=run_with_pipes(monkeypatch,key,manifest)
+    assert result["cleanroom_cryptographic_key_proof"]=="PASS_11_REMOTE_CIPHERS_AUTHENTICATED"
+    assert result["remote_cipher_authentication_count"]==11
