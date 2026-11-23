@@ -173,32 +173,46 @@ def _download(blob_id, expected):
     return c
 
 
-def _auth_first_chunk(cipher,key):
-    """Authenticate PG custom dump prefix, memory only, no host plaintext."""
-    magic=cipher[:8]
-    if magic not in (b"JWPGBK1\n",b"JWPGBK2\n"):
+def _auth_all_chunks(cipher, key):
+    """Authenticate every AES-GCM record in memory, including the final flag.
+
+    This proves ciphertext decryptability with the supplied key but does NOT
+    establish independent key custody or a successful PostgreSQL restoration.
+    """
+    magic = cipher[:8]
+    if magic not in (b"JWPGBK1\n", b"JWPGBK2\n"):
         raise Blocked("ENCRYPTED_MAGIC_UNSUPPORTED")
-    prefix_len=8 if magic==b"JWPGBK2\n" else 4
-    pos=8+prefix_len
-    if len(cipher)<pos+4:
+    prefix_len = 8 if magic == b"JWPGBK2\n" else 4
+    pos = 8 + prefix_len
+    prefix = cipher[8:pos]
+    aes = AESGCM(key)
+    counter = 0
+    while pos < len(cipher):
+        if counter >= (2**32 if prefix_len == 8 else 2**64):
+            raise Blocked("ENCRYPTED_CHUNK_COUNTER_EXHAUSTED")
+        if len(cipher) - pos < 4:
+            raise Blocked("ENCRYPTED_RECORD_TRUNCATED")
+        size = struct.unpack(">I", cipher[pos:pos+4])[0]
+        if not 16 <= size <= (1 << 20) + 16:
+            raise Blocked("ENCRYPTED_RECORD_LENGTH_INVALID")
+        start = pos + 4
+        end = start + size
+        if end > len(cipher):
+            raise Blocked("ENCRYPTED_RECORD_TRUNCATED")
+        nonce = (prefix + struct.pack(">I", counter)
+                 if prefix_len == 8 else prefix + struct.pack(">Q", counter))
+        final = end == len(cipher)
+        aad = magic + struct.pack(">QB", counter, int(final))
+        try:
+            plain = aes.decrypt(nonce, cipher[start:end], aad)
+        except (InvalidTag, ValueError):
+            raise Blocked("ESCROW_RECOVERY_KEY_AUTHENTICATION_FAILED") from None
+        if counter == 0 and not plain.startswith(b"PGDMP"):
+            raise Blocked("DECRYPTED_ARCHIVE_NOT_PG_CUSTOM")
+        pos = end
+        counter += 1
+    if counter == 0:
         raise Blocked("ENCRYPTED_RECORD_TRUNCATED")
-    size=struct.unpack(">I",cipher[pos:pos+4])[0]
-    if not 16<=size<=8*1024*1024+128:
-        raise Blocked("ENCRYPTED_RECORD_LENGTH_INVALID")
-    start=pos+4
-    end=start+size
-    if end>len(cipher):
-        raise Blocked("ENCRYPTED_RECORD_TRUNCATED")
-    nonce=(cipher[8:pos]+struct.pack(">I",0)
-           if prefix_len==8 else cipher[8:pos]+struct.pack(">Q",0))
-    final=end==len(cipher)
-    aad=magic+struct.pack(">QB",0,1 if final else 0)
-    try:
-        plain=AESGCM(key).decrypt(nonce,cipher[start:end],aad)
-    except (InvalidTag,ValueError):
-        raise Blocked("ESCROW_RECOVERY_KEY_AUTHENTICATION_FAILED") from None
-    if not plain.startswith(b"PGDMP"):
-        raise Blocked("DECRYPTED_ARCHIVE_NOT_PG_CUSTOM")
     return True
 
 
@@ -221,7 +235,7 @@ def verify():
             raise Blocked("MANIFEST_BLOB_NOT_IN_PINNED_PRIVATE_VAULT")
         for blob,sha256 in pairs:
             c=_download(blob,sha256)
-            _auth_first_chunk(c,key)
+            _auth_all_chunks(c,key)
             result["remote_cipher_authentication_count"]+=1
         if result["remote_cipher_authentication_count"]==11:
             result["cleanroom_cryptographic_key_proof"]="PASS_11_REMOTE_CIPHERS_AUTHENTICATED"
