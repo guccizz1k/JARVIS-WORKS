@@ -349,6 +349,27 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         encrypted = nested / "synthetic.jwpgbk"
         backup.encrypt_file(dump_path, encrypted, key)
         encrypted.chmod(0o600)
+        # The owner's 2026-11-17 files predate V2. Reproduce the ORIGINAL
+        # V1 32-bit-prefix + 64-bit-counter authenticated format with an
+        # independent encryptor, then restore both V1 and V2 via the exact
+        # owner-only networkless Docker path. Only synthetic CI data here.
+        import struct
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        legacy_file = nested / "synthetic-legacy-v1.jwpgbk"
+        payload = dump_path.read_bytes()
+        prefix = bytes((10, 20, 30, 40))
+        chunks = [payload[i:i+backup.CHUNK]
+                  for i in range(0, len(payload), backup.CHUNK)] or [b""]
+        with legacy_file.open("wb") as stream:
+            stream.write(backup.MAGIC_LEGACY + prefix)
+            for index, chunk in enumerate(chunks):
+                final = index == len(chunks) - 1
+                blob = AESGCM(key).encrypt(
+                    prefix + struct.pack(">Q", index), chunk,
+                    backup.MAGIC_LEGACY + struct.pack(">QB", index, int(final)))
+                stream.write(struct.pack(">I", len(blob)))
+                stream.write(blob)
+        legacy_file.chmod(0o600)
         dump_path.unlink()
         monkeypatch.setattr(owner, "_owner_backup_dir", lambda: root)
         monkeypatch.setenv("CODESPACES", "true")
@@ -360,8 +381,8 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
             "offline_65_table_archive_count", "failure_categories",
             "container_removed", "disposable_constraint_signature_groups")}
         assert result["offline_restore_execution"] == "PASS_LOCAL_ONLY", safe
-        assert result["offline_restored_archive_count"] == 1, safe
-        assert result["offline_65_table_archive_count"] == 1, safe
+        assert result["offline_restored_archive_count"] == 2, safe
+        assert result["offline_65_table_archive_count"] == 2, safe
         assert result["offline_restore_failure_count"] == 0, safe
         assert result["container_removed"] == "PASS", safe
         assert result["disposable_constraint_signature_groups"] == 1
