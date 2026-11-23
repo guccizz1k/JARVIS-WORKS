@@ -11,6 +11,7 @@ import psycopg
 
 from scripts import pg_backup_v223 as backup
 from scripts import p1_owner_archive_inventory_v223 as inventory
+from scripts import p1_owner_archive_deep_v223 as deep
 
 SOURCE = "postgresql://postgres:synthetic_only_change_not_needed@127.0.0.1:55432/postgres"
 TARGET = "postgresql://postgres:synthetic_only_change_not_needed@127.0.0.1:55433/postgres"
@@ -69,6 +70,15 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
     assert backup.audit_encrypted_archive(
         real_fixture_ciphers[0], results["archive_sha256"], bytes(range(32))
     )["authenticated_decryption"] is True
+    # Actual synthetic PostgreSQL 17 custom-format archive TOC via stdin
+    # (no plaintext temp file or connection; parsing is NOT a restore).
+    mem = deep.authenticated_plain_in_memory(real_fixture_ciphers[0])
+    try:
+        toc_status, toc_tables = deep.pg17_toc_counts(mem)
+        assert toc_status == "PG17_TOC_PARSED_NOT_RESTORED"
+        assert toc_tables == 1
+    finally:
+        mem.clear()
     assert results["tables"] == 1
     assert results["signature_mismatches"] == [], results["signature_mismatch_diagnostics"]
     assert results["signature_digest_matches"] is True
