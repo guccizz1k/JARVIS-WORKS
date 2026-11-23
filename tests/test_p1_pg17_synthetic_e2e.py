@@ -478,7 +478,14 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
             "blocker", "offline_restore_execution", "offline_restored_archive_count",
             "offline_65_table_archive_count", "failure_categories",
             "container_removed", "disposable_constraint_signature_groups")}
-        assert result["offline_restore_execution"] == "PASS_LOCAL_ONLY", safe
+        # Do not leak customer object names/credentials. A fixed-label failure
+        # summary makes a single failed CI reproducible without raw pg_restore stderr.
+        import json as _json
+        safe.update({k: result.get(k) for k in (
+            "offline_restore_failure_count","offline_restore_skipped_budget_count",
+            "offline_other_table_archive_count","private_archives_found",
+            "schema_delta_probe_unavailable_count")})
+        assert result["offline_restore_execution"] == "PASS_LOCAL_ONLY", _json.dumps(safe,sort_keys=True,separators=(",",":"))
         assert result["offline_restored_archive_count"] == 2, safe
         assert result["offline_65_table_archive_count"] == 2, safe
         assert result["offline_restore_failure_count"] == 0, safe

@@ -109,7 +109,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install isolated QA test dependencies (no source credentials)
-        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt 'cryptography>=43,<47'
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Verify protected QA adapter and P1 compatibility
         run: |
           python -m py_compile app/owner_review_app_v223.py app/owner_review_public_qa_guard_v223.py scripts/pg_backup_v223.py scripts/p1_owner_offline_restore_v223.py
