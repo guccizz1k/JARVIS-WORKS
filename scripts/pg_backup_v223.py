@@ -809,6 +809,14 @@ def roles_in_acl(connection, schema: str) -> list[str]:
                       LATERAL aclexplode(c.relacl) a
                       WHERE n.nspname=%(s)s AND c.relacl IS NOT NULL
                         AND (a.grantee=r.oid OR a.grantor=r.oid))
+              OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace,
+                      LATERAL aclexplode(p.proacl) a
+                         WHERE n.nspname=%(s)s AND p.proacl IS NOT NULL
+                           AND (a.grantee=r.oid OR a.grantor=r.oid))
+              OR EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace,
+                      LATERAL aclexplode(t.typacl) a
+                         WHERE n.nspname=%(s)s AND t.typacl IS NOT NULL
+                           AND (a.grantee=r.oid OR a.grantor=r.oid))
               OR EXISTS (SELECT 1 FROM pg_namespace n,
                       LATERAL aclexplode(n.nspacl) a
                          WHERE n.nspname=%(s)s AND n.nspacl IS NOT NULL

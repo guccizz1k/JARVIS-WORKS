@@ -42,6 +42,16 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         source.execute("GRANT SELECT ON jw_dev.records TO jw_p1_synthetic_reader")
         source.execute("CREATE ROLE jw_p1_existing_reader NOLOGIN")
         source.execute("GRANT SELECT ON jw_dev.records TO jw_p1_existing_reader")
+        # Roles referenced exclusively by function/type ACLs must be discovered
+        # before pg_restore or the restore will fail with a missing grantee.
+        source.execute("CREATE FUNCTION jw_dev.synthetic_ping() RETURNS integer LANGUAGE sql AS 'SELECT 1'")
+        source.execute("CREATE DOMAIN jw_dev.synthetic_label AS text")
+        source.execute("CREATE ROLE jw_p1_function_only NOLOGIN")
+        source.execute("CREATE ROLE jw_p1_type_only NOLOGIN")
+        source.execute("GRANT EXECUTE ON FUNCTION jw_dev.synthetic_ping() TO jw_p1_function_only")
+        source.execute("GRANT USAGE ON TYPE jw_dev.synthetic_label TO jw_p1_type_only")
+        discovered = set(backup.roles_in_acl(source, "jw_dev"))
+        assert {"jw_p1_function_only", "jw_p1_type_only"} <= discovered, discovered
         assert source.execute("SELECT count(*) FROM jw_dev.records").fetchone()[0] == 120
     with psycopg.connect(TARGET, autocommit=True) as target:
         target.execute("CREATE ROLE jw_p1_existing_reader NOLOGIN")
@@ -71,6 +81,10 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         assert target.execute(
             "SELECT count(*) FROM pg_roles WHERE rolname='jw_p1_synthetic_reader'"
         ).fetchone()[0] == 0, "restore-created cluster role leaked after cleanup"
+        for new_role in ("jw_p1_function_only", "jw_p1_type_only"):
+            assert target.execute(
+                "SELECT count(*) FROM pg_roles WHERE rolname=%s", (new_role,)
+            ).fetchone()[0] == 0, "function/type ACL restore-created role leaked"
         assert target.execute(
             "SELECT count(*) FROM pg_roles WHERE rolname='postgres'"
         ).fetchone()[0] == 1, "pre-existing restore admin role must remain"

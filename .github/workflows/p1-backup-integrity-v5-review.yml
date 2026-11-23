@@ -1,10 +1,8 @@
 name: P1 backup integrity V5 review
 
 on:
-  push:
-    branches:
-      - review/jw-p1-v5-pr147-clean-20261123
-  # Allows GitHub to publish Checks on a separately approved Draft PR.
+  # Avoid charging for duplicate push + PR jobs for the same review SHA.
+  # Manual isolated branch validation remains available via workflow_dispatch.
   pull_request:
     branches:
       - main
