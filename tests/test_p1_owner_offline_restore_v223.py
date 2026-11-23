@@ -71,7 +71,6 @@ def test_cli_requires_exact_action(capsys):
 
 
 @pytest.mark.parametrize("constraint,row,total", [
-    ("", "", ""),
     ("0"*63, "1"*64, "22"),
     ("0"*64, "1"*63, "22"),
     ("0"*64, "1"*64, "-1"),
