@@ -1,5 +1,7 @@
 """Owner-Codespaces-only encrypted GitHub vault readback. Never upload or decrypt."""
 from __future__ import annotations
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -106,13 +108,14 @@ def remote_sha256(repo:Path,sha:str)->tuple[str,int]:
         if proc and proc.poll() is None:
             proc.kill();proc.wait(timeout=10)
 
-def compare(remote:list[str],local:dict[str,str],repo:Path)->dict:
+def compare(remote:list[str],local:dict[str,str],repo:Path|None,remote_reader=None)->dict:
     matched_entries=0
     matched_objects=set()
     unmatched=0
     total=0
     for obj in remote:
-        sha,n=remote_sha256(repo,obj)
+        sha,n=(remote_reader(obj) if remote_reader is not None
+               else remote_sha256(repo,obj))
         total+=n
         if total>MAX_TOTAL:raise Blocked("REMOTE_CIPHERTEXT_TOTAL_LIMIT")
         if obj not in local:
@@ -194,6 +197,124 @@ def manifest_diagnostic()->dict:
     return report
 
 
+def _vault_cli_env()->dict[str,str]:
+    """Preserve Codespaces tokens while preventing source-only token shadowing.
+
+    GitHub CLI selects GH_TOKEN then GITHUB_TOKEN over its own stored
+    credentials. For this SECOND private repository only, remove the source
+    GITHUB_TOKEN from the child process, retaining an explicit GH_TOKEN or
+    a previously authorized secure gh login. No credential is logged,
+    persisted, elevated or modified. Original process env is unchanged.
+    """
+    env=os.environ.copy()
+    env.pop("GITHUB_TOKEN",None)
+    env.update(GH_PROMPT_DISABLED="1",GH_NO_UPDATE_NOTIFIER="1",
+               GIT_TERMINAL_PROMPT="0")
+    return env
+
+
+def _vault_api_json(endpoint:str,max_bytes:int=65536,timeout:int=45)->dict:
+    """Read approved private GitHub REST metadata, reject all untrusted bytes."""
+    if (not endpoint.startswith("repos/guccizz1k/jw-backup-vault-261111/")
+            or "\n" in endpoint or "\r" in endpoint or len(endpoint)>180):
+        raise Blocked("VAULT_API_ENDPOINT_INVALID")
+    try:
+        call=subprocess.run(["gh","api",endpoint,"--method","GET",
+            "--header","Accept: application/vnd.github+json"],
+            env=_vault_cli_env(),stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+            timeout=timeout,check=False)
+        if call.returncode or len(call.stdout)>max_bytes:
+            raise Blocked("VAULT_REST_CONTENTS_READ_UNAVAILABLE")
+        val=json.loads(call.stdout)
+        if not isinstance(val,dict):
+            raise ValueError("wrong response type")
+        return val
+    except (OSError,ValueError,UnicodeError,subprocess.TimeoutExpired):
+        raise Blocked("VAULT_REST_CONTENTS_READ_UNAVAILABLE") from None
+
+
+def _vault_api_tree(data:dict)->list[str]:
+    """Only named encrypted regular files; skip actual directory entries."""
+    if data.get("truncated") is not False or not isinstance(data.get("tree"),list):
+        raise Blocked("VAULT_REMOTE_TREE_TRUNCATED")
+    entries=data["tree"]
+    if len(entries)>MAX*5 or not entries:
+        raise Blocked("VAULT_REMOTE_TREE_UNEXPECTED_SIZE")
+    bin_tree=bytearray()
+    for obj in entries:
+        if not isinstance(obj,dict):
+            raise Blocked("VAULT_REMOTE_TREE_UNSAFE")
+        typ,mode=obj.get("type"),obj.get("mode")
+        if typ=="tree" and mode=="040000":
+            continue
+        if typ!="blob" or mode!="100644":
+            raise Blocked("VAULT_REMOTE_TREE_UNSAFE")
+        path,sha,size=obj.get("path"),obj.get("sha"),obj.get("size")
+        if (not isinstance(path,str) or not isinstance(sha,str)
+                or not isinstance(size,int) or isinstance(size,bool)
+                or not 0<size<=MAX_SIZE or not SHA.fullmatch(sha)):
+            raise Blocked("VAULT_REMOTE_TREE_UNSAFE")
+        try:
+            token=path.encode("ascii")
+        except UnicodeError:
+            raise Blocked("VAULT_REMOTE_TREE_UNSAFE") from None
+        if not PATH.fullmatch(token) or b".." in token.split(b"/"):
+            raise Blocked("VAULT_REMOTE_TREE_UNSAFE")
+        bin_tree.extend(b"100644 blob "+sha.encode()+b"\t"+token+b"\0")
+    return remote_blobs(bytes(bin_tree))
+
+
+def _vault_api_blob_sha256(sha:str)->tuple[str,int]:
+    """Use REST base64 response without filesystem plaintext or token logging."""
+    if not SHA.fullmatch(sha):
+        raise Blocked("VAULT_REMOTE_BLOB_ID_INVALID")
+    payload=_vault_api_json(
+        "repos/guccizz1k/jw-backup-vault-261111/git/blobs/"+sha,
+        max_bytes=MAX_SIZE*2+8192,timeout=90)
+    encoded=payload.get("content")
+    size=payload.get("size")
+    if (payload.get("sha")!=sha or payload.get("encoding")!="base64"
+            or not isinstance(encoded,str) or not isinstance(size,int)
+            or isinstance(size,bool) or not 0<size<=MAX_SIZE
+            or len(encoded)>2*MAX_SIZE):
+        raise Blocked("VAULT_REMOTE_BLOB_METADATA_INVALID")
+    try:
+        content=base64.b64decode("".join(encoded.split()),validate=True)
+    except (ValueError,binascii.Error):
+        raise Blocked("VAULT_REMOTE_BLOB_BASE64_INVALID") from None
+    if len(content)!=size:
+        raise Blocked("VAULT_REMOTE_BLOB_LENGTH_INVALID")
+    gitid=hashlib.sha1(b"blob "+str(size).encode("ascii")+b"\0"+content).hexdigest()
+    if gitid!=sha:
+        raise Blocked("VAULT_REMOTE_GIT_BLOB_HASH_MISMATCH")
+    return hashlib.sha256(content).hexdigest(),size
+
+
+def _vault_api_readback(local:dict[str,str],expected_head:str)->dict:
+    """Pinned read-only provider API, independent from Git credential helper.
+
+    This is an ALTERNATIVE to Git clone, not a permission bypass: GH_TOKEN or
+    a stored gh credential MUST already have Contents:read for this vault.
+    """
+    if not SHA.fullmatch(expected_head) or not shutil.which("gh"):
+        raise Blocked("VAULT_API_AUTH_OR_HEAD_UNAVAILABLE")
+    prefix="repos/guccizz1k/jw-backup-vault-261111/"
+    ref=_vault_api_json(prefix+"git/ref/heads/main")
+    obj=ref.get("object")
+    if not isinstance(obj,dict) or obj.get("sha")!=expected_head:
+        raise Blocked("VAULT_REMOTE_COMMIT_CHANGED")
+    c=_vault_api_json(prefix+"git/commits/"+expected_head)
+    tree=c.get("tree")
+    if c.get("sha")!=expected_head or not isinstance(tree,dict) or not SHA.fullmatch(tree.get("sha","")):
+        raise Blocked("VAULT_REMOTE_COMMIT_TREE_UNVERIFIED")
+    items=_vault_api_tree(_vault_api_json(prefix+"git/trees/"+tree["sha"]+"?recursive=1"))
+    proof=compare(items,local,None,remote_reader=_vault_api_blob_sha256)
+    proof["remote_commit_pinned"]=True
+    proof["readback_transport"]="GH_REST_BLOB_BASE64_VERIFIED"
+    return proof
+
+
 def auth_probe()->dict:
     """Differentiates existing Git credential helper from GitHub CLI identity.
 
@@ -214,8 +335,7 @@ def auth_probe()->dict:
     probe=git(["ls-remote","--heads",VAULT,"main"],timeout=30)
     result["git_read_only_private_access"]="PASS" if probe.returncode==0 else "BLOCKED"
     if shutil.which("gh"):
-        env=os.environ.copy()
-        env.update(GH_PROMPT_DISABLED="1",GH_NO_UPDATE_NOTIFIER="1")
+        env=_vault_cli_env()
         try:
             cli=subprocess.run(["gh","api","repos/guccizz1k/jw-backup-vault-261111",
                                 "--jq",".private"],env=env,
@@ -259,8 +379,7 @@ def _clone_with_approved_credentials(root:Path, checkout:Path):
             if checkout.is_symlink() or not checkout.is_dir():
                 raise Blocked("UNSAFE_TEMPORARY_CHECKOUT")
             shutil.rmtree(checkout)
-        probe_env=os.environ.copy()
-        probe_env.update(GH_PROMPT_DISABLED="1",GH_NO_UPDATE_NOTIFIER="1")
+        probe_env=_vault_cli_env()
         check=subprocess.run(["gh","api","repos/guccizz1k/jw-backup-vault-261111",
                               "--jq",".private"],
              env=probe_env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
@@ -313,15 +432,27 @@ def audit()->dict:
             root=Path(dirname);checkout=root/"vault"
             if stat.S_IMODE(root.stat().st_mode)!=0o700:
                 raise Blocked("PRIVATE_SCRATCH_PERMISSIONS_INVALID")
-            _clone_with_approved_credentials(root, checkout)
-            remote_head=git(["rev-parse","HEAD"],checkout)
-            if (remote_head.returncode or
-                remote_head.stdout.decode("ascii","ignore").strip()!=head):
-                raise Blocked("REMOTE_COMMIT_CHANGED")
-            tree=git(["ls-tree","-r","-z","--full-tree","HEAD"],checkout)
-            if tree.returncode:raise Blocked("REMOTE_TREE_UNREADABLE")
-            result.update(compare(remote_blobs(tree.stdout),local,checkout))
-            result["remote_commit_pinned"]=True
+            try:
+                _clone_with_approved_credentials(root, checkout)
+            except Blocked as clone_error:
+                # Existing authorized gh identity may allow REST Contents:read
+                # even when the Codespace Git helper cannot clone the vault.
+                if str(clone_error) not in (
+                    "CODESPACE_PRIVATE_VAULT_REPO_ACCESS_NOT_AUTHORIZED",
+                    "GH_TOKEN_MISSING_PRIVATE_VAULT_CONTENTS_READ",
+                    "GH_CLI_PRIVATE_REPO_CLONE_FAILED"):
+                    raise
+                result.update(_vault_api_readback(local,head))
+            else:
+                remote_head=git(["rev-parse","HEAD"],checkout)
+                if (remote_head.returncode or
+                    remote_head.stdout.decode("ascii","ignore").strip()!=head):
+                    raise Blocked("REMOTE_COMMIT_CHANGED")
+                tree=git(["ls-tree","-r","-z","--full-tree","HEAD"],checkout)
+                if tree.returncode:raise Blocked("REMOTE_TREE_UNREADABLE")
+                result.update(compare(remote_blobs(tree.stdout),local,checkout))
+                result["remote_commit_pinned"]=True
+                result["readback_transport"]="GIT_PRIVATE_REPOSITORY"
         result["temporary_clone_removed"]="PASS"
     except Blocked as e:
         result["blocker"]=str(e)
@@ -355,7 +486,7 @@ def diagnose_all()->dict:
                        "remote_unmatched_ciphertext_count",
                        "local_archives_not_offsite",
                        "all_11_archives_offsite", "temporary_clone_removed",
-                       "blocker"):
+                       "readback_transport", "blocker", "remote_commit_pinned"):
                 report[key]=value
     else:
         report["remote_readback"]="NOT_RUN_AUTHORIZATION_REQUIRED"
