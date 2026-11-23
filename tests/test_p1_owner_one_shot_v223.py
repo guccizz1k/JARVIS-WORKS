@@ -259,7 +259,8 @@ def test_diagnose_cli_returns_success_for_diagnostic_not_backup(tmp_path: Path, 
     result = json.loads(printed)
     assert result["diagnostic_execution"] == "PASS"
     assert result["overall"] == "BLOCKED"
-    assert "ARCHIVE" in printed
+    assert result["archive_discovery"] == "PRIVATE_BACKUP_DIRECTORY_ABSENT_OR_UNSAFE"
+    assert "ARCHIVE_PATH_REQUIRED" not in printed
     assert str(tmp_path) not in printed
 
 
