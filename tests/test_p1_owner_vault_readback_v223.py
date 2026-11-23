@@ -599,3 +599,105 @@ def test_corrupt_ciphertext_hash_never_falls_back_to_hide_integrity_failure(
     assert result["blocker"]=="REMOTE_CIPHERTEXT_SHA256_MISMATCH"
     assert result["remote_readback"]=="NOT_RUN"
     assert result["overall"]=="BLOCKED"
+
+
+
+def test_all_11_owner_ciphertexts_can_pass_with_unrelated_private_vault_blob_and_duplicate_path(
+    monkeypatch,tmp_path
+):
+    """A remaining historical extra + duplicate ciphertext must not prevent
+    source-owner 11/11 coverage PASS after correctly authorized backup copy.
+    """
+    sha=[f"{i:040x}" for i in range(1,13)]
+    content={key:(f"{i:064x}",100+i) for i,key in enumerate(sha,1)}
+    local={key:content[key][0] for key in sha[:11]}
+    all_remote=sha[:11]+[sha[11],sha[0]]
+    observed=[]
+    def remote_reader(key):
+        observed.append(key)
+        return content[key]
+    r=vault.compare(all_remote,local,None,remote_reader=remote_reader)
+    assert len(observed)==12 and len(set(observed))==12  # duplicate not downloaded twice
+    assert r["remote_ciphertext_count"]==13
+    assert r["remote_unique_ciphertext_count"]==12
+    assert r["remote_duplicate_content_entries"]==1
+    assert r["remote_unmatched_ciphertext_count"]==1
+    assert r["remote_unique_ciphertexts_not_in_owner"]==1
+    assert r["remote_full_sha256_readback_matches"]==12
+    assert r["remote_unique_full_sha256_matches"]==11
+    assert r["local_archives_not_offsite"]==0
+    assert r["all_11_archives_offsite"] is True
+    assert r["remote_readback"]=="PASS_ALL_11_OWNER_ARCHIVES_VERIFIED"
+
+
+def test_remote_verified_4_entries_3_unique_2_matched_and_9_missing_stays_blocked():
+    sha=[f"{i:040x}" for i in range(1,12)]
+    local={x:"f"*64 for x in sha}
+    remote=[sha[0],sha[1],sha[0],"a"*40]
+    called=[]
+    def verified(key):
+        called.append(key)
+        return ("f"*64,485000)
+    r=vault.compare(remote,local,None,remote_reader=verified)
+    assert len(called)==3
+    assert r["remote_ciphertext_count"]==4
+    assert r["remote_unique_ciphertext_count"]==3
+    assert r["remote_duplicate_content_entries"]==1
+    assert r["remote_full_sha256_readback_matches"]==3
+    assert r["remote_unique_full_sha256_matches"]==2
+    assert r["remote_unique_ciphertexts_not_in_owner"]==1
+    assert r["local_archives_not_offsite"]==9
+    assert r["all_11_archives_offsite"] is False
+    assert r["remote_readback"]=="BLOCKED_REMOTE_NOT_LOCAL"
+
+
+def test_remote_forget_one_owner_archive_always_fails_even_with_many_remote_duplicates():
+    sha=[f"{i:040x}" for i in range(1,12)]
+    local={x:"e"*64 for x in sha}
+    remote=sha[:10]+[sha[0]]*4
+    r=vault.compare(remote,local,None,remote_reader=lambda x:("e"*64,400))
+    assert r["remote_unique_full_sha256_matches"]==10
+    assert r["local_archives_not_offsite"]==1
+    assert r["all_11_archives_offsite"] is False
+
+
+def test_remote_sha256_tamper_cannot_be_hidden_by_duplicate_archive_path():
+    owner_sha="a"*40
+    remote=[owner_sha,owner_sha]
+    with pytest.raises(vault.Blocked,match="SHA256_MISMATCH"):
+        vault.compare(remote,{owner_sha:"f"*64},None,
+                      remote_reader=lambda x:("0"*64,400))
+
+
+def test_offsite_preflight_exposes_only_counts_never_performs_upload(monkeypatch,capsys):
+    audit={
+        "remote_commit_pinned":True,
+        "temporary_clone_removed":"PASS",
+        "readback_transport":"GH_REST_BLOB_BASE64_VERIFIED",
+        "remote_ciphertext_count":4,
+        "remote_unique_ciphertext_count":3,
+        "remote_downloaded_unique_objects_count":3,
+        "remote_unique_full_sha256_matches":2,
+        "local_archives_not_offsite":9,
+        "overall":"BLOCKED",
+    }
+    monkeypatch.setattr(vault,"audit",lambda:audit.copy())
+    assert vault.main(["plan-offsite"])==0
+    import json
+    report=json.loads(capsys.readouterr().out)
+    assert report["offsite_plan"]=="PASS_READ_ONLY_GAP_PREFLIGHT"
+    assert report["missing_unique_archive_upload_candidates"]==9
+    assert report["predicted_unique_ciphertexts_after_owner_approved_copy"]==12
+    assert report["predicted_vault_file_entries_after_owner_approved_copy"]==13
+    assert report["offsite_upload_execution"]=="NOT_RUN_REQUIRES_SEPARATE_APPROVAL"
+    assert report["overall"]=="BLOCKED"
+
+
+def test_offsite_preflight_refuses_unverified_provider_results(monkeypatch,capsys):
+    monkeypatch.setattr(vault,"audit",lambda:{
+       "remote_commit_pinned":False,"temporary_clone_removed":"NOT_STARTED",
+       "remote_ciphertext_count":4,"remote_unique_ciphertext_count":3,
+       "remote_downloaded_unique_objects_count":0,"local_archives_not_offsite":9,
+       "overall":"BLOCKED"})
+    assert vault.main(["plan-offsite"])==1
+    assert "BLOCKED_INCOMPLETE_PROVIDER_EVIDENCE" in capsys.readouterr().out
