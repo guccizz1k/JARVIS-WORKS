@@ -284,3 +284,132 @@ def test_diagnose_replaces_generic_archive_path_error_with_real_discovery(tmp_pa
     assert "ARCHIVE_PATH_REQUIRED" not in result["blockers"]
     assert result["diagnostic_execution"] == "PASS"
     assert result["overall"] == "BLOCKED"
+
+
+
+def test_many_owner_archives_with_current_key_authenticate_but_do_not_auto_select(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    # All copies are distinct files and valid AES-GCM, but NONE establishes
+    # external origin or trusted hash proof.
+    for i in range(10):
+        p = saved.parent / f"other_{i}.jwpgbk"
+        p.write_bytes(saved.read_bytes())
+        p.chmod(0o600)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    env.pop("JW_PG_EXPECT_ARCHIVE_SHA256")
+    result = one.diagnose_one_shot(env)
+    assert result["discovered_private_archive_count"] == 11
+    assert result["archive_discovery"] == "MULTIPLE_ARCHIVES"
+    assert result["key_authenticated_candidate_count"] == 11
+    assert result["candidate_key_authentication"] == "AES_GCM_KEY_ONLY_VERIFIED"
+    assert result["candidate_selection"] == "NOT_SELECTED"
+    assert result["local_archive_auth"] == "BLOCKED"
+    assert "INDEPENDENT_CIPHER_SHA256_REQUIRED" in result["blockers"]
+    assert result["overall"] == "BLOCKED"
+
+
+def test_matching_supplied_digest_unambiguously_selects_without_external_proof(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    second = saved.parent / "another.jwpgbk"
+    plaintext = tmp_path / "different"
+    plaintext.write_bytes(b"different-protected-data" * 12)
+    backup.encrypt_file(plaintext, second, base64.urlsafe_b64decode(env["JW_PG_BACKUP_KEY"]))
+    second.chmod(0o600)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    r = one.diagnose_one_shot(env)
+    assert r["archive_discovery"] == "ONE_MATCHED_SUPPLIED_SHA"
+    assert r["candidate_hash_match_count"] == 1
+    assert r["candidate_selection"] == "ONE_MATCH_TO_SUPPLIED_SHA_NOT_REMOTE_ATTESTED"
+    assert r["local_archive_auth"] == "PASS"
+    assert r["candidate_origin_verified"] is False
+    assert r["overall"] == "BLOCKED"
+
+
+def test_identical_copies_cannot_be_chosen_from_hash_alone(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    second = saved.parent / "same.jwpgbk"
+    second.write_bytes(saved.read_bytes())
+    second.chmod(0o600)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    r = one.diagnose_one_shot(env)
+    assert r["candidate_selection"] == "AMBIGUOUS_SAME_SHA"
+    assert r["candidate_hash_match_count"] == 2
+    assert r["local_archive_auth"] == "BLOCKED"
+    assert r["overall"] == "BLOCKED"
+
+
+def test_receipt_reported_even_if_archive_selection_is_blocked(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    other = saved.parent / "another.jwpgbk"
+    other.write_bytes(saved.read_bytes())
+    other.chmod(0o600)
+    receipt = root.parent / "owner_b2b3_20261117_20261123.json"
+    receipt.write_text('{"verdict":"BLOCKED","source":"not_verified"}')
+    receipt.chmod(0o600)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    env.pop("JW_PG_EXPECT_ARCHIVE_SHA256")
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    r = one.diagnose_one_shot(env)
+    assert r["private_receipt_metadata"] == "PRESENT_NOT_INDEPENDENTLY_VERIFIED"
+    assert "OWNER_PRIVATE_RECEIPT_NOT_DISCOVERED" not in r["blockers"]
+    assert r["overall"] == "BLOCKED"
+
+
+def test_key_only_probe_rejects_wrong_key_or_tampered_candidate(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    another = saved.parent / "other.jwpgbk"
+    another.write_bytes(saved.read_bytes())
+    another.chmod(0o600)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    env.pop("JW_PG_EXPECT_ARCHIVE_SHA256")
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    env["JW_PG_BACKUP_KEY"] = base64.urlsafe_b64encode(backup.AESGCM.generate_key(256)).decode()
+    r = one.diagnose_one_shot(env)
+    assert r["key_authenticated_candidate_count"] == 0
+    assert r["candidate_probe_skipped_count"] == 2
+    assert r["candidate_key_authentication"] == "BOUNDED_OR_INVALID_CANDIDATES"
+    assert r["overall"] == "BLOCKED"
+
+
+def test_key_only_probe_limits_total_bytes_before_crypto(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    second = saved.parent / "extra.jwpgbk"
+    second.write_bytes(saved.read_bytes())
+    second.chmod(0o600)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    monkeypatch.setattr(one, "MAX_AUTH_TOTAL_BYTES", 3)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    env.pop("JW_PG_EXPECT_ARCHIVE_SHA256")
+    r = one.diagnose_one_shot(env)
+    assert r["key_authenticated_candidate_count"] == 0
+    assert r["candidate_probe_skipped_count"] == 2
+    assert r["local_archive_auth"] == "BLOCKED"
+
+
+def test_key_only_probe_exposes_no_archive_names_or_plaintext(tmp_path: Path, monkeypatch, capsys):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    second = saved.parent / "private_name_99299.jwpgbk"
+    second.write_bytes(saved.read_bytes())
+    second.chmod(0o600)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    env.pop("JW_PG_EXPECT_ARCHIVE_SHA256")
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    for k,v in env.items():
+        monkeypatch.setenv(k,v)
+    assert one.main(["diagnose"]) == 0
+    out=capsys.readouterr().out
+    assert "private_name_99299" not in out
+    assert str(saved) not in out
+    assert env["JW_PG_BACKUP_KEY"] not in out
+    assert env.get("JW_PG_EXPECT_PLAINTEXT_SHA256") not in out
+    assert "AES_GCM_KEY_ONLY_VERIFIED" in out

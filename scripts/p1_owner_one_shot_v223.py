@@ -66,6 +66,12 @@ def execute_one_shot(environ: dict[str, str] | None = None) -> dict[str, object]
         "render_live_e2e": "NOT_RUN",
         "overall": "BLOCKED",
     }
+    # This check is independent of archive/key selection. The old order
+    # returned early for a missing SHA and misreported an existing private
+    # receipt as NOT_DISCOVERED.
+    receipt = env.get("JW_PG_OWNER_RECEIPT_PATH", "")
+    if _private_receipt_present(receipt):
+        result["private_receipt_metadata"] = "PRESENT_NOT_INDEPENDENTLY_VERIFIED"
     original = env.get("JW_PG_ARCHIVE_PATH", "")
     expected = env.get("JW_PG_EXPECT_ARCHIVE_SHA256", "")
     if not original:
@@ -96,10 +102,6 @@ def execute_one_shot(environ: dict[str, str] | None = None) -> dict[str, object]
         result["blocker"] = "LOCAL_CIPHERTEXT_NOT_AUTHENTICATED"
         return result
     result["local_archive_auth"] = "PASS"
-    receipt = env.get("JW_PG_OWNER_RECEIPT_PATH", "")
-    if _private_receipt_present(receipt):
-        result["private_receipt_metadata"] = "PRESENT_NOT_INDEPENDENTLY_VERIFIED"
-
     downloaded = env.get("JW_PG_RETRIEVED_ARCHIVE_PATH", "")
     if not downloaded:
         result["blocker"] = "INDEPENDENTLY_RETRIEVED_CIPHERTEXT_REQUIRED"
@@ -214,6 +216,102 @@ def _candidate_owner_receipt() -> str:
     return ""
 
 
+
+
+# Not an external receipt: probing self-derived local hashes may prove only
+# AES-GCM authentication under the current owner's key. The origin of each
+# archive and historic DB parity remain UNVERIFIED.
+MAX_AUTH_CANDIDATE_BYTES = 128 * 1024 * 1024
+MAX_AUTH_TOTAL_BYTES = 512 * 1024 * 1024
+
+
+def _sha256_private_candidate(path: Path, max_bytes: int) -> tuple[str, int]:
+    """Bounded, no-follow, same-owner 0600 read; no secret/path printing."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as stream:
+        st = os.fstat(stream.fileno())
+        if not (stat.S_ISREG(st.st_mode)
+                and stat.S_IMODE(st.st_mode) == 0o600
+                and (not hasattr(os, "getuid") or st.st_uid == os.getuid())):
+            raise BackupError("BLOCKED_V223_UNSAFE_ARCHIVE_METADATA")
+        if st.st_size > max_bytes:
+            raise BackupError("BLOCKED_V223_LOCAL_KEY_PROBE_SIZE_LIMIT")
+        digest = hashlib.sha256()
+        total = 0
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            total += len(chunk)
+            if total > max_bytes:
+                raise BackupError("BLOCKED_V223_LOCAL_KEY_PROBE_SIZE_LIMIT")
+            digest.update(chunk)
+        return digest.hexdigest(), total
+
+
+def inspect_local_candidates(
+    archives: list[Path], supplied_expected_sha: str, key_encoded: str
+) -> tuple[dict[str, object], Path | None]:
+    """Inspect at most 16 private candidates, without selecting on age/name.
+
+    When no independently sourced hash exists, AES-GCM verification alone
+    must NEVER promote a candidate to source-verified PASS.
+    """
+    result: dict[str, object] = {
+        "candidate_key_authentication": "KEY_UNAVAILABLE",
+        "key_authenticated_candidate_count": 0,
+        "candidate_hash_match_count": 0,
+        "candidate_probe_skipped_count": 0,
+        "candidate_selection": "NOT_SELECTED",
+        "candidate_origin_verified": False,
+    }
+    if not archives or len(archives) > 16:
+        result["candidate_key_authentication"] = "NOT_SCANNED"
+        return result, None
+    key = None
+    if key_encoded:
+        try:
+            key = load_key(key_encoded)
+        except BackupError:
+            result["candidate_key_authentication"] = "KEY_INVALID"
+    matched: list[Path] = []
+    examined = 0
+    skipped = 0
+    authenticated = 0
+    for candidate in archives:
+        try:
+            # Stop before reading beyond the total budget, even if an entry is
+            # unexpectedly large or grows while being examined.
+            remaining = MAX_AUTH_TOTAL_BYTES - examined
+            if remaining <= 0:
+                skipped += 1
+                continue
+            fingerprint, size = _sha256_private_candidate(
+                candidate, min(MAX_AUTH_CANDIDATE_BYTES, remaining))
+            examined += size
+            if SHA256_RE.fullmatch(supplied_expected_sha or "") and fingerprint == supplied_expected_sha:
+                matched.append(candidate)
+            if key is not None:
+                # SELF-HASHED expected value is ONLY an implementation detail
+                # of authenticated decryption. It is NOT independent SHA proof.
+                audit_encrypted_archive(candidate, fingerprint, key)
+                authenticated += 1
+        except (BackupError, OSError, TypeError, ValueError):
+            skipped += 1
+    result["key_authenticated_candidate_count"] = authenticated
+    result["candidate_hash_match_count"] = len(matched)
+    result["candidate_probe_skipped_count"] = skipped
+    if key is None:
+        result["candidate_key_authentication"] = "KEY_INVALID" if key_encoded else "KEY_UNAVAILABLE"
+    else:
+        result["candidate_key_authentication"] = ("BOUNDED_OR_INVALID_CANDIDATES"
+                                                  if skipped else "AES_GCM_KEY_ONLY_VERIFIED")
+    if len(matched) == 1:
+        result["candidate_selection"] = "ONE_MATCH_TO_SUPPLIED_SHA_NOT_REMOTE_ATTESTED"
+        return result, matched[0]
+    if len(matched) > 1:
+        result["candidate_selection"] = "AMBIGUOUS_SAME_SHA"
+    elif supplied_expected_sha:
+        result["candidate_selection"] = "NO_SHA_MATCH"
+    return result, None
+
 def diagnose_one_shot(environ: dict[str, str] | None = None) -> dict[str, object]:
     """Run as many independent safety gates as possible, report ALL blockers.
 
@@ -225,13 +323,23 @@ def diagnose_one_shot(environ: dict[str, str] | None = None) -> dict[str, object
     explicit = env.get("JW_PG_ARCHIVE_PATH", "")
     discovery = "EXPLICIT_PATH" if explicit else "NOT_ATTEMPTED"
     count = 0
+    inspect_report: dict[str, object] | None = None
     if not explicit:
         archives, discovery = discover_owner_archive()
         count = len(archives)
         if len(archives) == 1:
             env["JW_PG_ARCHIVE_PATH"] = str(archives[0])
         elif len(archives) > 1:
-            blockers.append("MULTIPLE_ARCHIVES_NEED_TRUSTED_RECEIPT_SELECTION")
+            inspect_report, selected = inspect_local_candidates(
+                archives,
+                env.get("JW_PG_EXPECT_ARCHIVE_SHA256", ""),
+                env.get("JW_PG_BACKUP_KEY", ""),
+            )
+            if selected is not None:
+                env["JW_PG_ARCHIVE_PATH"] = str(selected)
+                discovery = "ONE_MATCHED_SUPPLIED_SHA"
+            else:
+                blockers.append("MULTIPLE_ARCHIVES_NEED_TRUSTED_RECEIPT_SELECTION")
         else:
             blockers.append(discovery)
     if not env.get("JW_PG_EXPECT_ARCHIVE_SHA256", ""):
@@ -246,6 +354,14 @@ def diagnose_one_shot(environ: dict[str, str] | None = None) -> dict[str, object
             env["JW_PG_OWNER_RECEIPT_PATH"] = receipt
 
     report = execute_one_shot(env)
+    if inspect_report is not None:
+        report.update(inspect_report)
+        if inspect_report["candidate_key_authentication"] == "BOUNDED_OR_INVALID_CANDIDATES":
+            blockers.append("CANDIDATE_PROBE_INCOMPLETE")
+        if inspect_report["candidate_key_authentication"] == "KEY_INVALID":
+            blockers.append("CANDIDATE_KEY_INVALID")
+        if inspect_report["candidate_key_authentication"] == "AES_GCM_KEY_ONLY_VERIFIED":
+            blockers.append("LOCAL_KEY_AUTHENTICATION_NOT_INDEPENDENT_PROVENANCE")
     primary = str(report.get("blocker") or "")
     # When no path was supplied, the older first-failure checker says only
     # ARCHIVE_PATH_REQUIRED. Report the actual bounded discovery result
