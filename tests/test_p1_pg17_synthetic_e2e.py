@@ -77,3 +77,34 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         assert target.execute(
             "SELECT count(*) FROM pg_roles WHERE rolname='jw_p1_existing_reader'"
         ).fetchone()[0] == 1, "pre-existing auxiliary role must never be deleted"
+
+    # Inject a failure after a new disposable restore DB and role are created.
+    # The finally path must clean up the failed restore without touching
+    # previously existing cluster roles, the marker or source records.
+    original_run_tool = backup.run_tool
+
+    def fail_during_real_restore(args, opts, timeout):
+        if args[0] == "pg_restore" and "--dbname" in args and "--list" not in args:
+            raise backup.BackupError("TEST_INJECTED_RESTORE_FAILURE")
+        return original_run_tool(args, opts, timeout)
+
+    monkeypatch.setattr(backup, "run_tool", fail_during_real_restore)
+    with __import__("pytest").raises(backup.BackupError, match="TEST_INJECTED_RESTORE_FAILURE"):
+        backup.run(SOURCE, TARGET, schema="jw_dev", workdir=tmp_path / "injected", real_source=False)
+    with psycopg.connect(TARGET, autocommit=True) as target:
+        assert not target.execute(
+            "SELECT datname FROM pg_database WHERE datname LIKE 'jw_v223_%'"
+        ).fetchall(), "failed restore leaked an ephemeral database"
+        assert target.execute(
+            "SELECT count(*) FROM pg_roles WHERE rolname='jw_p1_synthetic_reader'"
+        ).fetchone()[0] == 0, "failed restore leaked a temporary role"
+        assert target.execute(
+            "SELECT count(*) FROM pg_roles WHERE rolname='jw_p1_existing_reader'"
+        ).fetchone()[0] == 1, "failed restore deleted a preexisting role"
+        assert target.execute(
+            "SELECT count(*) FROM pg_database WHERE datname='jw_ephemeral_marker'"
+        ).fetchone()[0] == 1, "failed restore damaged the ephemeral target marker"
+    with psycopg.connect(SOURCE, autocommit=True) as source:
+        assert source.execute("SELECT count(*) FROM jw_dev.records").fetchone()[0] == 120
+    assert not list((tmp_path / "injected").glob("*.dump"))
+    assert not list((tmp_path / "injected").glob("*.back"))
