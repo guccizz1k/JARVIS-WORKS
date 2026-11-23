@@ -439,31 +439,47 @@ def audit()->dict:
             gitsha,strong=local_hash(path)
             if gitsha in local:raise Blocked("DUPLICATE_LOCAL_CIPHERTEXT")
             local[gitsha]=strong
+        # GitHub CLI may authenticate to the *second* private vault even
+        # when the Codespace source-repo git credential helper cannot.
+        # A --filter=blob:none clone can therefore SUCCEED but subsequent
+        # git cat-file triggers an unauthenticated lazy blob fetch:
+        # GIT_BLOB_SIZE_UNKNOWN. Do not take that known-broken transport.
+        # Prefer pinned GitHub REST blobs when only gh API auth is proven.
+        authorized=auth_probe()
+        gh_readable=authorized.get("gh_cli_private_api_access")=="PASS"
+        git_readable=authorized.get("git_read_only_private_access")=="PASS"
         with tempfile.TemporaryDirectory(prefix="jw-vault-readback-") as dirname:
             root=Path(dirname);checkout=root/"vault"
             if stat.S_IMODE(root.stat().st_mode)!=0o700:
                 raise Blocked("PRIVATE_SCRATCH_PERMISSIONS_INVALID")
-            try:
-                _clone_with_approved_credentials(root, checkout)
-            except Blocked as clone_error:
-                # Existing authorized gh identity may allow REST Contents:read
-                # even when the Codespace Git helper cannot clone the vault.
-                if str(clone_error) not in (
-                    "CODESPACE_PRIVATE_VAULT_REPO_ACCESS_NOT_AUTHORIZED",
-                    "GH_TOKEN_MISSING_PRIVATE_VAULT_CONTENTS_READ",
-                    "GH_CLI_PRIVATE_REPO_CLONE_FAILED"):
-                    raise
+            if gh_readable and not git_readable:
                 result.update(_vault_api_readback(local,head))
             else:
-                remote_head=git(["rev-parse","HEAD"],checkout)
-                if (remote_head.returncode or
-                    remote_head.stdout.decode("ascii","ignore").strip()!=head):
-                    raise Blocked("REMOTE_COMMIT_CHANGED")
-                tree=git(["ls-tree","-r","-z","--full-tree","HEAD"],checkout)
-                if tree.returncode:raise Blocked("REMOTE_TREE_UNREADABLE")
-                result.update(compare(remote_blobs(tree.stdout),local,checkout))
-                result["remote_commit_pinned"]=True
-                result["readback_transport"]="GIT_PRIVATE_REPOSITORY"
+                try:
+                    _clone_with_approved_credentials(root, checkout)
+                    remote_head=git(["rev-parse","HEAD"],checkout)
+                    if (remote_head.returncode or
+                        remote_head.stdout.decode("ascii","ignore").strip()!=head):
+                        raise Blocked("REMOTE_COMMIT_CHANGED")
+                    tree=git(["ls-tree","-r","-z","--full-tree","HEAD"],checkout)
+                    if tree.returncode:raise Blocked("REMOTE_TREE_UNREADABLE")
+                    result.update(compare(remote_blobs(tree.stdout),local,checkout))
+                    result["remote_commit_pinned"]=True
+                    result["readback_transport"]="GIT_PRIVATE_REPOSITORY"
+                except Blocked as problem:
+                    # Defense in depth: an apparently successful clone may
+                    # still lack lazy-fetch permissions. Retry with an
+                    # independently authorized REST transport only for these
+                    # transport errors, never for ciphertext hash mismatches.
+                    if not gh_readable or str(problem) not in (
+                        "CODESPACE_PRIVATE_VAULT_REPO_ACCESS_NOT_AUTHORIZED",
+                        "GH_TOKEN_MISSING_PRIVATE_VAULT_CONTENTS_READ",
+                        "GH_CLI_PRIVATE_REPO_CLONE_FAILED",
+                        "GIT_BLOB_SIZE_UNKNOWN",
+                        "GIT_BLOB_UNSAFE_SIZE",
+                        "GIT_BLOB_READBACK_FAILED"):
+                        raise
+                    result.update(_vault_api_readback(local,head))
         result["temporary_clone_removed"]="PASS"
     except Blocked as e:
         result["blocker"]=str(e)
