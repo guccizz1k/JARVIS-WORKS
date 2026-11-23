@@ -172,7 +172,7 @@ def _exec(container: str, command: list[str], *, data: bytes | None = None,
     return _docker([*prefix, *command], data=data, timeout=timeout)
 
 
-def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, int, str | None, str | None, int | None]:
+def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, int, str | None, str | None, int | None, str | None]:
     """Fresh disposable DB per archive. Auto-create NOLOGIN roles ONLY in
     this networkless throwaway cluster, only when pg_restore reports one.
     """
@@ -181,7 +181,7 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
     for attempt in range(MAX_MISSING_ROLES + 1):
         created = _exec(container, ["createdb", "-U", "postgres", db])
         if created.returncode:
-            return "CREATE_DISPOSABLE_DB_FAILED", 0, None, None, None
+            return "CREATE_DISPOSABLE_DB_FAILED", 0, None, None, None, None
         try:
             done = _exec(container, [
                 "pg_restore", "-U", "postgres", "--no-owner", "--no-acl",
@@ -192,7 +192,7 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
                 if missing and attempt < MAX_MISSING_ROLES:
                     role = missing.group(1).decode("ascii")
                     if role in added or role.lower().startswith("pg_"):
-                        return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None
+                        return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None
                     added.add(role)
                     # ASCII-validated, quoted identifier; the target cluster is
                     # fresh, networkless, and destroyed at the end of the run.
@@ -201,7 +201,7 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
                         "-v", "ON_ERROR_STOP=1", "-c", 'CREATE ROLE "'+role+'" NOLOGIN',
                     ])
                     if made.returncode:
-                        return "EPHEMERAL_ROLE_PROVISION_FAILED", 0, None, None, None
+                        return "EPHEMERAL_ROLE_PROVISION_FAILED", 0, None, None, None, None
                     continue
                 return _restore_reason(done.stderr), 0, None
             count_query = (
@@ -214,13 +214,13 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
                 "-v", "ON_ERROR_STOP=1", "-c", count_query,
             ])
             if checked.returncode:
-                return "POST_RESTORE_TABLE_COUNT_UNAVAILABLE", 0, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_UNAVAILABLE", 0, None, None, None, None
             try:
                 total = int(checked.stdout.strip())
             except (TypeError, ValueError):
-                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None
             if not 0 <= total <= 100000:
-                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None
             hash_query = (
                 "SELECT md5(coalesce(string_agg(c.relname||'.'||k.conname||'='||"
                 "pg_get_constraintdef(k.oid,true),E'\\n' ORDER BY c.relname,k.conname),'') ) "
@@ -234,17 +234,30 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
             ])
             digest = h.stdout.decode("ascii", "ignore").strip() if h.returncode == 0 else ""
             if not re.fullmatch(r"[a-f0-9]{32}", digest):
-                return "POST_RESTORE_CONSTRAINT_DIGEST_INVALID", 0, None, None, None
+                return "POST_RESTORE_CONSTRAINT_DIGEST_INVALID", 0, None, None, None, None
+            sha_query = (
+                "SELECT encode(sha256(convert_to(coalesce(string_agg("
+                "c.relname||'.'||k.conname||'='||pg_get_constraintdef(k.oid,true),"
+                "E'\\n' ORDER BY c.relname,k.conname),''),'UTF8')),'hex') "
+                "FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname='jw_dev';"
+            )
+            sh = _exec(container, ["psql", "-U", "postgres", "-d", db, "-qAt",
+                                    "-v", "ON_ERROR_STOP=1", "-c", sha_query])
+            sha = sh.stdout.decode("ascii", "ignore").strip() if sh.returncode == 0 else ""
+            if not FINGERPRINT_RE.fullmatch(sha):
+                return "POST_RESTORE_CONSTRAINT_SHA256_INVALID", 0, None, None, None, None
             rows = _audit_restored_row_manifest(container, db)
             if rows is None or rows[0] != total:
-                return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None
-            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1]
+                return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None
+            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha
         finally:
             # Always discard this database before moving to the next archive.
             dropped = _exec(container, ["dropdb", "-U", "postgres", "--force", db])
             if dropped.returncode:
                 raise backup.BackupError("BLOCKED_EPHEMERAL_DATABASE_CLEANUP_FAILED")
-    return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None
+    return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None
 
 
 def run_offline() -> dict[str, object]:
@@ -339,7 +352,7 @@ def run_offline() -> dict[str, object]:
                 continue
             try:
                 remaining -= len(plain)
-                status, count, fingerprint, row_manifest, row_total = _restore_one(container, plain, index)
+                status, count, fingerprint, row_manifest, row_total, constraint_sha256 = _restore_one(container, plain, index)
                 if status != "LOCAL_DISPOSABLE_RESTORED":
                     result["offline_restore_failure_count"] += 1
                     failure_kinds.add(status)
@@ -358,8 +371,14 @@ def run_offline() -> dict[str, object]:
                         # See separate SHA256 constraints query below. The old
                         # 32-character MD5 grouping is retained for backwards
                         # compatibility; source comparison uses SHA256.
-                        if row_manifest == live_rows:
+                        match_c = constraint_sha256 == live_constraints
+                        match_r = row_manifest == live_rows
+                        if match_c:
+                            result["current_source_constraints_match_count"] += 1
+                        if match_r:
                             result["current_source_row_manifest_match_count"] += 1
+                        if match_c and match_r and row_total == live_total and count == 65:
+                            result["current_source_combined_match_count"] += 1
                         if row_total == live_total:
                             result["current_source_row_total_match_count"] += 1
             except (backup.BackupError, OSError, subprocess.SubprocessError):
