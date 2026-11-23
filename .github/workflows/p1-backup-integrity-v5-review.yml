@@ -37,7 +37,7 @@ jobs:
       - name: Compile engine and test
         run: python -m py_compile scripts/pg_backup_v223.py tests/test_p1_backup_integrity_v5.py
       - name: Run isolated P1 V5 regressions
-        run: python -m pytest -q tests/test_p1_backup_integrity_v5.py
+        run: python -m pytest --noconftest -q tests/test_p1_backup_integrity_v5.py
 
   synthetic-pg17-restore:
     name: PG17 synthetic backup and isolated restore (no production data)
@@ -89,7 +89,7 @@ jobs:
           pg_restore --version
           python -m py_compile scripts/pg_backup_v223.py tests/test_p1_pg17_synthetic_e2e.py
       - name: Run actual PG17 synthetic source to disposable target restore
-        run: python -m pytest -q tests/test_p1_pg17_synthetic_e2e.py
+        run: python -m pytest --noconftest -q tests/test_p1_pg17_synthetic_e2e.py
       - name: Remove disposable PostgreSQL 17 instances
         if: always()
         shell: bash
