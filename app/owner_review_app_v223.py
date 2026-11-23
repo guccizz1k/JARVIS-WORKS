@@ -18,6 +18,7 @@ from .owner_settings_v223 import install_schema, register_routes
 from .owner_customer_cas_v223 import register_routes as register_customer_review_routes
 from .owner_quote_cas_v223 import register_routes as register_quote_review_routes
 from .owner_order_review_v223 import register_routes as register_order_review_routes
+from .owner_review_hosted_one_shot_v223 import schedule as schedule_hosted_review_e2e
 
 
 def check_review_database_target():
@@ -52,7 +53,14 @@ async def owner_review_lifespan(_app):
     async with core.app.router.lifespan_context(core.app):
         # Only the isolated review application's database receives optional rows.
         install_schema(core.conn)
-        yield
+        # Disabled by default. In public QA only, explicit operator opt-in can
+        # execute one end-to-end synthetic transaction via THIS Render service.
+        hosted_e2e_task = schedule_hosted_review_e2e()
+        try:
+            yield
+        finally:
+            if hosted_e2e_task is not None and not hosted_e2e_task.done():
+                hosted_e2e_task.cancel()
 
 
 app = FastAPI(title='JARVIS WORKS isolated owner review', docs_url=None,
