@@ -826,6 +826,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
                      "target_proven_ephemeral": True}
     t = time.monotonic
     created = False
+    created_roles: list[str] = []
     try:
         # PostgreSQL exported snapshot keeps source signatures and pg_dump
         # consistent under concurrent writes (the transaction stays open until
@@ -900,11 +901,19 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             created = True
         restore_opts = {**tgt, "dbname": restore_db}
         restore_dsn = dsn_with_dbname(target_admin_dsn, restore_db)
+        # Restore roles are cluster-global; keep pre-existing roles untouched.
+        # A create race fails closed rather than treating another owner's role as ours.
         with psycopg.connect(restore_dsn, autocommit=True) as tconn:
             for role in roles:
-                tconn.execute(sql.SQL("DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname={}) "
-                                      "THEN CREATE ROLE {} NOLOGIN; END IF; END$$").format(
-                                          sql.Literal(role), sql.Identifier(role)))
+                exists = tconn.execute(
+                    "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)
+                ).fetchone()
+                if exists:
+                    continue
+                tconn.execute(
+                    sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role))
+                )
+                created_roles.append(role)
         run_tool(["pg_restore", "--no-owner", "--exit-on-error", "--dbname", restore_db, str(back)],
                  restore_opts, timeout=600)
         summary["timings_s"]["restore_rto"] = round(t() - t1, 3)
@@ -959,7 +968,21 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             path.unlink(missing_ok=True)
         if created:
             with psycopg.connect(target_admin_dsn, autocommit=True) as admin:
-                admin.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(restore_db)))
+                # Drop database first to release grants/dependencies on temp roles.
+                # Only drop roles created during this run; never touch existing ones.
+                try:
+                    admin.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(restore_db)))
+                finally:
+                    if created_roles:
+                        # If database cleanup fails, do not attempt unsafe role deletion.
+                        remaining = admin.execute(
+                            "SELECT 1 FROM pg_database WHERE datname = %s", (restore_db,)
+                        ).fetchone()
+                        if remaining is None:
+                            for role in reversed(created_roles):
+                                admin.execute(
+                                    sql.SQL("DROP ROLE {}").format(sql.Identifier(role))
+                                )
     summary["verdict"] = verdict(summary)
     return summary
 
