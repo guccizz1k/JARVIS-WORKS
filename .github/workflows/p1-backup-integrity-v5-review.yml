@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - review/jw-p1-v5-integrity-20261123
+  # Allows GitHub to publish Checks on a separately approved Draft PR.
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
