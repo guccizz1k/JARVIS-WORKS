@@ -94,7 +94,7 @@ jobs:
         shell: bash
         run: docker rm -f jw-p1-source jw-p1-target >/dev/null 2>&1 || true
 
-staging-qa-adapter-compat:
+  staging-qa-adapter-compat:
     name: P1 + pinned V22.3 QA adapter and original UI preservation
     if: github.repository == 'guccizz1k/JARVIS-WORKS'
     runs-on: ubuntu-latest
