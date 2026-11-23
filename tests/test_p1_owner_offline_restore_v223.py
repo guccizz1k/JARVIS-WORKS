@@ -68,3 +68,37 @@ def test_offline_report_never_claims_real_source_or_offsite(monkeypatch):
 def test_cli_requires_exact_action(capsys):
     assert offline.main(["run"])==2
     assert "USAGE" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("constraint,row,total", [
+    ("", "", ""),
+    ("0"*63, "1"*64, "22"),
+    ("0"*64, "1"*63, "22"),
+    ("0"*64, "1"*64, "-1"),
+    ("0"*64, "1"*64, "5000001"),
+])
+def test_untrusted_current_source_reference_rejected(monkeypatch,constraint,row,total):
+    monkeypatch.setenv(offline.REFERENCE_CONSTRAINT_ENV,constraint)
+    monkeypatch.setenv(offline.REFERENCE_ROW_ENV,row)
+    monkeypatch.setenv(offline.REFERENCE_TOTAL_ENV,total)
+    with pytest.raises(offline.backup.BackupError, match="INVALID_READONLY_SOURCE_REFERENCE"):
+        offline._source_snapshot_reference()
+
+
+def test_current_source_reference_is_explicit_opt_in(monkeypatch):
+    for name in (offline.REFERENCE_CONSTRAINT_ENV, offline.REFERENCE_ROW_ENV,
+                 offline.REFERENCE_TOTAL_ENV):
+        monkeypatch.delenv(name,raising=False)
+    assert offline._source_snapshot_reference() is None
+    monkeypatch.setenv(offline.REFERENCE_CONSTRAINT_ENV,"a"*64)
+    monkeypatch.setenv(offline.REFERENCE_ROW_ENV,"b"*64)
+    monkeypatch.setenv(offline.REFERENCE_TOTAL_ENV,"22")
+    assert offline._source_snapshot_reference()==("a"*64,"b"*64,22)
+
+
+def test_reference_never_yields_historic_attestation(monkeypatch):
+    monkeypatch.setattr(offline,"_preflight",lambda:"OWNER_CODESPACE_REQUIRED")
+    r=offline.run_offline()
+    assert r["historic_real_source_identity_verified"] is False
+    assert r["current_source_snapshot_is_historic_attestation"] is False
+    assert r["overall"]=="BLOCKED"
