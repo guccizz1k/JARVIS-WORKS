@@ -156,3 +156,35 @@ def test_approved_gh_token_retrieval_missing_permissions_fails_closed(monkeypatc
     monkeypatch.setattr(subprocess,"run",lambda cmd,**kw:subprocess.CompletedProcess(cmd,1,b"",b"not found"))
     with pytest.raises(vault.Blocked,match="GH_TOKEN_MISSING_PRIVATE_VAULT_CONTENTS_READ"):
         vault._clone_with_approved_credentials(tmp_path,tmp_path/"temporary_checkout")
+
+
+
+def test_duplicate_remote_blob_paths_cannot_falsely_make_11_complete(monkeypatch,tmp_path):
+    sha="a"*40
+    monkeypatch.setattr(vault,"remote_sha256",lambda repo,x:("b"*64,10))
+    out=vault.compare([sha,sha],{sha:"b"*64,"c"*40:"d"*64},tmp_path)
+    assert out["remote_ciphertext_count"]==2
+    assert out["remote_unique_ciphertext_count"]==1
+    assert out["remote_duplicate_content_entries"]==1
+    assert out["remote_full_sha256_readback_matches"]==2
+    assert out["remote_unique_full_sha256_matches"]==1
+    assert out["local_archives_not_offsite"]==1
+    assert out["all_11_archives_offsite"] is False
+
+
+def test_gh_cli_can_be_authorized_without_extra_token_env(monkeypatch,tmp_path):
+    import subprocess
+    monkeypatch.delenv("GH_TOKEN",raising=False)
+    monkeypatch.setattr(vault.shutil,"which",lambda x:"/usr/bin/"+x)
+    monkeypatch.setattr(vault,"git",lambda *a,**kw:subprocess.CompletedProcess([],128,b"",b""))
+    called=[]
+    def fake_run(cmd,**kw):
+        called.append(cmd[:2])
+        if cmd[:2]==["gh","api"]:
+            return subprocess.CompletedProcess(cmd,0,b"true\n",b"")
+        if cmd[:2]==["gh","repo"]:
+            return subprocess.CompletedProcess(cmd,0,b"",b"")
+        raise AssertionError("unknown command")
+    monkeypatch.setattr(subprocess,"run",fake_run)
+    vault._clone_with_approved_credentials(tmp_path,tmp_path/"testclone")
+    assert called==[["gh","api"],["gh","repo"]]

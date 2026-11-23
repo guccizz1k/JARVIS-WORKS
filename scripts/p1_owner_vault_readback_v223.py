@@ -107,22 +107,36 @@ def remote_sha256(repo:Path,sha:str)->tuple[str,int]:
             proc.kill();proc.wait(timeout=10)
 
 def compare(remote:list[str],local:dict[str,str],repo:Path)->dict:
-    matched=0;unmatched=0;total=0
+    matched_entries=0
+    matched_objects=set()
+    unmatched=0
+    total=0
     for obj in remote:
         sha,n=remote_sha256(repo,obj)
         total+=n
         if total>MAX_TOTAL:raise Blocked("REMOTE_CIPHERTEXT_TOTAL_LIMIT")
-        if obj not in local:unmatched+=1
-        elif sha!=local[obj]:raise Blocked("REMOTE_CIPHERTEXT_SHA256_MISMATCH")
-        else:matched+=1
+        if obj not in local:
+            unmatched+=1
+        elif sha!=local[obj]:
+            raise Blocked("REMOTE_CIPHERTEXT_SHA256_MISMATCH")
+        else:
+            matched_entries+=1
+            matched_objects.add(obj)
+    # A second path to an identical encrypted file cannot count as a
+    # SECOND independently recoverable backup. Never subtract path count
+    # from the number of unique owner-local ciphertexts.
     return {
         "remote_ciphertext_count":len(remote),
-        "remote_full_sha256_readback_matches":matched,
+        "remote_unique_ciphertext_count":len(set(remote)),
+        "remote_duplicate_content_entries":len(remote)-len(set(remote)),
+        "remote_full_sha256_readback_matches":matched_entries,
+        "remote_unique_full_sha256_matches":len(matched_objects),
         "remote_unmatched_ciphertext_count":unmatched,
-        "local_archives_not_offsite":len(local)-matched,
-        "remote_readback":"PASS_MATCHED_REMOTE_CIPHERTEXT" if matched==len(remote)
+        "local_archives_not_offsite":len(local)-len(matched_objects),
+        "remote_readback":"PASS_MATCHED_REMOTE_CIPHERTEXT" if matched_entries==len(remote)
             else "BLOCKED_REMOTE_NOT_LOCAL",
-        "all_11_archives_offsite":matched==len(local)==len(remote)==11,
+        "all_11_archives_offsite":(
+            matched_entries==len(matched_objects)==len(local)==len(remote)==11),
     }
 
 
@@ -236,9 +250,9 @@ def _clone_with_approved_credentials(root:Path, checkout:Path):
     if first.returncode==0:
         return
     # GitHub Codespaces GITHUB_TOKEN normally covers only its own repository.
-    # GH_TOKEN, if separately provisioned with private vault Contents:read,
-    # may be used through GitHub CLI without revealing a credential.
-    if not os.environ.get("GH_TOKEN") or not shutil.which("gh"):
+    # GH_TOKEN or an existing separately authorized gh login may be used
+    # through GitHub CLI without printing or changing a credential.
+    if not shutil.which("gh"):
         raise Blocked("CODESPACE_PRIVATE_VAULT_REPO_ACCESS_NOT_AUTHORIZED")
     try:
         if checkout.exists():
