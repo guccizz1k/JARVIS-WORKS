@@ -70,6 +70,7 @@ class FakeS3:
 class FakeSTS:
     def __init__(self,account=OWNER):
         self.account=account
+        self.meta=SimpleNamespace(endpoint_url="https://sts.ap-northeast-2.amazonaws.com")
     def get_caller_identity(self):
         return {"Account":self.account}
 
@@ -158,6 +159,9 @@ def test_bucket_wide_protection_required(monkeypatch,field,value,reason):
 def test_bucket_owner_and_provider_endpoint_cannot_be_spoofed(monkeypatch):
     env,objects,manifest,s3=fixture(monkeypatch)
     assert audit(env,manifest,s3,FakeSTS("999999999999"))["blocker"]=="AWS_CALLER_ACCOUNT_MISMATCH"
+    fake_sts=FakeSTS()
+    fake_sts.meta.endpoint_url="https://sts.attacker.invalid"
+    assert audit(env,manifest,s3,fake_sts)["blocker"]=="AWS_STS_PROVIDER_ENDPOINT_UNTRUSTED"
     s3.meta.endpoint_url="https://s3.attacker.invalid"
     assert audit(env,manifest,s3)["blocker"]=="AWS_PROVIDER_ENDPOINT_UNTRUSTED"
 
@@ -168,6 +172,8 @@ def test_bucket_owner_and_provider_endpoint_cannot_be_spoofed(monkeypatch):
     ("JW_PG_BACKUP_KEY","source-secret","SOURCE_OR_BACKUP_SECRET_PRESENT"),
     ("DATABASE_URL","postgresql://source.invalid","SOURCE_OR_BACKUP_SECRET_PRESENT"),
     ("AWS_ENDPOINT_URL","http://attacker.invalid","CUSTOM_S3_ENDPOINT_NOT_ALLOWED"),
+    ("AWS_ENDPOINT_URL_STS","http://attacker.invalid","CUSTOM_S3_ENDPOINT_NOT_ALLOWED"),
+    ("AWS_CA_BUNDLE","/tmp/untrusted-ca.pem","CUSTOM_S3_ENDPOINT_NOT_ALLOWED"),
     ("JW_WORM_EXPECTED_AWS_ACCOUNT","bad","EXPECTED_BUCKET_OWNER_REQUIRED"),
     ("JW_WORM_BUCKET","bad/bucket","STRICT_BUCKET_NAME_REQUIRED"),
     ("JW_WORM_VAULT_SHA","invalid","PINNED_PRIVATE_VAULT_COMMIT_REQUIRED"),

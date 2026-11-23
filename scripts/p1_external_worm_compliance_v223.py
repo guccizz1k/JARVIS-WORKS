@@ -62,7 +62,8 @@ def preflight(env=None, *, now=None):
         return "INDEPENDENT_CUSTODIAN_RUNTIME_REQUIRED"
     if any(env.get(k) for k in FORBIDDEN):
         return "SOURCE_OR_BACKUP_SECRET_PRESENT"
-    if env.get("AWS_ENDPOINT_URL") or env.get("AWS_ENDPOINT_URL_S3"):
+    if any(env.get(k) for k in ("AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_S3",
+                                  "AWS_ENDPOINT_URL_STS", "AWS_CA_BUNDLE")):
         return "CUSTOM_S3_ENDPOINT_NOT_ALLOWED"
     if not ACCOUNT_RE.fullmatch(env.get("JW_WORM_EXPECTED_AWS_ACCOUNT", "")):
         return "EXPECTED_BUCKET_OWNER_REQUIRED"
@@ -115,14 +116,14 @@ def _manifest(env):
     return checked
 
 
-def _provider_client_is_aws(client):
+def _provider_client_is_aws(client, *, service="s3"):
     endpoint = urlparse(getattr(getattr(client, "meta", None),
                                 "endpoint_url", "") or "")
     return (endpoint.scheme == "https"
             and not endpoint.username and not endpoint.password
             and endpoint.port in (None, 443)
             and bool(re.fullmatch(
-                r"s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com(?:\.cn)?",
+                rf"{service}(?:[.-][a-z0-9-]+)*\.amazonaws\.com(?:\.cn)?",
                 endpoint.hostname or "")))
 
 
@@ -217,6 +218,8 @@ def verify(*, s3=None, sts=None, env=None, now=None):
                 sts = session.client("sts")
         if not _provider_client_is_aws(s3):
             raise Blocked("AWS_PROVIDER_ENDPOINT_UNTRUSTED")
+        if not _provider_client_is_aws(sts, service="sts"):
+            raise Blocked("AWS_STS_PROVIDER_ENDPOINT_UNTRUSTED")
         owner = env["JW_WORM_EXPECTED_AWS_ACCOUNT"]
         if sts.get_caller_identity().get("Account") != owner:
             raise Blocked("AWS_CALLER_ACCOUNT_MISMATCH")
