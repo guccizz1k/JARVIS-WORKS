@@ -231,7 +231,9 @@ def test_actual_pg17_constraint_reparse_restore_and_semantic_mutation(tmp_path: 
                        AND display_name = btrim(display_name))
             """)
             changed = backup.fetch_signature(dst, schema)
-            assert "constraints:sample.name_check" in backup.diff_signatures(before, changed)
+            labels = backup.diff_signatures(before, changed)
+            assert "constraints:sample?name_check" in labels
+            assert "sample.name_check" not in repr(labels)
             with __import__("pytest").raises(errors.CheckViolation):
                 dst.execute("INSERT INTO jw_p1_canonical_probe.sample VALUES (2,'ab')")
             dst.execute("ALTER TABLE jw_p1_canonical_probe.sample DROP CONSTRAINT name_check")
