@@ -33,9 +33,9 @@ jobs:
       - name: Install minimal dependencies
         run: python -m pip install --disable-pip-version-check 'pytest>=8,<10' 'cryptography>=43,<47'
       - name: Compile engine and test
-        run: python -m py_compile scripts/pg_backup_v223.py tests/test_p1_backup_integrity_v5.py scripts/p1_owner_one_shot_v223.py tests/test_p1_owner_one_shot_v223.py
+        run: python -m py_compile scripts/pg_backup_v223.py tests/test_p1_backup_integrity_v5.py scripts/p1_owner_one_shot_v223.py tests/test_p1_owner_one_shot_v223.py scripts/p1_owner_archive_inventory_v223.py tests/test_p1_owner_archive_inventory_v223.py
       - name: Run isolated P1 V5 regressions
-        run: python -m pytest --noconftest -q tests/test_p1_backup_integrity_v5.py tests/test_p1_owner_one_shot_v223.py
+        run: python -m pytest --noconftest -q tests/test_p1_backup_integrity_v5.py tests/test_p1_owner_one_shot_v223.py tests/test_p1_owner_archive_inventory_v223.py
 
   synthetic-pg17-restore:
     name: PG17 synthetic backup and isolated restore (no production data)
