@@ -275,3 +275,52 @@ def test_restore_create_db_failure_yields_safe_eight_fields(monkeypatch):
     assert len(result)==8
     assert result[0]=="CREATE_DISPOSABLE_DB_FAILED"
     assert all(v is None for v in result[2:])
+
+
+
+def test_schema_token_reference_strictly_rejects_injection_and_duplicates(monkeypatch):
+    for name in (offline.SCHEMA_SALT_ENV,offline.SCHEMA_TOKENS_ENV,
+                 offline.SCHEMA_SHAPES_ENV,offline.SCHEMA_NAMES_ENV):
+        monkeypatch.delenv(name,raising=False)
+    assert offline._schema_source_reference() is None
+    monkeypatch.setenv(offline.SCHEMA_SALT_ENV,"a"*24)
+    monkeypatch.setenv(offline.SCHEMA_SHAPES_ENV,"b"*64)
+    monkeypatch.setenv(offline.SCHEMA_NAMES_ENV,"c"*64)
+    for invalid in ("", "a"*15, "z"*16, "0"*32, "a"*17, "b"*16+"a"*16):
+        monkeypatch.setenv(offline.SCHEMA_TOKENS_ENV,invalid)
+        with pytest.raises(offline.backup.BackupError):
+            offline._schema_source_reference()
+    monkeypatch.setenv(offline.SCHEMA_TOKENS_ENV,"0"*16+"1"*16)
+    assert offline._schema_source_reference()[1]=={"0"*16,"1"*16}
+
+
+def test_schema_fingerprints_fails_closed_on_sql_injection_or_remote_probe(monkeypatch):
+    assert offline._schema_delta_probe("none","none","abc';SELECT secret") is None
+
+
+@pytest.mark.parametrize("key,bad",[
+    ("schema_delta_reference_provided",False),
+    ("schema_delta_probe_unavailable_count",1),
+    ("schema_delta_classification","SCHEMA_DIAGNOSTIC_INCOMPLETE_OR_INCONSISTENT"),
+    ("container_removed","BLOCKED_CLEANUP")
+])
+def test_schema_diagnosis_requires_full_safe_execution(monkeypatch,capsys,key,bad):
+    report={"offline_restore_execution":"PASS_LOCAL_ONLY","container_removed":"PASS",
+            "schema_delta_reference_provided":True,"schema_delta_probe_unavailable_count":0,
+            "schema_delta_classification":"TABLE_NAME_DRIFT_COLUMN_SHAPES_MATCH","overall":"BLOCKED"}
+    report[key]=bad
+    monkeypatch.setattr(offline,"run_offline",lambda:report)
+    assert offline.main(["diagnose-schema"])==1
+    assert '"overall":"BLOCKED"' in capsys.readouterr().out
+
+
+def test_schema_diagnosis_can_complete_without_falsely_reporting_parity(monkeypatch,capsys):
+    report={"offline_restore_execution":"PASS_LOCAL_ONLY","container_removed":"PASS",
+            "schema_delta_reference_provided":True,"schema_delta_probe_unavailable_count":0,
+            "schema_delta_classification":"TABLE_NAME_DRIFT_COLUMN_SHAPES_MATCH",
+            "schema_delta_only_in_live_per_archive":1,"schema_delta_only_in_backup_per_archive":1,
+            "overall":"BLOCKED"}
+    monkeypatch.setattr(offline,"run_offline",lambda:report)
+    assert offline.main(["diagnose-schema"])==0
+    assert '"overall":"BLOCKED"' in capsys.readouterr().out
+    assert offline.main(["restore-offline"])==1

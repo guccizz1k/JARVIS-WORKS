@@ -85,13 +85,17 @@ SELECT count(*)::int, coalesce(sum(n),0)::bigint,
   encode(sha256(convert_to(coalesce(string_agg(name,E'\\n' ORDER BY name) FILTER (WHERE n=0),''),'UTF8')),'hex'),
   count(*) FILTER (WHERE n>0)::int,
   encode(sha256(convert_to(coalesce(string_agg(entry,chr(92)||'n' ORDER BY name),''),'UTF8')),'hex'),
-  encode(sha256(convert_to(coalesce(array_to_string(array_agg(entry ORDER BY name),chr(10)),''),'UTF8')),'hex')
+  encode(sha256(convert_to(coalesce(array_to_string(array_agg(entry ORDER BY name),chr(10)),''),'UTF8')),'hex'),
+  -- bytewise C collation is stable across ICU/libc locale differences
+  encode(sha256(convert_to(coalesce(string_agg(name,chr(10) ORDER BY name COLLATE "C"),''),'UTF8')),'hex'),
+  encode(sha256(convert_to(coalesce(string_agg(name,chr(10) ORDER BY name COLLATE "C") FILTER (WHERE n=0),''),'UTF8')),'hex'),
+  encode(sha256(convert_to(coalesce(string_agg(entry,chr(10) ORDER BY name COLLATE "C"),''),'UTF8')),'hex')
 FROM entries;
 ROLLBACK;
 """
 
 
-def _audit_restored_row_manifest(container: str, db: str) -> tuple[int, int, str, str, str, int, str, str] | None:
+def _audit_restored_row_manifest(container: str, db: str) -> tuple[int, int, str, str, str, int, str, str, str, str, str] | None:
     """Bounded, disposable DB-only row and schema fingerprint diagnostics.
 
     Result order: table count, row count, legacy newline manifest,
@@ -105,7 +109,7 @@ def _audit_restored_row_manifest(container: str, db: str) -> tuple[int, int, str
     if done.returncode:
         return None
     parts = done.stdout.decode("ascii", "ignore").strip().split("|")
-    if len(parts) != 8:
+    if len(parts) != 11:
         return None
     try:
         table_count, rows, populated = int(parts[0]), int(parts[1]), int(parts[5])
@@ -114,9 +118,9 @@ def _audit_restored_row_manifest(container: str, db: str) -> tuple[int, int, str
     if not (0 <= table_count <= 100000
             and 0 <= rows <= MAX_SOURCE_TOTAL_ROWS
             and 0 <= populated <= table_count
-            and all(FINGERPRINT_RE.fullmatch(parts[i]) for i in (2,3,4,6,7))):
+            and all(FINGERPRINT_RE.fullmatch(parts[i]) for i in (2,3,4,6,7,8,9,10))):
         return None
-    return table_count, rows, parts[2], parts[3], parts[4], populated, parts[6], parts[7]
+    return table_count, rows, parts[2], parts[3], parts[4], populated, parts[6], parts[7], parts[8], parts[9], parts[10]
 
 
 # Optional independently measured metadata-only current-source references.
@@ -138,6 +142,101 @@ def _manifest_reference() -> tuple[str, str, str, int] | None:
             and n.isascii() and n.isdecimal() and 0 <= int(n) <= 100000):
         raise backup.BackupError("BLOCKED_INVALID_METADATA_REFERENCE")
     return a,b,c,int(n)
+
+
+# Independent current-source table-set fingerprint reference: sorted, 64-bit
+# name tokens derived by md5(salt||name). The source is queried separately
+# READ ONLY and no names, row data or credentials are passed to the tool.
+# 64-bit collision risk is extremely small but NOT zero; compare the full
+# bytewise SHA256 name digest too and fail closed on any inconsistency.
+SCHEMA_SALT_ENV = "JW_PG_EXPECT_SCHEMA_SALT"
+SCHEMA_TOKENS_ENV = "JW_PG_EXPECT_SCHEMA_TOKENS"
+SCHEMA_SHAPES_ENV = "JW_PG_EXPECT_SCHEMA_SHAPES_SHA256"
+SCHEMA_NAMES_ENV = "JW_PG_EXPECT_SCHEMA_NAMES_FULL_SHA256"
+SCHEMA_SALT_RE = re.compile(r"^[0-9a-f]{24}$")
+NAME_TOKEN_RE = re.compile(r"^[0-9a-f]{16}$")
+MAX_TABLES_REF = 128
+
+
+def _schema_source_reference() -> tuple[str, set[str], str, str] | None:
+    vals = [os.environ.get(k, "") for k in (
+        SCHEMA_SALT_ENV, SCHEMA_TOKENS_ENV, SCHEMA_SHAPES_ENV,
+        SCHEMA_NAMES_ENV)]
+    if not any(vals):
+        return None
+    salt, packed, shapes, names_sha = vals
+    if not (SCHEMA_SALT_RE.fullmatch(salt)
+            and len(packed) >= 16 and len(packed) <= MAX_TABLES_REF*16
+            and len(packed) % 16 == 0
+            and FINGERPRINT_RE.fullmatch(shapes)
+            and FINGERPRINT_RE.fullmatch(names_sha)):
+        raise backup.BackupError("BLOCKED_SCHEMA_REFERENCE_MALFORMED")
+    tokens = [packed[i:i+16] for i in range(0,len(packed),16)]
+    if (not all(NAME_TOKEN_RE.fullmatch(v) for v in tokens)
+            or len(tokens) != len(set(tokens))
+            or tokens != sorted(tokens)):
+        raise backup.BackupError("BLOCKED_SCHEMA_REFERENCE_NOT_UNIQUE_OR_SORTED")
+    return salt, set(tokens), shapes, names_sha
+
+
+def _schema_delta_probe(container: str, db: str, salt: str) -> tuple[int, set[str], str, str] | None:
+    """Collect only salted pseudonymous name tokens and aggregate column shape.
+
+    No raw names, SQL, rows, or hashes leave this subprocess in report data.
+    The salt is a validated 24-hex lower-case string, not arbitrary SQL input.
+    """
+    if not SCHEMA_SALT_RE.fullmatch(salt):
+        return None
+    q = f"""
+    WITH base AS (
+      SELECT c.oid,c.relname FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')
+    ), per_table AS (
+      SELECT b.relname,
+        coalesce(string_agg(
+          a.attname||chr(9)||pg_catalog.format_type(a.atttypid,a.atttypmod)
+          ||chr(9)||a.attnotnull::text,
+          chr(10) ORDER BY a.attnum), '') AS column_spec
+      FROM base b LEFT JOIN pg_catalog.pg_attribute a
+        ON a.attrelid=b.oid AND a.attnum>0 AND NOT a.attisdropped
+      GROUP BY b.oid,b.relname
+    ), hashed AS (
+      SELECT relname,substr(md5('{salt}'||relname),1,16) name_token,
+        encode(sha256(convert_to(column_spec,'UTF8')),'hex') shape_token
+      FROM per_table
+    )
+    SELECT count(*)::int,
+      coalesce(string_agg(name_token,'' ORDER BY name_token),''),
+      encode(sha256(convert_to(coalesce(string_agg(shape_token,chr(10)
+         ORDER BY shape_token),''),'UTF8')),'hex'),
+      encode(sha256(convert_to(coalesce(string_agg(relname,chr(10)
+         ORDER BY relname COLLATE "C"),''),'UTF8')),'hex')
+    FROM hashed
+    """
+    try:
+        done = _exec(container, ["psql","-qAt","-U","postgres","-d",db,
+                                 "-v","ON_ERROR_STOP=1","-c",q],timeout=45)
+        if done.returncode:
+            return None
+        parts = done.stdout.decode("ascii","strict").strip().split("|")
+        if len(parts)!=4 or not parts[0].isdecimal():
+            return None
+        n=int(parts[0])
+        packed=parts[1]
+        if not (0<=n<=MAX_TABLES_REF and len(packed)==n*16
+                and FINGERPRINT_RE.fullmatch(parts[2])
+                and FINGERPRINT_RE.fullmatch(parts[3])):
+            return None
+        tokens = [packed[i:i+16] for i in range(0,len(packed),16)]
+        if not all(NAME_TOKEN_RE.fullmatch(t) for t in tokens):
+            return None
+        if len(set(tokens)) != n or tokens != sorted(tokens):
+            return None
+        return n,set(tokens),parts[2],parts[3]
+    except (OSError,UnicodeError,ValueError,subprocess.TimeoutExpired):
+        return None
+
 
 
 def _source_snapshot_reference() -> tuple[str, str, int | None] | None:
@@ -279,7 +378,7 @@ def _focus_probe(container: str, db: str, table: str) -> tuple[int, str, str] | 
 
 
 
-def _restore_one(container: str, original: bytearray, index: int, focus: tuple[str, int, str, str] | None = None) -> tuple[str, int, str | None, str | None, int | None, str | None, tuple[int, str, str] | None, tuple[str, str, int, str, str] | None]:
+def _restore_one(container: str, original: bytearray, index: int, focus: tuple[str, int, str, str] | None = None, schema_salt: str | None = None) -> tuple[str, int, str | None, str | None, int | None, str | None, tuple[int, str, str] | None, tuple[str, str, int, str, str] | None]:
     """Fresh disposable DB per archive. Auto-create NOLOGIN roles ONLY in
     this networkless throwaway cluster, only when pg_restore reports one.
     """
@@ -359,7 +458,8 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
             if rows is None or rows[0] != total:
                 return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None, None, None
             probe = _focus_probe(container, db, focus[0]) if focus else None
-            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha, probe, (rows[3],rows[4],rows[5],rows[6],rows[7])
+            schema_probe = _schema_delta_probe(container, db, schema_salt) if schema_salt else None
+            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha, probe, (rows[3],rows[4],rows[5],rows[6],rows[7],rows[8],rows[9],rows[10],schema_probe)
         finally:
             # Always discard this database before moving to the next archive.
             dropped = _exec(container, ["dropdb", "-U", "postgres", "--force", db])
@@ -380,6 +480,19 @@ def run_offline() -> dict[str, object]:
         "disposable_constraint_signature_groups": 0,
         "disposable_row_manifest_groups": 0,
         "manifest_metadata_reference_provided": False,
+        "metadata_c_sorted_schema_names_match_count": 0,
+        "metadata_c_sorted_empty_names_match_count": 0,
+        "metadata_c_sorted_row_manifest_match_count": 0,
+        "schema_delta_reference_provided": False,
+        "schema_delta_probe_unavailable_count": 0,
+        "schema_delta_common_table_count_per_archive": None,
+        "schema_delta_only_in_live_per_archive": None,
+        "schema_delta_only_in_backup_per_archive": None,
+        "schema_delta_column_shapes_match_count": 0,
+        "schema_delta_name_sha256_match_count": 0,
+        "schema_delta_distinct_results": 0,
+        "schema_delta_classification": "NOT_RUN",
+        "schema_delta_is_signed_historic_attestation": False,
         "metadata_schema_names_match_count": 0,
         "metadata_empty_table_names_match_count": 0,
         "metadata_nonempty_table_count_match_count": 0,
@@ -431,6 +544,12 @@ def run_offline() -> dict[str, object]:
         result["blocker"] = "INVALID_METADATA_REFERENCE"
         return result
     result["manifest_metadata_reference_provided"] = metadata_ref is not None
+    try:
+        schema_ref = _schema_source_reference()
+    except backup.BackupError:
+        result["blocker"] = "INVALID_PSEUDONYMOUS_SCHEMA_REFERENCE"
+        return result
+    result["schema_delta_reference_provided"] = schema_ref is not None
     archives, discovery = owner.discover_owner_archive()
     result["archive_discovery"] = discovery
     result["private_archives_found"] = len(archives)
@@ -447,6 +566,7 @@ def run_offline() -> dict[str, object]:
     container = None
     fingerprints = set()
     row_fingerprints = set()
+    schema_results = set()
     try:
         create = _docker([
             "run", "--rm", "--pull", "never", "-d",
@@ -490,7 +610,7 @@ def run_offline() -> dict[str, object]:
                 continue
             try:
                 remaining -= len(plain)
-                status, count, fingerprint, row_manifest, row_total, constraint_sha256, focus_probe, metadata = _restore_one(container, plain, index, focus)
+                status, count, fingerprint, row_manifest, row_total, constraint_sha256, focus_probe, metadata = _restore_one(container, plain, index, focus, schema_ref[0] if schema_ref else None)
                 if status != "LOCAL_DISPOSABLE_RESTORED":
                     result["offline_restore_failure_count"] += 1
                     failure_kinds.add(status)
@@ -525,13 +645,31 @@ def run_offline() -> dict[str, object]:
                             result["metadata_probe_unavailable_count"] += 1
                         else:
                             ref_names, ref_empty, ref_literal, ref_nonempty = metadata_ref
-                            local_names, local_empty, local_nonempty, local_literal, local_canonical = metadata
+                            local_names, local_empty, local_nonempty, local_literal, local_canonical = metadata[:5]
                             result["metadata_schema_names_match_count"] += int(local_names == ref_names)
                             result["metadata_empty_table_names_match_count"] += int(local_empty == ref_empty)
                             result["metadata_nonempty_table_count_match_count"] += int(local_nonempty == ref_nonempty)
+                            result["metadata_c_sorted_schema_names_match_count"] += int(metadata[5] == ref_names)
+                            result["metadata_c_sorted_empty_names_match_count"] += int(metadata[6] == ref_empty)
                             result["metadata_literal_manifest_match_count"] += int(local_literal == ref_literal)
                             if snapshot is not None:
                                 result["metadata_canonical_array_manifest_match_count"] += int(local_canonical == snapshot[1])
+                                result["metadata_c_sorted_row_manifest_match_count"] += int(metadata[7] == snapshot[1])
+                    if schema_ref is not None:
+                        schema_probe = metadata[8] if metadata else None
+                        if schema_probe is None:
+                            result["schema_delta_probe_unavailable_count"] += 1
+                        else:
+                            salt, source_names, source_shapes, source_names_fullsha = schema_ref
+                            parsed_count, restored_names, restored_shapes, restored_fullsha = schema_probe
+                            only_source = len(source_names - restored_names)
+                            only_restore = len(restored_names - source_names)
+                            common = len(source_names & restored_names)
+                            shapes_equal = restored_shapes == source_shapes
+                            full_names_equal = restored_fullsha == source_names_fullsha
+                            schema_results.add((common,only_source,only_restore,shapes_equal,full_names_equal))
+                            result["schema_delta_column_shapes_match_count"] += int(shapes_equal)
+                            result["schema_delta_name_sha256_match_count"] += int(full_names_equal)
                     if snapshot is not None:
                         live_constraints, live_rows, live_total = snapshot
                         # See separate SHA256 constraints query below. The old
@@ -555,6 +693,27 @@ def run_offline() -> dict[str, object]:
                 plain.clear()
         result["disposable_constraint_signature_groups"] = len(fingerprints)
         result["disposable_row_manifest_groups"] = len(row_fingerprints)
+        if schema_ref is not None:
+            total = len(archives)
+            result["schema_delta_distinct_results"] = len(schema_results)
+            if (result["schema_delta_probe_unavailable_count"]
+                    or result["offline_restore_failure_count"]
+                    or result["offline_restore_skipped_budget_count"]
+                    or len(schema_results) != 1):
+                result["schema_delta_classification"] = "SCHEMA_DIAGNOSTIC_INCOMPLETE_OR_INCONSISTENT"
+            else:
+                common,only_source,only_restore,shapes_equal,full_equal = next(iter(schema_results))
+                result["schema_delta_common_table_count_per_archive"] = common
+                result["schema_delta_only_in_live_per_archive"] = only_source
+                result["schema_delta_only_in_backup_per_archive"] = only_restore
+                if only_source==0 and only_restore==0 and full_equal:
+                    result["schema_delta_classification"] = "IDENTICAL_TABLE_NAME_SET"
+                elif only_source==0 and only_restore==0:
+                    result["schema_delta_classification"] = "NAME_HASH_COLLISION_OR_ENCODING_INCONSISTENCY"
+                elif shapes_equal:
+                    result["schema_delta_classification"] = "TABLE_NAME_DRIFT_COLUMN_SHAPES_MATCH"
+                else:
+                    result["schema_delta_classification"] = "TABLE_NAMES_AND_COLUMN_SHAPES_DIFFER"
         if metadata_ref is not None:
             n = len(archives)
             if (result["metadata_probe_unavailable_count"]
@@ -562,7 +721,13 @@ def run_offline() -> dict[str, object]:
                     or result["offline_restore_skipped_budget_count"]):
                 result["manifest_reconciliation"] = "METADATA_PROBE_INCOMPLETE"
             elif result["metadata_schema_names_match_count"] != n:
-                result["manifest_reconciliation"] = "SCHEMA_NAME_SET_DIFFERS"
+                result["manifest_reconciliation"] = (
+                    "COLLATION_SORT_ORDER_DIFFERENCE" if
+                    result["metadata_c_sorted_schema_names_match_count"] == n and
+                    result["metadata_c_sorted_empty_names_match_count"] == n and
+                    snapshot is not None and
+                    result["metadata_c_sorted_row_manifest_match_count"] == n
+                    else "SCHEMA_NAME_SET_OR_SORT_ORDER_DIFFERS")
             elif result["metadata_empty_table_names_match_count"] != n:
                 result["manifest_reconciliation"] = "EMPTY_TABLE_NAME_SET_DIFFERS"
             elif result["metadata_nonempty_table_count_match_count"] != n:
@@ -619,8 +784,8 @@ def run_offline() -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if args not in (["restore-offline"], ["diagnose-focus"], ["diagnose-manifest"]):
-        print("USAGE: python -m scripts.p1_owner_offline_restore_v223 [restore-offline|diagnose-focus|diagnose-manifest]", file=sys.stderr)
+    if args not in (["restore-offline"], ["diagnose-focus"], ["diagnose-manifest"], ["diagnose-schema"]):
+        print("USAGE: python -m scripts.p1_owner_offline_restore_v223 [restore-offline|diagnose-focus|diagnose-manifest|diagnose-schema]", file=sys.stderr)
         return 2
     try:
         report = run_offline()
@@ -628,6 +793,17 @@ def main(argv: list[str] | None = None) -> int:
         print('{"offline_restore_execution":"BLOCKED","overall":"BLOCKED","blocker":"UNEXPECTED_SAFE_RESTORE_ERROR"}')
         return 1
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+    if args == ["diagnose-schema"]:
+        # Diagnosis completeness can PASS, but source integrity / release
+        # remain BLOCKED. Never upgrade a mismatched schema to data PASS.
+        return 0 if (
+            report.get("offline_restore_execution") == "PASS_LOCAL_ONLY"
+            and report.get("container_removed") == "PASS"
+            and report.get("schema_delta_reference_provided") is True
+            and report.get("schema_delta_probe_unavailable_count") == 0
+            and report.get("schema_delta_classification") not in
+            ("NOT_RUN","SCHEMA_DIAGNOSTIC_INCOMPLETE_OR_INCONSISTENT")
+        ) else 1
     if args == ["diagnose-manifest"]:
         # A completed diagnostic can succeed even when individual fingerprints
         # disagree. Never confuse completion with data parity PASS.
@@ -656,7 +832,9 @@ def main(argv: list[str] | None = None) -> int:
                  and report.get("focus_comparison") in
                    ("NOT_RUN", "PASS_CURRENT_FOCUS_CONTENT")
                  and report.get("manifest_reconciliation") in
-                   ("NOT_RUN", "PASS_CURRENT_SCHEMA_AND_AGGREGATES")) else 1
+                   ("NOT_RUN", "PASS_CURRENT_SCHEMA_AND_AGGREGATES")
+                 and report.get("schema_delta_classification") in
+                   ("NOT_RUN","IDENTICAL_TABLE_NAME_SET")) else 1
 
 
 if __name__ == "__main__":

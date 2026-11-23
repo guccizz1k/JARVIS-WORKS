@@ -368,6 +368,33 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
             expected_data = hashlib.sha256(
                 "\n".join(row_manifest_parts).encode("utf-8")).hexdigest()
             assert expected_rows == 65
+            # Source reference is produced independently in the synthetic
+            # source PG17 instance. No real owner data enter GitHub tests.
+            schema_salt = "a80f5e17a62d43bd93507c4e"
+            schema_ref = conn.execute("""
+              WITH base AS (
+                SELECT c.oid,c.relname FROM pg_class c
+                JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')
+              ), per_table AS (
+                SELECT b.relname,
+                  coalesce(string_agg(
+                    a.attname||chr(9)||format_type(a.atttypid,a.atttypmod)
+                    ||chr(9)||a.attnotnull::text,
+                    chr(10) ORDER BY a.attnum),'') AS spec
+                FROM base b LEFT JOIN pg_attribute a
+                  ON a.attrelid=b.oid AND a.attnum>0 AND NOT a.attisdropped
+                GROUP BY b.oid,b.relname
+              ), hashed AS (
+                SELECT relname,substr(md5('a80f5e17a62d43bd93507c4e'||relname),1,16) tok,
+                       encode(sha256(convert_to(spec,'UTF8')),'hex') shape
+                FROM per_table
+              ) SELECT count(*)::int,string_agg(tok,'' ORDER BY tok),
+                     encode(sha256(convert_to(string_agg(shape,chr(10) ORDER BY shape),'UTF8')),'hex'),
+                     encode(sha256(convert_to(string_agg(relname,chr(10) ORDER BY relname COLLATE "C"),'UTF8')),'hex')
+                FROM hashed
+            """).fetchone()
+            assert schema_ref[0] == 65 and len(schema_ref[1]) == 65*16
             expected_names = hashlib.sha256(
                 "\n".join(sorted([x.split(":",1)[0] for x in row_manifest_parts])).encode("utf-8")).hexdigest()
             expected_empty_names = hashlib.sha256(b"").hexdigest()
@@ -434,6 +461,10 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         monkeypatch.setenv(offline.REFERENCE_CONSTRAINT_ENV, expected_constraints)
         monkeypatch.setenv(offline.REFERENCE_ROW_ENV, expected_data)
         monkeypatch.setenv(offline.REFERENCE_TOTAL_ENV, str(expected_rows))
+        monkeypatch.setenv(offline.SCHEMA_SALT_ENV, schema_salt)
+        monkeypatch.setenv(offline.SCHEMA_TOKENS_ENV, schema_ref[1])
+        monkeypatch.setenv(offline.SCHEMA_SHAPES_ENV, schema_ref[2])
+        monkeypatch.setenv(offline.SCHEMA_NAMES_ENV, schema_ref[3])
         monkeypatch.setenv(offline.REFERENCE_SCHEMA_NAMES_ENV, expected_names)
         monkeypatch.setenv(offline.REFERENCE_EMPTY_NAMES_ENV, expected_empty_names)
         monkeypatch.setenv(offline.REFERENCE_LITERAL_MANIFEST_ENV, expected_literal_join)
@@ -466,6 +497,14 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert result["metadata_literal_manifest_match_count"] == 2, safe
         assert result["metadata_canonical_array_manifest_match_count"] == 2, safe
         assert result["manifest_reconciliation"] == "PASS_CURRENT_SCHEMA_AND_AGGREGATES", safe
+        assert result["schema_delta_reference_provided"] is True
+        assert result["schema_delta_probe_unavailable_count"] == 0, safe
+        assert result["schema_delta_common_table_count_per_archive"] == 65, safe
+        assert result["schema_delta_only_in_live_per_archive"] == 0, safe
+        assert result["schema_delta_only_in_backup_per_archive"] == 0, safe
+        assert result["schema_delta_column_shapes_match_count"] == 2, safe
+        assert result["schema_delta_name_sha256_match_count"] == 2, safe
+        assert result["schema_delta_classification"] == "IDENTICAL_TABLE_NAME_SET", safe
         assert result["focus_reference_provided"] is True
         assert result["focus_row_count_match_count"] == 2, safe
         assert result["focus_composite_match_count"] == 2, safe
@@ -483,6 +522,13 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         # decrypt and restore cleanly. Never rewrite either archive to force a match.
         monkeypatch.setenv(offline.REFERENCE_ROW_ENV, "f" * 64)
         monkeypatch.setenv(offline.FOCUS_JSON_ENV, "f" * 64)
+        # One blinded source fingerprint changed, but COLUMN SHAPES remain
+        # identical. The tool must classify names without revealing any.
+        original_tokens = [schema_ref[1][i:i+16] for i in range(0,len(schema_ref[1]),16)]
+        fake = "ffffffffffffffff"
+        assert fake not in original_tokens
+        original_tokens[0] = fake
+        monkeypatch.setenv(offline.SCHEMA_TOKENS_ENV,"".join(sorted(original_tokens)))
         wrong = offline.run_offline()
         assert wrong["offline_restore_execution"] == "PASS_LOCAL_ONLY"
         assert wrong["container_removed"] == "PASS"
@@ -493,6 +539,11 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert wrong["focus_json_content_match_count"] == 0
         assert wrong["focus_composite_match_count"] == 2
         assert wrong["focus_comparison"] == "FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE"
+        assert wrong["schema_delta_only_in_live_per_archive"] == 1, safe
+        assert wrong["schema_delta_only_in_backup_per_archive"] == 1, safe
+        assert wrong["schema_delta_common_table_count_per_archive"] == 64, safe
+        assert wrong["schema_delta_column_shapes_match_count"] == 2, safe
+        assert wrong["schema_delta_classification"] == "TABLE_NAME_DRIFT_COLUMN_SHAPES_MATCH", safe
         assert wrong["overall"] == "BLOCKED"
     finally:
         if created_db:
