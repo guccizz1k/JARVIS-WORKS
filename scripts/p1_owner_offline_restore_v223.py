@@ -310,7 +310,7 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
                     if made.returncode:
                         return "EPHEMERAL_ROLE_PROVISION_FAILED", 0, None, None, None, None, None, None
                     continue
-                return _restore_reason(done.stderr), 0, None, None, None, None, None
+                return _restore_reason(done.stderr), 0, None, None, None, None, None, None
             count_query = (
                 "SELECT count(*) FROM pg_class c "
                 "JOIN pg_namespace n ON n.oid=c.relnamespace "
@@ -354,7 +354,7 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
                                     "-v", "ON_ERROR_STOP=1", "-c", sha_query])
             sha = sh.stdout.decode("ascii", "ignore").strip() if sh.returncode == 0 else ""
             if not FINGERPRINT_RE.fullmatch(sha):
-                return "POST_RESTORE_CONSTRAINT_SHA256_INVALID", 0, None, None, None, None
+                return "POST_RESTORE_CONSTRAINT_SHA256_INVALID", 0, None, None, None, None, None, None, None
             rows = _audit_restored_row_manifest(container, db)
             if rows is None or rows[0] != total:
                 return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None, None, None

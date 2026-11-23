@@ -252,3 +252,26 @@ def test_diagnose_manifest_requires_complete_evidence(monkeypatch,capsys,key,bad
     monkeypatch.setattr(offline,"run_offline",lambda:result)
     assert offline.main(["diagnose-manifest"])==1
     capsys.readouterr()
+
+
+
+def test_all_restore_failure_and_success_returns_have_same_arity():
+    """Prevent a real fail-closed pg_restore error from becoming ValueError
+    during unpacking and obscuring the underlying fixed failure category.
+    """
+    import ast
+    import inspect
+    import textwrap
+    tree=ast.parse(textwrap.dedent(inspect.getsource(offline._restore_one)))
+    ret=[n.value for n in ast.walk(tree) if isinstance(n,ast.Return)]
+    assert len(ret)>=10
+    assert all(isinstance(n,ast.Tuple) and len(n.elts)==8 for n in ret)
+
+
+def test_restore_create_db_failure_yields_safe_eight_fields(monkeypatch):
+    import subprocess
+    monkeypatch.setattr(offline,"_exec",lambda *a,**kw: subprocess.CompletedProcess([],1,b"",b"db inaccessible"))
+    result=offline._restore_one("nonexistent",bytearray(),0)
+    assert len(result)==8
+    assert result[0]=="CREATE_DISPOSABLE_DB_FAILED"
+    assert all(v is None for v in result[2:])
