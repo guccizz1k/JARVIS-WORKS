@@ -471,6 +471,25 @@ def audit()->dict:
         result["blocker"]="SAFE_VAULT_READBACK_ERROR"
     return result
 
+def diagnose_remote()->dict:
+    """One-call complete credential classification + authorized readback only.
+
+    This independent owner-only check doesn't need the already-proven
+    provider blob metadata input. The CLI exit is a diagnostic completion,
+    NEVER a false offsite/retention/origin PASS.
+    """
+    diagnostic=auth_probe()
+    if diagnostic.get("auth_diagnostic") in (
+        "PASS_PRIVATE_VAULT_GIT_READ", "GIT_HELPER_USING_DIFFERENT_CREDENTIALS"
+    ):
+        recovered=audit()
+        diagnostic.update(recovered)
+    else:
+        diagnostic["remote_readback"]="NOT_RUN_AUTHORIZATION_REQUIRED"
+    diagnostic["overall"]="BLOCKED"
+    return diagnostic
+
+
 def diagnose_all()->dict:
     """One-shot owner workflow; fail-closed evidence, no token or data printed."""
     report=manifest_diagnostic()
@@ -508,17 +527,20 @@ def diagnose_all()->dict:
 
 def main(argv:list[str]|None=None)->int:
     args=sys.argv[1:] if argv is None else argv
-    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"], ["diagnose-all"]):
-        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth|diagnose-all]",file=sys.stderr)
+    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"], ["diagnose-all"], ["diagnose-remote"]):
+        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth|diagnose-all|diagnose-remote]",file=sys.stderr)
         return 2
     try:
         result=(auth_probe() if args==["diagnose-auth"] else
                 manifest_diagnostic() if args==["diagnose-manifest"] else
-                diagnose_all() if args==["diagnose-all"] else audit())
+                diagnose_all() if args==["diagnose-all"] else
+                diagnose_remote() if args==["diagnose-remote"] else audit())
     except Exception:
         print('{"remote_readback":"BLOCKED","overall":"BLOCKED","blocker":"SAFE_FAIL_CLOSED"}')
         return 1
     print(json.dumps(result,sort_keys=True,separators=(",",":")))
+    if args==["diagnose-remote"]:
+        return 0 if result.get("auth_diagnostic") not in ("BLOCKED",None) else 1
     if args==["diagnose-all"]:
         return 0 if result.get("manifest_diagnostic")=="PASS_LOCAL_HASH_COMPARISON_EXECUTED" else 1
     if args==["diagnose-auth"]:
