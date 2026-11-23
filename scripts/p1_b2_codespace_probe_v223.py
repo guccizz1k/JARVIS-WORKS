@@ -79,7 +79,28 @@ def transport(url, headers, body=None):
         # Strictly classify status, NEVER display response body, request
         # Authorization header, URL with tokens, or exception text.
         if url == AUTH and exc.code == 401:
-            raise Blocked("B2_AUTH_KEY_REJECTED_401") from None
+            # Backblaze documents two *different* 401 codes for authorize:
+            # unauthorized: wrong key pair; unsupported: API-key version.
+            # Never call BOTH a credential error; that hides the root cause.
+            # Consume only a small error JSON and disclose ONLY its
+            # allowlisted 'code', never provider messages or raw bodies.
+            try:
+                raw = exc.read(1025)
+                if len(raw) > 1024:
+                    raise ValueError("oversized")
+                error_doc = json.loads(raw)
+                if (not isinstance(error_doc, dict)
+                        or error_doc.get("status") != 401):
+                    raise ValueError("invalid status")
+                if error_doc.get("code") == "unauthorized":
+                    raise Blocked("B2_AUTH_PAIR_INVALID_401")
+                if error_doc.get("code") == "unsupported":
+                    raise Blocked("B2_AUTH_VERSION_UNSUPPORTED_401")
+            except Blocked:
+                raise
+            except (Exception, KeyboardInterrupt):
+                pass
+            raise Blocked("B2_AUTH_401_UNCLASSIFIED") from None
         if url == AUTH and exc.code == 403:
             raise Blocked("B2_AUTH_ACCESS_DENIED_403") from None
         if exc.code == 429:

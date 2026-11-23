@@ -82,3 +82,29 @@ The current diagnostic probe is pinned by **content-addressed Git blob SHA1**
 No provider exception body, URLs, host routing, headers, key IDs or secrets
 are included in receipt. Eight corresponding synthetic negative tests cover
 all classes. All other original read-only guards remain intact.
+
+## 2026-11-23: HTTP 401 root-cause correction
+
+Backblaze's official native `b2_authorize_account` documentation makes two
+different responses for HTTP 401: `code=unauthorized` (wrong application
+key ID / secret pair) and `code=unsupported` (key version incompatible with
+the called native API). The prior verifier incorrectly marked EVERY HTTP
+401 as a wrong key, even when the provider error was `unsupported`.
+
+The new audited pinned probe is content-addressed by Git blob SHA
+`8f3b19ab652a846ad4f86c439f0103f40f55c88a` and reads at most 1,025 bytes from a 401 error response.
+It accepts ONLY a JSON object with `status:401` and code in the tiny
+allowlist `unauthorized` or `unsupported`; all other errors are
+`B2_AUTH_401_UNCLASSIFIED`, **never assumed to be wrong credentials**.
+It never outputs provider `message`, raw response, token, key ID, key
+material, host or user context. This is strictly read-only; the existing
+source DB/backup environment guard remains enabled inside the child.
+
+Status meanings:
+- `B2_AUTH_PAIR_INVALID_401`: Backblaze specifically reported wrong pair;
+  without private Codespaces secret comparison one cannot identify which.
+- `B2_AUTH_VERSION_UNSUPPORTED_401`: Backblaze specifically reported API
+  incompatibility; do not rotate credentials prematurely.
+- `B2_AUTH_401_UNCLASSIFIED`: no trustworthy provider code was readable;
+  do not assert cause.
+All preserve overall BLOCKED; actual third-site WORM backups NOT RUN.

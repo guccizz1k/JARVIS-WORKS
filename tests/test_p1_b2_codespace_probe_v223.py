@@ -203,7 +203,7 @@ def test_stdout_never_prints_secrets_on_failed_preflight(monkeypatch,capsys):
 
 
 @pytest.mark.parametrize(("kind", "expect"), [
-    ("http401", "B2_AUTH_KEY_REJECTED_401"),
+    ("http401", "B2_AUTH_401_UNCLASSIFIED"),
     ("http403", "B2_AUTH_ACCESS_DENIED_403"),
     ("http429", "B2_PROVIDER_RATE_LIMITED_429"),
     ("http500", "B2_PROVIDER_HTTP_REJECTED"),
@@ -246,4 +246,48 @@ def test_first_authorize_error_is_diagnostic_but_never_discloses_a_secret(
     assert result["real_backup_uploads"] == 0
     assert "secret" not in str(result).lower()
     assert "sensitive" not in str(result).lower()
+
+
+@pytest.mark.parametrize(("error_doc","expected"),[
+    ({"status":401,"code":"unauthorized","message":"secret source text"},
+     "B2_AUTH_PAIR_INVALID_401"),
+    ({"status":401,"code":"unsupported","message":"secret API diagnostic"},
+     "B2_AUTH_VERSION_UNSUPPORTED_401"),
+    ({"status":401,"code":"bad_auth_token"},
+     "B2_AUTH_401_UNCLASSIFIED"),
+    ({"status":200,"code":"unauthorized"},
+     "B2_AUTH_401_UNCLASSIFIED"),
+    ({"status":401,"code":"hostile-dynamic-secret-value"},
+     "B2_AUTH_401_UNCLASSIFIED"),
+])
+def test_official_401_error_code_distinguished_safely(monkeypatch,error_doc,expected):
+    from urllib.error import HTTPError
+    import io
+    import json
+    class FakeOpener:
+        def open(self,request,timeout):
+            assert request.full_url == b2.AUTH
+            raise HTTPError(request.full_url,401,"secret HTTP status",None,
+                            io.BytesIO(json.dumps(error_doc).encode()))
+    monkeypatch.setattr(b2,"build_opener",lambda *args: FakeOpener())
+    result=b2.verify(env=env(),fetch=b2.transport,now_ms=NOW)
+    assert result["blocker"]==expected
+    assert result["provider_calls"]==0
+    assert result["overall_release"]=="BLOCKED"
+    assert "secret" not in str(result)
+    assert "hostile" not in str(result)
+    assert "HTTP status" not in str(result)
+
+
+def test_401_oversized_body_does_not_echo_or_leak(monkeypatch):
+    from urllib.error import HTTPError
+    import io
+    class FakeOpener:
+        def open(self,request,timeout):
+            raise HTTPError(request.full_url,401,"private",None,
+                            io.BytesIO(b"SECRET_AUTH_ERROR"*1000))
+    monkeypatch.setattr(b2,"build_opener",lambda *args: FakeOpener())
+    result=b2.verify(env=env(),fetch=b2.transport,now_ms=NOW)
+    assert result["blocker"]=="B2_AUTH_401_UNCLASSIFIED"
+    assert "SECRET" not in str(result)
 

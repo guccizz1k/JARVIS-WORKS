@@ -165,3 +165,24 @@ def test_stdout_has_safe_error_code_and_no_raw_secrets(monkeypatch, capsys):
     assert "OWNER_CODESPACE_REQUIRED" in output
     assert "source-db-secret" not in output
     assert "synthetic-app-key" not in output
+
+@pytest.mark.parametrize("error_code",[
+    "B2_AUTH_PAIR_INVALID_401",
+    "B2_AUTH_VERSION_UNSUPPORTED_401",
+    "B2_AUTH_401_UNCLASSIFIED",
+])
+def test_exact_401_subcode_crosses_launcher_only_as_safe_marker(error_code):
+    fake = Runner(
+        raw={"b2_owner_bucket_readonly":"BLOCKED",
+             "overall_release":"BLOCKED",
+             "real_backup_uploads":0,
+             "provider_calls":0,
+             "blocker":error_code},
+        returncode=1,
+    )
+    result = launcher.verify(parent=PARENT, runner=fake)
+    assert result["blocker"] == error_code
+    assert result["b2_owner_bucket_readonly"] == "BLOCKED"
+    assert result["provider_calls"] == 0
+    assert result["actual_backup_objects_uploaded"] == 0
+
