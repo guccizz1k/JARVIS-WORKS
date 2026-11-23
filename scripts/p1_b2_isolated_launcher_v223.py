@@ -14,9 +14,10 @@ import os
 import subprocess
 import sys
 
-PINNED_PROBE_SHA = "fa93a675a0bc4a8adf18e566c5c4d7ab7419ffc7"
-PINNED_PROBE_PATH = "scripts/p1_b2_codespace_probe_v223.py"
-PROBE_REF = PINNED_PROBE_SHA + ":" + PINNED_PROBE_PATH
+# Exact immutable Git blob object instead of editable branch/working tree.
+# The parent review SHA remains recorded in GitHub CI evidence.
+PINNED_PROBE_SHA = "3d94191e3df75998e5e36135e338fe8c56820b69"
+PROBE_REF = PINNED_PROBE_SHA
 B2_KEY_NAMES = ("JW_B2_AUDIT_KEY_ID", "JW_B2_AUDIT_APPLICATION_KEY")
 ALLOWED_ENV_KEYS = frozenset((
     "CODESPACES", "JW_B2_AUDIT_KEY_ID", "JW_B2_AUDIT_APPLICATION_KEY",
@@ -66,6 +67,10 @@ SAFE_BLOCKERS = frozenset((
     "SOURCE_OR_BACKUP_CREDENTIALS_MUST_BE_ISOLATED",
     "INVALID_B2_AUDIT_KEY_FORMAT", "B2_AUTH_RESPONSE_INVALID",
     "B2_KEY_SCOPE_UNAVAILABLE", "B2_BUCKET_SCOPE_INVALID",
+    "B2_AUTH_KEY_REJECTED_401", "B2_AUTH_ACCESS_DENIED_403",
+    "B2_PROVIDER_RATE_LIMITED_429", "B2_PROVIDER_HTTP_REJECTED",
+    "B2_PROVIDER_TLS_VERIFY_FAILED", "B2_PROVIDER_DNS_LOOKUP_FAILED",
+    "B2_PROVIDER_NETWORK_TIMEOUT", "B2_PROVIDER_DIRECT_NETWORK_UNAVAILABLE",
 ))
 DEFAULT_BLOCKER = "PROBE_RETURNED_UNSAFE_RECEIPT"
 
@@ -118,8 +123,8 @@ def verify(*, parent=None, runner=None):
     result["two_secrets_reused_without_reentry"] = True
     result["child_env_whitelist_only"] = True
     try:
-        # Git show is LOCAL ONLY. The code object is locked to a reviewed
-        # full SHA, never the editable checkout branch or local working tree.
+        # Git show is LOCAL ONLY. This uses a content-addressed reviewed
+        # Git blob SHA1, never the editable checkout or working tree.
         pin = runner(
             ["git", "show", PROBE_REF],
             env=GIT_ENV, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

@@ -56,3 +56,29 @@ of exactly 11 owner-approved ciphertext blobs, independent readback/retention,
 second-site owner-key custodian and actual PG17 recovery.
 
 No B2 service work is done from CI; tests use only synthetic credentials.
+
+## Distinguishing the first live provider failure
+
+Owner screenshot showed the isolated child correctly excluded backup/DB
+credentials; `provider_calls=0` and a previous catch-all provider failure
+could not distinguish rejected B2 credentials from HTTPS egress problems.
+
+The original official B2 Native v4 GET `b2_authorize_account` endpoint is
+correct; do not silently downgrade API versions or use the master key.
+The current diagnostic probe is pinned by **content-addressed Git blob SHA1**
+`3d94191e3df75998e5e36135e338fe8c56820b69` and only emits allowlisted safe codes:
+- `B2_AUTH_KEY_REJECTED_401`: server rejected key ID/application key pair;
+  verify source of Codespaces secrets privately, never paste/print values.
+- `B2_AUTH_ACCESS_DENIED_403`: app key or account access denied.
+- `B2_PROVIDER_RATE_LIMITED_429`: rate limit, don't retry blindly.
+- `B2_PROVIDER_TLS_VERIFY_FAILED`: TLS/certificate validation failed.
+- `B2_PROVIDER_DNS_LOOKUP_FAILED`: local resolver issue.
+- `B2_PROVIDER_NETWORK_TIMEOUT`: direct HTTPS timeout.
+- `B2_PROVIDER_DIRECT_NETWORK_UNAVAILABLE`: network routing/proxy
+  configuration blocked direct HTTPS; **do not weaken TLS or automatically
+  forward Basic authentication through untrusted proxies**.
+- `B2_PROVIDER_HTTP_REJECTED`: other sanitized HTTP status.
+
+No provider exception body, URLs, host routing, headers, key IDs or secrets
+are included in receipt. Eight corresponding synthetic negative tests cover
+all classes. All other original read-only guards remain intact.

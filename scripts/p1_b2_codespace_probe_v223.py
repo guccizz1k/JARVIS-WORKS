@@ -18,6 +18,9 @@ import os
 import re
 import sys
 import time
+import socket
+import ssl
+from urllib.error import HTTPError, URLError
 from urllib.request import (
     Request, ProxyHandler, HTTPRedirectHandler, build_opener,
 )
@@ -67,13 +70,38 @@ def transport(url, headers, body=None):
     # Ignore inherited HTTP(S)_PROXY variables so provider credentials cannot
     # silently route to an arbitrary proxy controlled by the environment.
     opener = build_opener(ProxyHandler({}), NoRedirect())
-    with opener.open(req, timeout=12) as response:
-        if response.status != 200:
-            raise Blocked("B2_UNEXPECTED_PROVIDER_STATUS")
-        raw = response.read(MAX_JSON + 1)
+    try:
+        with opener.open(req, timeout=12) as response:
+            if response.status != 200:
+                raise Blocked("B2_UNEXPECTED_PROVIDER_STATUS")
+            raw = response.read(MAX_JSON + 1)
+    except HTTPError as exc:
+        # Strictly classify status, NEVER display response body, request
+        # Authorization header, URL with tokens, or exception text.
+        if url == AUTH and exc.code == 401:
+            raise Blocked("B2_AUTH_KEY_REJECTED_401") from None
+        if url == AUTH and exc.code == 403:
+            raise Blocked("B2_AUTH_ACCESS_DENIED_403") from None
+        if exc.code == 429:
+            raise Blocked("B2_PROVIDER_RATE_LIMITED_429") from None
+        raise Blocked("B2_PROVIDER_HTTP_REJECTED") from None
+    except URLError as exc:
+        reason = exc.reason
+        if isinstance(reason, ssl.SSLError):
+            raise Blocked("B2_PROVIDER_TLS_VERIFY_FAILED") from None
+        if isinstance(reason, socket.gaierror):
+            raise Blocked("B2_PROVIDER_DNS_LOOKUP_FAILED") from None
+        if isinstance(reason, (TimeoutError, socket.timeout)):
+            raise Blocked("B2_PROVIDER_NETWORK_TIMEOUT") from None
+        raise Blocked("B2_PROVIDER_DIRECT_NETWORK_UNAVAILABLE") from None
+    except (TimeoutError, socket.timeout):
+        raise Blocked("B2_PROVIDER_NETWORK_TIMEOUT") from None
     if len(raw) > MAX_JSON:
         raise Blocked("B2_PROVIDER_RESPONSE_TOO_LARGE")
-    doc = json.loads(raw)
+    try:
+        doc = json.loads(raw)
+    except (UnicodeError, ValueError):
+        raise Blocked("B2_PROVIDER_RESPONSE_INVALID") from None
     if not isinstance(doc, dict):
         raise Blocked("B2_PROVIDER_RESPONSE_INVALID")
     return doc

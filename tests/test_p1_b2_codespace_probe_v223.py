@@ -200,3 +200,50 @@ def test_stdout_never_prints_secrets_on_failed_preflight(monkeypatch,capsys):
     monkeypatch.setenv("CODESPACES","true")
     assert b2.main(["verify-readonly"])==1
     assert "CODESPACE_SECRETS_NOT_VISIBLE_RESTART_REQUIRED" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("kind", "expect"), [
+    ("http401", "B2_AUTH_KEY_REJECTED_401"),
+    ("http403", "B2_AUTH_ACCESS_DENIED_403"),
+    ("http429", "B2_PROVIDER_RATE_LIMITED_429"),
+    ("http500", "B2_PROVIDER_HTTP_REJECTED"),
+    ("dns", "B2_PROVIDER_DNS_LOOKUP_FAILED"),
+    ("tls", "B2_PROVIDER_TLS_VERIFY_FAILED"),
+    ("timeout", "B2_PROVIDER_NETWORK_TIMEOUT"),
+    ("network", "B2_PROVIDER_DIRECT_NETWORK_UNAVAILABLE"),
+])
+def test_first_authorize_error_is_diagnostic_but_never_discloses_a_secret(
+        monkeypatch, kind, expect):
+    from urllib.error import HTTPError, URLError
+    import socket
+    import ssl
+    import pytest
+    import io
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            assert request.get_method() == "GET"
+            assert request.full_url == b2.AUTH
+            assert request.get_header("Authorization").startswith("Basic ")
+            if kind.startswith("http"):
+                code = int(kind[-3:])
+                raise HTTPError(request.full_url, code,
+                                "sensitive-provider-error-must-not-echo",
+                                None, io.BytesIO(b"sensitive-response-body"))
+            if kind == "dns":
+                raise URLError(socket.gaierror("secret DNS response"))
+            if kind == "tls":
+                raise URLError(ssl.SSLError("sensitive certificate details"))
+            if kind == "timeout":
+                raise URLError(socket.timeout("secret timeout"))
+            raise URLError(OSError("private network routing details"))
+
+    monkeypatch.setattr(b2, "build_opener", lambda *args: FakeOpener())
+    result = b2.verify(env=env(), fetch=b2.transport, now_ms=NOW)
+    assert result["blocker"] == expect
+    assert result["provider_calls"] == 0
+    assert result["overall_release"] == "BLOCKED"
+    assert result["real_backup_uploads"] == 0
+    assert "secret" not in str(result).lower()
+    assert "sensitive" not in str(result).lower()
+
