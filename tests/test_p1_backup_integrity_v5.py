@@ -259,3 +259,40 @@ def test_pg_tool_env_allowlist_is_shared_with_version_probe(monkeypatch):
     assert "JW_PG_SOURCE_DSN" not in parent
     assert "JW_PG_SOURCE_DSN" not in env
     assert all(env[name] == value for name, value in parent.items())
+
+
+@pytest.mark.parametrize("malformed", [
+    "not-a-url",
+    "postgresql://[unclosed-ipv6",
+    "postgresql://",
+])
+def test_safe_password_extraction_never_crashes(malformed):
+    assert p._safe_dsn_password(malformed) == ""
+
+
+def test_safe_password_extraction_retains_password_redaction():
+    assert p._safe_dsn_password("postgresql://alice:safe-fixture@localhost/test") == "safe-fixture"
+
+
+def test_malformed_dsn_never_leaks_traceback(monkeypatch, capsys):
+    """Broken URL must flow to sanitized CLI errors, not print an exception traceback."""
+    monkeypatch.setenv("JW_PG_SOURCE_DSN", "postgresql://[malformed-host")
+    monkeypatch.setenv(
+        "JW_PG_TARGET_ADMIN_DSN",
+        "postgresql://u:target-fixture-secret@localhost:5432/postgres")
+    monkeypatch.setattr(p, "install_termination_handlers", lambda: None)
+    assert p.main(["run"]) == 1
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert "target-fixture-secret" not in captured.err
+    assert "FAIL_V223_UNEXPECTED_ValueError" in captured.err
+
+
+def test_mark_target_error_handling_survives_malformed_url(monkeypatch, capsys):
+    """A malformed target must not crash its own error redaction handler."""
+    monkeypatch.setenv("JW_PG_TARGET_ADMIN_DSN", "postgresql://[malformed-target")
+    monkeypatch.setenv("JW_PG_TARGET_EPHEMERAL_TOKEN", "bad")
+    assert p.mark_target() == 1
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert "BLOCKED_V223_TOKEN_REQUIRED_MIN_16_CHARS" in captured.err
