@@ -462,3 +462,140 @@ def test_diagnose_remote_authorized_calls_actual_cipher_readback_but_not_release
     assert result["local_archives_not_offsite"]==9
     assert result["all_11_archives_offsite"] is False
     assert result["overall"]=="BLOCKED"
+
+
+
+def test_real_cause_gh_private_access_but_git_blobless_clone_fail_prevented(
+    monkeypatch,tmp_path
+):
+    """2026-11-23 16:25 owner: Git helper BLOCKED, gh private API PASS,
+    clone could succeed, but its --filter=blob:none lazy cat-file fails.
+    Verify no git clone/cat-file even attempted and pinned API is used.
+    """
+    import os
+    from pathlib import Path
+    monkeypatch.setenv("CODESPACES","true")
+    monkeypatch.setenv("JW_PG_VAULT_READBACK_ACK",vault.ACK)
+    head="a"*40
+    monkeypatch.setenv("JW_PG_VAULT_EXPECTED_SHA",head)
+    f=tmp_path/"owner-only.jwpgbk"
+    f.write_bytes(b"JWPGBK1\x00synthetic_private_cipher")
+    f.chmod(0o600)
+    monkeypatch.setattr(vault.owner,"discover_owner_archive",lambda:([f],"ONE_SYNTHETIC"))
+    monkeypatch.setattr(vault.owner,"_private_cipher_file",lambda p:Path(p)==f)
+    monkeypatch.setattr(vault.shutil,"which",lambda prog:"/usr/bin/"+prog)
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+        "auth_diagnostic":"GIT_HELPER_USING_DIFFERENT_CREDENTIALS",
+        "git_read_only_private_access":"BLOCKED",
+        "gh_cli_private_api_access":"PASS"})
+    monkeypatch.setattr(vault,"_clone_with_approved_credentials",
+        lambda *a,**kw:(_ for _ in ()).throw(
+            AssertionError("do not clone partial Git blob tree")))
+    called=[]
+    def api(local,pin):
+        called.append((len(local),pin))
+        return {"remote_readback":"BLOCKED_REMOTE_NOT_LOCAL",
+                "remote_ciphertext_count":4,
+                "remote_unique_ciphertext_count":3,
+                "remote_full_sha256_readback_matches":2,
+                "remote_unique_full_sha256_matches":2,
+                "remote_unmatched_ciphertext_count":1,
+                "local_archives_not_offsite":9,
+                "readback_transport":"GH_REST_BLOB_BASE64_VERIFIED",
+                "remote_commit_pinned":True,
+                "all_11_archives_offsite":False}
+    monkeypatch.setattr(vault,"_vault_api_readback",api)
+    result=vault.audit()
+    assert called==[(1,head)]
+    assert result["readback_transport"]=="GH_REST_BLOB_BASE64_VERIFIED"
+    assert result["remote_readback"]=="BLOCKED_REMOTE_NOT_LOCAL"
+    assert result["temporary_clone_removed"]=="PASS"
+    assert result["overall"]=="BLOCKED"
+
+
+def test_partial_clone_lazy_catfile_size_failure_retries_only_authorized_rest(
+    monkeypatch,tmp_path
+):
+    import subprocess
+    from pathlib import Path
+    monkeypatch.setenv("CODESPACES","true")
+    monkeypatch.setenv("JW_PG_VAULT_READBACK_ACK",vault.ACK)
+    pin="b"*40
+    monkeypatch.setenv("JW_PG_VAULT_EXPECTED_SHA",pin)
+    encrypted=tmp_path/"local.jwpgbk"
+    encrypted.write_bytes(b"JWPGBK2\x00unrelated_fixture")
+    encrypted.chmod(0o600)
+    monkeypatch.setattr(vault.owner,"discover_owner_archive",lambda:([encrypted],"ONE"))
+    monkeypatch.setattr(vault.owner,"_private_cipher_file",lambda p:Path(p)==encrypted)
+    monkeypatch.setattr(vault.shutil,"which",lambda x:"/usr/bin/"+x)
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+        "git_read_only_private_access":"PASS","gh_cli_private_api_access":"PASS"})
+    monkeypatch.setattr(vault,"_clone_with_approved_credentials",lambda *a,**kw:None)
+    def simulate_git(cmd,dir=None,timeout=60):
+        if cmd[0]=="rev-parse":
+            return subprocess.CompletedProcess(cmd,0,(pin+"\n").encode(),b"")
+        if cmd[0]=="ls-tree":
+            sha="c"*40
+            return subprocess.CompletedProcess(cmd,0,
+                b"100644 blob "+sha.encode()+b"\tarchived.jwpgbk\0",b"")
+        raise AssertionError("unexpected network command")
+    monkeypatch.setattr(vault,"git",simulate_git)
+    monkeypatch.setattr(vault,"remote_sha256",
+        lambda *args:(_ for _ in ()).throw(vault.Blocked("GIT_BLOB_SIZE_UNKNOWN")))
+    calls=[]
+    monkeypatch.setattr(vault,"_vault_api_readback",
+        lambda local,head:(calls.append(1) or {
+            "remote_readback":"BLOCKED_REMOTE_NOT_LOCAL",
+            "readback_transport":"GH_REST_BLOB_BASE64_VERIFIED",
+            "all_11_archives_offsite":False}))
+    result=vault.audit()
+    assert calls==[1]
+    assert result["readback_transport"]=="GH_REST_BLOB_BASE64_VERIFIED"
+    assert result["overall"]=="BLOCKED"
+
+
+def test_corrupt_ciphertext_hash_never_falls_back_to_hide_integrity_failure(
+    monkeypatch,tmp_path
+):
+    import subprocess
+    from pathlib import Path
+    monkeypatch.setenv("CODESPACES","true")
+    monkeypatch.setenv("JW_PG_VAULT_READBACK_ACK",vault.ACK)
+    pin="b"*40
+    monkeypatch.setenv("JW_PG_VAULT_EXPECTED_SHA",pin)
+    encrypted=tmp_path/"owner.jwpgbk"
+    encrypted.write_bytes(b"JWPGBK1\x00integrity_control")
+    encrypted.chmod(0o600)
+    monkeypatch.setattr(vault.owner,"discover_owner_archive",lambda:([encrypted],"ONE"))
+    monkeypatch.setattr(vault.owner,"_private_cipher_file",lambda p:Path(p)==encrypted)
+    monkeypatch.setattr(vault.shutil,"which",lambda x:"/usr/bin/"+x)
+    monkeypatch.setattr(vault,"auth_probe",lambda:{
+        "git_read_only_private_access":"PASS","gh_cli_private_api_access":"PASS"})
+    monkeypatch.setattr(vault,"_clone_with_approved_credentials",lambda *a,**kw:None)
+    def git_ok(cmd,dir=None,timeout=60):
+        if cmd[0]=="rev-parse":
+            return subprocess.CompletedProcess(cmd,0,(pin+"\n").encode(),b"")
+        if cmd[0]=="ls-tree":
+            return subprocess.CompletedProcess(cmd,0,
+                b"100644 blob "+b"c"*40+b"\tarchived.jwpgbk\0",b"")
+        raise AssertionError("unexpected")
+    monkeypatch.setattr(vault,"git",git_ok)
+    monkeypatch.setattr(vault,"remote_sha256",lambda *a:("f"*64,100))
+    monkeypatch.setattr(vault,"_vault_api_readback",
+        lambda *a:(_ for _ in ()).throw(
+            AssertionError("never bypass cryptographic mismatch")))
+    # Not the local Git SHA -> may report NOT_LOCAL, not a digest mismatch.
+    # Force the *same* Git SHA with a malicious SHA256 value.
+    real_git_sha=vault.local_hash(encrypted)[0]
+    def source_git(cmd,dir=None,timeout=60):
+        if cmd[0]=="rev-parse":
+            return subprocess.CompletedProcess(cmd,0,(pin+"\n").encode(),b"")
+        if cmd[0]=="ls-tree":
+            return subprocess.CompletedProcess(cmd,0,
+                b"100644 blob "+real_git_sha.encode()+b"\tarchived.jwpgbk\0",b"")
+        raise AssertionError("unexpected")
+    monkeypatch.setattr(vault,"git",source_git)
+    result=vault.audit()
+    assert result["blocker"]=="REMOTE_CIPHERTEXT_SHA256_MISMATCH"
+    assert result["remote_readback"]=="NOT_RUN"
+    assert result["overall"]=="BLOCKED"
