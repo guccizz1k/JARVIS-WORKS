@@ -34,6 +34,8 @@ REMOTE_UNIQUE = 12
 LOCAL_UNIQUE = 11
 RETENTION_DAYS = 30
 UPLOAD_PREFIX = "jw-v223/approved-30d-20261124/"
+# Public repository pins identity by SHA256, not the owner's bucket name.
+B2_BUCKET_NAME_SHA256 = "818b599eca5772d820b2b04ba3e192b5e40688fb9a715b4b1082d7b5aed2be5c"
 
 
 class Blocked(Exception):
@@ -65,7 +67,9 @@ def _local_files(root=None):
                 count += 1
                 if count > 256:
                     raise Blocked("OWNER_BACKUP_SCAN_LIMIT")
-                if entry.is_file(follow_symlinks=False) and entry.name.endswith(".jwpgbk"):
+                if entry.name.endswith(".jwpgbk"):
+                    if not entry.is_file(follow_symlinks=False):
+                        raise Blocked("OWNER_CIPHER_UNSAFE_FILE_TYPE")
                     if not _private_file(Path(entry.path)):
                         raise Blocked("OWNER_CIPHER_PERMISSIONS_INVALID")
                     paths.append(Path(entry.path))
@@ -77,7 +81,9 @@ def _local_files(root=None):
                             count += 1
                             if count > 256:
                                 raise Blocked("OWNER_BACKUP_SCAN_LIMIT")
-                            if item.is_file(follow_symlinks=False) and item.name.endswith(".jwpgbk"):
+                            if item.name.endswith(".jwpgbk"):
+                                if not item.is_file(follow_symlinks=False):
+                                    raise Blocked("OWNER_CIPHER_UNSAFE_FILE_TYPE")
                                 if not _private_file(Path(item.path)):
                                     raise Blocked("OWNER_CIPHER_PERMISSIONS_INVALID")
                                 paths.append(Path(item.path))
@@ -141,18 +147,19 @@ def _gh_get(endpoint):
         raise Blocked("INVALID_PRIVATE_VAULT_READ_ENDPOINT")
     # GitHub-only CLI child. Never passes B2 keys, source DB connection
     # strings or owner recovery keys to the GitHub process environment.
-    env = os.environ.copy()
-    for key in list(env):
-        if (key.startswith("JW_B2_") or key.startswith("JW_PG_")
-                or key in ("DATABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
-                           "AWS_SECRET_ACCESS_KEY")):
-            env.pop(key, None)
-    env.pop("GITHUB_TOKEN", None)
-    vaulted = os.environ.get("JW_VAULT_READ_TOKEN")
+    # Explicit allowlist; GH sees no B2 key, DB password, recovery secret,
+    # HTTP(S) proxy, AWS config, or unrelated Codespaces secrets.
+    env = {
+        "HOME": str(Path.home()),
+        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "LANG": "C.UTF-8",
+        "GH_PROMPT_DISABLED": "1",
+        "GH_NO_UPDATE_NOTIFIER": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    vaulted = os.environ.get("JW_VAULT_READ_TOKEN") or os.environ.get("GH_TOKEN")
     if vaulted:
         env["GH_TOKEN"] = vaulted
-    env["GH_PROMPT_DISABLED"] = "1"
-    env["GH_NO_UPDATE_NOTIFIER"] = "1"
     try:
         p = subprocess.run(["gh", "api", endpoint, "--method", "GET",
                             "--header", "Accept: application/vnd.github+json"],
@@ -280,7 +287,9 @@ def validate_upload_key_capabilities(allowed, *, now_ms):
     bucket = allowed.get("buckets")
     if (not isinstance(bucket, list) or len(bucket) != 1
             or not isinstance(bucket[0], dict)
-            or bucket[0].get("name") != "naruv-jw-backup-worm-2026"):
+            or not isinstance(bucket[0].get("name"), str)
+            or hashlib.sha256(bucket[0]["name"].encode("utf-8")).hexdigest()
+                != B2_BUCKET_NAME_SHA256):
         return "UPLOAD_KEY_NOT_RESTRICTED_TO_OWNER_BUCKET"
     if allowed.get("namePrefix") != UPLOAD_PREFIX:
         return "UPLOAD_KEY_PREFIX_MISMATCH"

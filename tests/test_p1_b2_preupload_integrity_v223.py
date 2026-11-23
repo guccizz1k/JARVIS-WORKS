@@ -184,7 +184,7 @@ def test_local_symlinks_and_nonapproved_files_are_rejected(tmp_path):
     outside=tmp_path/"outside"
     outside.write_bytes(b"JWPGBK2\n"+b"Y"*400)
     (root/"accidental.jwpgbk").symlink_to(outside)
-    with pytest.raises(gate.Blocked,match="OWNER_ELEVEN_ARCHIVES_REQUIRED"):
+    with pytest.raises(gate.Blocked,match="OWNER_CIPHER_UNSAFE_FILE_TYPE"):
         gate._local_files(root)
     outside.chmod(0o600)
     (root/"accidental.jwpgbk").unlink()
@@ -268,4 +268,41 @@ def test_wrong_owner_pin_stops_before_b2_and_blob_download():
     assert not any("/blobs/" in x for x in touched)
     assert result["backblaze_empty_bucket_readonly"]=="NOT_RUN"
     assert result["overall"]=="BLOCKED"
+
+
+
+def test_private_github_api_child_never_inherits_b2_db_or_source_secrets(monkeypatch):
+    monkeypatch.setenv("JW_B2_AUDIT_APPLICATION_KEY","sensitive-b2-secret")
+    monkeypatch.setenv("JW_PG_BACKUP_KEY","sensitive-owner-recovery-key")
+    monkeypatch.setenv("DATABASE_URL","sensitive-postgres-url")
+    monkeypatch.setenv("HTTPS_PROXY","https://untrusted.invalid")
+    monkeypatch.setenv("GH_TOKEN","synthetic-github-read-token")
+    record={}
+    def dummy_run(argv,**kwargs):
+        record["env"]=kwargs["env"]
+        assert argv[0]=="gh" and argv[1]=="api"
+        return subprocess.CompletedProcess(argv,0,
+            stdout=json.dumps({"synthetic":True}).encode())
+    monkeypatch.setattr(gate.subprocess,"run",dummy_run)
+    assert gate._gh_get(gate.VAULT_REPO+"/git/ref/heads/main")=={"synthetic":True}
+    assert set(record["env"])=={
+        "HOME","PATH","LANG","GH_PROMPT_DISABLED",
+        "GH_NO_UPDATE_NOTIFIER","GIT_TERMINAL_PROMPT","GH_TOKEN"}
+    assert record["env"]["GH_TOKEN"]=="synthetic-github-read-token"
+    assert "sensitive" not in str(record["env"])
+    assert "HTTPS_PROXY" not in record["env"]
+
+
+def test_unapproved_extra_symlink_blocks_even_with_eleven_good_local_files(tmp_path):
+    root=tmp_path/"backup"
+    root.mkdir(mode=0o700)
+    root.chmod(0o700)
+    for i in range(11):
+        p=root/f"archive_{i}.jwpgbk"
+        p.write_bytes(b"JWPGBK2\n"+bytes([i])*370)
+        p.chmod(0o600)
+    assert len(gate._local_files(root))==11
+    (root/"untrusted.jwpgbk").symlink_to(root/"archive_0.jwpgbk")
+    with pytest.raises(gate.Blocked,match="OWNER_CIPHER_UNSAFE_FILE_TYPE"):
+        gate._local_files(root)
 
