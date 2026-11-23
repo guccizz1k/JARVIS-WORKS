@@ -113,7 +113,7 @@ jobs:
       - name: Verify protected QA adapter and P1 compatibility
         run: |
           python -m py_compile app/owner_review_app_v223.py app/owner_review_public_qa_guard_v223.py scripts/pg_backup_v223.py scripts/p1_owner_offline_restore_v223.py
-          python -m pytest --noconftest -q tests/test_v223_public_qa_gate.py tests/test_v223_review_isolation.py tests/test_v223_owner_approved_ui_pin.py tests/test_v223_order_review.py tests/test_v223_review_target_boundary.py tests/test_v223_owner_visual_server.py tests/test_v223_approved_review_server.py
+          python -m pytest --noconftest -q tests/test_v223_public_qa_gate.py tests/test_v223_review_isolation.py tests/test_v223_owner_approved_ui_pin.py tests/test_v223_order_review.py tests/test_v223_review_target_boundary.py tests/test_v223_owner_visual_server.py tests/test_v223_approved_review_server.py tests/test_v223_document_to_settlement_e2e.py
           node --test tests/test_v223_review_operational_panels.cjs
 
   integrated-owner-browser:
