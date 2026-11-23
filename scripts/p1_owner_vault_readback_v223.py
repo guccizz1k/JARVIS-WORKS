@@ -112,37 +112,59 @@ def remote_sha256(repo:Path,sha:str)->tuple[str,int]:
             proc.kill();proc.wait(timeout=10)
 
 def compare(remote:list[str],local:dict[str,str],repo:Path|None,remote_reader=None)->dict:
+    """Verify every remote blob and the distinct local-owner coverage.
+
+    A private vault can contain older/unrelated encrypted objects and multiple
+    paths to one blob. Neither is permission to delete files, nor a reason
+    to reject 11/11 independently verified CURRENT OWNER backups. All remote
+    blob bytes are still read and hashed; any corresponding local mismatch
+    fails closed before any positive result.
+    """
     matched_entries=0
     matched_objects=set()
-    unmatched=0
+    unmatched_entries=0
     total=0
+    checked={}
     for obj in remote:
-        sha,n=(remote_reader(obj) if remote_reader is not None
-               else remote_sha256(repo,obj))
-        total+=n
-        if total>MAX_TOTAL:raise Blocked("REMOTE_CIPHERTEXT_TOTAL_LIMIT")
+        if obj not in checked:
+            actual,n=(remote_reader(obj) if remote_reader is not None
+                      else remote_sha256(repo,obj))
+            if not (isinstance(actual,str) and re.fullmatch(r"[0-9a-f]{64}",actual)
+                    and isinstance(n,int) and not isinstance(n,bool)
+                    and 0<n<=MAX_SIZE):
+                raise Blocked("REMOTE_READBACK_INVALID_RESULT")
+            total+=n
+            if total>MAX_TOTAL:raise Blocked("REMOTE_CIPHERTEXT_TOTAL_LIMIT")
+            checked[obj]=(actual,n)
+        actual,n=checked[obj]
         if obj not in local:
-            unmatched+=1
-        elif sha!=local[obj]:
+            unmatched_entries+=1
+        elif actual!=local[obj]:
             raise Blocked("REMOTE_CIPHERTEXT_SHA256_MISMATCH")
         else:
             matched_entries+=1
             matched_objects.add(obj)
-    # A second path to an identical encrypted file cannot count as a
-    # SECOND independently recoverable backup. Never subtract path count
-    # from the number of unique owner-local ciphertexts.
+    fully_covered=(len(local)==11 and len(matched_objects)==11)
+    # Preserve the existing all-remote-members-local result, but recognize
+    # full OWNER coverage independently of unrelated remotely stored blobs.
+    if fully_covered:
+        status="PASS_ALL_11_OWNER_ARCHIVES_VERIFIED"
+    elif matched_entries==len(remote):
+        status="PASS_MATCHED_REMOTE_CIPHERTEXT"
+    else:
+        status="BLOCKED_REMOTE_NOT_LOCAL"
     return {
         "remote_ciphertext_count":len(remote),
-        "remote_unique_ciphertext_count":len(set(remote)),
-        "remote_duplicate_content_entries":len(remote)-len(set(remote)),
+        "remote_unique_ciphertext_count":len(checked),
+        "remote_duplicate_content_entries":len(remote)-len(checked),
+        "remote_downloaded_unique_objects_count":len(checked),
         "remote_full_sha256_readback_matches":matched_entries,
         "remote_unique_full_sha256_matches":len(matched_objects),
-        "remote_unmatched_ciphertext_count":unmatched,
+        "remote_unmatched_ciphertext_count":unmatched_entries,
+        "remote_unique_ciphertexts_not_in_owner":len(set(remote)-set(local)),
         "local_archives_not_offsite":len(local)-len(matched_objects),
-        "remote_readback":"PASS_MATCHED_REMOTE_CIPHERTEXT" if matched_entries==len(remote)
-            else "BLOCKED_REMOTE_NOT_LOCAL",
-        "all_11_archives_offsite":(
-            matched_entries==len(matched_objects)==len(local)==len(remote)==11),
+        "remote_readback":status,
+        "all_11_archives_offsite":fully_covered,
     }
 
 
@@ -487,6 +509,42 @@ def audit()->dict:
         result["blocker"]="SAFE_VAULT_READBACK_ERROR"
     return result
 
+def plan_offsite()->dict:
+    """Non-mutating provider gap preflight with no archive names or secret data.
+
+    The proposed copy count is informational; this function never writes to
+    GitHub, moves files or changes retention/credentials. Remote object hashes
+    must have been independently read back before a plan is considered valid.
+    """
+    report=audit()
+    report["offsite_upload_execution"]="NOT_RUN_REQUIRES_SEPARATE_APPROVAL"
+    report["backup_time_attestation"]="NOT_VERIFIED"
+    report["key_custody_independent"]="NOT_VERIFIED"
+    report["immutable_remote_retention"]="NOT_VERIFIED"
+    report["offsite_plan"]="BLOCKED_INCOMPLETE_PROVIDER_EVIDENCE"
+    if not (report.get("remote_commit_pinned") is True
+            and report.get("temporary_clone_removed")=="PASS"
+            and report.get("readback_transport") in (
+                "GH_REST_BLOB_BASE64_VERIFIED","GIT_PRIVATE_REPOSITORY")):
+        return report
+    missing=report.get("local_archives_not_offsite")
+    checked=report.get("remote_downloaded_unique_objects_count")
+    unique=report.get("remote_unique_ciphertext_count")
+    if (not isinstance(missing,int) or isinstance(missing,bool)
+            or not 0<=missing<=11
+            or not isinstance(unique,int) or unique<1
+            or checked!=unique):
+        return report
+    report["offsite_plan"]="PASS_READ_ONLY_GAP_PREFLIGHT"
+    report["missing_unique_archive_upload_candidates"]=missing
+    report["predicted_unique_ciphertexts_after_owner_approved_copy"]=unique+missing
+    report["predicted_vault_file_entries_after_owner_approved_copy"]=(
+        report["remote_ciphertext_count"]+missing)
+    report["offsite_upload_execution"]="NOT_RUN_REQUIRES_SEPARATE_APPROVAL"
+    report["overall"]="BLOCKED"
+    return report
+
+
 def diagnose_remote()->dict:
     """One-call complete credential classification + authorized readback only.
 
@@ -543,18 +601,21 @@ def diagnose_all()->dict:
 
 def main(argv:list[str]|None=None)->int:
     args=sys.argv[1:] if argv is None else argv
-    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"], ["diagnose-all"], ["diagnose-remote"]):
-        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth|diagnose-all|diagnose-remote]",file=sys.stderr)
+    if args not in (["readback"], ["diagnose-manifest"], ["diagnose-auth"], ["diagnose-all"], ["diagnose-remote"], ["plan-offsite"]):
+        print("USAGE: python -m scripts.p1_owner_vault_readback_v223 [readback|diagnose-manifest|diagnose-auth|diagnose-all|diagnose-remote|plan-offsite]",file=sys.stderr)
         return 2
     try:
         result=(auth_probe() if args==["diagnose-auth"] else
                 manifest_diagnostic() if args==["diagnose-manifest"] else
                 diagnose_all() if args==["diagnose-all"] else
-                diagnose_remote() if args==["diagnose-remote"] else audit())
+                diagnose_remote() if args==["diagnose-remote"] else
+                plan_offsite() if args==["plan-offsite"] else audit())
     except Exception:
         print('{"remote_readback":"BLOCKED","overall":"BLOCKED","blocker":"SAFE_FAIL_CLOSED"}')
         return 1
     print(json.dumps(result,sort_keys=True,separators=(",",":")))
+    if args==["plan-offsite"]:
+        return 0 if result.get("offsite_plan")=="PASS_READ_ONLY_GAP_PREFLIGHT" else 1
     if args==["diagnose-remote"]:
         return 0 if result.get("auth_diagnostic") not in ("BLOCKED",None) else 1
     if args==["diagnose-all"]:
@@ -563,7 +624,9 @@ def main(argv:list[str]|None=None)->int:
         return 0 if result.get("auth_diagnostic") not in ("BLOCKED",None) else 1
     if args==["diagnose-manifest"]:
         return 0 if result.get("manifest_diagnostic")=="PASS_LOCAL_HASH_COMPARISON_EXECUTED" else 1
-    return 0 if (result.get("remote_readback")=="PASS_MATCHED_REMOTE_CIPHERTEXT"
+    return 0 if (result.get("remote_readback") in (
+                    "PASS_MATCHED_REMOTE_CIPHERTEXT",
+                    "PASS_ALL_11_OWNER_ARCHIVES_VERIFIED")
                  and result.get("temporary_clone_removed")=="PASS") else 1
 
 if __name__=="__main__":
