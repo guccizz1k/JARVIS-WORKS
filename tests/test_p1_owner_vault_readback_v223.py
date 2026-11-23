@@ -188,3 +188,55 @@ def test_gh_cli_can_be_authorized_without_extra_token_env(monkeypatch,tmp_path):
     monkeypatch.setattr(subprocess,"run",fake_run)
     vault._clone_with_approved_credentials(tmp_path,tmp_path/"testclone")
     assert called==[["gh","api"],["gh","repo"]]
+
+
+
+def test_real_one_shot_codespaces_cli_offline_manifest_synthetic_11_archives(tmp_path):
+    """End-to-end invoke the EXACT mobile owner's diagnostic module command.
+
+    No Codespaces authentication, no network, no secret, no owner backups.
+    Fixture recreates original owner archive discovery layout and permissions.
+    """
+    import json
+    import os
+    import sys
+    root=tmp_path/"isolated-owner"
+    backup_root=root/".local"/"share"/"jw-v223-restore"/"backups"
+    folder=backup_root/"jw_v223_synthetic-only"
+    folder.mkdir(parents=True,mode=0o700)
+    backup_root.chmod(0o700)
+    folder.chmod(0o700)
+    shas=[]
+    for i in range(11):
+        file=folder/f"synthetic-{i:02d}.jwpgbk"
+        data=b"JWPGBK1\n"+f"NON_CUSTOMER_TEST_{i:02d}".encode()*2
+        file.write_bytes(data)
+        file.chmod(0o600)
+        blob=hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
+        shas.append(blob)
+    env=os.environ.copy()
+    env.update({
+        "HOME":str(root),
+        "CODESPACES":"true",
+        "JW_PG_VAULT_READBACK_ACK":vault.ACK,
+        vault.PINNED_ENV:"c"*40,
+        vault.MANIFEST_ENV:",".join([shas[0],shas[1],shas[2],shas[0]]),
+        "PYTHONDONTWRITEBYTECODE":"1",
+    })
+    result=subprocess.run(
+        [sys.executable,"-m","scripts.p1_owner_vault_readback_v223",
+         "diagnose-manifest"],
+        env=env,check=False,capture_output=True,text=True,timeout=30)
+    assert result.returncode==0, (result.returncode,result.stdout[:200])
+    report=json.loads(result.stdout)
+    assert report["local_archive_count"]==11
+    assert report["manifest_diagnostic"]=="PASS_LOCAL_HASH_COMPARISON_EXECUTED"
+    assert report["provider_file_entry_count"]==4
+    assert report["provider_unique_git_blob_count"]==3
+    assert report["provider_duplicate_content_entries"]==1
+    assert report["provider_git_blob_id_matched_local_count"]==3
+    assert report["owner_archives_not_in_provider_manifest"]==8
+    assert report["provider_ciphertext_sha256_readback"]=="NOT_RUN"
+    assert report["overall"]=="BLOCKED"
+    assert all(sha not in result.stdout for sha in shas)
+    assert str(root) not in result.stdout
