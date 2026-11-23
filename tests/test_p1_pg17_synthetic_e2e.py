@@ -336,6 +336,39 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
                 ).format(sql.Identifier(f"item_{i}")))
             tables = backup.fetch_signature(conn, "jw_dev")["tables"]
             assert len(tables) == 65
+            # Build a trusted READ-ONLY synthetic source reference separately
+            # from the tested offline restore implementation.
+            import hashlib
+            constraint_sql = """
+                SELECT encode(sha256(convert_to(coalesce(string_agg(
+                  c.relname||'.'||k.conname||'='||pg_get_constraintdef(k.oid,true),
+                  E'\n' ORDER BY c.relname,k.conname),''),'UTF8')),'hex')
+                FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+                JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname='jw_dev';
+            """
+            expected_constraints = conn.execute(constraint_sql).fetchone()[0]
+            row_manifest_parts = []
+            expected_rows = 0
+            for (table,) in conn.execute("""
+                SELECT c.relname FROM pg_class c
+                JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname='jw_dev' AND c.relkind IN ('r','p')
+                ORDER BY c.relname
+            """).fetchall():
+                digest_sql = sql.SQL("""
+                    SELECT count(*)::bigint,
+                    coalesce(sum(('x'||substr(h,1,16))::bit(64)::bigint::numeric),0)::text,
+                    coalesce(sum(('x'||substr(h,17,16))::bit(64)::bigint::numeric),0)::text
+                    FROM (SELECT md5(x::text) h FROM {}.{} x) z
+                """).format(sql.Identifier("jw_dev"), sql.Identifier(table))
+                count, lo, hi = conn.execute(digest_sql).fetchone()
+                expected_rows += count
+                row_manifest_parts.append(f"{table}:{count}:{lo}:{hi}")
+            expected_data = hashlib.sha256(
+                "\n".join(row_manifest_parts).encode("utf-8")).hexdigest()
+            assert expected_rows == 65
+
         dump_path = tmp_path / "ci65.custom"
         key = bytes(range(32))
         opts = backup.parse_dsn(source_db)
@@ -375,6 +408,9 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         monkeypatch.setenv("CODESPACES", "true")
         monkeypatch.setenv("JW_PG_BACKUP_KEY", base64.urlsafe_b64encode(key).decode())
         monkeypatch.setenv("JW_PG_OFFLINE_RESTORE_ACK", offline.ACK)
+        monkeypatch.setenv(offline.REFERENCE_CONSTRAINT_ENV, expected_constraints)
+        monkeypatch.setenv(offline.REFERENCE_ROW_ENV, expected_data)
+        monkeypatch.setenv(offline.REFERENCE_TOTAL_ENV, str(expected_rows))
         result = offline.run_offline()
         safe = {k: result.get(k) for k in (
             "blocker", "offline_restore_execution", "offline_restored_archive_count",
@@ -386,6 +422,13 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert result["offline_restore_failure_count"] == 0, safe
         assert result["container_removed"] == "PASS", safe
         assert result["disposable_constraint_signature_groups"] == 1
+        assert result["disposable_row_manifest_groups"] == 1
+        assert result["current_source_reference_provided"] is True
+        assert result["current_source_constraints_match_count"] == 2, safe
+        assert result["current_source_row_manifest_match_count"] == 2, safe
+        assert result["current_source_combined_match_count"] == 2, safe
+        assert result["current_source_row_total_match_count"] == 2, safe
+        assert result["current_source_snapshot_is_historic_attestation"] is False
         assert result["historic_real_source_identity_verified"] is False
         assert result["remote_storage_proven"] is False
         assert result["overall"] == "BLOCKED"
