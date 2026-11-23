@@ -434,6 +434,17 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert result["remote_storage_proven"] is False
         assert result["overall"] == "BLOCKED"
         assert role not in str(result), "never expose source-only role names"
+        # Negative control: a wrong current-source digest MUST NOT be reported
+        # as source-matched, even though the historical V1/V2 files still
+        # decrypt and restore cleanly. Never rewrite either archive to force a match.
+        monkeypatch.setenv(offline.REFERENCE_ROW_ENV, "f" * 64)
+        wrong = offline.run_offline()
+        assert wrong["offline_restore_execution"] == "PASS_LOCAL_ONLY"
+        assert wrong["container_removed"] == "PASS"
+        assert wrong["current_source_row_manifest_match_count"] == 0
+        assert wrong["current_source_combined_match_count"] == 0
+        assert wrong["current_source_comparison"] == "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
+        assert wrong["overall"] == "BLOCKED"
     finally:
         if created_db:
             source_admin.execute(
