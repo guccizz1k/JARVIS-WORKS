@@ -1,5 +1,6 @@
 """Owner private ciphertext readback synthetic Git objects only, no network."""
 import hashlib
+import os
 import subprocess
 from pathlib import Path
 import pytest
@@ -290,3 +291,111 @@ def test_diagnose_all_halts_before_remote_on_unsafe_local_evidence(monkeypatch):
     monkeypatch.setattr(vault,"auth_probe",lambda:(_ for _ in ()).throw(
        AssertionError("must not contact remote")))
     assert vault.main(["diagnose-all"])==1
+
+
+
+def test_vault_gh_cli_does_not_let_source_codespace_token_shadow_stored_login(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN","SOURCE_ONLY_FIXTURE_NOT_SECRET")
+    monkeypatch.delenv("GH_TOKEN",raising=False)
+    first=vault._vault_cli_env()
+    assert "GITHUB_TOKEN" not in first and "GH_TOKEN" not in first
+    assert os.environ.get("GITHUB_TOKEN")=="SOURCE_ONLY_FIXTURE_NOT_SECRET"
+    monkeypatch.setenv("GH_TOKEN","VAULT_READ_ONLY_FIXTURE_NOT_SECRET")
+    second=vault._vault_cli_env()
+    assert "GITHUB_TOKEN" not in second
+    assert second["GH_TOKEN"]=="VAULT_READ_ONLY_FIXTURE_NOT_SECRET"
+
+
+def test_vault_gh_auth_probe_uses_secondary_login_not_source_token(monkeypatch):
+    import subprocess
+    monkeypatch.setenv("CODESPACES","true")
+    monkeypatch.setenv("JW_PG_VAULT_READBACK_ACK",vault.ACK)
+    monkeypatch.setenv("GITHUB_TOKEN","SOURCE_ONLY")
+    monkeypatch.delenv("GH_TOKEN",raising=False)
+    monkeypatch.setattr(vault.shutil,"which",lambda name:"/usr/bin/"+name)
+    monkeypatch.setattr(vault,"git",lambda *args,**kw:
+        subprocess.CompletedProcess([],128,b"",b"no private vault"))
+    def runner(cmd,**kw):
+        assert "GITHUB_TOKEN" not in kw["env"]
+        assert kw["stderr"]==subprocess.DEVNULL
+        return subprocess.CompletedProcess(cmd,0,b"true\n",b"")
+    monkeypatch.setattr(subprocess,"run",runner)
+    result=vault.auth_probe()
+    assert result["gh_cli_private_api_access"]=="PASS"
+    assert result["auth_diagnostic"]=="GIT_HELPER_USING_DIFFERENT_CREDENTIALS"
+
+
+def test_readonly_gh_rest_binary_cipher_sha256_and_git_blob_integrity(monkeypatch):
+    import base64
+    import hashlib
+    raw=b"JWPGBK1\x00\xfa\xfe\x10NONCUSTOMER_TEST_ENCRYPTED_CIPHER"
+    sha=hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()
+    good={"sha":sha,"size":len(raw),"encoding":"base64",
+          "content":base64.b64encode(raw).decode()}
+    monkeypatch.setattr(vault,"_vault_api_json",lambda *a,**kw:good)
+    assert vault._vault_api_blob_sha256(sha)==(hashlib.sha256(raw).hexdigest(),len(raw))
+    good["content"]=base64.b64encode(b"X"+raw[1:]).decode()
+    with pytest.raises(vault.Blocked,match="GIT_BLOB_HASH_MISMATCH"):
+        vault._vault_api_blob_sha256(sha)
+    good["content"]="z%%%notbase64"
+    with pytest.raises(vault.Blocked,match="BASE64_INVALID"):
+        vault._vault_api_blob_sha256(sha)
+
+
+def test_vault_api_tree_allows_duplicate_ciphertext_and_rejects_symlinks():
+    token="a"*40
+    data={"truncated":False,"tree":[
+        {"type":"tree","mode":"040000","path":"archives"},
+        {"type":"blob","mode":"100644","path":"archives/first.jwpgbk","sha":token,"size":99},
+        {"type":"blob","mode":"100644","path":"archives/second.jwpgbk","sha":token,"size":99},
+    ]}
+    assert vault._vault_api_tree(data)==[token,token]
+    data["tree"].append({"type":"blob","mode":"120000","path":"archives/evil.jwpgbk","sha":"b"*40,"size":19})
+    with pytest.raises(vault.Blocked):
+        vault._vault_api_tree(data)
+    data.pop("tree")
+    with pytest.raises(vault.Blocked):
+        vault._vault_api_tree(data)
+
+
+def test_vault_api_readback_with_4_paths_3_unique_preserves_offsite_block(monkeypatch):
+    import hashlib
+    sha_a,sha_b,sha_c="a"*40,"b"*40,"c"*40
+    head="d"*40
+    def provider(path,max_bytes=65536,timeout=45):
+        if "/git/ref/heads/main" in path:
+            return {"object":{"sha":head}}
+        if "/git/commits/" in path:
+            return {"sha":head,"tree":{"sha":"e"*40}}
+        if "/git/trees/" in path:
+            return {"truncated":False,"tree":[
+                {"type":"blob","mode":"100644","path":f"archive/{i}.jwpgbk","sha":sha,"size":23}
+                for i,sha in enumerate([sha_a,sha_b,sha_a,sha_c])]}
+        raise AssertionError("bad resource")
+    monkeypatch.setattr(vault.shutil,"which",lambda cmd:"/usr/bin/"+cmd)
+    monkeypatch.setattr(vault,"_vault_api_json",provider)
+    monkeypatch.setattr(vault,"_vault_api_blob_sha256",lambda sha:("f"*64,23))
+    result=vault._vault_api_readback({sha_a:"f"*64,sha_b:"f"*64,
+                                     **{str(i).zfill(40):"0"*64 for i in range(9)}},head)
+    assert result["remote_ciphertext_count"]==4
+    assert result["remote_unique_ciphertext_count"]==3
+    assert result["remote_full_sha256_readback_matches"]==3
+    assert result["remote_unique_full_sha256_matches"]==2
+    assert result["local_archives_not_offsite"]==9
+    assert result["all_11_archives_offsite"] is False
+    assert result["remote_commit_pinned"] is True
+    assert result["readback_transport"]=="GH_REST_BLOB_BASE64_VERIFIED"
+
+
+def test_gh_api_refuses_using_untrusted_host_and_suppresses_all_stderr(monkeypatch):
+    import subprocess
+    monkeypatch.setenv("GITHUB_TOKEN","SOURCE_TOKEN_PRIVATE")
+    def fake(cmd,**kw):
+        assert cmd[0:2]==["gh","api"]
+        assert "GITHUB_TOKEN" not in kw["env"]
+        assert kw["stderr"]==subprocess.DEVNULL
+        return subprocess.CompletedProcess(cmd,0,b'{"private": true}',b"token_not_logged")
+    monkeypatch.setattr(subprocess,"run",fake)
+    assert vault._vault_api_json("repos/guccizz1k/jw-backup-vault-261111/git/ref/heads/main")=={"private":True}
+    with pytest.raises(vault.Blocked,match="ENDPOINT_INVALID"):
+        vault._vault_api_json("repos/other/unsafe/data")
