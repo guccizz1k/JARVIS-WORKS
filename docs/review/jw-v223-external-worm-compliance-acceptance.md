@@ -1,0 +1,44 @@
+# Review only: external immutable storage validation
+
+The private Git ciphertext vault has already passed its own integrity/readback
+checks. Git history is NOT equivalent to a WORM retention guarantee.
+
+This additive program is read-only and does not provision AWS resources,
+change Object Lock configuration, upload ciphertext, move/reveal owner keys,
+or read any production DB. Customer plaintext is never requested.
+
+Requirements for a future *separately approved* real run:
+- One owner-approved independent AWS S3 bucket with versioning enabled and
+  Object Lock enabled. Default and EACH of 11 specific object versions must
+  use COMPLIANCE retention, not GOVERNANCE or removable legal hold.
+- A chosen UTC expiration threshold, appropriate storage budget/retention
+  policy, block-public-access flags, pinned private vault commit, 11 stable
+  version IDs, an independent custodian AWS identity, private Git read rights.
+- Read-only S3/IAM permissions for bucket versioning, Object Lock configuration,
+  public access block, HEAD/GET for explicit versions, object retention, and
+  STS identity. All object versions must match ciphertext SHA-256 by streaming
+  real bytes; object metadata/ETag alone cannot prove identity.
+- Independently supplied manifest via preopened OS PIPE, JSON containing
+  vault_commit_sha1 and 11 objects: blob_sha1, cipher_sha256, object_key,
+  version_id. Contains no key, customer fields or access tokens.
+- Environment names: JW_WORM_AUDIT_ACK, JW_WORM_EXPECTED_AWS_ACCOUNT,
+  JW_WORM_BUCKET, JW_WORM_VAULT_SHA, JW_WORM_MIN_UNTIL,
+  JW_WORM_MANIFEST_FD. Never put values in public GitHub, logs or chat.
+- Only after those conditions and separate explicit permission:
+  python -m scripts.p1_external_worm_compliance_v223 verify-readonly
+
+All S3 reads verify the exact object VersionId and current HEAD, retention
+mode and deadline, and full ciphertext SHA-256. The report omits bucket, key,
+version, secret and ciphertext; release_ready remains false.
+
+Even when S3 returns PASS, independent recovery-key custody, signer provenance
+and true second-site owner-data PG17 recovery need different actual evidence.
+S3 Object Lock protects pinned versions, not all future/latest versions,
+and it does not retroactively sign historic backups.
+
+Official AWS docs:
+https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html
+https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock-managing.html
+https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectRetention.html
+
+A simulated S3 client in CI is NOT proof of a real AWS WORM bucket.
