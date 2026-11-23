@@ -97,7 +97,12 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
     monkeypatch.setenv("CODESPACES", "true")
     monkeypatch.setenv("JW_PG_OFFLINE_RESTORE_ACK", offline.ACK)
     offline_report = offline.run_offline()
-    assert offline_report["offline_restored_archive_count"] == 1, offline_report
+    # Emit only fixed safe diagnostic labels/counts on CI failure.
+    offline_diagnosis = {k: offline_report.get(k) for k in (
+        "blocker", "offline_restore_execution", "offline_restored_archive_count",
+        "offline_restore_failure_count", "offline_restore_skipped_budget_count",
+        "failure_categories", "container_removed")}
+    assert offline_report["offline_restored_archive_count"] == 1, offline_diagnosis
     assert offline_report["offline_other_table_archive_count"] == 1, offline_report
     assert offline_report["offline_65_table_archive_count"] == 0, offline_report
     assert offline_report["offline_restore_execution"] == "PASS_LOCAL_ONLY", offline_report

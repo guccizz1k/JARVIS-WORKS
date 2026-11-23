@@ -83,8 +83,10 @@ def _restore_reason(stderr: bytes) -> str:
 
 def _exec(container: str, command: list[str], *, data: bytes | None = None,
           timeout: int = 30) -> subprocess.CompletedProcess:
-    return _docker(["exec", "-i" if data is not None else "-t", container, *command],
-                   data=data, timeout=timeout)
+    # Never allocate a TTY in unattended CI / mobile Codespaces: docker
+    # exec -t may fail or alter output on redirected stdio.
+    prefix = ["exec", "-i", container] if data is not None else ["exec", container]
+    return _docker([*prefix, *command], data=data, timeout=timeout)
 
 
 def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, int, str | None]:
