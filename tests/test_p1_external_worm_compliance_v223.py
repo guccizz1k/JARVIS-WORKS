@@ -104,7 +104,9 @@ def fixture(monkeypatch):
     env={"JW_WORM_AUDIT_ACK":worm.ACK,
          "JW_WORM_EXPECTED_AWS_ACCOUNT":OWNER,
          "JW_WORM_BUCKET":BUCKET,"JW_WORM_VAULT_SHA":PIN,
-         "JW_WORM_MIN_UNTIL":(NOW+timedelta(days=30)).isoformat()}
+         "JW_WORM_MIN_UNTIL":(NOW+timedelta(days=30)).isoformat(),
+         "JW_WORM_OWNER_SCOPE_SHA256":worm.owner_scope_fingerprint(
+             o["blob_sha1"] for o in objects)}
     manifest={"vault_commit_sha1":PIN,
               "objects":[{k:v for k,v in obj.items() if k!="_bytes"}
                          for obj in objects]}
@@ -132,6 +134,10 @@ def test_eleven_exact_object_versions_read_and_hash_verified(monkeypatch):
     assert r["actual_sha256_readback_count"]==11
     assert r["private_vault_tree_verified"] is True
     assert r["private_vault_cipher_verified_count"]==11
+    assert r["vault_unique_cipher_count"]==11
+    assert r["vault_unscoped_unique_cipher_count"]==0
+    assert r["owner_scope_pin_checked"] is True
+    assert r["owner_scope_signed_attestation"] is False
     assert r["decrypted_data_read"] is False
     assert r["ciphertext_or_key_exported"] is False
     assert r["overall"]=="BLOCKED"
@@ -188,6 +194,7 @@ def test_bucket_owner_and_provider_endpoint_cannot_be_spoofed(monkeypatch):
     ("JW_WORM_EXPECTED_AWS_ACCOUNT","bad","EXPECTED_BUCKET_OWNER_REQUIRED"),
     ("JW_WORM_BUCKET","bad/bucket","STRICT_BUCKET_NAME_REQUIRED"),
     ("JW_WORM_VAULT_SHA","invalid","PINNED_PRIVATE_VAULT_COMMIT_REQUIRED"),
+    ("JW_WORM_OWNER_SCOPE_SHA256","","INDEPENDENT_OWNER_SCOPE_PIN_REQUIRED"),
     ("JW_WORM_MIN_UNTIL","2020-01-01T00:00:00Z","RETENTION_DEADLINE_NOT_FUTURE"),
     ("JW_WORM_MIN_UNTIL","2027-invalid","OWNER_RETENTION_DATE_MISSING_OR_INVALID"),
 ])
@@ -254,6 +261,47 @@ def test_forged_sha256_without_s3_write_rejected_before_provider(monkeypatch):
     assert r["actual_sha256_readback_count"]==0
     assert s3.calls==0
 
+
+
+def test_real_vault_has_12_unique_but_only_11_owner_approved(monkeypatch):
+    """The actual private vault has 13 paths, 12 unique blobs, 11 owner scope."""
+    env,objects,manifest,s3=fixture(monkeypatch)
+    approved=set(x["blob_sha1"] for x in objects)
+    historical_extra="e"*40
+    assert historical_extra not in approved
+    monkeypatch.setattr(worm.vault,"_head_tree",
+                        lambda _:approved|{historical_extra})
+    result=audit(env,manifest,s3)
+    assert result["worm_readonly_audit"]=="PASS_ELEVEN_S3_COMPLIANCE_VERSIONS"
+    assert result["private_vault_cipher_verified_count"]==11
+    assert result["vault_unique_cipher_count"]==12
+    assert result["vault_unscoped_unique_cipher_count"]==1
+    assert result["owner_scope_pin_checked"] is True
+    assert result["owner_scope_signed_attestation"] is False
+    assert result["overall"]=="BLOCKED"
+
+
+def test_manifest_switches_out_owner_cipher_for_historical_extra_denied(monkeypatch):
+    """Any eleven of twelve is NOT an owner-approved eleven."""
+    env,objects,manifest,s3=fixture(monkeypatch)
+    historical_extra="e"*40
+    approved=set(x["blob_sha1"] for x in objects)
+    monkeypatch.setattr(worm.vault,"_head_tree",
+                        lambda _:approved|{historical_extra})
+    manifest["objects"][3]["blob_sha1"]=historical_extra
+    result=audit(env,manifest,s3)
+    assert result["blocker"]=="OWNER_APPROVED_CIPHER_SET_PIN_MISMATCH"
+    assert result["actual_sha256_readback_count"]==0
+    assert s3.calls==0
+
+
+def test_forged_owner_scope_pin_is_not_allowed_to_reuse_same_bytes(monkeypatch):
+    env,objects,manifest,s3=fixture(monkeypatch)
+    env["JW_WORM_OWNER_SCOPE_SHA256"]="f"*64
+    result=audit(env,manifest,s3)
+    assert result["blocker"]=="OWNER_APPROVED_CIPHER_SET_PIN_MISMATCH"
+    assert result["actual_sha256_readback_count"]==0
+    assert s3.calls==0
 
 def test_default_cli_never_contacts_cloud(monkeypatch,capsys):
     monkeypatch.delenv("JW_WORM_AUDIT_ACK",raising=False)

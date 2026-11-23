@@ -77,6 +77,8 @@ def preflight(env=None, *, now=None):
         return str(exc)
     if expected <= now:
         return "RETENTION_DEADLINE_NOT_FUTURE"
+    if not vault.SHA256.fullmatch(env.get("JW_WORM_OWNER_SCOPE_SHA256", "")):
+        return "INDEPENDENT_OWNER_SCOPE_PIN_REQUIRED"
     if not env.get("JW_WORM_MANIFEST_FD"):
         return "INDEPENDENT_MANIFEST_PIPE_REQUIRED"
     return "PASS"
@@ -114,6 +116,20 @@ def _manifest(env):
         seen_objects.add((key, version))
         checked.append((blob, digest, key, version))
     return checked
+
+
+def owner_scope_fingerprint(blob_ids):
+    """A separated owner-side scope commitment; NOT a signer identity proof.
+
+    Explicit canonical version and domain separation prevent ambiguous
+    concatenation and digest collision between unrelated manifest formats.
+    """
+    values=list(blob_ids)
+    if (len(values)!=ENTRIES or len(set(values))!=ENTRIES
+            or not all(isinstance(v,str) and vault.SHA1.fullmatch(v) for v in values)):
+        raise Blocked("OWNER_SCOPE_NOT_ELEVEN_UNIQUE_CIPHERS")
+    body="JW-WORM-OWNER-SCOPE-V1\\n"+"\\n".join(sorted(values))+"\\n"
+    return hashlib.sha256(body.encode("ascii")).hexdigest()
 
 
 def _provider_client_is_aws(client, *, service="s3"):
@@ -189,6 +205,10 @@ def verify(*, s3=None, sts=None, env=None, now=None):
         "actual_sha256_readback_count": 0,
         "private_vault_tree_verified": False,
         "private_vault_cipher_verified_count": 0,
+        "vault_unique_cipher_count": 0,
+        "vault_unscoped_unique_cipher_count": 0,
+        "owner_scope_pin_checked": False,
+        "owner_scope_signed_attestation": False,
         "ciphertext_or_key_exported": False,
         "decrypted_data_read": False,
         "independent_recovery_key_custody": "NOT_ATTESTED",
@@ -207,8 +227,20 @@ def verify(*, s3=None, sts=None, env=None, now=None):
         entries = _manifest(env)
         pin = env["JW_WORM_VAULT_SHA"]
         trusted = vault._head_tree(pin)
-        if set(row[0] for row in entries) != trusted:
-            raise Blocked("WORM_MANIFEST_NOT_EXACT_PRIVATE_VAULT_TREE")
+        selected = set(row[0] for row in entries)
+        # Vault includes 13 on-disk Git paths but 12 UNIQUE encrypted blobs:
+        # 4 historical files (3 unique) plus 9 owner-approved additions.
+        # Only 11 owner-scope blobs were approved for second-site restoration.
+        # A Git tree-wide equality test falsely blocks all 11 approved items,
+        # yet blindly accepting ANY 11 of 12 permits silent scope substitution.
+        # Require a separately obtained owner-selected 11-item commitment.
+        if not selected.issubset(trusted):
+            raise Blocked("WORM_MANIFEST_BLOB_NOT_IN_PINNED_PRIVATE_VAULT")
+        if owner_scope_fingerprint(selected) != env["JW_WORM_OWNER_SCOPE_SHA256"]:
+            raise Blocked("OWNER_APPROVED_CIPHER_SET_PIN_MISMATCH")
+        result["owner_scope_pin_checked"] = True
+        result["vault_unique_cipher_count"] = len(trusted)
+        result["vault_unscoped_unique_cipher_count"] = len(trusted - selected)
         # A vault tree proves which Git blob SHA-1 identities exist, NOT that
         # a custodian-supplied SHA-256 belongs to those identities. Resolve
         # every exact pinned Git object and verify its Git blob hash AND

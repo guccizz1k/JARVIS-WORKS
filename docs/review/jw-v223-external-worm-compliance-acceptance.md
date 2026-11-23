@@ -53,3 +53,28 @@ then match the same independently provider-verified SHA-256. An attacker
 replacing both the S3 version and its manifest SHA-256 cannot obtain PASS.
 This adds 11 bounded private-vault readbacks per real WORM verification;
 no source key, plaintext, production DB, provider write, or log of bytes.
+
+### Inventory reconciliation and owner's approved 11-of-12 scope (2026-11-23)
+
+The actual pinned private vault contains **13 encrypted file paths but 12
+distinct Git ciphertext objects**: four historical files (three unique) plus
+nine newly owner-approved ciphertexts. Existing owner backup selection contains
+**eleven** unique encrypted archives. Checking that the 11-item manifest set
+equals the 12-item private vault tree is incorrect (always BLOCKED).
+Accept a SUBSET of the vault tree only if it matches a **separate
+owner-Codespace-derived SHA-256 scope commitment** over sorted 11 Git object
+identifiers. This digest is not a password or a digital signature; independently
+deliver it outside the manifest pipe, and retain a signed custodian record
+separately. Missing/wrong commitment blocks BEFORE any S3 operation.
+
+Read-only owner Codespace command, with the pinned vault SHA supplied locally
+in `JW_WORM_VAULT_SHA`:
+`python -m scripts.p1_owner_vault_scope_pin_v223 derive-scope-pin`.
+This prints the non-secret owner_scope_digest and counts only; it does not
+read keys or plaintext or mutate the encrypted vault. External custodian
+sets `JW_WORM_OWNER_SCOPE_SHA256` using this independent value.
+The WORM audit reports vault_unique_cipher_count, and
+vault_unscoped_unique_cipher_count = 1 for the current baseline.
+Only the approved 11-item S3 object scope can receive a scoped PASS, NEVER
+claim that the extra historical ciphertext is WORM-protected. The overall
+release remains BLOCKED pending actual provider verification.
