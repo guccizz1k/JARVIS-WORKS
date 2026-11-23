@@ -296,3 +296,28 @@ def test_mark_target_error_handling_survives_malformed_url(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Traceback" not in captured.err
     assert "BLOCKED_V223_TOKEN_REQUIRED_MIN_16_CHARS" in captured.err
+
+
+@pytest.mark.parametrize("bad_dsn", [
+    "postgresql://[missing-ipv6-bracket",
+    "postgresql://",
+    "bad-scheme://u:p@localhost/db",
+])
+def test_malformed_dsn_fails_before_optional_psycopg_import(monkeypatch, bad_dsn):
+    """Isolation test: reject invalid connection strings even without psycopg installed."""
+    import sys
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    with pytest.raises((p.BackupError, ValueError)):
+        p.run(
+            bad_dsn,
+            "postgresql://u:fixture@127.0.0.1:55433/postgres",
+            schema="jw_dev",
+            real_source=False,
+        )
+
+
+def test_validation_precedes_psycopg_import_in_real_engine():
+    src = inspect.getsource(p.run)
+    validation = src.index("tgt = guard_target(target_admin_dsn, source_dsn)")
+    driver = src.index("    import psycopg")
+    assert validation < driver, "DB driver import must not preempt DSN validation"
