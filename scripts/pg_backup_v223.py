@@ -799,9 +799,8 @@ def roles_in_acl(connection, schema: str) -> list[str]:
 
 def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
         workdir: Path | None = None, real_source: bool = False) -> dict:
-    import psycopg  # lazy: unit tests of the pure logic do not need it
-    from psycopg import sql
-
+    # Validate pure inputs before importing optional DB dependencies. This also
+    # ensures malformed DSNs fail closed in the isolated CI unit-test job.
     check_schema(schema)
     src = guard_source(source_dsn) if real_source else parse_dsn(source_dsn)
     # Explicit source binding prevents arbitrary synthetic or third-party DSNs
@@ -810,6 +809,8 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     if real_source and (not expected_host or expected_host.lower() != src["host"]):
         raise BackupError("BLOCKED_V223_REAL_SOURCE_HOST_NOT_VERIFIED")
     tgt = guard_target(target_admin_dsn, source_dsn)
+    import psycopg
+    from psycopg import sql
     key = load_key()
     require_pg17_tools()
     # F1: prove the restore target is a disposable cluster BEFORE connecting to the source
