@@ -335,7 +335,7 @@ def auth_probe()->dict:
             "git_read_only_private_access":"NOT_RUN",
             "gh_cli_private_api_access":"NOT_RUN",
             "gh_token_environment_present":bool(os.environ.get("GH_TOKEN")),
-            "vault_read_secret_present":bool(os.environ.get("JW_VAULT_READ_TOKEN")),
+            "vault_read_token_present":bool(os.environ.get("JW_VAULT_READ_TOKEN")),
             "source_github_token_present":bool(os.environ.get("GITHUB_TOKEN"))}
     if os.environ.get("CODESPACES","").lower()!="true":
         result["blocker"]="OWNER_CODESPACE_REQUIRED";return result
@@ -480,7 +480,7 @@ def diagnose_all()->dict:
     for key in (
         "auth_diagnostic", "git_read_only_private_access",
         "gh_cli_private_api_access", "gh_token_environment_present",
-        "vault_read_secret_present", "source_github_token_present",
+        "vault_read_token_present", "source_github_token_present",
     ):
         if key in authorization:
             report[key]=authorization[key]
