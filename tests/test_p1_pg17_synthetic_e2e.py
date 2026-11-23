@@ -519,6 +519,46 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert result["remote_storage_proven"] is False
         assert result["overall"] == "BLOCKED"
         assert role not in str(result), "never expose source-only role names"
+        # Reproduce a locale-induced legacy aggregate mismatch on the REAL
+        # 65-table PG17 synthetic V1/V2 ciphertexts. The source digest and
+        # C-collated restored data remain correct; the default sort order is
+        # deliberately perturbed ONLY in this injected test instrumentation.
+        original_audit = offline._audit_restored_row_manifest
+        def different_legacy_sort(container, db):
+            original = original_audit(container, db)
+            assert original is not None
+            data = list(original)
+            data[2] = "0"*64
+            return tuple(data)
+        with monkeypatch.context() as patch:
+            patch.setattr(offline,"_audit_restored_row_manifest",different_legacy_sort)
+            legacy_sort_diff = offline.run_offline()
+        assert legacy_sort_diff["offline_restore_execution"] == "PASS_LOCAL_ONLY"
+        assert legacy_sort_diff["container_removed"] == "PASS"
+        assert legacy_sort_diff["current_source_row_manifest_match_count"] == 0
+        assert legacy_sort_diff["current_source_c_sorted_row_manifest_match_count"] == 2
+        assert legacy_sort_diff["current_source_c_sorted_combined_match_count"] == 2
+        assert legacy_sort_diff["schema_delta_classification"] == "IDENTICAL_TABLE_NAME_SET"
+        assert legacy_sort_diff["schema_delta_column_shapes_match_count"] == 2
+        assert legacy_sort_diff["current_source_comparison"] == "PASS_CURRENT_C_COLLATION_REFERENCE"
+        assert legacy_sort_diff["manifest_reconciliation"] == "LEGACY_AGGREGATION_DIFFERS"
+        assert offline._restored_source_verdict_pass(legacy_sort_diff)
+        assert legacy_sort_diff["overall"] == "BLOCKED"
+
+        # A forged column-structure reference MUST prevent a C-only PASS,
+        # even if all row hashes, table names and constraints still match.
+        with monkeypatch.context() as patch:
+            patch.setenv(offline.SCHEMA_SHAPES_ENV,"0"*64)
+            patch.setattr(offline,"_audit_restored_row_manifest",different_legacy_sort)
+            wrong_structure = offline.run_offline()
+        assert wrong_structure["offline_restore_execution"] == "PASS_LOCAL_ONLY"
+        assert wrong_structure["container_removed"] == "PASS"
+        assert wrong_structure["schema_delta_column_shapes_match_count"] == 0
+        assert wrong_structure["current_source_c_sorted_combined_match_count"] == 2
+        assert wrong_structure["current_source_comparison"] == "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
+        assert not offline._restored_source_verdict_pass(wrong_structure)
+        assert wrong_structure["overall"] == "BLOCKED"
+
         # Negative control: a wrong current-source digest MUST NOT be reported
         # as source-matched, even though the historical V1/V2 files still
         # decrypt and restore cleanly. Never rewrite either archive to force a match.

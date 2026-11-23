@@ -769,7 +769,9 @@ def run_offline() -> dict[str, object]:
             elif (complete
                   and result["current_source_c_sorted_combined_match_count"] == len(archives)
                   and schema_ref is not None
-                  and result["schema_delta_classification"] == "IDENTICAL_TABLE_NAME_SET"):
+                  and result["schema_delta_classification"] == "IDENTICAL_TABLE_NAME_SET"
+                  and result["schema_delta_column_shapes_match_count"] == len(archives)
+                  and result["schema_delta_name_sha256_match_count"] == len(archives)):
                 result["current_source_comparison"] = "PASS_CURRENT_C_COLLATION_REFERENCE"
             else:
                 result["current_source_comparison"] = "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
@@ -793,6 +795,57 @@ def run_offline() -> dict[str, object]:
             if result["container_removed"] != "PASS":
                 result["offline_restore_execution"] = "BLOCKED_CLEANUP"
         # No container ID/paths/keys/SQL/row data are returned.
+
+
+def _restored_source_verdict_pass(report: dict[str, object]) -> bool:
+    """Strict parity gate. Locale differences never masquerade as source drift.
+
+    A PASS here is ONLY present-time checksum parity of a disposable restored
+    archive, not evidence of independent historical origin or offsite storage.
+    The source-snapshot references must have been independently supplied.
+    """
+    n = report.get("offline_restored_archive_count")
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        return False
+    if (report.get("offline_restore_execution") != "PASS_LOCAL_ONLY"
+            or report.get("offline_restore_failure_count") != 0
+            or report.get("offline_restore_skipped_budget_count") != 0
+            or report.get("container_removed") != "PASS"):
+        return False
+    status = report.get("current_source_comparison")
+    manifest = report.get("manifest_reconciliation")
+    focus = report.get("focus_comparison")
+    schema = report.get("schema_delta_classification")
+    if focus not in ("NOT_RUN", "PASS_CURRENT_FOCUS_CONTENT"):
+        return False
+    if status == "PASS_CURRENT_C_COLLATION_REFERENCE":
+        return (
+            report.get("current_source_reference_provided") is True
+            and report.get("schema_delta_reference_provided") is True
+            and schema == "IDENTICAL_TABLE_NAME_SET"
+            and report.get("schema_delta_name_sha256_match_count") == n
+            and report.get("schema_delta_column_shapes_match_count") == n
+            and report.get("schema_delta_probe_unavailable_count") == 0
+            and report.get("current_source_c_sorted_combined_match_count") == n
+            and manifest in ("NOT_RUN", "COLLATION_SORT_ORDER_DIFFERENCE",
+                             "LEGACY_AGGREGATION_DIFFERS",
+                             "PASS_CURRENT_SCHEMA_AND_AGGREGATES")
+        )
+    if status == "PASS_CURRENT_REFERENCE":
+        if (report.get("current_source_reference_provided") is not True
+                or report.get("current_source_combined_match_count") != n):
+            return False
+        if report.get("schema_delta_reference_provided") is True:
+            if (schema != "IDENTICAL_TABLE_NAME_SET"
+                    or report.get("schema_delta_column_shapes_match_count") != n
+                    or report.get("schema_delta_name_sha256_match_count") != n):
+                return False
+        return manifest in ("NOT_RUN", "PASS_CURRENT_SCHEMA_AND_AGGREGATES")
+    if status != "NOT_RUN":
+        return False
+    if report.get("schema_delta_reference_provided") is True and schema != "IDENTICAL_TABLE_NAME_SET":
+        return False
+    return manifest in ("NOT_RUN", "PASS_CURRENT_SCHEMA_AND_AGGREGATES")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -838,16 +891,7 @@ def main(argv: list[str] | None = None) -> int:
             and report.get("focus_probe_unavailable_count") == 0
             and report.get("focus_comparison") not in ("FOCUS_DIAGNOSTIC_INCOMPLETE", "NOT_RUN")
         ) else 1
-    return 0 if (report.get("offline_restore_execution") == "PASS_LOCAL_ONLY"
-                 and report.get("container_removed") == "PASS"
-                 and report.get("current_source_comparison") in
-                   ("NOT_RUN", "PASS_CURRENT_REFERENCE")
-                 and report.get("focus_comparison") in
-                   ("NOT_RUN", "PASS_CURRENT_FOCUS_CONTENT")
-                 and report.get("manifest_reconciliation") in
-                   ("NOT_RUN", "PASS_CURRENT_SCHEMA_AND_AGGREGATES")
-                 and report.get("schema_delta_classification") in
-                   ("NOT_RUN","IDENTICAL_TABLE_NAME_SET")) else 1
+    return 0 if _restored_source_verdict_pass(report) else 1
 
 
 if __name__ == "__main__":

@@ -324,3 +324,76 @@ def test_schema_diagnosis_can_complete_without_falsely_reporting_parity(monkeypa
     assert offline.main(["diagnose-schema"])==0
     assert '"overall":"BLOCKED"' in capsys.readouterr().out
     assert offline.main(["restore-offline"])==1
+
+
+
+def test_c_collation_reference_acceptance_requires_full_independent_schema_proofs():
+    """Regression: owner 2026-11-23 14:39 actual 11/11 current C-matched,
+    while default-order row manifest alone disagreed. Never fake provenance.
+    """
+    n=11
+    data={
+        "offline_restore_execution":"PASS_LOCAL_ONLY",
+        "offline_restored_archive_count":n,
+        "offline_restore_failure_count":0,
+        "offline_restore_skipped_budget_count":0,
+        "container_removed":"PASS",
+        "current_source_comparison":"PASS_CURRENT_C_COLLATION_REFERENCE",
+        "current_source_reference_provided":True,
+        "current_source_c_sorted_combined_match_count":n,
+        "current_source_combined_match_count":0,
+        "schema_delta_reference_provided":True,
+        "schema_delta_classification":"IDENTICAL_TABLE_NAME_SET",
+        "schema_delta_name_sha256_match_count":n,
+        "schema_delta_column_shapes_match_count":n,
+        "schema_delta_probe_unavailable_count":0,
+        "manifest_reconciliation":"NOT_RUN",
+        "focus_comparison":"NOT_RUN",
+        "overall":"BLOCKED",
+    }
+    assert offline._restored_source_verdict_pass(data)
+    for failure in (
+        {"current_source_c_sorted_combined_match_count":n-1},
+        {"schema_delta_column_shapes_match_count":n-1},
+        {"schema_delta_name_sha256_match_count":n-1},
+        {"schema_delta_classification":"TABLE_NAME_DRIFT_COLUMN_SHAPES_MATCH"},
+        {"schema_delta_probe_unavailable_count":1},
+        {"schema_delta_reference_provided":False},
+        {"current_source_reference_provided":False},
+        {"container_removed":"BLOCKED_CLEANUP"},
+        {"offline_restore_failure_count":1},
+        {"manifest_reconciliation":"SCHEMA_NAME_SET_OR_SORT_ORDER_DIFFERS"},
+        {"focus_comparison":"FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE"}
+    ):
+        assert not offline._restored_source_verdict_pass({**data,**failure}), failure
+    for allowed in ("COLLATION_SORT_ORDER_DIFFERENCE","LEGACY_AGGREGATION_DIFFERS"):
+        assert offline._restored_source_verdict_pass({**data,"manifest_reconciliation":allowed})
+    assert not offline._restored_source_verdict_pass({**data,"overall":"BLOCKED",
+                                                     "current_source_comparison":"SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"})
+
+
+def test_restore_offline_cli_returns_zero_only_on_proven_current_reference(monkeypatch,capsys):
+    result={
+        "offline_restore_execution":"PASS_LOCAL_ONLY",
+        "offline_restored_archive_count":11,
+        "offline_restore_failure_count":0,
+        "offline_restore_skipped_budget_count":0,
+        "container_removed":"PASS",
+        "current_source_comparison":"PASS_CURRENT_C_COLLATION_REFERENCE",
+        "current_source_reference_provided":True,
+        "current_source_c_sorted_combined_match_count":11,
+        "schema_delta_reference_provided":True,
+        "schema_delta_classification":"IDENTICAL_TABLE_NAME_SET",
+        "schema_delta_name_sha256_match_count":11,
+        "schema_delta_column_shapes_match_count":11,
+        "schema_delta_probe_unavailable_count":0,
+        "manifest_reconciliation":"NOT_RUN",
+        "focus_comparison":"NOT_RUN",
+        "overall":"BLOCKED",
+    }
+    monkeypatch.setattr(offline,"run_offline",lambda:result)
+    assert offline.main(["restore-offline"]) == 0
+    assert '"overall":"BLOCKED"' in capsys.readouterr().out
+    result["schema_delta_column_shapes_match_count"]=10
+    assert offline.main(["restore-offline"]) == 1
+    assert '"overall":"BLOCKED"' in capsys.readouterr().out
