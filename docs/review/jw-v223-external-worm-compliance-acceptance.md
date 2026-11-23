@@ -42,3 +42,14 @@ https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock-managing.html
 https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObjectRetention.html
 
 A simulated S3 client in CI is NOT proof of a real AWS WORM bucket.
+
+### Additional source-SHA256 parity requirement (2026-11-23)
+
+A pinned Git tree confirms only object Git blob IDs, not arbitrary caller-supplied
+cipher SHA-256 values. Before ANY S3 read, the verifier now uses the existing
+private Git vault read-only blob retrieval to recompute both actual Git SHA-1
+and actual ciphertext SHA-256 for all 11 pinned objects. The S3 stream must
+then match the same independently provider-verified SHA-256. An attacker
+replacing both the S3 version and its manifest SHA-256 cannot obtain PASS.
+This adds 11 bounded private-vault readbacks per real WORM verification;
+no source key, plaintext, production DB, provider write, or log of bytes.

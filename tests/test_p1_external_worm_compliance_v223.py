@@ -91,6 +91,16 @@ def fixture(monkeypatch):
                         "version_id":f"immutable-version-{i:02}","_bytes":raw})
     monkeypatch.setattr(worm.vault,"_head_tree",lambda _:set(
         o["blob_sha1"] for o in objects))
+    # Independently pinned original provider object content, *not* the S3
+    # fixture's mutable version. A forged manifest cannot rewrite this view.
+    source_objects={o["blob_sha1"]:o["_bytes"] for o in objects}
+    def read_pinned_blob(blob,digest):
+        original=source_objects[blob]
+        if (hashlib.sha1(b"blob "+str(len(original)).encode()+b"\0"+original).hexdigest()!=blob
+                or hashlib.sha256(original).hexdigest()!=digest):
+            raise worm.vault.Blocked("REMOTE_CIPHER_HASH_MISMATCH")
+        return original
+    monkeypatch.setattr(worm.vault,"_download",read_pinned_blob)
     env={"JW_WORM_AUDIT_ACK":worm.ACK,
          "JW_WORM_EXPECTED_AWS_ACCOUNT":OWNER,
          "JW_WORM_BUCKET":BUCKET,"JW_WORM_VAULT_SHA":PIN,
@@ -121,6 +131,7 @@ def test_eleven_exact_object_versions_read_and_hash_verified(monkeypatch):
     assert r["compliance_version_count"]==11
     assert r["actual_sha256_readback_count"]==11
     assert r["private_vault_tree_verified"] is True
+    assert r["private_vault_cipher_verified_count"]==11
     assert r["decrypted_data_read"] is False
     assert r["ciphertext_or_key_exported"] is False
     assert r["overall"]=="BLOCKED"
@@ -209,6 +220,37 @@ def test_false_manifest_denied_before_s3(monkeypatch,attack):
         manifest["objects"][3]["version_id"]="null"
     r=audit(env,manifest,s3)
     assert r["worm_readonly_audit"]=="BLOCKED"
+    assert r["actual_sha256_readback_count"]==0
+    assert s3.calls==0
+
+
+def test_replaced_s3_cipher_and_forged_matching_manifest_sha256_rejected(monkeypatch):
+    """Critical old false PASS: manifest digest matched foreign S3 ciphertext.
+
+    All 11 original Git blob SHA-1s still appear in the trusted Git tree,
+    yet the S3 bytes for one blob and the supplied SHA-256 are both replaced.
+    The real pinned private Git blob differs: no S3 request may start.
+    """
+    env,objects,manifest,s3=fixture(monkeypatch)
+    original=objects[4]["_bytes"]
+    changed=original[:-1]+bytes((original[-1]^1,))
+    objects[4]["_bytes"]=changed
+    manifest["objects"][4]["cipher_sha256"]=hashlib.sha256(changed).hexdigest()
+    result=audit(env,manifest,s3)
+    assert result["worm_readonly_audit"]=="BLOCKED"
+    assert result["blocker"]=="PINNED_GIT_BLOB_AND_SHA256_DO_NOT_MATCH"
+    assert result["private_vault_cipher_verified_count"]==4
+    assert result["actual_sha256_readback_count"]==0
+    assert s3.calls==0
+    assert result["overall"]=="BLOCKED"
+
+
+def test_forged_sha256_without_s3_write_rejected_before_provider(monkeypatch):
+    env,objects,manifest,s3=fixture(monkeypatch)
+    manifest["objects"][5]["cipher_sha256"]="f"*64
+    r=audit(env,manifest,s3)
+    assert r["blocker"]=="PINNED_GIT_BLOB_AND_SHA256_DO_NOT_MATCH"
+    assert r["private_vault_cipher_verified_count"]==5
     assert r["actual_sha256_readback_count"]==0
     assert s3.calls==0
 

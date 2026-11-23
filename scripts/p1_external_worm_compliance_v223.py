@@ -188,6 +188,7 @@ def verify(*, s3=None, sts=None, env=None, now=None):
         "compliance_version_count": 0,
         "actual_sha256_readback_count": 0,
         "private_vault_tree_verified": False,
+        "private_vault_cipher_verified_count": 0,
         "ciphertext_or_key_exported": False,
         "decrypted_data_read": False,
         "independent_recovery_key_custody": "NOT_ATTESTED",
@@ -208,6 +209,23 @@ def verify(*, s3=None, sts=None, env=None, now=None):
         trusted = vault._head_tree(pin)
         if set(row[0] for row in entries) != trusted:
             raise Blocked("WORM_MANIFEST_NOT_EXACT_PRIVATE_VAULT_TREE")
+        # A vault tree proves which Git blob SHA-1 identities exist, NOT that
+        # a custodian-supplied SHA-256 belongs to those identities. Resolve
+        # every exact pinned Git object and verify its Git blob hash AND
+        # cipher SHA-256 via the already-vetted read-only cleanroom client.
+        # This must finish BEFORE any S3 call; otherwise an attacker could
+        # replace an S3 ciphertext and its manifest digest together.
+        for blob, digest, _, _ in entries:
+            try:
+                source_cipher = vault._download(blob, digest)
+            except vault.Blocked:
+                raise Blocked("PINNED_GIT_BLOB_AND_SHA256_DO_NOT_MATCH") from None
+            try:
+                if not source_cipher.startswith((b"JWPGBK1\n", b"JWPGBK2\n")):
+                    raise Blocked("PINNED_GIT_CIPHER_MAGIC_INVALID")
+                result["private_vault_cipher_verified_count"] += 1
+            finally:
+                source_cipher = None
         result["private_vault_tree_verified"] = True
         if s3 is None or sts is None:
             import boto3
