@@ -119,7 +119,7 @@ jobs:
   integrated-owner-browser:
     name: V22.3 integrated real-browser HTTPS business flow (synthetic only)
     if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event_name == 'pull_request' && github.base_ref == 'review/jw-v223-render-qa-pinned-20261122'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 12
     permissions:
       contents: read
