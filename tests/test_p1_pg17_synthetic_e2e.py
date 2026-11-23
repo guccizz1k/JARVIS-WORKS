@@ -171,3 +171,73 @@ def test_pg17_real_catalog_role_probe_rejects_view_insert_and_sequence_nextval()
         finally:
             admin.execute("DROP SCHEMA jw_p1_privilege_probe CASCADE")
             admin.execute("DROP ROLE jw_p1_privilege_probe_reader")
+
+
+def test_actual_pg17_constraint_reparse_restore_and_semantic_mutation(tmp_path: Path):
+    """Actual PG17 --schema dump/restore with a nested AND CHECK, then mutation.
+
+    The original historical bug was default deparser parenthesization drifting
+    across a PG17 upgrade. The engine's precedence-aware pretty deparser must
+    preserve identical semantics after dump while still detecting real changes.
+    Only disposable synthetic PG17 source/target containers are touched.
+    """
+    import hashlib
+    import psycopg
+    from psycopg import errors
+
+    schema = "jw_p1_canonical_probe"
+    src_opts, dst_opts = backup.parse_dsn(SOURCE), backup.parse_dsn(TARGET)
+    dump = tmp_path / "constraint_synthetic.dump"
+    # Both clusters are the disposable PG17 CI fixtures, not customer databases.
+    assert src_opts["host"] == "127.0.0.1" and src_opts["port"] == "55432"
+    assert dst_opts["host"] == "127.0.0.1" and dst_opts["port"] == "55433"
+    with psycopg.connect(SOURCE, autocommit=True) as src, psycopg.connect(TARGET, autocommit=True) as dst:
+        src.execute("CREATE SCHEMA jw_p1_canonical_probe")
+        try:
+            src.execute("""
+                CREATE TABLE jw_p1_canonical_probe.sample (
+                    id integer PRIMARY KEY,
+                    display_name text,
+                    CONSTRAINT name_check CHECK(
+                        (length(display_name) >= 2 AND length(display_name) <= 120)
+                        AND display_name = btrim(display_name)
+                    )
+                )
+            """)
+            before = backup.fetch_signature(src, schema)
+            # This captures the actual DB server's normalized pretty deparser,
+            # not a guessed textual SQL normalizer.
+            original = dict(before["constraints"])["sample.name_check"]
+            row = src.execute("""
+                SELECT pg_get_constraintdef(k.oid, true)
+                FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+                JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname=%s AND c.relname='sample' AND k.conname='name_check'
+            """, (schema,)).fetchone()
+            assert original == hashlib.md5(row[0].encode()).hexdigest()
+            backup.run_tool(["pg_dump", "--format=custom", f"--schema={schema}",
+                             "--no-owner", "--file", str(dump)], src_opts, timeout=60)
+            backup.run_tool(["pg_restore", "--no-owner", "--no-acl", "--exit-on-error",
+                             "--dbname", "postgres", str(dump)], dst_opts, timeout=60)
+            after = backup.fetch_signature(dst, schema)
+            assert backup.diff_signatures(before, after) == []
+            assert dict(after["constraints"])["sample.name_check"] == original
+            dst.execute("INSERT INTO jw_p1_canonical_probe.sample VALUES (1,'ab')")
+            dst.execute("DELETE FROM jw_p1_canonical_probe.sample WHERE id=1")
+            dst.execute("ALTER TABLE jw_p1_canonical_probe.sample DROP CONSTRAINT name_check")
+            dst.execute("""
+                ALTER TABLE jw_p1_canonical_probe.sample ADD CONSTRAINT name_check
+                CHECK (length(display_name) >= 3 AND length(display_name) <= 120
+                       AND display_name = btrim(display_name))
+            """)
+            changed = backup.fetch_signature(dst, schema)
+            assert "constraints:sample.name_check" in backup.diff_signatures(before, changed)
+            with __import__("pytest").raises(errors.CheckViolation):
+                dst.execute("INSERT INTO jw_p1_canonical_probe.sample VALUES (2,'ab')")
+            dst.execute("ALTER TABLE jw_p1_canonical_probe.sample DROP CONSTRAINT name_check")
+            missing = backup.fetch_signature(dst, schema)
+            assert backup.diagnose_signature_mismatches(before, missing)["constraints"]["missing_in_restore"] == 1
+        finally:
+            dst.execute("DROP SCHEMA IF EXISTS jw_p1_canonical_probe CASCADE")
+            src.execute("DROP SCHEMA IF EXISTS jw_p1_canonical_probe CASCADE")
+    assert dump.exists()
