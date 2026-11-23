@@ -34,6 +34,12 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         source.execute("ALTER TABLE jw_dev.records ENABLE ROW LEVEL SECURITY")
         source.execute("ALTER TABLE jw_dev.records FORCE ROW LEVEL SECURITY")
         source.execute("CREATE POLICY read_all ON jw_dev.records FOR SELECT TO PUBLIC USING (true)")
+        # This role is intentionally referenced by grants in the source.
+        # The restore engine must create it NOLOGIN on the disposable target,
+        # then remove that new cluster-global role after the restore DB is dropped.
+        source.execute("CREATE ROLE jw_p1_synthetic_reader NOLOGIN")
+        source.execute("GRANT USAGE ON SCHEMA jw_dev TO jw_p1_synthetic_reader")
+        source.execute("GRANT SELECT ON jw_dev.records TO jw_p1_synthetic_reader")
         assert source.execute("SELECT count(*) FROM jw_dev.records").fetchone()[0] == 120
     backup.provision_ephemeral_marker(TARGET, TOKEN)
     results = backup.run(SOURCE, TARGET, schema="jw_dev", workdir=tmp_path, real_source=False)
@@ -58,3 +64,9 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         assert not target.execute(
             "SELECT datname FROM pg_database WHERE datname LIKE 'jw_v223_%'"
         ).fetchall()
+        assert target.execute(
+            "SELECT count(*) FROM pg_roles WHERE rolname='jw_p1_synthetic_reader'"
+        ).fetchone()[0] == 0, "restore-created cluster role leaked after cleanup"
+        assert target.execute(
+            "SELECT count(*) FROM pg_roles WHERE rolname='postgres'"
+        ).fetchone()[0] == 1, "pre-existing restore admin role must remain"
