@@ -308,6 +308,24 @@ def _exec(container: str, command: list[str], *, data: bytes | None = None,
     return _docker([*prefix, *command], data=data, timeout=timeout)
 
 
+def _final_pg17_ready(container: str) -> bool:
+    """Fail closed during PostgreSQL image's transient initdb server window.
+
+    The official entrypoint starts a temporary postmaster during initialization,
+    then replaces PID 1 with the final postgres process. pg_isready alone may
+    return 0 during that transient postmaster and race with createdb.
+    """
+    try:
+        proc = _exec(container, ["cat", "/proc/1/comm"], timeout=10)
+        if proc.returncode or proc.stdout.strip() != b"postgres":
+            return False
+        check = _exec(container, ["pg_isready", "-U", "postgres", "-d", "postgres"],
+                      timeout=10)
+        return check.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 # Optional owner-only focus compares one validated non-empty relation against
 # a separately read-only obtained current-source reference. This distinguishes
 # row::text fingerprint serialization from JSONB-canonical content drift.
@@ -586,8 +604,7 @@ def run_offline() -> dict[str, object]:
             result["blocker"] = "DISPOSABLE_CONTAINER_ID_INVALID"
             return result
         for i in range(60):
-            ready = _exec(container, ["pg_isready", "-U", "postgres", "-d", "postgres"])
-            if ready.returncode == 0:
+            if _final_pg17_ready(container):
                 break
             time.sleep(0.5)
         else:

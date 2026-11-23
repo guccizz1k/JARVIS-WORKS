@@ -397,3 +397,37 @@ def test_restore_offline_cli_returns_zero_only_on_proven_current_reference(monke
     result["schema_delta_column_shapes_match_count"]=10
     assert offline.main(["restore-offline"]) == 1
     assert '"overall":"BLOCKED"' in capsys.readouterr().out
+
+
+
+def test_final_pg17_readiness_does_not_accept_temporary_initdb_server(monkeypatch):
+    """The initdb temporary postmaster can say pg_isready=0 while the entrypoint
+    is about to shut it down. Only PID1=postgres and ready can pass."""
+    import subprocess
+    calls=[]
+    state={"phase":"initdb"}
+    def execute(container, command, **kw):
+        calls.append(tuple(command))
+        if command == ["cat","/proc/1/comm"]:
+            name=b"docker-entrypoi\n" if state["phase"]=="initdb" else b"postgres\n"
+            return subprocess.CompletedProcess(command,0,name,b"")
+        if command[0]=="pg_isready":
+            return subprocess.CompletedProcess(command,0,b"accepting connections",b"")
+        raise AssertionError("unexpected command")
+    monkeypatch.setattr(offline,"_exec",execute)
+    assert offline._final_pg17_ready("isolated") is False
+    assert calls == [("cat","/proc/1/comm")]
+    state["phase"]="final"
+    assert offline._final_pg17_ready("isolated") is True
+    assert calls[-2:] == [("cat","/proc/1/comm"),
+                           ("pg_isready","-U","postgres","-d","postgres")]
+
+
+def test_final_pg17_readiness_denies_final_server_not_accepting(monkeypatch):
+    import subprocess
+    def execute(container, command, **kw):
+        if command[0]=="cat":
+            return subprocess.CompletedProcess(command,0,b"postgres\n",b"")
+        return subprocess.CompletedProcess(command,1,b"rejecting",b"")
+    monkeypatch.setattr(offline,"_exec",execute)
+    assert offline._final_pg17_ready("isolated") is False
