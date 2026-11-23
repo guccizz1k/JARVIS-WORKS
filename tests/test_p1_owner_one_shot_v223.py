@@ -153,3 +153,124 @@ def test_cli_never_prints_key_or_archive_path(tmp_path: Path, monkeypatch, capsy
 def test_invalid_cli_command_does_not_open_files(capsys):
     assert one.main(["run"]) == 2
     assert "USAGE" in capsys.readouterr().err
+
+
+
+def _historical_storage(tmp_path: Path, archive: Path):
+    """Mirror historical TMPDIR/jw_v223_*/nonce.jwpgbk without network."""
+    root = tmp_path / "backups"
+    root.mkdir(mode=0o700)
+    folder = root / "jw_v223_abc12345"
+    folder.mkdir(mode=0o700)
+    saved = folder / "historical.jwpgbk"
+    saved.write_bytes(archive.read_bytes())
+    saved.chmod(0o600)
+    return root, saved
+
+
+def test_diagnose_auto_discovers_historical_nested_ciphertext(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    result = one.diagnose_one_shot(env)
+    assert result["archive_discovery"] == "FOUND_ONE"
+    assert result["discovered_private_archive_count"] == 1
+    assert result["local_archive_auth"] == "PASS"
+    assert result["diagnostic_execution"] == "PASS"
+    assert result["overall"] == "BLOCKED"
+    assert "INDEPENDENTLY_RETRIEVED_CIPHERTEXT_REQUIRED" in result["blockers"]
+    assert str(saved) not in str(result)
+
+
+def test_diagnose_aggregates_all_independent_missing_evidence(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: tmp_path / "absent")
+    result = one.diagnose_one_shot({})
+    assert result["diagnostic_execution"] == "PASS"
+    assert result["archive_discovery"] == "PRIVATE_BACKUP_DIRECTORY_ABSENT_OR_UNSAFE"
+    assert "PRIVATE_BACKUP_DIRECTORY_ABSENT_OR_UNSAFE" in result["blockers"]
+    assert "INDEPENDENT_CIPHER_SHA256_REQUIRED" in result["blockers"]
+    assert "BACKUP_KEY_REQUIRED_IN_OWNER_ENV" in result["blockers"]
+    assert "INDEPENDENTLY_RETRIEVED_CIPHERTEXT_REQUIRED" in result["blockers"]
+    assert "OFFSITE_STORAGE_PROVIDER_ATTESTATION_NOT_VERIFIED" in result["blockers"]
+    assert "HISTORICAL_65_TABLE_INDEPENDENT_RESTORE_NOT_VERIFIED" in result["blockers"]
+    assert "RENDER_AUTHENTICATED_LIVE_E2E_NOT_RUN" in result["blockers"]
+
+
+def test_diagnose_does_not_select_ambiguous_copies(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    (saved.parent / "second.jwpgbk").write_bytes(saved.read_bytes())
+    (saved.parent / "second.jwpgbk").chmod(0o600)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    result = one.diagnose_one_shot(env)
+    assert result["archive_discovery"] == "MULTIPLE_ARCHIVES"
+    assert result["discovered_private_archive_count"] == 2
+    assert "MULTIPLE_ARCHIVES_NEED_TRUSTED_RECEIPT_SELECTION" in result["blockers"]
+    assert result["local_archive_auth"] == "BLOCKED"
+    assert result["diagnostic_execution"] == "PASS"
+
+
+@pytest.mark.parametrize("attack", ["root_symlink", "folder_symlink", "world_readable", "root_permissive"])
+def test_diagnose_discovery_rejects_insecure_historical_storage(tmp_path: Path, monkeypatch, attack):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    if attack == "root_symlink":
+        alias = tmp_path / "alias"
+        alias.symlink_to(root, target_is_directory=True)
+        monkeypatch.setattr(one, "_owner_backup_dir", lambda: alias)
+    elif attack == "folder_symlink":
+        linked = root / "jw_v223_fake"
+        linked.symlink_to(saved.parent, target_is_directory=True)
+        saved.unlink()
+    elif attack == "world_readable":
+        saved.chmod(0o644)
+    elif attack == "root_permissive":
+        root.chmod(0o755)
+    r = one.diagnose_one_shot(env)
+    assert r["archive_discovery"] in ("NO_PRIVATE_CIPHERTEXT_FOUND",
+                                      "PRIVATE_BACKUP_DIRECTORY_ABSENT_OR_UNSAFE")
+    assert r["local_archive_auth"] == "BLOCKED"
+
+
+def test_diagnose_preserves_owner_receipt_but_never_trusts_it(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root, saved = _historical_storage(tmp_path, archive)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    receipt = tmp_path / "owner_b2b3_20261117_20261123.json"
+    receipt.write_text('{"verdict":"PASS","signed":"not really"}')
+    receipt.chmod(0o600)
+    env.pop("JW_PG_ARCHIVE_PATH")
+    r = one.diagnose_one_shot(env)
+    assert r["private_receipt_metadata"] == "PRESENT_NOT_INDEPENDENTLY_VERIFIED"
+    assert r["overall"] == "BLOCKED"
+
+
+def test_diagnose_cli_returns_success_for_diagnostic_not_backup(tmp_path: Path, monkeypatch, capsys):
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: tmp_path / "absent")
+    for key in ("JW_PG_ARCHIVE_PATH","JW_PG_BACKUP_KEY","JW_PG_EXPECT_ARCHIVE_SHA256",
+                "JW_PG_OWNER_RECEIPT_PATH","JW_PG_RETRIEVED_ARCHIVE_PATH"):
+        monkeypatch.delenv(key, raising=False)
+    assert one.main(["diagnose"]) == 0
+    printed = capsys.readouterr().out
+    result = json.loads(printed)
+    assert result["diagnostic_execution"] == "PASS"
+    assert result["overall"] == "BLOCKED"
+    assert "ARCHIVE" in printed
+    assert str(tmp_path) not in printed
+
+
+def test_discovery_does_not_scan_outside_known_owner_dir(tmp_path: Path, monkeypatch):
+    env, archive = _fixture(tmp_path)
+    root = tmp_path / "backups"
+    root.mkdir(mode=0o700)
+    outside = tmp_path / "untrusted"
+    outside.mkdir(mode=0o700)
+    (outside / "malicious.jwpgbk").write_bytes(archive.read_bytes())
+    (outside / "malicious.jwpgbk").chmod(0o600)
+    (root / "jw_v223_outside").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(one, "_owner_backup_dir", lambda: root)
+    assert one.discover_owner_archive() == ([], "NO_PRIVATE_CIPHERTEXT_FOUND")
