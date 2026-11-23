@@ -39,7 +39,7 @@ jobs:
     name: PG17 synthetic backup and isolated restore (no production data)
     if: github.repository == 'guccizz1k/JARVIS-WORKS'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     steps:
       - name: Checkout review commit
         uses: actions/checkout@v4
