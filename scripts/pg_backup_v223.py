@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import struct
 import subprocess
 import sys
@@ -30,7 +31,10 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-MAGIC = b"JWPGBK1\n"
+# V1 has only 32 bits of random nonce prefix. Preserve decryption support for
+# historical archives, but NEVER generate more V1 backups under a reused key.
+MAGIC_LEGACY = b"JWPGBK1\n"
+MAGIC = b"JWPGBK2\n"
 CHUNK = 1 << 20
 MAX_CHUNK_CIPHERTEXT = CHUNK + 16
 SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
@@ -67,11 +71,20 @@ def load_key(value: str | None = None) -> bytes:
 
 # ------------------------------------------------- chunked AES-256-GCM file format
 def _nonce(prefix: bytes, counter: int) -> bytes:
-    return prefix + struct.pack(">Q", counter)
+    """AES-GCM 96-bit nonce: V1=32-bit prefix+64-bit counter; V2=64+32."""
+    if len(prefix) == 8:
+        if not 0 <= counter < 2**32:
+            raise BackupError("BLOCKED_V223_BACKUP_V2_CHUNK_COUNTER_EXHAUSTED")
+        return prefix + struct.pack(">I", counter)
+    if len(prefix) == 4:
+        if not 0 <= counter < 2**64:
+            raise BackupError("BLOCKED_V223_BACKUP_V1_CHUNK_COUNTER_EXHAUSTED")
+        return prefix + struct.pack(">Q", counter)
+    raise BackupError("BLOCKED_V223_BACKUP_BAD_NONCE_PREFIX")
 
 
-def _aad(counter: int, final: bool) -> bytes:
-    return MAGIC + struct.pack(">QB", counter, 1 if final else 0)
+def _aad(counter: int, final: bool, magic: bytes = MAGIC) -> bytes:
+    return magic + struct.pack(">QB", counter, 1 if final else 0)
 
 
 def _open_new(path: Path):
@@ -85,7 +98,9 @@ def encrypt_file(src: Path, dst: Path, key: bytes) -> dict:
     """Encrypt ``src`` to ``dst``. The final chunk is authenticated as final, so
     truncation (even at a chunk boundary), reordering and tampering all fail."""
     aes = AESGCM(key)
-    prefix = os.urandom(4)
+    # 64 random bits per archive reduce cross-archive nonce collisions.
+    # V2's 32-bit chunk counter supports up to 4 PiB per backup.
+    prefix = os.urandom(8)
     plain_hash, cipher_hash = hashlib.sha256(), hashlib.sha256()
     out = _open_new(Path(dst))
     try:
@@ -111,7 +126,7 @@ def encrypt_file(src: Path, dst: Path, key: bytes) -> dict:
         Path(dst).unlink(missing_ok=True)
         raise
     return {"plain_sha256": plain_hash.hexdigest(), "cipher_sha256": cipher_hash.hexdigest(),
-            "chunks": counter + 1}
+            "chunks": counter + 1, "format_version": 2}
 
 
 def decrypt_file(src: Path, dst: Path, key: bytes) -> str:
@@ -121,10 +136,12 @@ def decrypt_file(src: Path, dst: Path, key: bytes) -> str:
     out = _open_new(Path(dst))
     try:
         with open(src, "rb") as fin, out:
-            if fin.read(len(MAGIC)) != MAGIC:
+            magic = fin.read(len(MAGIC))
+            if magic not in (MAGIC, MAGIC_LEGACY):
                 raise BackupError("BLOCKED_V223_BACKUP_BAD_HEADER")
-            prefix = fin.read(4)
-            if len(prefix) != 4:
+            prefix_len = 8 if magic == MAGIC else 4
+            prefix = fin.read(prefix_len)
+            if len(prefix) != prefix_len:
                 raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
             counter = 0
             while True:
@@ -141,7 +158,7 @@ def decrypt_file(src: Path, dst: Path, key: bytes) -> str:
                 if not final:
                     fin.seek(-1, os.SEEK_CUR)
                 try:
-                    plain = aes.decrypt(_nonce(prefix, counter), blob, _aad(counter, final))
+                    plain = aes.decrypt(_nonce(prefix, counter), blob, _aad(counter, final, magic))
                 except InvalidTag as exc:
                     raise BackupError("BLOCKED_V223_BACKUP_AUTH_FAILED") from exc
                 digest.update(plain)
@@ -162,7 +179,11 @@ def write_negative_cipher_copy(src: Path, dst: Path, kind: str) -> None:
     src, dst = Path(src), Path(dst)
     if kind not in ("tamper", "truncation"):
         raise BackupError("BLOCKED_V223_UNKNOWN_NEGATIVE_TEST")
-    payload_offset = len(MAGIC) + 4 + 4
+    with src.open("rb") as header:
+        magic = header.read(len(MAGIC))
+    if magic not in (MAGIC, MAGIC_LEGACY):
+        raise BackupError("BLOCKED_V223_BACKUP_BAD_HEADER")
+    payload_offset = len(magic) + (8 if magic == MAGIC else 4) + 4
     size = src.stat().st_size
     if size <= payload_offset:
         raise BackupError("BLOCKED_V223_ENCRYPTED_ARTIFACT_TOO_SHORT")
@@ -236,8 +257,12 @@ def guard_target(target_dsn: str, source_dsn: str, environ: dict | None = None) 
     target, source = parse_dsn(target_dsn), parse_dsn(source_dsn)
     if target["host"] not in ("localhost", "127.0.0.1", "::1"):
         raise BackupError("BLOCKED_V223_TARGET_MUST_BE_LOCAL")
-    if (target["host"], target["port"], target["dbname"]) == (
-            source["host"], source["port"], source["dbname"]):
+    # A loopback hostname is not an independent cluster identity: localhost,
+    # 127.0.0.1 and ::1 may point to the same PostgreSQL endpoint.
+    same_host = target["host"] == source["host"] or source["host"] in (
+        "localhost", "127.0.0.1", "::1")
+    if same_host and (target["port"], target["dbname"]) == (
+            source["port"], source["dbname"]):
         raise BackupError("BLOCKED_V223_TARGET_EQUALS_SOURCE")
     return target
 
@@ -263,9 +288,38 @@ def dsn_with_dbname(dsn: str, dbname: str) -> str:
                        parts.query, parts.fragment))
 
 
+def prepare_private_workdir(workdir: Path | None = None) -> Path:
+    """Block plaintext dump creation in a shared directory or symlink.
+
+    Both generated and supplied workspaces must be private; mkdir(exist_ok=True)
+    alone does not correct permissive permissions on an existing directory.
+    """
+    work = Path(workdir) if workdir is not None else Path(tempfile.mkdtemp(prefix="jw_v223_"))
+    if work.is_symlink():
+        raise BackupError("BLOCKED_V223_WORKDIR_SYMLINK")
+    work.mkdir(parents=True, exist_ok=True, mode=0o700)
+    mode = work.lstat().st_mode
+    if not stat.S_ISDIR(mode) or (stat.S_IMODE(mode) & 0o777) != 0o700:
+        raise BackupError("BLOCKED_V223_WORKDIR_NOT_PRIVATE_0700")
+    return work
+
+
+def _pg_process_base_env() -> dict:
+    """Minimal process environment, shared by pg tools and version checks."""
+    safe_parent = (
+        "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "LC_CTYPE",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "SystemRoot", "WINDIR", "PATHEXT",
+        "USERPROFILE", "LD_LIBRARY_PATH", "DOCKER_HOST", "DOCKER_CONTEXT",
+        "DOCKER_CONFIG", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH",
+    )
+    return {name: os.environ[name] for name in safe_parent if name in os.environ}
+
+
 def pg_env(opts: dict) -> dict:
-    env = {**os.environ, "PGHOST": opts["host"], "PGPORT": opts["port"],
-           "PGUSER": opts["user"], "PGPASSWORD": opts["password"], "PGDATABASE": opts["dbname"]}
+    """Pass only required PG settings; never pass backup/vault/cloud secrets."""
+    env = _pg_process_base_env()
+    env.update(PGHOST=opts["host"], PGPORT=opts["port"], PGUSER=opts["user"],
+               PGPASSWORD=opts["password"], PGDATABASE=opts["dbname"])
     if opts.get("sslmode"):
         env["PGSSLMODE"] = opts["sslmode"]
     if opts.get("sslrootcert"):
@@ -284,7 +338,8 @@ def parse_tool_major(out: str) -> int | None:
 
 
 def tool_major(tool: str) -> int:
-    out = subprocess.run([tool, "--version"], capture_output=True, text=True, timeout=15).stdout
+    out = subprocess.run([tool, "--version"], env=_pg_process_base_env(),
+                         capture_output=True, text=True, timeout=15).stdout
     major = parse_tool_major(out)
     if major is None:
         raise BackupError("BLOCKED_V223_TOOL_VERSION_UNKNOWN")
@@ -301,8 +356,10 @@ def run_tool(args: list[str], opts: dict, timeout: int) -> str:
     result = subprocess.run(args, env=pg_env(opts), capture_output=True, text=True,
                             timeout=timeout)
     if result.returncode != 0:
-        detail = redact(result.stderr.strip()[-400:], opts["password"])
-        raise BackupError(f"FAIL_V223_{Path(args[0]).name.upper()}_EXIT_{result.returncode}: {detail}")
+        # pg_dump/pg_restore stderr can include full SQL definitions, literal
+        # data, DSNs, or connection details. Public CI must never print it.
+        # The stable tool name and exit status are sufficient as a safe signal.
+        raise BackupError(f"FAIL_V223_{Path(args[0]).name.upper()}_EXIT_{result.returncode}")
     return result.stdout
 
 
@@ -409,44 +466,67 @@ def fetch_signature(connection, schema: str) -> dict:
     return sig
 
 
+def _signature_groups(rows: list) -> dict:
+    """Preserve duplicates and variants in signature rows."""
+    from collections import Counter, defaultdict
+    groups = defaultdict(Counter)
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or not row:
+            raise ValueError("INVALID_SIGNATURE_ROW")
+        label = str(row[0])
+        groups[label][json.dumps(row, sort_keys=True, default=str, ensure_ascii=False)] += 1
+    return groups
+
+
+def canonical_signature(sig: dict) -> dict:
+    """Normalize SQL row order without changing row multiplicities."""
+    return {
+        key: sorted(value, key=lambda row: json.dumps(row, sort_keys=True, default=str, ensure_ascii=False))
+        if isinstance(value, list) else value
+        for key, value in sig.items()
+    }
+
+
 def diff_signatures(source: dict, restored: dict) -> list[str]:
-    """Return mismatch labels only (names, never values)."""
+    """Return mismatch labels, never object definitions or row values."""
     problems = []
     for key in sorted(set(source) | set(restored)):
-        if source.get(key) == restored.get(key):
+        if key not in source or key not in restored:
+            problems.append(key)
             continue
-        if isinstance(source.get(key), dict) and isinstance(restored.get(key), dict):
-            names = sorted(k for k in set(source[key]) | set(restored[key])
-                           if source[key].get(k) != restored[key].get(k))
-            problems.extend(f"{key}:{name}" for name in names)
-        elif isinstance(source.get(key), list) and isinstance(restored.get(key), list):
-            a = {row[0]: row for row in source[key]}
-            b = {row[0]: row for row in restored[key]}
-            names = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
-            problems.extend(f"{key}:{name}" for name in names)
+        a, b = source[key], restored[key]
+        if isinstance(a, list) and isinstance(b, list):
+            x, y = _signature_groups(a), _signature_groups(b)
+            problems.extend(
+                f"{key}:{_safe_label(name)}"
+                for name in sorted(set(x) | set(y), key=str)
+                if x.get(name) != y.get(name)
+            )
+        elif a == b:
+            continue
+        elif isinstance(a, dict) and isinstance(b, dict):
+            problems.extend(
+                f"{key}:{_safe_label(name)}"
+                for name in sorted(set(a) | set(b), key=str)
+                if name not in a or name not in b or a[name] != b[name]
+            )
         else:
             problems.append(key)
     return problems
 
 
 def diagnose_signature_mismatches(source: dict, restored: dict) -> dict:
-    """Bounded, content-free comparison evidence; never change the PASS gate.
-
-    Classify missing objects separately from differing signatures. ACL values
-    and constraint definitions are deliberately not exposed to logs.
-    """
+    """Count mismatches while retaining duplicate object names."""
     result = {}
     for category in ("constraints", "acl"):
-        a = {row[0]: row[1:] for row in source.get(category, [])}
-        b = {row[0]: row[1:] for row in restored.get(category, [])}
-        common = set(a) & set(b)
-        changed = {name for name in common if a[name] != b[name]}
+        a = _signature_groups(source.get(category, []))
+        b = _signature_groups(restored.get(category, []))
         result[category] = {
-            "source_objects": len(a),
-            "restored_objects": len(b),
-            "missing_in_restore": len(set(a) - set(b)),
-            "unexpected_in_restore": len(set(b) - set(a)),
-            "different_definition_or_grants": len(changed),
+            "source_objects": sum(sum(counts.values()) for counts in a.values()),
+            "restored_objects": sum(sum(counts.values()) for counts in b.values()),
+            "missing_in_restore": sum(sum(a[name].values()) for name in a.keys() - b.keys()),
+            "unexpected_in_restore": sum(sum(b[name].values()) for name in b.keys() - a.keys()),
+            "different_definition_or_grants": sum(a[name] != b[name] for name in a.keys() & b.keys()),
         }
     return result
 
@@ -579,8 +659,9 @@ FROM pg_roles r,
                                          OR has_table_privilege(c.oid, 'TRIGGER')) AS writable,
                      count(*) FILTER (WHERE c.relrowsecurity) AS rls_tables
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = %(s)s AND c.relkind IN ('r','p')) t,
-     LATERAL (SELECT count(*) FILTER (WHERE has_sequence_privilege(c.oid, 'UPDATE')) AS writable_seq
+              WHERE n.nspname = %(s)s AND c.relkind IN ('r','p','v','m','f')) t,
+     LATERAL (SELECT count(*) FILTER (WHERE has_sequence_privilege(c.oid, 'USAGE')
+                                             OR has_sequence_privilege(c.oid, 'UPDATE')) AS writable_seq
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
               WHERE n.nspname = %(s)s AND c.relkind = 'S') q
 WHERE r.rolname = current_user
@@ -620,8 +701,12 @@ def evaluate_source_privileges(facts: dict) -> list[str]:
                       ("sequences_writable", "sequences_writable")):
         if facts[key] != 0:
             bad.append(name)
-    if isinstance(facts["rls_tables"], int) and facts["rls_tables"] > 0 and facts["bypassrls"] is not True:
+    if type(facts["rls_tables"]) is not int or facts["rls_tables"] < 0:
+        bad.append("rls_table_count_invalid")
+    elif facts["rls_tables"] > 0 and facts["bypassrls"] is not True:
         bad.append("rls_rows_not_fully_readable")
+    elif facts["rls_tables"] == 0 and facts["bypassrls"] is not False:
+        bad.append("bypassrls_without_rls")
     return bad
 
 
@@ -719,7 +804,8 @@ def verdict(summary: dict) -> str:
     # backup was restored. Require independent execution evidence as well.
     required_evidence = ("source_identity_verified", "source_role_least_privilege",
                          "target_proven_ephemeral", "snapshot_consistent",
-                         "restore_verified", "decrypt_sha256_matches")
+                         "restore_verified", "decrypt_sha256_matches",
+                         "signature_digest_matches", "archive_sha256_matches")
     if not all(summary.get(k) is True for k in required_evidence):
         return "PARTIAL: source, snapshot, decrypt or actual restore not verified"
     if summary.get("signature_mismatches") != []:
@@ -743,6 +829,14 @@ def roles_in_acl(connection, schema: str) -> list[str]:
                       LATERAL aclexplode(c.relacl) a
                       WHERE n.nspname=%(s)s AND c.relacl IS NOT NULL
                         AND (a.grantee=r.oid OR a.grantor=r.oid))
+              OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace,
+                      LATERAL aclexplode(p.proacl) a
+                         WHERE n.nspname=%(s)s AND p.proacl IS NOT NULL
+                           AND (a.grantee=r.oid OR a.grantor=r.oid))
+              OR EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace,
+                      LATERAL aclexplode(t.typacl) a
+                         WHERE n.nspname=%(s)s AND t.typacl IS NOT NULL
+                           AND (a.grantee=r.oid OR a.grantor=r.oid))
               OR EXISTS (SELECT 1 FROM pg_namespace n,
                       LATERAL aclexplode(n.nspacl) a
                          WHERE n.nspname=%(s)s AND n.nspacl IS NOT NULL
@@ -759,9 +853,8 @@ def roles_in_acl(connection, schema: str) -> list[str]:
 
 def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
         workdir: Path | None = None, real_source: bool = False) -> dict:
-    import psycopg  # lazy: unit tests of the pure logic do not need it
-    from psycopg import sql
-
+    # Validate pure inputs before importing optional DB dependencies. This also
+    # ensures malformed DSNs fail closed in the isolated CI unit-test job.
     check_schema(schema)
     src = guard_source(source_dsn) if real_source else parse_dsn(source_dsn)
     # Explicit source binding prevents arbitrary synthetic or third-party DSNs
@@ -770,14 +863,15 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     if real_source and (not expected_host or expected_host.lower() != src["host"]):
         raise BackupError("BLOCKED_V223_REAL_SOURCE_HOST_NOT_VERIFIED")
     tgt = guard_target(target_admin_dsn, source_dsn)
+    import psycopg
+    from psycopg import sql
     key = load_key()
     require_pg17_tools()
     # F1: prove the restore target is a disposable cluster BEFORE connecting to the source
     # or issuing any CREATE/DROP on the target.
     with psycopg.connect(target_admin_dsn, autocommit=True) as probe:
         verify_ephemeral_target(probe)
-    work = Path(workdir or tempfile.mkdtemp(prefix="jw_v223_"))
-    work.mkdir(parents=True, exist_ok=True, mode=0o700)
+    work = prepare_private_workdir(workdir)
     nonce = os.urandom(5).hex()
     restore_db = f"jw_v223_{nonce}"
     plain, enc, back = (work / f"{nonce}.dump", work / f"{nonce}.jwpgbk", work / f"{nonce}.back")
@@ -786,6 +880,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
                      "target_proven_ephemeral": True}
     t = time.monotonic
     created = False
+    created_roles: list[str] = []
     try:
         # PostgreSQL exported snapshot keeps source signatures and pg_dump
         # consistent under concurrent writes (the transaction stays open until
@@ -822,6 +917,15 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             summary["source_identity_verified"] = (not real_source or
                         identity_verified(identity_checks or {}))
         summary["encrypt"] = encrypt_file(plain, enc, key)
+        digest = hashlib.sha256()
+        with enc.open("rb") as ciphertext:
+            for chunk in iter(lambda: ciphertext.read(1 << 20), b""):
+                digest.update(chunk)
+        summary["archive_sha256"] = digest.hexdigest()
+        summary["archive_sha256_matches"] = (
+            summary["archive_sha256"] == summary["encrypt"]["cipher_sha256"])
+        if not summary["archive_sha256_matches"]:
+            raise BackupError("FAIL_V223_CIPHERTEXT_HASH_MISMATCH")
         summary["dump_bytes"] = plain.stat().st_size
         plain.unlink()
         # negative tests on the ENCRYPTED artifact (never on the only copy)
@@ -851,11 +955,19 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             created = True
         restore_opts = {**tgt, "dbname": restore_db}
         restore_dsn = dsn_with_dbname(target_admin_dsn, restore_db)
+        # Restore roles are cluster-global; keep pre-existing roles untouched.
+        # A create race fails closed rather than treating another owner's role as ours.
         with psycopg.connect(restore_dsn, autocommit=True) as tconn:
             for role in roles:
-                tconn.execute(sql.SQL("DO $$BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname={}) "
-                                      "THEN CREATE ROLE {} NOLOGIN; END IF; END$$").format(
-                                          sql.Literal(role), sql.Identifier(role)))
+                exists = tconn.execute(
+                    "SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)
+                ).fetchone()
+                if exists:
+                    continue
+                tconn.execute(
+                    sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role))
+                )
+                created_roles.append(role)
         run_tool(["pg_restore", "--no-owner", "--exit-on-error", "--dbname", restore_db, str(back)],
                  restore_opts, timeout=600)
         summary["timings_s"]["restore_rto"] = round(t() - t1, 3)
@@ -863,7 +975,25 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             restored_sig = fetch_signature(tconn, schema)
         summary["signature_mismatches"] = diff_signatures(src_sig, restored_sig)
         summary["signature_mismatch_diagnostics"] = diagnose_signature_mismatches(src_sig, restored_sig)
-        summary["restore_verified"] = not summary["signature_mismatches"]
+        summary["restored_signature_sha256"] = signature_digest(restored_sig)
+        source_canonical = canonical_signature(src_sig)
+        restored_canonical = canonical_signature(restored_sig)
+        summary["canonical_source_sha256"] = signature_digest(source_canonical)
+        summary["canonical_restored_sha256"] = signature_digest(restored_canonical)
+        summary["signature_digest_matches"] = (
+            summary["canonical_source_sha256"] == summary["canonical_restored_sha256"])
+        summary["restore_verified"] = (
+            not summary["signature_mismatches"] and summary["signature_digest_matches"])
+        summary["signature_component_sha256"] = {
+            side: {name: signature_digest({name: value}) for name, value in canonical.items()}
+            for side, canonical in (("source", source_canonical), ("restored", restored_canonical))
+        }
+        source_components = summary["signature_component_sha256"]["source"]
+        restored_components = summary["signature_component_sha256"]["restored"]
+        summary["signature_component_mismatch_categories"] = sorted(
+            name for name in set(source_components) | set(restored_components)
+            if source_components.get(name) != restored_components.get(name)
+        )
         summary["tables"] = len(src_sig["tables"])
         summary["signature_sha256"] = signature_digest(src_sig)
         # A truncated archive can still pass `pg_restore --list` because its
@@ -892,7 +1022,21 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             path.unlink(missing_ok=True)
         if created:
             with psycopg.connect(target_admin_dsn, autocommit=True) as admin:
-                admin.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(restore_db)))
+                # Drop database first to release grants/dependencies on temp roles.
+                # Only drop roles created during this run; never touch existing ones.
+                try:
+                    admin.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(restore_db)))
+                finally:
+                    if created_roles:
+                        # If database cleanup fails, do not attempt unsafe role deletion.
+                        remaining = admin.execute(
+                            "SELECT 1 FROM pg_database WHERE datname = %s", (restore_db,)
+                        ).fetchone()
+                        if remaining is None:
+                            for role in reversed(created_roles):
+                                admin.execute(
+                                    sql.SQL("DROP ROLE {}").format(sql.Identifier(role))
+                                )
     summary["verdict"] = verdict(summary)
     return summary
 
@@ -909,6 +1053,116 @@ def install_termination_handlers() -> None:
         signal.signal(sig, _handler)
 
 
+def _safe_dsn_password(dsn: str) -> str:
+    """Best-effort redaction only: malformed input must not bypass error handling."""
+    if not dsn:
+        return ""
+    try:
+        return parse_dsn(dsn)["password"]
+    except (BackupError, ValueError, TypeError):
+        return ""
+
+
+
+def audit_encrypted_archive(path: Path, expected_cipher_sha256: str, key: bytes,
+                            expected_plain_sha256: str = "") -> dict:
+    """Read-only, single-pass authenticated archive audit; never writes plaintext.
+
+    The expected SHA must come from an *independent* trusted receipt. This only
+    authenticates an archive under the supplied key. It does NOT prove that the
+    historical development DB was the source or that the file is stored offsite.
+    """
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_cipher_sha256 or ""):
+        raise BackupError("BLOCKED_V223_ARCHIVE_EXPECTED_SHA256_REQUIRED")
+    if expected_plain_sha256 and not re.fullmatch(r"[0-9a-f]{64}", expected_plain_sha256):
+        raise BackupError("BLOCKED_V223_PLAINTEXT_EXPECTED_SHA256_INVALID")
+    if not isinstance(key, bytes) or len(key) != 32:
+        raise BackupError("BLOCKED_V223_BACKUP_KEY_MUST_BE_32_BYTES")
+    path = Path(path)
+    if path.is_symlink():
+        raise BackupError("BLOCKED_V223_ARCHIVE_SYMLINK")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        with os.fdopen(fd, "rb") as fin:
+            mode = os.fstat(fin.fileno())
+            if not stat.S_ISREG(mode.st_mode) or (stat.S_IMODE(mode.st_mode) & 0o777) != 0o600:
+                raise BackupError("BLOCKED_V223_ARCHIVE_NOT_PRIVATE_0600")
+            if hasattr(os, "getuid") and mode.st_uid != os.getuid():
+                raise BackupError("BLOCKED_V223_ARCHIVE_UNEXPECTED_OWNER")
+            digest_cipher, digest_plain = hashlib.sha256(), hashlib.sha256()
+            def take(size: int) -> bytes:
+                data = fin.read(size)
+                digest_cipher.update(data)
+                return data
+            magic = take(len(MAGIC))
+            if magic not in (MAGIC, MAGIC_LEGACY):
+                raise BackupError("BLOCKED_V223_BACKUP_BAD_HEADER")
+            prefix_len = 8 if magic == MAGIC else 4
+            prefix = take(prefix_len)
+            if len(prefix) != prefix_len:
+                raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
+            aes = AESGCM(key)
+            index = 0
+            while True:
+                length_data = take(4)
+                if len(length_data) != 4:
+                    raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
+                length = struct.unpack(">I", length_data)[0]
+                if not 16 <= length <= MAX_CHUNK_CIPHERTEXT:
+                    raise BackupError("BLOCKED_V223_BACKUP_BAD_CHUNK_LENGTH")
+                blob = take(length)
+                if len(blob) != length:
+                    raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
+                # The final flag is included in authenticated AAD. Peeking does
+                # not hash twice; the next length read will absorb the byte.
+                next_byte = fin.read(1)
+                final = not next_byte
+                if next_byte:
+                    fin.seek(-1, os.SEEK_CUR)
+                try:
+                    digest_plain.update(aes.decrypt(
+                        _nonce(prefix, index), blob, _aad(index, final, magic)))
+                except InvalidTag:
+                    raise BackupError("BLOCKED_V223_BACKUP_AUTH_FAILED") from None
+                index += 1
+                if final:
+                    break
+            if not __import__("hmac").compare_digest(
+                    digest_cipher.hexdigest(), expected_cipher_sha256):
+                raise BackupError("BLOCKED_V223_ARCHIVE_SHA256_MISMATCH")
+            if expected_plain_sha256 and not __import__("hmac").compare_digest(
+                    digest_plain.hexdigest(), expected_plain_sha256):
+                raise BackupError("BLOCKED_V223_PLAINTEXT_SHA256_MISMATCH")
+            return {"format_version": 2 if magic == MAGIC else 1,
+                    "chunks": index, "cipher_sha256_matches": True,
+                    "authenticated_decryption": True,
+                    "plain_sha256_matches": True if expected_plain_sha256 else None,
+                    "external_storage_proven": False, "historical_source_proven": False}
+    except BaseException:
+        # The audit does not create, modify or delete any on-disk archive.
+        raise
+
+
+def audit_archive_cli() -> int:
+    """Offline-only; prints labels, never raw keys, paths, DSNs or row data."""
+    try:
+        result = audit_encrypted_archive(
+            Path(os.environ.get("JW_PG_ARCHIVE_PATH", "")),
+            os.environ.get("JW_PG_EXPECT_ARCHIVE_SHA256", ""),
+            load_key(),
+            os.environ.get("JW_PG_EXPECT_PLAINTEXT_SHA256", ""),
+        )
+    except BackupError as exc:
+        print(str(exc).split(":")[0], file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print("FAIL_V223_ARCHIVE_AUDIT_" + type(exc).__name__, file=sys.stderr)
+        return 1
+    print(json.dumps({"offline_archive_verification": "PASS",
+                      **result}, sort_keys=True))
+    return 0
+
+
 def mark_target() -> int:
     """``mark-target``: plant the ephemeral marker in the disposable restore cluster."""
     target, token = os.environ.get("JW_PG_TARGET_ADMIN_DSN", ""), os.environ.get(EPHEMERAL_TOKEN_ENV, "")
@@ -918,7 +1172,7 @@ def mark_target() -> int:
         guard_target(target, os.environ.get("JW_PG_SOURCE_DSN", "postgresql://none@invalid.invalid/none"))
         provision_ephemeral_marker(target, token)
     except BackupError as exc:
-        print(redact(str(exc), parse_dsn(target)["password"] if target else ""), file=sys.stderr)
+        print(redact(str(exc), _safe_dsn_password(target)), file=sys.stderr)
         return 1
     except Exception as exc:
         print("FAIL_V223_UNEXPECTED_" + type(exc).__name__, file=sys.stderr)
@@ -928,15 +1182,17 @@ def mark_target() -> int:
 
 
 def main(argv: list[str]) -> int:
+    if argv == ["audit-archive"]:
+        return audit_archive_cli()
     if argv == ["mark-target"]:
         return mark_target()
     if len(argv) != 1 or argv[0] != "run":
         print("usage: JW_PG_SOURCE_DSN=... JW_PG_TARGET_ADMIN_DSN=... JW_PG_BACKUP_KEY=... "
               "JW_PG_TARGET_EPHEMERAL_TOKEN=... JW_PG_REAL_SOURCE=1 "
-              "python -m scripts.pg_backup_v223 [mark-target|run]", file=sys.stderr)
+              "python -m scripts.pg_backup_v223 [mark-target|run|audit-archive]", file=sys.stderr)
         return 2
     source, target = os.environ.get("JW_PG_SOURCE_DSN", ""), os.environ.get("JW_PG_TARGET_ADMIN_DSN", "")
-    secrets = [parse_dsn(d)["password"] for d in (source, target) if d]
+    secrets = [_safe_dsn_password(d) for d in (source, target) if d]
     install_termination_handlers()
     try:
         summary = run(source, target, os.environ.get("JW_PG_SCHEMA", "jw_dev"),
