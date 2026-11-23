@@ -108,3 +108,30 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         assert source.execute("SELECT count(*) FROM jw_dev.records").fetchone()[0] == 120
     assert not list((tmp_path / "injected").glob("*.dump"))
     assert not list((tmp_path / "injected").glob("*.back"))
+
+
+def test_pg17_real_catalog_role_probe_rejects_view_insert_and_sequence_nextval():
+    """Independent disposable PG17 proof: SELECT-only source probes see both capabilities."""
+    with psycopg.connect(SOURCE, autocommit=True) as admin:
+        admin.execute("CREATE SCHEMA jw_p1_privilege_probe")
+        admin.execute("CREATE TABLE jw_p1_privilege_probe.base (id bigint PRIMARY KEY)")
+        admin.execute("CREATE VIEW jw_p1_privilege_probe.writable_view AS SELECT id FROM jw_p1_privilege_probe.base")
+        admin.execute("CREATE SEQUENCE jw_p1_privilege_probe.mutable_sequence")
+        admin.execute("CREATE ROLE jw_p1_privilege_probe_reader NOLOGIN")
+        try:
+            admin.execute("GRANT USAGE ON SCHEMA jw_p1_privilege_probe TO jw_p1_privilege_probe_reader")
+            admin.execute("GRANT INSERT ON jw_p1_privilege_probe.writable_view TO jw_p1_privilege_probe_reader")
+            admin.execute("GRANT USAGE ON SEQUENCE jw_p1_privilege_probe.mutable_sequence TO jw_p1_privilege_probe_reader")
+            admin.execute("SET ROLE jw_p1_privilege_probe_reader")
+            try:
+                facts = backup.fetch_role_facts(admin, "jw_p1_privilege_probe")
+                violations = backup.evaluate_source_privileges(facts)
+                assert facts["tables_writable"] >= 1, facts
+                assert facts["sequences_writable"] == 1, facts
+                assert "tables_writable" in violations
+                assert "sequences_writable" in violations
+            finally:
+                admin.execute("RESET ROLE")
+        finally:
+            admin.execute("DROP SCHEMA jw_p1_privilege_probe CASCADE")
+            admin.execute("DROP ROLE jw_p1_privilege_probe_reader")

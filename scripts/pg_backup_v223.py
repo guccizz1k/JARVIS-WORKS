@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import struct
 import subprocess
 import sys
@@ -236,8 +237,12 @@ def guard_target(target_dsn: str, source_dsn: str, environ: dict | None = None) 
     target, source = parse_dsn(target_dsn), parse_dsn(source_dsn)
     if target["host"] not in ("localhost", "127.0.0.1", "::1"):
         raise BackupError("BLOCKED_V223_TARGET_MUST_BE_LOCAL")
-    if (target["host"], target["port"], target["dbname"]) == (
-            source["host"], source["port"], source["dbname"]):
+    # A loopback hostname is not an independent cluster identity: localhost,
+    # 127.0.0.1 and ::1 may point to the same PostgreSQL endpoint.
+    same_host = target["host"] == source["host"] or source["host"] in (
+        "localhost", "127.0.0.1", "::1")
+    if same_host and (target["port"], target["dbname"]) == (
+            source["port"], source["dbname"]):
         raise BackupError("BLOCKED_V223_TARGET_EQUALS_SOURCE")
     return target
 
@@ -261,6 +266,22 @@ def dsn_with_dbname(dsn: str, dbname: str) -> str:
     from urllib.parse import quote, urlunsplit
     return urlunsplit((parts.scheme, parts.netloc, "/" + quote(dbname, safe=""),
                        parts.query, parts.fragment))
+
+
+def prepare_private_workdir(workdir: Path | None = None) -> Path:
+    """Block plaintext dump creation in a shared directory or symlink.
+
+    Both generated and supplied workspaces must be private; mkdir(exist_ok=True)
+    alone does not correct permissive permissions on an existing directory.
+    """
+    work = Path(workdir) if workdir is not None else Path(tempfile.mkdtemp(prefix="jw_v223_"))
+    if work.is_symlink():
+        raise BackupError("BLOCKED_V223_WORKDIR_SYMLINK")
+    work.mkdir(parents=True, exist_ok=True, mode=0o700)
+    mode = work.lstat().st_mode
+    if not stat.S_ISDIR(mode) or (stat.S_IMODE(mode) & 0o777) != 0o700:
+        raise BackupError("BLOCKED_V223_WORKDIR_NOT_PRIVATE_0700")
+    return work
 
 
 def _pg_process_base_env() -> dict:
@@ -618,8 +639,9 @@ FROM pg_roles r,
                                          OR has_table_privilege(c.oid, 'TRIGGER')) AS writable,
                      count(*) FILTER (WHERE c.relrowsecurity) AS rls_tables
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-              WHERE n.nspname = %(s)s AND c.relkind IN ('r','p')) t,
-     LATERAL (SELECT count(*) FILTER (WHERE has_sequence_privilege(c.oid, 'UPDATE')) AS writable_seq
+              WHERE n.nspname = %(s)s AND c.relkind IN ('r','p','v','m','f')) t,
+     LATERAL (SELECT count(*) FILTER (WHERE has_sequence_privilege(c.oid, 'USAGE')
+                                             OR has_sequence_privilege(c.oid, 'UPDATE')) AS writable_seq
               FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
               WHERE n.nspname = %(s)s AND c.relkind = 'S') q
 WHERE r.rolname = current_user
@@ -659,8 +681,12 @@ def evaluate_source_privileges(facts: dict) -> list[str]:
                       ("sequences_writable", "sequences_writable")):
         if facts[key] != 0:
             bad.append(name)
-    if isinstance(facts["rls_tables"], int) and facts["rls_tables"] > 0 and facts["bypassrls"] is not True:
+    if type(facts["rls_tables"]) is not int or facts["rls_tables"] < 0:
+        bad.append("rls_table_count_invalid")
+    elif facts["rls_tables"] > 0 and facts["bypassrls"] is not True:
         bad.append("rls_rows_not_fully_readable")
+    elif facts["rls_tables"] == 0 and facts["bypassrls"] is not False:
+        bad.append("bypassrls_without_rls")
     return bad
 
 
@@ -817,8 +843,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     # or issuing any CREATE/DROP on the target.
     with psycopg.connect(target_admin_dsn, autocommit=True) as probe:
         verify_ephemeral_target(probe)
-    work = Path(workdir or tempfile.mkdtemp(prefix="jw_v223_"))
-    work.mkdir(parents=True, exist_ok=True, mode=0o700)
+    work = prepare_private_workdir(workdir)
     nonce = os.urandom(5).hex()
     restore_db = f"jw_v223_{nonce}"
     plain, enc, back = (work / f"{nonce}.dump", work / f"{nonce}.jwpgbk", work / f"{nonce}.back")

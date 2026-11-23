@@ -321,3 +321,83 @@ def test_validation_precedes_psycopg_import_in_real_engine():
     validation = src.index("tgt = guard_target(target_admin_dsn, source_dsn)")
     driver = src.index("    import psycopg")
     assert validation < driver, "DB driver import must not preempt DSN validation"
+
+
+# Batch security regressions: no production resources or credentials involved.
+@pytest.mark.parametrize(("source", "target"), [
+    ("postgresql://u:p@127.0.0.1:55432/postgres", "postgresql://u:p@localhost:55432/postgres"),
+    ("postgresql://u:p@localhost:55432/postgres", "postgresql://u:p@127.0.0.1:55432/postgres"),
+    ("postgresql://u:p@[::1]:55432/postgres", "postgresql://u:p@127.0.0.1:55432/postgres"),
+])
+def test_source_target_loopback_aliases_are_not_independent(source, target):
+    with pytest.raises(p.BackupError, match="TARGET_EQUALS_SOURCE"):
+        p.guard_target(target, source, {"JW_PG_CI_ALLOW": "ONLY_EPHEMERAL_LOCAL_DATABASE"})
+
+
+def test_different_loopback_ports_remain_allowed():
+    source = "postgresql://u:p@localhost:55432/postgres"
+    target = "postgresql://u:p@127.0.0.1:55433/postgres"
+    assert p.guard_target(target, source, {"JW_PG_CI_ALLOW": "ONLY_EPHEMERAL_LOCAL_DATABASE"})["port"] == "55433"
+
+
+def test_new_workspace_is_private_0700(tmp_path: Path):
+    folder = p.prepare_private_workdir(tmp_path / "new_private")
+    assert folder.is_dir()
+    assert folder.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize("mode", [0o755, 0o750, 0o770, 0o777, 0o600])
+def test_existing_nonprivate_workspaces_fail_closed(tmp_path: Path, mode):
+    folder = tmp_path / "shared"
+    folder.mkdir()
+    folder.chmod(mode)
+    with pytest.raises(p.BackupError, match="WORKDIR_NOT_PRIVATE_0700"):
+        p.prepare_private_workdir(folder)
+
+
+def test_symlinked_workspace_is_rejected(tmp_path: Path):
+    actual = tmp_path / "actual"
+    actual.mkdir(mode=0o700)
+    link = tmp_path / "alias"
+    link.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(p.BackupError, match="WORKDIR_SYMLINK"):
+        p.prepare_private_workdir(link)
+
+
+def _readonly_role_facts():
+    facts = {key: False for key in p.ROLE_FACT_KEYS}
+    facts.update(tables=1, tables_unreadable=0, tables_writable=0, rls_tables=1,
+                 sequences_writable=0, schema_usage=True, same_session_user=True,
+                 bypassrls=True)
+    return facts
+
+
+def test_valid_rls_source_role_still_passes():
+    assert p.evaluate_source_privileges(_readonly_role_facts()) == []
+
+
+@pytest.mark.parametrize(("key", "value", "failure"), [
+    ("sequences_writable", 1, "sequences_writable"),
+    ("tables_writable", 1, "tables_writable"),
+    ("rls_tables", -1, "rls_table_count_invalid"),
+    ("rls_tables", "1", "rls_table_count_invalid"),
+    ("rls_tables", None, "facts_incomplete"),
+    ("bypassrls", False, "rls_rows_not_fully_readable"),
+])
+def test_source_role_untrusted_or_write_capable_fails_closed(key, value, failure):
+    facts = _readonly_role_facts()
+    facts[key] = value
+    assert failure in p.evaluate_source_privileges(facts)
+
+
+def test_bypassrls_is_rejected_without_rls_tables():
+    facts = _readonly_role_facts()
+    facts["rls_tables"] = 0
+    assert "bypassrls_without_rls" in p.evaluate_source_privileges(facts)
+
+
+def test_source_privilege_catalog_includes_views_and_nextval():
+    sql = p.ROLE_SQL
+    assert "('r','p','v','m','f')" in sql
+    assert "has_sequence_privilege(c.oid, 'USAGE')" in sql
+    assert "has_sequence_privilege(c.oid, 'UPDATE')" in sql
