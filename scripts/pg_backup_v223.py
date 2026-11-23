@@ -999,6 +999,16 @@ def install_termination_handlers() -> None:
         signal.signal(sig, _handler)
 
 
+def _safe_dsn_password(dsn: str) -> str:
+    """Best-effort redaction only: malformed input must not bypass error handling."""
+    if not dsn:
+        return ""
+    try:
+        return parse_dsn(dsn)["password"]
+    except (BackupError, ValueError, TypeError):
+        return ""
+
+
 def mark_target() -> int:
     """``mark-target``: plant the ephemeral marker in the disposable restore cluster."""
     target, token = os.environ.get("JW_PG_TARGET_ADMIN_DSN", ""), os.environ.get(EPHEMERAL_TOKEN_ENV, "")
@@ -1008,7 +1018,7 @@ def mark_target() -> int:
         guard_target(target, os.environ.get("JW_PG_SOURCE_DSN", "postgresql://none@invalid.invalid/none"))
         provision_ephemeral_marker(target, token)
     except BackupError as exc:
-        print(redact(str(exc), parse_dsn(target)["password"] if target else ""), file=sys.stderr)
+        print(redact(str(exc), _safe_dsn_password(target)), file=sys.stderr)
         return 1
     except Exception as exc:
         print("FAIL_V223_UNEXPECTED_" + type(exc).__name__, file=sys.stderr)
@@ -1026,7 +1036,7 @@ def main(argv: list[str]) -> int:
               "python -m scripts.pg_backup_v223 [mark-target|run]", file=sys.stderr)
         return 2
     source, target = os.environ.get("JW_PG_SOURCE_DSN", ""), os.environ.get("JW_PG_TARGET_ADMIN_DSN", "")
-    secrets = [parse_dsn(d)["password"] for d in (source, target) if d]
+    secrets = [_safe_dsn_password(d) for d in (source, target) if d]
     install_termination_handlers()
     try:
         summary = run(source, target, os.environ.get("JW_PG_SCHEMA", "jw_dev"),
