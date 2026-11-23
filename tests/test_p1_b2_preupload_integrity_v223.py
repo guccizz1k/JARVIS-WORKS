@@ -59,7 +59,9 @@ def test_exact_owner_11_subset_of_vault_12_with_sha256_content_readback():
 
 def test_full_read_only_stage_pass_never_implies_upload_or_30d_worm():
     local,raw,extra,items,get=fixture()
-    result=gate.verify(local=local,get=get,b2=lambda:True,env={"CODESPACES":"true"})
+    digest=gate._verify_remote(local,get)["owner_scope_digest"]
+    result=gate.verify(local=local,get=get,b2=lambda:True,
+                       env={"CODESPACES":"true","JW_WORM_OWNER_SCOPE_SHA256":digest})
     assert result["preupload"]=="PASS_OWNER_AND_B2_READ_ONLY"
     assert result["owner_source_eleven_sha256"]=="PASS"
     assert result["private_vault_readback"]=="PASS"
@@ -99,13 +101,14 @@ def test_reject_archive_manifest_drift_before_any_remote_cipher_read():
     bad={**local}
     bad.pop(next(iter(bad)))
     bad[extra]="f"*64
-    with pytest.raises(gate.Blocked,match="ELEVEN_OWNER_CIPHERS_NOT_EXACT_VAULT_SUBSET"):
-        gate._verify_remote(bad,get)
+    original_pin=gate._verify_remote(local,get)["owner_scope_digest"]
+    with pytest.raises(gate.Blocked,match="OWNER_APPROVED_SCOPE_PIN_MISMATCH"):
+        gate._verify_remote(bad,get,pinned_scope_digest=original_pin)
 
 
 def test_reject_same_git_blob_twice_even_with_distinct_names():
     local,raw,extra,items,get=fixture()
-    items[1]["sha"]=items[2]["sha"]
+    items[3]["sha"]=items[2]["sha"]
     with pytest.raises(gate.Blocked,match="PRIVATE_VAULT_12_UNIQUE_CIPHER_BASELINE_CHANGED"):
         gate._verify_remote(local,get)
 
@@ -147,6 +150,7 @@ def test_reject_untrusted_cipher_header_even_when_both_hashes_match():
     local[replacement_sha1]=local.pop(target)
     local[replacement_sha1]=replacement_sha256
     items[1]["sha"]=replacement_sha1
+    items[-1]["sha"]=replacement_sha1
     def changed_get(path):
         if path.endswith("/blobs/"+replacement_sha1):
             return {"sha":replacement_sha1,"encoding":"base64",
@@ -238,3 +242,30 @@ def test_fail_closed_when_b2_bucket_read_only_reverification_fails():
 def test_invalid_cli_action_never_reads_or_uploads(capsys):
     assert gate.main(["upload-30-days"])==2
     assert "USAGE" in capsys.readouterr().err
+
+
+def test_unpinned_11_subset_cannot_be_treated_as_upload_approved():
+    local,raw,extra,items,get=fixture()
+    result=gate.verify(local=local,get=get,b2=lambda:True,env={"CODESPACES":"true"})
+    assert result["owner_source_eleven_sha256"]=="PASS"
+    assert result["private_vault_readback"]=="PASS"
+    assert result["backblaze_empty_bucket_readonly"]=="PASS"
+    assert result["preupload"]=="PASS_UNPINNED_PARITY_AND_B2_ONLY"
+    assert result["owner_scope_selected_pin"]=="NOT_ATTESTED"
+    assert result["blocker"]=="OWNER_ELEVEN_CIPHER_SCOPE_PIN_REQUIRED"
+    assert result["upload_count"]==0 and result["overall"]=="BLOCKED"
+
+
+def test_wrong_owner_pin_stops_before_b2_and_blob_download():
+    local,raw,extra,items,get=fixture()
+    touched=[]
+    def spy(path):
+        touched.append(path)
+        return get(path)
+    result=gate.verify(local=local,get=spy,b2=lambda:False,
+        env={"CODESPACES":"true","JW_WORM_OWNER_SCOPE_SHA256":"f"*64})
+    assert result["blocker"]=="OWNER_APPROVED_SCOPE_PIN_MISMATCH"
+    assert not any("/blobs/" in x for x in touched)
+    assert result["backblaze_empty_bucket_readonly"]=="NOT_RUN"
+    assert result["overall"]=="BLOCKED"
+

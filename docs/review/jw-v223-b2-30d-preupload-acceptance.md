@@ -74,3 +74,20 @@ Possible outcomes:
 
 This preflight makes no claim that a backup has actually been uploaded,
 protected by 30-day COMPLIANCE, or independently restored.
+
+## FAIL-CLOSED correction from first actual CI (important)
+
+The original 11-of-12 subset proof alone was NOT independently pinned
+to the owner's exact approved selection. It could have accepted a different
+historical ciphertext after a local swap. The independent owner scope pin
+`JW_WORM_OWNER_SCOPE_SHA256` is now required before declaring
+`PASS_OWNER_AND_B2_READ_ONLY` or permitting future upload.
+
+First read-only run can safely return
+`PASS_UNPINNED_PARITY_AND_B2_ONLY` and the non-secret candidate
+`owner_scope_digest`. This proves current local/remote bytes and B2
+readiness ONLY and still reports overall BLOCKED, upload 0, owner scope
+NOT_ATTESTED. The owner must separately approve the printed digest (not a
+password) before we pin it to the reviewed build. Do not auto-trust an
+owner-run self-generated digest as a historical signature or custodian proof.
+Wrong supplied scope pin blocks before any remote blob download or B2 call.

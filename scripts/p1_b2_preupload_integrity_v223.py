@@ -169,7 +169,7 @@ def _gh_get(endpoint):
         raise Blocked("PINNED_PRIVATE_VAULT_READ_UNAVAILABLE") from None
 
 
-def _verify_remote(local, get=None):
+def _verify_remote(local, get=None, pinned_scope_digest=None):
     get = _gh_get if get is None else get
     if len(local) != LOCAL_UNIQUE or not all(
             SHA1.fullmatch(k) and SHA256.fullmatch(v)
@@ -199,6 +199,17 @@ def _verify_remote(local, get=None):
         raise Blocked("PRIVATE_VAULT_12_UNIQUE_CIPHER_BASELINE_CHANGED")
     if not set(local).issubset(set(remotes)) or len(set(remotes) - set(local)) != 1:
         raise Blocked("ELEVEN_OWNER_CIPHERS_NOT_EXACT_VAULT_SUBSET")
+    # A local 11-of-12 subset does not establish independent OWNER scope:
+    # a changed local file can swap one historical cipher for another.
+    # Require the owner's separately approved exact 11-blob commitment
+    # BEFORE downloading or trusting ANY particular subset as authorized.
+    scope = ("JW-WORM-OWNER-SCOPE-V1\n" + "\n".join(sorted(local)) + "\n").encode()
+    fingerprint = hashlib.sha256(scope).hexdigest()
+    if pinned_scope_digest is not None:
+        if (not isinstance(pinned_scope_digest, str)
+                or not SHA256.fullmatch(pinned_scope_digest)
+                or fingerprint != pinned_scope_digest):
+            raise Blocked("OWNER_APPROVED_SCOPE_PIN_MISMATCH")
     # Git blob identity and SHA256 must BOTH be computed from actual
     # provider bytes; don't trust a caller-supplied hash manifest.
     for blob, strong in sorted(local.items()):
@@ -217,8 +228,7 @@ def _verify_remote(local, get=None):
                 or hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() != blob
                 or hashlib.sha256(raw).hexdigest() != strong):
             raise Blocked("PRIVATE_VAULT_CIPHER_CONTENT_DIFFERENT")
-    scope = ("JW-WORM-OWNER-SCOPE-V1\n" + "\n".join(sorted(local)) + "\n").encode()
-    return {"owner_scope_digest": hashlib.sha256(scope).hexdigest(),
+    return {"owner_scope_digest": fingerprint,
             "verified_archive_count": LOCAL_UNIQUE,
             "vault_cipher_paths": REMOTE_PATHS,
             "vault_unique_cipher_blobs": REMOTE_UNIQUE,
@@ -308,7 +318,8 @@ def verify(*, local=None, get=None, b2=None, env=None):
         return out
     try:
         selected = _local_files() if local is None else local
-        info = _verify_remote(selected, get=get)
+        owner_pin = env.get("JW_WORM_OWNER_SCOPE_SHA256") or None
+        info = _verify_remote(selected, get=get, pinned_scope_digest=owner_pin)
         out["owner_source_eleven_sha256"] = "PASS"
         out["private_vault_readback"] = "PASS"
         out.update(info)
@@ -317,6 +328,14 @@ def verify(*, local=None, get=None, b2=None, env=None):
         elif b2() is not True:
             raise Blocked("REAL_B2_EMPTY_BUCKET_READONLY_FAILED")
         out["backblaze_empty_bucket_readonly"] = "PASS"
+        if owner_pin is None:
+            # Report cryptographic candidate evidence only, do not upgrade
+            # it to owner-APPROVED source scope or upload eligibility.
+            out["owner_scope_selected_pin"] = "NOT_ATTESTED"
+            out["preupload"] = "PASS_UNPINNED_PARITY_AND_B2_ONLY"
+            out["blocker"] = "OWNER_ELEVEN_CIPHER_SCOPE_PIN_REQUIRED"
+            return out
+        out["owner_scope_selected_pin"] = "PASS_EXACT_OWNER_PIN"
         out["preupload"] = "PASS_OWNER_AND_B2_READ_ONLY"
         # No independent WRITER credential exists yet. Do not upload.
         out["blocker"] = "DISTINCT_MINIMAL_UPLOADER_KEY_NOT_CONFIGURED"
