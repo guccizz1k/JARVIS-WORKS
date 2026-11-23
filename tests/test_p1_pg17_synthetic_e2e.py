@@ -368,6 +368,23 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
             expected_data = hashlib.sha256(
                 "\n".join(row_manifest_parts).encode("utf-8")).hexdigest()
             assert expected_rows == 65
+            focus_source = conn.execute("""
+                WITH hashes AS (
+                  SELECT md5(t::text) h,
+                    encode(sha256(convert_to(to_jsonb(t)::text,'UTF8')),'hex') j
+                  FROM jw_dev.parent t
+                ), totals AS (
+                  SELECT count(*)::bigint n,
+                    coalesce(sum(('x'||substr(h,1,16))::bit(64)::bigint::numeric),0)::text lo,
+                    coalesce(sum(('x'||substr(h,17,16))::bit(64)::bigint::numeric),0)::text hi,
+                    encode(sha256(convert_to(
+                      coalesce(string_agg(j,E'\\n' ORDER BY j),''),'UTF8')),'hex') jsonsha
+                  FROM hashes
+                )
+                SELECT n,encode(sha256(convert_to(n::text||':'||lo||':'||hi,'UTF8')),'hex'),jsonsha
+                FROM totals
+            """).fetchone()
+            assert focus_source[0] == 1
 
         dump_path = tmp_path / "ci65.custom"
         key = bytes(range(32))
@@ -411,6 +428,10 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         monkeypatch.setenv(offline.REFERENCE_CONSTRAINT_ENV, expected_constraints)
         monkeypatch.setenv(offline.REFERENCE_ROW_ENV, expected_data)
         monkeypatch.setenv(offline.REFERENCE_TOTAL_ENV, str(expected_rows))
+        monkeypatch.setenv(offline.FOCUS_TABLE_ENV, "parent")
+        monkeypatch.setenv(offline.FOCUS_COUNT_ENV, str(focus_source[0]))
+        monkeypatch.setenv(offline.FOCUS_COMPOSITE_ENV, focus_source[1])
+        monkeypatch.setenv(offline.FOCUS_JSON_ENV, focus_source[2])
         result = offline.run_offline()
         safe = {k: result.get(k) for k in (
             "blocker", "offline_restore_execution", "offline_restored_archive_count",
@@ -428,6 +449,12 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert result["current_source_row_manifest_match_count"] == 2, safe
         assert result["current_source_combined_match_count"] == 2, safe
         assert result["current_source_comparison"] == "PASS_CURRENT_REFERENCE", safe
+        assert result["focus_reference_provided"] is True
+        assert result["focus_row_count_match_count"] == 2, safe
+        assert result["focus_composite_match_count"] == 2, safe
+        assert result["focus_json_content_match_count"] == 2, safe
+        assert result["focus_both_match_count"] == 2, safe
+        assert result["focus_comparison"] == "PASS_CURRENT_FOCUS_CONTENT", safe
         assert result["current_source_row_total_match_count"] == 2, safe
         assert result["current_source_snapshot_is_historic_attestation"] is False
         assert result["historic_real_source_identity_verified"] is False
@@ -438,12 +465,16 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         # as source-matched, even though the historical V1/V2 files still
         # decrypt and restore cleanly. Never rewrite either archive to force a match.
         monkeypatch.setenv(offline.REFERENCE_ROW_ENV, "f" * 64)
+        monkeypatch.setenv(offline.FOCUS_JSON_ENV, "f" * 64)
         wrong = offline.run_offline()
         assert wrong["offline_restore_execution"] == "PASS_LOCAL_ONLY"
         assert wrong["container_removed"] == "PASS"
         assert wrong["current_source_row_manifest_match_count"] == 0
         assert wrong["current_source_combined_match_count"] == 0
         assert wrong["current_source_comparison"] == "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
+        assert wrong["focus_json_content_match_count"] == 0
+        assert wrong["focus_composite_match_count"] == 2
+        assert wrong["focus_comparison"] == "FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE"
         assert wrong["overall"] == "BLOCKED"
     finally:
         if created_db:

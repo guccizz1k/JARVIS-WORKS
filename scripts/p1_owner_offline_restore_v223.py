@@ -172,7 +172,77 @@ def _exec(container: str, command: list[str], *, data: bytes | None = None,
     return _docker([*prefix, *command], data=data, timeout=timeout)
 
 
-def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, int, str | None, str | None, int | None, str | None]:
+# Optional owner-only focus compares one validated non-empty relation against
+# a separately read-only obtained current-source reference. This distinguishes
+# row::text fingerprint serialization from JSONB-canonical content drift.
+# No source credentials or customer row values are ever accessed or printed.
+FOCUS_TABLE_ENV = "JW_PG_FOCUS_TABLE"
+FOCUS_COUNT_ENV = "JW_PG_EXPECT_FOCUS_ROWS"
+FOCUS_COMPOSITE_ENV = "JW_PG_EXPECT_FOCUS_COMPOSITE_SHA256"
+FOCUS_JSON_ENV = "JW_PG_EXPECT_FOCUS_JSON_SHA256"
+FOCUS_TABLE_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+
+
+def _focus_reference() -> tuple[str, int, str, str] | None:
+    values = [os.environ.get(x, "") for x in (
+        FOCUS_TABLE_ENV, FOCUS_COUNT_ENV, FOCUS_COMPOSITE_ENV, FOCUS_JSON_ENV)]
+    if not any(values):
+        return None
+    name, count, composite, jsonsha = values
+    if not (FOCUS_TABLE_RE.fullmatch(name)
+            and count.isascii() and count.isdecimal()
+            and 0 <= int(count) <= MAX_SOURCE_TABLE_ROWS
+            and FINGERPRINT_RE.fullmatch(composite)
+            and FINGERPRINT_RE.fullmatch(jsonsha)):
+        raise backup.BackupError("BLOCKED_FOCUS_REFERENCE_INVALID")
+    return name, int(count), composite, jsonsha
+
+
+def _focus_probe(container: str, db: str, table: str) -> tuple[int, str, str] | None:
+    """Only returns counts and SHA256 digests; no rows or table identifiers.
+
+    The table is constrained to a safe ASCII identifier, SQL never uses
+    untrusted strings except this strictly validated and quoted identifier.
+    """
+    if not FOCUS_TABLE_RE.fullmatch(table):
+        return None
+    q = f"""
+    WITH hashes AS (
+      SELECT md5(t::text) AS composite_h,
+             encode(sha256(convert_to(to_jsonb(t)::text,'UTF8')),'hex') AS json_h
+        FROM jw_dev."{table}" t
+    ), totals AS (
+      SELECT count(*)::bigint AS n,
+        coalesce(sum(('x'||substr(composite_h,1,16))::bit(64)::bigint::numeric),0)::text lo,
+        coalesce(sum(('x'||substr(composite_h,17,16))::bit(64)::bigint::numeric),0)::text hi,
+        encode(sha256(convert_to(
+          coalesce(string_agg(json_h,E'\\n' ORDER BY json_h),''),'UTF8')),'hex')
+        AS json_sha
+      FROM hashes
+    )
+    SELECT n,encode(sha256(convert_to(n::text||':'||lo||':'||hi,'UTF8')),'hex'),json_sha
+    FROM totals;
+    """
+    try:
+        done = _exec(container, ["psql", "-qAt", "-U", "postgres", "-d", db,
+                                 "-v", "ON_ERROR_STOP=1", "-c", q], timeout=30)
+        if done.returncode:
+            return None
+        parts = done.stdout.decode("ascii", "ignore").strip().split("|")
+        if len(parts) != 3 or not parts[0].isdecimal():
+            return None
+        n = int(parts[0])
+        if not (0 <= n <= MAX_SOURCE_TABLE_ROWS
+                and FINGERPRINT_RE.fullmatch(parts[1])
+                and FINGERPRINT_RE.fullmatch(parts[2])):
+            return None
+        return n, parts[1], parts[2]
+    except (OSError, UnicodeError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+
+def _restore_one(container: str, original: bytearray, index: int, focus: tuple[str, int, str, str] | None = None) -> tuple[str, int, str | None, str | None, int | None, str | None, tuple[int, str, str] | None]:
     """Fresh disposable DB per archive. Auto-create NOLOGIN roles ONLY in
     this networkless throwaway cluster, only when pg_restore reports one.
     """
@@ -181,7 +251,7 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
     for attempt in range(MAX_MISSING_ROLES + 1):
         created = _exec(container, ["createdb", "-U", "postgres", db])
         if created.returncode:
-            return "CREATE_DISPOSABLE_DB_FAILED", 0, None, None, None, None
+            return "CREATE_DISPOSABLE_DB_FAILED", 0, None, None, None, None, None
         try:
             done = _exec(container, [
                 "pg_restore", "-U", "postgres", "--no-owner", "--no-acl",
@@ -192,7 +262,7 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
                 if missing and attempt < MAX_MISSING_ROLES:
                     role = missing.group(1).decode("ascii")
                     if role in added or role.lower().startswith("pg_"):
-                        return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None
+                        return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None, None
                     added.add(role)
                     # ASCII-validated, quoted identifier; the target cluster is
                     # fresh, networkless, and destroyed at the end of the run.
@@ -201,7 +271,7 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
                         "-v", "ON_ERROR_STOP=1", "-c", 'CREATE ROLE "'+role+'" NOLOGIN',
                     ])
                     if made.returncode:
-                        return "EPHEMERAL_ROLE_PROVISION_FAILED", 0, None, None, None, None
+                        return "EPHEMERAL_ROLE_PROVISION_FAILED", 0, None, None, None, None, None
                     continue
                 return _restore_reason(done.stderr), 0, None
             count_query = (
@@ -214,13 +284,13 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
                 "-v", "ON_ERROR_STOP=1", "-c", count_query,
             ])
             if checked.returncode:
-                return "POST_RESTORE_TABLE_COUNT_UNAVAILABLE", 0, None, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_UNAVAILABLE", 0, None, None, None, None, None
             try:
                 total = int(checked.stdout.strip())
             except (TypeError, ValueError):
-                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None, None
             if not 0 <= total <= 100000:
-                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None, None
             hash_query = (
                 "SELECT md5(coalesce(string_agg(c.relname||'.'||k.conname||'='||"
                 "pg_get_constraintdef(k.oid,true),E'\\n' ORDER BY c.relname,k.conname),'') ) "
@@ -234,7 +304,7 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
             ])
             digest = h.stdout.decode("ascii", "ignore").strip() if h.returncode == 0 else ""
             if not re.fullmatch(r"[a-f0-9]{32}", digest):
-                return "POST_RESTORE_CONSTRAINT_DIGEST_INVALID", 0, None, None, None, None
+                return "POST_RESTORE_CONSTRAINT_DIGEST_INVALID", 0, None, None, None, None, None
             sha_query = (
                 "SELECT encode(sha256(convert_to(coalesce(string_agg("
                 "c.relname||'.'||k.conname||'='||pg_get_constraintdef(k.oid,true),"
@@ -250,14 +320,15 @@ def _restore_one(container: str, original: bytearray, index: int) -> tuple[str, 
                 return "POST_RESTORE_CONSTRAINT_SHA256_INVALID", 0, None, None, None, None
             rows = _audit_restored_row_manifest(container, db)
             if rows is None or rows[0] != total:
-                return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None
-            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha
+                return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None, None
+            probe = _focus_probe(container, db, focus[0]) if focus else None
+            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha, probe
         finally:
             # Always discard this database before moving to the next archive.
             dropped = _exec(container, ["dropdb", "-U", "postgres", "--force", db])
             if dropped.returncode:
                 raise backup.BackupError("BLOCKED_EPHEMERAL_DATABASE_CLEANUP_FAILED")
-    return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None
+    return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None, None
 
 
 def run_offline() -> dict[str, object]:
@@ -278,6 +349,14 @@ def run_offline() -> dict[str, object]:
         "current_source_combined_match_count": 0,
         "current_source_row_total_match_count": 0,
         "current_source_snapshot_is_historic_attestation": False,
+        "focus_reference_provided": False,
+        "focus_probe_unavailable_count": 0,
+        "focus_row_count_match_count": 0,
+        "focus_composite_match_count": 0,
+        "focus_json_content_match_count": 0,
+        "focus_both_match_count": 0,
+        "focus_comparison": "NOT_RUN",
+        "focus_comparison_is_historic_attestation": False,
         "historic_real_source_identity_verified": False,
         "independent_live_source_signature_compared": False,
         "remote_storage_proven": False,
@@ -294,6 +373,12 @@ def run_offline() -> dict[str, object]:
         result["blocker"] = "INVALID_READONLY_SOURCE_REFERENCE"
         return result
     result["current_source_reference_provided"] = snapshot is not None
+    try:
+        focus = _focus_reference()
+    except backup.BackupError:
+        result["blocker"] = "INVALID_FOCUS_REFERENCE"
+        return result
+    result["focus_reference_provided"] = focus is not None
     archives, discovery = owner.discover_owner_archive()
     result["archive_discovery"] = discovery
     result["private_archives_found"] = len(archives)
@@ -353,7 +438,7 @@ def run_offline() -> dict[str, object]:
                 continue
             try:
                 remaining -= len(plain)
-                status, count, fingerprint, row_manifest, row_total, constraint_sha256 = _restore_one(container, plain, index)
+                status, count, fingerprint, row_manifest, row_total, constraint_sha256, focus_probe = _restore_one(container, plain, index, focus)
                 if status != "LOCAL_DISPOSABLE_RESTORED":
                     result["offline_restore_failure_count"] += 1
                     failure_kinds.add(status)
@@ -367,6 +452,22 @@ def run_offline() -> dict[str, object]:
                         fingerprints.add(fingerprint)
                     if row_manifest:
                         row_fingerprints.add(row_manifest)
+                    if focus is not None:
+                        if focus_probe is None:
+                            result["focus_probe_unavailable_count"] += 1
+                        else:
+                            _, expected_n, expected_composite, expected_json = focus
+                            count_ok = focus_probe[0] == expected_n
+                            composite_ok = focus_probe[1] == expected_composite
+                            json_ok = focus_probe[2] == expected_json
+                            if count_ok:
+                                result["focus_row_count_match_count"] += 1
+                            if composite_ok:
+                                result["focus_composite_match_count"] += 1
+                            if json_ok:
+                                result["focus_json_content_match_count"] += 1
+                            if count_ok and composite_ok and json_ok:
+                                result["focus_both_match_count"] += 1
                     if snapshot is not None:
                         live_constraints, live_rows, live_total = snapshot
                         # See separate SHA256 constraints query below. The old
@@ -390,6 +491,18 @@ def run_offline() -> dict[str, object]:
                 plain.clear()
         result["disposable_constraint_signature_groups"] = len(fingerprints)
         result["disposable_row_manifest_groups"] = len(row_fingerprints)
+        if focus is not None:
+            n = len(archives)
+            if result["focus_probe_unavailable_count"] or result["offline_restore_failure_count"]                     or result["offline_restore_skipped_budget_count"]:
+                result["focus_comparison"] = "FOCUS_DIAGNOSTIC_INCOMPLETE"
+            elif result["focus_both_match_count"] == n:
+                result["focus_comparison"] = "PASS_CURRENT_FOCUS_CONTENT"
+            elif result["focus_row_count_match_count"] != n:
+                result["focus_comparison"] = "FOCUS_ROW_COUNT_DIFFERENCE"
+            elif result["focus_json_content_match_count"] == n:
+                result["focus_comparison"] = "COMPOSITE_ROW_TEXT_SERIALIZATION_DIFFERENCE"
+            else:
+                result["focus_comparison"] = "FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE"
         if snapshot is not None:
             both = result["current_source_combined_match_count"]
             result["current_source_comparison"] = (
@@ -434,7 +547,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0 if (report.get("offline_restore_execution") == "PASS_LOCAL_ONLY"
                  and report.get("container_removed") == "PASS"
                  and report.get("current_source_comparison") in
-                   ("NOT_RUN", "PASS_CURRENT_REFERENCE")) else 1
+                   ("NOT_RUN", "PASS_CURRENT_REFERENCE")
+                 and report.get("focus_comparison") in
+                   ("NOT_RUN", "PASS_CURRENT_FOCUS_CONTENT")) else 1
 
 
 if __name__ == "__main__":

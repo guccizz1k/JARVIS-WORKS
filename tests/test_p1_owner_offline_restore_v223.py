@@ -101,3 +101,40 @@ def test_reference_never_yields_historic_attestation(monkeypatch):
     assert r["historic_real_source_identity_verified"] is False
     assert r["current_source_snapshot_is_historic_attestation"] is False
     assert r["overall"]=="BLOCKED"
+
+
+
+@pytest.mark.parametrize("name,count,comp,jsonhash", [
+    ("cinema_pg_transitions; DROP SCHEMA jw_dev", "22", "a"*64, "b"*64),
+    ("cinema-pg-transitions", "22", "a"*64, "b"*64),
+    ("cinema_pg_transitions", "-1", "a"*64, "b"*64),
+    ("cinema_pg_transitions", "22", "xyz", "b"*64),
+    ("cinema_pg_transitions", "22", "a"*64, "b"*63),
+    ("", "22", "a"*64, "b"*64),
+])
+def test_focus_ref_fail_closed_before_network_or_docker(monkeypatch,name,count,comp,jsonhash):
+    monkeypatch.setenv(offline.FOCUS_TABLE_ENV,name)
+    monkeypatch.setenv(offline.FOCUS_COUNT_ENV,count)
+    monkeypatch.setenv(offline.FOCUS_COMPOSITE_ENV,comp)
+    monkeypatch.setenv(offline.FOCUS_JSON_ENV,jsonhash)
+    with pytest.raises(offline.backup.BackupError,match="FOCUS_REFERENCE_INVALID"):
+        offline._focus_reference()
+
+
+def test_no_focus_reference_is_optional(monkeypatch):
+    for key in (offline.FOCUS_TABLE_ENV,offline.FOCUS_COUNT_ENV,
+                offline.FOCUS_COMPOSITE_ENV,offline.FOCUS_JSON_ENV):
+        monkeypatch.delenv(key,raising=False)
+    assert offline._focus_reference() is None
+
+
+def test_valid_focus_reference_only_uses_digest_values(monkeypatch):
+    monkeypatch.setenv(offline.FOCUS_TABLE_ENV,"cinema_pg_transitions")
+    monkeypatch.setenv(offline.FOCUS_COUNT_ENV,"22")
+    monkeypatch.setenv(offline.FOCUS_COMPOSITE_ENV,"a"*64)
+    monkeypatch.setenv(offline.FOCUS_JSON_ENV,"b"*64)
+    assert offline._focus_reference() == ("cinema_pg_transitions",22,"a"*64,"b"*64)
+
+
+def test_focus_sql_identifier_rejects_untrusted_names(monkeypatch):
+    assert offline._focus_probe("untrusted","postgres","bad'; select secret") is None
