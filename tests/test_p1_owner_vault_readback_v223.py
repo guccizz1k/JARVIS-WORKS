@@ -399,3 +399,28 @@ def test_gh_api_refuses_using_untrusted_host_and_suppresses_all_stderr(monkeypat
     assert vault._vault_api_json("repos/guccizz1k/jw-backup-vault-261111/git/ref/heads/main")=={"private":True}
     with pytest.raises(vault.Blocked,match="ENDPOINT_INVALID"):
         vault._vault_api_json("repos/other/unsafe/data")
+
+
+
+def test_vault_only_codespaces_fine_grained_secret_does_not_replace_source_token(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN","SOURCE_ONLY_PLACEHOLDER")
+    monkeypatch.setenv("JW_VAULT_READ_TOKEN","VAULT_READ_ONLY_PLACEHOLDER")
+    monkeypatch.delenv("GH_TOKEN",raising=False)
+    child=vault._vault_cli_env()
+    assert child["GH_TOKEN"]=="VAULT_READ_ONLY_PLACEHOLDER"
+    assert "JW_VAULT_READ_TOKEN" not in child
+    assert "GITHUB_TOKEN" not in child
+    assert os.environ["GITHUB_TOKEN"]=="SOURCE_ONLY_PLACEHOLDER"
+    assert os.environ["JW_VAULT_READ_TOKEN"]=="VAULT_READ_ONLY_PLACEHOLDER"
+
+
+def test_vault_specific_token_never_passes_into_git_clone_process(monkeypatch):
+    import subprocess
+    monkeypatch.setenv("JW_VAULT_READ_TOKEN","PRIVATE_VAULT_READ_PLACEHOLDER")
+    def fake(cmd,**kwargs):
+        assert "JW_VAULT_READ_TOKEN" not in kwargs["env"]
+        assert kwargs["stderr"]==subprocess.DEVNULL
+        return subprocess.CompletedProcess(cmd,128,b"",b"not permitted")
+    monkeypatch.setattr(subprocess,"run",fake)
+    result=vault.git(["ls-remote","--heads",vault.VAULT,"main"])
+    assert result.returncode==128
