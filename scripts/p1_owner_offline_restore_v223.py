@@ -535,8 +535,8 @@ def run_offline() -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if args != ["restore-offline"]:
-        print("USAGE: python -m scripts.p1_owner_offline_restore_v223 restore-offline", file=sys.stderr)
+    if args not in (["restore-offline"], ["diagnose-focus"]):
+        print("USAGE: python -m scripts.p1_owner_offline_restore_v223 [restore-offline|diagnose-focus]", file=sys.stderr)
         return 2
     try:
         report = run_offline()
@@ -544,6 +544,17 @@ def main(argv: list[str] | None = None) -> int:
         print('{"offline_restore_execution":"BLOCKED","overall":"BLOCKED","blocker":"UNEXPECTED_SAFE_RESTORE_ERROR"}')
         return 1
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+    if args == ["diagnose-focus"]:
+        # Only the DIAGNOSTIC itself passes: successful full local restoration,
+        # no unchecked files or failed focus probes. Real contents may differ
+        # and both source parity & release remain BLOCKED in JSON, always.
+        return 0 if (
+            report.get("offline_restore_execution") == "PASS_LOCAL_ONLY"
+            and report.get("container_removed") == "PASS"
+            and report.get("focus_reference_provided") is True
+            and report.get("focus_probe_unavailable_count") == 0
+            and report.get("focus_comparison") not in ("FOCUS_DIAGNOSTIC_INCOMPLETE", "NOT_RUN")
+        ) else 1
     return 0 if (report.get("offline_restore_execution") == "PASS_LOCAL_ONLY"
                  and report.get("container_removed") == "PASS"
                  and report.get("current_source_comparison") in

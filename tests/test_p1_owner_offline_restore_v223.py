@@ -138,3 +138,46 @@ def test_valid_focus_reference_only_uses_digest_values(monkeypatch):
 
 def test_focus_sql_identifier_rejects_untrusted_names(monkeypatch):
     assert offline._focus_probe("untrusted","postgres","bad'; select secret") is None
+
+
+
+def test_focus_diagnose_complete_diagnostic_does_not_claim_data_pass(monkeypatch,capsys):
+    result={
+        "offline_restore_execution":"PASS_LOCAL_ONLY",
+        "container_removed":"PASS",
+        "focus_reference_provided":True,
+        "focus_probe_unavailable_count":0,
+        "focus_comparison":"FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE",
+        "current_source_comparison":"SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE",
+        "overall":"BLOCKED",
+    }
+    monkeypatch.setattr(offline,"run_offline",lambda:result)
+    assert offline.main(["diagnose-focus"]) == 0
+    import json
+    out=json.loads(capsys.readouterr().out)
+    assert out["overall"] == "BLOCKED"
+    assert out["focus_comparison"] == "FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE"
+    assert offline.main(["restore-offline"]) == 1
+
+
+@pytest.mark.parametrize("bad_field,bad_value",[
+    ("offline_restore_execution","BLOCKED_INCOMPLETE"),
+    ("container_removed","BLOCKED_CLEANUP"),
+    ("focus_reference_provided",False),
+    ("focus_probe_unavailable_count",1),
+    ("focus_comparison","FOCUS_DIAGNOSTIC_INCOMPLETE"),
+    ("focus_comparison","NOT_RUN"),
+])
+def test_focus_diagnose_never_passes_missing_or_incomplete_evidence(monkeypatch,bad_field,bad_value,capsys):
+    result={
+        "offline_restore_execution":"PASS_LOCAL_ONLY",
+        "container_removed":"PASS",
+        "focus_reference_provided":True,
+        "focus_probe_unavailable_count":0,
+        "focus_comparison":"FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE",
+        "overall":"BLOCKED"
+    }
+    result[bad_field]=bad_value
+    monkeypatch.setattr(offline,"run_offline",lambda:result)
+    assert offline.main(["diagnose-focus"]) == 1
+    assert '"overall":"BLOCKED"' in capsys.readouterr().out
