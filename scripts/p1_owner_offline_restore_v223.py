@@ -272,6 +272,7 @@ def run_offline() -> dict[str, object]:
         "disposable_constraint_signature_groups": 0,
         "disposable_row_manifest_groups": 0,
         "current_source_reference_provided": False,
+        "current_source_comparison": "NOT_RUN",
         "current_source_constraints_match_count": 0,
         "current_source_row_manifest_match_count": 0,
         "current_source_combined_match_count": 0,
@@ -389,6 +390,14 @@ def run_offline() -> dict[str, object]:
                 plain.clear()
         result["disposable_constraint_signature_groups"] = len(fingerprints)
         result["disposable_row_manifest_groups"] = len(row_fingerprints)
+        if snapshot is not None:
+            both = result["current_source_combined_match_count"]
+            result["current_source_comparison"] = (
+                "PASS_CURRENT_REFERENCE" if both == len(archives)
+                and result["offline_restore_failure_count"] == 0
+                and result["offline_restore_skipped_budget_count"] == 0
+                else "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
+            )
         result["failure_categories"] = sorted(failure_kinds)
         result["offline_restore_execution"] = (
             "PASS_LOCAL_ONLY" if result["offline_restored_archive_count"] == len(archives)
@@ -422,7 +431,10 @@ def main(argv: list[str] | None = None) -> int:
         print('{"offline_restore_execution":"BLOCKED","overall":"BLOCKED","blocker":"UNEXPECTED_SAFE_RESTORE_ERROR"}')
         return 1
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
-    return 0 if report.get("offline_restore_execution") == "PASS_LOCAL_ONLY" and report.get("container_removed") == "PASS" else 1
+    return 0 if (report.get("offline_restore_execution") == "PASS_LOCAL_ONLY"
+                 and report.get("container_removed") == "PASS"
+                 and report.get("current_source_comparison") in
+                   ("NOT_RUN", "PASS_CURRENT_REFERENCE")) else 1
 
 
 if __name__ == "__main__":

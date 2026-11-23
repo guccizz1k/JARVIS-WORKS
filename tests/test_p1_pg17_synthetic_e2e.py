@@ -427,6 +427,7 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert result["current_source_constraints_match_count"] == 2, safe
         assert result["current_source_row_manifest_match_count"] == 2, safe
         assert result["current_source_combined_match_count"] == 2, safe
+        assert result["current_source_comparison"] == "PASS_CURRENT_REFERENCE", safe
         assert result["current_source_row_total_match_count"] == 2, safe
         assert result["current_source_snapshot_is_historic_attestation"] is False
         assert result["historic_real_source_identity_verified"] is False
