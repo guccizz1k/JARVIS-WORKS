@@ -54,6 +54,11 @@ def _single_chunk_postgres_magic(path: Path, key: bytes) -> str:
         return "NOT_CONFIRMED"
     try:
         with open(path, "rb", opener=lambda p, f: os.open(p, f | getattr(os, "O_NOFOLLOW", 0))) as fh:
+            st = os.fstat(fh.fileno())
+            if not (stat.S_ISREG(st.st_mode)
+                    and stat.S_IMODE(st.st_mode) == 0o600
+                    and (not hasattr(os, "getuid") or st.st_uid == os.getuid())):
+                return "NOT_CONFIRMED"
             magic = fh.read(len(backup.MAGIC))
             if magic not in (backup.MAGIC, backup.MAGIC_LEGACY):
                 return "NOT_POSTGRES_CUSTOM"

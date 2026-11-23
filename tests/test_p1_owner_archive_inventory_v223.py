@@ -174,3 +174,14 @@ def test_no_plaintext_file_or_private_secrets_from_inventory(tmp_path,monkeypatc
 def test_bad_command_fail_closed(capsys):
     assert inv.main(["execute_backup"])==2
     assert "USAGE" in capsys.readouterr().err
+
+
+def test_header_probe_rejects_symlink_and_world_readable(tmp_path):
+    key=p.AESGCM.generate_key(256)
+    good=mk_candidate(tmp_path,"good_privacy",key)
+    good.chmod(0o644)
+    assert inv._single_chunk_postgres_magic(good,key)=="NOT_CONFIRMED"
+    good.chmod(0o600)
+    alias=tmp_path/"alias.jwpgbk"
+    alias.symlink_to(good)
+    assert inv._single_chunk_postgres_magic(alias,key)=="NOT_CONFIRMED"

@@ -10,6 +10,7 @@ from pathlib import Path
 import psycopg
 
 from scripts import pg_backup_v223 as backup
+from scripts import p1_owner_archive_inventory_v223 as inventory
 
 SOURCE = "postgresql://postgres:synthetic_only_change_not_needed@127.0.0.1:55432/postgres"
 TARGET = "postgresql://postgres:synthetic_only_change_not_needed@127.0.0.1:55433/postgres"
@@ -57,6 +58,17 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         target.execute("CREATE ROLE jw_p1_existing_reader NOLOGIN")
     backup.provision_ephemeral_marker(TARGET, TOKEN)
     results = backup.run(SOURCE, TARGET, schema="jw_dev", workdir=tmp_path, real_source=False)
+    # Independently verify new archive inventory classification on an ACTUAL
+    # PostgreSQL 17 pg_dump custom archive, not merely a fabricated PGDMP
+    # string. No source/external data; plaintext is not written by inventory.
+    real_fixture_ciphers = list(tmp_path.glob("*.jwpgbk"))
+    assert len(real_fixture_ciphers) == 1
+    assert inventory._single_chunk_postgres_magic(
+        real_fixture_ciphers[0], bytes(range(32))
+    ) == "AUTHENTICATED_PGDMP_HEADER_ONLY"
+    assert backup.audit_encrypted_archive(
+        real_fixture_ciphers[0], results["archive_sha256"], bytes(range(32))
+    )["authenticated_decryption"] is True
     assert results["tables"] == 1
     assert results["signature_mismatches"] == [], results["signature_mismatch_diagnostics"]
     assert results["signature_digest_matches"] is True
