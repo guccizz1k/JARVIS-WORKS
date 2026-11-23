@@ -79,6 +79,31 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         assert toc_tables == 1
     finally:
         mem.clear()
+    # Perform a REAL local full-data pg_restore of the synthetic encrypted
+    # PG17 backup into a networkless, volume-free, temporary PG17 Docker server.
+    # The owner-only tool never contacts the source DB or transfers customer
+    # data; its "offline" PASS cannot prove the origin of historical archives.
+    import shutil
+    from scripts import p1_owner_one_shot_v223 as owner
+    from scripts import p1_owner_offline_restore_v223 as offline
+    owner_root = tmp_path / "owner-restore" / "backups"
+    owner_root.mkdir(mode=0o700, parents=True)
+    archive_group = owner_root / "jw_v223_ci"
+    archive_group.mkdir(mode=0o700)
+    candidate = archive_group / "ci.jwpgbk"
+    shutil.copyfile(real_fixture_ciphers[0], candidate)
+    candidate.chmod(0o600)
+    monkeypatch.setattr(owner, "_owner_backup_dir", lambda: owner_root)
+    monkeypatch.setenv("CODESPACES", "true")
+    monkeypatch.setenv("JW_PG_OFFLINE_RESTORE_ACK", offline.ACK)
+    offline_report = offline.run_offline()
+    assert offline_report["offline_restored_archive_count"] == 1, offline_report
+    assert offline_report["offline_other_table_archive_count"] == 1, offline_report
+    assert offline_report["offline_65_table_archive_count"] == 0, offline_report
+    assert offline_report["offline_restore_execution"] == "PASS_LOCAL_ONLY", offline_report
+    assert offline_report["container_removed"] == "PASS", offline_report
+    assert offline_report["remote_storage_proven"] is False
+    assert offline_report["overall"] == "BLOCKED"
     assert results["tables"] == 1
     assert results["signature_mismatches"] == [], results["signature_mismatch_diagnostics"]
     assert results["signature_digest_matches"] is True
