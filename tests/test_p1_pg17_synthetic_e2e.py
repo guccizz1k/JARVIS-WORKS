@@ -488,6 +488,8 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert result["current_source_reference_provided"] is True
         assert result["current_source_constraints_match_count"] == 2, safe
         assert result["current_source_row_manifest_match_count"] == 2, safe
+        assert result["current_source_c_sorted_row_manifest_match_count"] == 2, safe
+        assert result["current_source_c_sorted_combined_match_count"] == 2, safe
         assert result["current_source_combined_match_count"] == 2, safe
         assert result["current_source_comparison"] == "PASS_CURRENT_REFERENCE", safe
         assert result["manifest_metadata_reference_provided"] is True
@@ -533,6 +535,8 @@ def test_actual_65_table_legacy_compatible_archive_restores_in_networkless_tmpfs
         assert wrong["offline_restore_execution"] == "PASS_LOCAL_ONLY"
         assert wrong["container_removed"] == "PASS"
         assert wrong["current_source_row_manifest_match_count"] == 0
+        assert wrong["current_source_c_sorted_row_manifest_match_count"] == 0
+        assert wrong["current_source_c_sorted_combined_match_count"] == 0
         assert wrong["current_source_combined_match_count"] == 0
         assert wrong["current_source_comparison"] == "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
         assert wrong["manifest_reconciliation"] == "CANONICAL_AGGREGATION_DIFFERS"

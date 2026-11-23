@@ -505,6 +505,8 @@ def run_offline() -> dict[str, object]:
         "current_source_comparison": "NOT_RUN",
         "current_source_constraints_match_count": 0,
         "current_source_row_manifest_match_count": 0,
+        "current_source_c_sorted_row_manifest_match_count": 0,
+        "current_source_c_sorted_combined_match_count": 0,
         "current_source_combined_match_count": 0,
         "current_source_row_total_match_count": 0,
         "current_source_snapshot_is_historic_attestation": False,
@@ -677,6 +679,11 @@ def run_offline() -> dict[str, object]:
                         # compatibility; source comparison uses SHA256.
                         match_c = constraint_sha256 == live_constraints
                         match_r = row_manifest == live_rows
+                        match_r_c = metadata is not None and metadata[7] == live_rows
+                        if match_r_c:
+                            result["current_source_c_sorted_row_manifest_match_count"] += 1
+                        if match_c and match_r_c and row_total == live_total and count == 65:
+                            result["current_source_c_sorted_combined_match_count"] += 1
                         if match_c:
                             result["current_source_constraints_match_count"] += 1
                         if match_r:
@@ -754,12 +761,18 @@ def run_offline() -> dict[str, object]:
                 result["focus_comparison"] = "FOCUS_CONTENT_OR_SNAPSHOT_DIFFERENCE"
         if snapshot is not None:
             both = result["current_source_combined_match_count"]
-            result["current_source_comparison"] = (
-                "PASS_CURRENT_REFERENCE" if both == len(archives)
-                and result["offline_restore_failure_count"] == 0
-                and result["offline_restore_skipped_budget_count"] == 0
-                else "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
-            )
+            complete = (result["offline_restore_failure_count"] == 0
+                        and result["offline_restore_skipped_budget_count"] == 0
+                        and result["offline_restored_archive_count"] == len(archives))
+            if complete and both == len(archives):
+                result["current_source_comparison"] = "PASS_CURRENT_REFERENCE"
+            elif (complete
+                  and result["current_source_c_sorted_combined_match_count"] == len(archives)
+                  and schema_ref is not None
+                  and result["schema_delta_classification"] == "IDENTICAL_TABLE_NAME_SET"):
+                result["current_source_comparison"] = "PASS_CURRENT_C_COLLATION_REFERENCE"
+            else:
+                result["current_source_comparison"] = "SOURCE_DRIFT_OR_RESTORED_DATA_DIFFERENCE"
         result["failure_categories"] = sorted(failure_kinds)
         result["offline_restore_execution"] = (
             "PASS_LOCAL_ONLY" if result["offline_restored_archive_count"] == len(archives)
