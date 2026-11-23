@@ -40,7 +40,11 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         source.execute("CREATE ROLE jw_p1_synthetic_reader NOLOGIN")
         source.execute("GRANT USAGE ON SCHEMA jw_dev TO jw_p1_synthetic_reader")
         source.execute("GRANT SELECT ON jw_dev.records TO jw_p1_synthetic_reader")
+        source.execute("CREATE ROLE jw_p1_existing_reader NOLOGIN")
+        source.execute("GRANT SELECT ON jw_dev.records TO jw_p1_existing_reader")
         assert source.execute("SELECT count(*) FROM jw_dev.records").fetchone()[0] == 120
+    with psycopg.connect(TARGET, autocommit=True) as target:
+        target.execute("CREATE ROLE jw_p1_existing_reader NOLOGIN")
     backup.provision_ephemeral_marker(TARGET, TOKEN)
     results = backup.run(SOURCE, TARGET, schema="jw_dev", workdir=tmp_path, real_source=False)
     assert results["tables"] == 1
@@ -70,3 +74,6 @@ def test_full_pg17_synthetic_backup_encrypt_restore(tmp_path: Path, monkeypatch)
         assert target.execute(
             "SELECT count(*) FROM pg_roles WHERE rolname='postgres'"
         ).fetchone()[0] == 1, "pre-existing restore admin role must remain"
+        assert target.execute(
+            "SELECT count(*) FROM pg_roles WHERE rolname='jw_p1_existing_reader'"
+        ).fetchone()[0] == 1, "pre-existing auxiliary role must never be deleted"
