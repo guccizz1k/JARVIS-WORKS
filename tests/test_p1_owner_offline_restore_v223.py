@@ -181,3 +181,74 @@ def test_focus_diagnose_never_passes_missing_or_incomplete_evidence(monkeypatch,
     monkeypatch.setattr(offline,"run_offline",lambda:result)
     assert offline.main(["diagnose-focus"]) == 1
     assert '"overall":"BLOCKED"' in capsys.readouterr().out
+
+
+
+@pytest.mark.parametrize("key,bad",[
+    (offline.REFERENCE_SCHEMA_NAMES_ENV,"x"*64),
+    (offline.REFERENCE_EMPTY_NAMES_ENV,"bad"),
+    (offline.REFERENCE_LITERAL_MANIFEST_ENV,"f"*63),
+    (offline.REFERENCE_NONEMPTY_ENV,"-1"),
+    (offline.REFERENCE_NONEMPTY_ENV,"100001"),
+])
+def test_manifest_reference_fail_closed_on_partial_invalid(monkeypatch,key,bad):
+    for name in (
+        offline.REFERENCE_SCHEMA_NAMES_ENV,offline.REFERENCE_EMPTY_NAMES_ENV,
+        offline.REFERENCE_LITERAL_MANIFEST_ENV,offline.REFERENCE_NONEMPTY_ENV
+    ):
+        monkeypatch.delenv(name,raising=False)
+    monkeypatch.setenv(key,bad)
+    with pytest.raises(offline.backup.BackupError):
+        offline._manifest_reference()
+
+
+def test_manifest_reference_complete_or_optional(monkeypatch):
+    for name in (
+        offline.REFERENCE_SCHEMA_NAMES_ENV,offline.REFERENCE_EMPTY_NAMES_ENV,
+        offline.REFERENCE_LITERAL_MANIFEST_ENV,offline.REFERENCE_NONEMPTY_ENV
+    ):
+        monkeypatch.delenv(name,raising=False)
+    assert offline._manifest_reference() is None
+    monkeypatch.setenv(offline.REFERENCE_SCHEMA_NAMES_ENV,"a"*64)
+    monkeypatch.setenv(offline.REFERENCE_EMPTY_NAMES_ENV,"b"*64)
+    monkeypatch.setenv(offline.REFERENCE_LITERAL_MANIFEST_ENV,"c"*64)
+    monkeypatch.setenv(offline.REFERENCE_NONEMPTY_ENV,"1")
+    assert offline._manifest_reference() == ("a"*64,"b"*64,"c"*64,1)
+
+
+def test_diagnose_manifest_exit_never_claims_source_integrity(monkeypatch,capsys):
+    from scripts import p1_owner_offline_restore_v223 as offline
+    report={
+        "offline_restore_execution":"PASS_LOCAL_ONLY",
+        "container_removed":"PASS",
+        "manifest_metadata_reference_provided":True,
+        "metadata_probe_unavailable_count":0,
+        "manifest_reconciliation":"SCHEMA_NAME_SET_DIFFERS",
+        "overall":"BLOCKED",
+    }
+    monkeypatch.setattr(offline,"run_offline",lambda:report)
+    assert offline.main(["diagnose-manifest"])==0
+    assert '"overall":"BLOCKED"' in capsys.readouterr().out
+    assert offline.main(["restore-offline"])==1
+
+
+@pytest.mark.parametrize("key,bad",[
+    ("manifest_metadata_reference_provided",False),
+    ("metadata_probe_unavailable_count",1),
+    ("manifest_reconciliation","NOT_RUN"),
+    ("manifest_reconciliation","METADATA_PROBE_INCOMPLETE"),
+    ("container_removed","BLOCKED_CLEANUP"),
+])
+def test_diagnose_manifest_requires_complete_evidence(monkeypatch,capsys,key,bad):
+    result={
+        "offline_restore_execution":"PASS_LOCAL_ONLY",
+        "container_removed":"PASS",
+        "manifest_metadata_reference_provided":True,
+        "metadata_probe_unavailable_count":0,
+        "manifest_reconciliation":"PASS_CURRENT_SCHEMA_AND_AGGREGATES",
+        "overall":"BLOCKED",
+    }
+    result[key]=bad
+    monkeypatch.setattr(offline,"run_offline",lambda:result)
+    assert offline.main(["diagnose-manifest"])==1
+    capsys.readouterr()

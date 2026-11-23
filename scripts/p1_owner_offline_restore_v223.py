@@ -73,34 +73,71 @@ BEGIN
   END LOOP;
 END;
 $jw$;
+-- Each independent digest below is read ONLY from this transaction's
+-- temporary metadata table. No plaintext rows, names or hashes are printed.
+WITH entries AS (
+  SELECT name,n,lo,hi,name||':'||n::text||':'||lo||':'||hi AS entry
+  FROM jw_p1_digest
+)
 SELECT count(*)::int, coalesce(sum(n),0)::bigint,
-  encode(sha256(convert_to(
-   coalesce(string_agg(name||':'||n::text||':'||lo||':'||hi,E'\\n' ORDER BY name),''),
-  'UTF8')),'hex')
-FROM jw_p1_digest;
+  encode(sha256(convert_to(coalesce(string_agg(entry,E'\\n' ORDER BY name),''),'UTF8')),'hex'),
+  encode(sha256(convert_to(coalesce(string_agg(name,E'\\n' ORDER BY name),''),'UTF8')),'hex'),
+  encode(sha256(convert_to(coalesce(string_agg(name,E'\\n' ORDER BY name) FILTER (WHERE n=0),''),'UTF8')),'hex'),
+  count(*) FILTER (WHERE n>0)::int,
+  encode(sha256(convert_to(coalesce(string_agg(entry,chr(92)||'n' ORDER BY name),''),'UTF8')),'hex'),
+  encode(sha256(convert_to(coalesce(array_to_string(array_agg(entry ORDER BY name),chr(10)),''),'UTF8')),'hex')
+FROM entries;
 ROLLBACK;
 """
 
 
-def _audit_restored_row_manifest(container: str, db: str) -> tuple[int, int, str] | None:
-    """Read-only content digest on the disposable DB (temporary table only)."""
+def _audit_restored_row_manifest(container: str, db: str) -> tuple[int, int, str, str, str, int, str, str] | None:
+    """Bounded, disposable DB-only row and schema fingerprint diagnostics.
+
+    Result order: table count, row count, legacy newline manifest,
+    names SHA256, empty names SHA256, populated count,
+    literal-backslash-n manifest and independent chr(10) array-join manifest.
+    None of these private values are returned in the CLI's report.
+    """
     done = _exec(container, ["psql", "-qAt", "-U", "postgres", "-d", db,
                             "-v", "ON_ERROR_STOP=1", "-c", ROW_MANIFEST_SQL],
                  timeout=100)
     if done.returncode:
         return None
     parts = done.stdout.decode("ascii", "ignore").strip().split("|")
-    if len(parts) != 3:
+    if len(parts) != 8:
         return None
     try:
-        table_count, rows = int(parts[0]), int(parts[1])
+        table_count, rows, populated = int(parts[0]), int(parts[1]), int(parts[5])
     except ValueError:
         return None
     if not (0 <= table_count <= 100000
             and 0 <= rows <= MAX_SOURCE_TOTAL_ROWS
-            and FINGERPRINT_RE.fullmatch(parts[2])):
+            and 0 <= populated <= table_count
+            and all(FINGERPRINT_RE.fullmatch(parts[i]) for i in (2,3,4,6,7))):
         return None
-    return table_count, rows, parts[2]
+    return table_count, rows, parts[2], parts[3], parts[4], populated, parts[6], parts[7]
+
+
+# Optional independently measured metadata-only current-source references.
+# The source remains READ ONLY; restored temporary DBs stay networkless.
+REFERENCE_SCHEMA_NAMES_ENV = "JW_PG_EXPECT_SCHEMA_NAMES_SHA256"
+REFERENCE_EMPTY_NAMES_ENV = "JW_PG_EXPECT_EMPTY_NAMES_SHA256"
+REFERENCE_LITERAL_MANIFEST_ENV = "JW_PG_EXPECT_LITERAL_JOIN_MANIFEST_SHA256"
+REFERENCE_NONEMPTY_ENV = "JW_PG_EXPECT_NONEMPTY_TABLES"
+
+
+def _manifest_reference() -> tuple[str, str, str, int] | None:
+    values = [os.environ.get(n, "") for n in (
+        REFERENCE_SCHEMA_NAMES_ENV, REFERENCE_EMPTY_NAMES_ENV,
+        REFERENCE_LITERAL_MANIFEST_ENV, REFERENCE_NONEMPTY_ENV)]
+    if not any(values):
+        return None
+    a,b,c,n = values
+    if not (all(FINGERPRINT_RE.fullmatch(v) for v in (a,b,c))
+            and n.isascii() and n.isdecimal() and 0 <= int(n) <= 100000):
+        raise backup.BackupError("BLOCKED_INVALID_METADATA_REFERENCE")
+    return a,b,c,int(n)
 
 
 def _source_snapshot_reference() -> tuple[str, str, int | None] | None:
@@ -242,7 +279,7 @@ def _focus_probe(container: str, db: str, table: str) -> tuple[int, str, str] | 
 
 
 
-def _restore_one(container: str, original: bytearray, index: int, focus: tuple[str, int, str, str] | None = None) -> tuple[str, int, str | None, str | None, int | None, str | None, tuple[int, str, str] | None]:
+def _restore_one(container: str, original: bytearray, index: int, focus: tuple[str, int, str, str] | None = None) -> tuple[str, int, str | None, str | None, int | None, str | None, tuple[int, str, str] | None, tuple[str, str, int, str, str] | None]:
     """Fresh disposable DB per archive. Auto-create NOLOGIN roles ONLY in
     this networkless throwaway cluster, only when pg_restore reports one.
     """
@@ -251,7 +288,7 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
     for attempt in range(MAX_MISSING_ROLES + 1):
         created = _exec(container, ["createdb", "-U", "postgres", db])
         if created.returncode:
-            return "CREATE_DISPOSABLE_DB_FAILED", 0, None, None, None, None, None
+            return "CREATE_DISPOSABLE_DB_FAILED", 0, None, None, None, None, None, None
         try:
             done = _exec(container, [
                 "pg_restore", "-U", "postgres", "--no-owner", "--no-acl",
@@ -262,7 +299,7 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
                 if missing and attempt < MAX_MISSING_ROLES:
                     role = missing.group(1).decode("ascii")
                     if role in added or role.lower().startswith("pg_"):
-                        return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None, None
+                        return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None, None, None
                     added.add(role)
                     # ASCII-validated, quoted identifier; the target cluster is
                     # fresh, networkless, and destroyed at the end of the run.
@@ -271,9 +308,9 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
                         "-v", "ON_ERROR_STOP=1", "-c", 'CREATE ROLE "'+role+'" NOLOGIN',
                     ])
                     if made.returncode:
-                        return "EPHEMERAL_ROLE_PROVISION_FAILED", 0, None, None, None, None, None
+                        return "EPHEMERAL_ROLE_PROVISION_FAILED", 0, None, None, None, None, None, None
                     continue
-                return _restore_reason(done.stderr), 0, None
+                return _restore_reason(done.stderr), 0, None, None, None, None, None
             count_query = (
                 "SELECT count(*) FROM pg_class c "
                 "JOIN pg_namespace n ON n.oid=c.relnamespace "
@@ -284,13 +321,13 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
                 "-v", "ON_ERROR_STOP=1", "-c", count_query,
             ])
             if checked.returncode:
-                return "POST_RESTORE_TABLE_COUNT_UNAVAILABLE", 0, None, None, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_UNAVAILABLE", 0, None, None, None, None, None, None
             try:
                 total = int(checked.stdout.strip())
             except (TypeError, ValueError):
-                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None, None, None
             if not 0 <= total <= 100000:
-                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None, None
+                return "POST_RESTORE_TABLE_COUNT_INVALID", 0, None, None, None, None, None, None
             hash_query = (
                 "SELECT md5(coalesce(string_agg(c.relname||'.'||k.conname||'='||"
                 "pg_get_constraintdef(k.oid,true),E'\\n' ORDER BY c.relname,k.conname),'') ) "
@@ -304,7 +341,7 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
             ])
             digest = h.stdout.decode("ascii", "ignore").strip() if h.returncode == 0 else ""
             if not re.fullmatch(r"[a-f0-9]{32}", digest):
-                return "POST_RESTORE_CONSTRAINT_DIGEST_INVALID", 0, None, None, None, None, None
+                return "POST_RESTORE_CONSTRAINT_DIGEST_INVALID", 0, None, None, None, None, None, None
             sha_query = (
                 "SELECT encode(sha256(convert_to(coalesce(string_agg("
                 "c.relname||'.'||k.conname||'='||pg_get_constraintdef(k.oid,true),"
@@ -320,15 +357,15 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
                 return "POST_RESTORE_CONSTRAINT_SHA256_INVALID", 0, None, None, None, None
             rows = _audit_restored_row_manifest(container, db)
             if rows is None or rows[0] != total:
-                return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None, None
+                return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None, None, None
             probe = _focus_probe(container, db, focus[0]) if focus else None
-            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha, probe
+            return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha, probe, (rows[3],rows[4],rows[5],rows[6],rows[7])
         finally:
             # Always discard this database before moving to the next archive.
             dropped = _exec(container, ["dropdb", "-U", "postgres", "--force", db])
             if dropped.returncode:
                 raise backup.BackupError("BLOCKED_EPHEMERAL_DATABASE_CLEANUP_FAILED")
-    return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None, None
+    return "MISSING_DISPOSABLE_TARGET_ROLE", 0, None, None, None, None, None, None
 
 
 def run_offline() -> dict[str, object]:
@@ -342,6 +379,15 @@ def run_offline() -> dict[str, object]:
         "offline_restore_skipped_budget_count": 0,
         "disposable_constraint_signature_groups": 0,
         "disposable_row_manifest_groups": 0,
+        "manifest_metadata_reference_provided": False,
+        "metadata_schema_names_match_count": 0,
+        "metadata_empty_table_names_match_count": 0,
+        "metadata_nonempty_table_count_match_count": 0,
+        "metadata_literal_manifest_match_count": 0,
+        "metadata_canonical_array_manifest_match_count": 0,
+        "metadata_probe_unavailable_count": 0,
+        "manifest_reconciliation": "NOT_RUN",
+        "manifest_reconciliation_is_historic_attestation": False,
         "current_source_reference_provided": False,
         "current_source_comparison": "NOT_RUN",
         "current_source_constraints_match_count": 0,
@@ -379,6 +425,12 @@ def run_offline() -> dict[str, object]:
         result["blocker"] = "INVALID_FOCUS_REFERENCE"
         return result
     result["focus_reference_provided"] = focus is not None
+    try:
+        metadata_ref = _manifest_reference()
+    except backup.BackupError:
+        result["blocker"] = "INVALID_METADATA_REFERENCE"
+        return result
+    result["manifest_metadata_reference_provided"] = metadata_ref is not None
     archives, discovery = owner.discover_owner_archive()
     result["archive_discovery"] = discovery
     result["private_archives_found"] = len(archives)
@@ -438,7 +490,7 @@ def run_offline() -> dict[str, object]:
                 continue
             try:
                 remaining -= len(plain)
-                status, count, fingerprint, row_manifest, row_total, constraint_sha256, focus_probe = _restore_one(container, plain, index, focus)
+                status, count, fingerprint, row_manifest, row_total, constraint_sha256, focus_probe, metadata = _restore_one(container, plain, index, focus)
                 if status != "LOCAL_DISPOSABLE_RESTORED":
                     result["offline_restore_failure_count"] += 1
                     failure_kinds.add(status)
@@ -468,6 +520,18 @@ def run_offline() -> dict[str, object]:
                                 result["focus_json_content_match_count"] += 1
                             if count_ok and composite_ok and json_ok:
                                 result["focus_both_match_count"] += 1
+                    if metadata_ref is not None:
+                        if metadata is None:
+                            result["metadata_probe_unavailable_count"] += 1
+                        else:
+                            ref_names, ref_empty, ref_literal, ref_nonempty = metadata_ref
+                            local_names, local_empty, local_nonempty, local_literal, local_canonical = metadata
+                            result["metadata_schema_names_match_count"] += int(local_names == ref_names)
+                            result["metadata_empty_table_names_match_count"] += int(local_empty == ref_empty)
+                            result["metadata_nonempty_table_count_match_count"] += int(local_nonempty == ref_nonempty)
+                            result["metadata_literal_manifest_match_count"] += int(local_literal == ref_literal)
+                            if snapshot is not None:
+                                result["metadata_canonical_array_manifest_match_count"] += int(local_canonical == snapshot[1])
                     if snapshot is not None:
                         live_constraints, live_rows, live_total = snapshot
                         # See separate SHA256 constraints query below. The old
@@ -491,6 +555,26 @@ def run_offline() -> dict[str, object]:
                 plain.clear()
         result["disposable_constraint_signature_groups"] = len(fingerprints)
         result["disposable_row_manifest_groups"] = len(row_fingerprints)
+        if metadata_ref is not None:
+            n = len(archives)
+            if (result["metadata_probe_unavailable_count"]
+                    or result["offline_restore_failure_count"]
+                    or result["offline_restore_skipped_budget_count"]):
+                result["manifest_reconciliation"] = "METADATA_PROBE_INCOMPLETE"
+            elif result["metadata_schema_names_match_count"] != n:
+                result["manifest_reconciliation"] = "SCHEMA_NAME_SET_DIFFERS"
+            elif result["metadata_empty_table_names_match_count"] != n:
+                result["manifest_reconciliation"] = "EMPTY_TABLE_NAME_SET_DIFFERS"
+            elif result["metadata_nonempty_table_count_match_count"] != n:
+                result["manifest_reconciliation"] = "NONEMPTY_TABLE_COUNT_DIFFERS"
+            elif result["metadata_literal_manifest_match_count"] != n:
+                result["manifest_reconciliation"] = "ROW_MANIFEST_COMPONENTS_DIFFER"
+            elif snapshot is not None and result["metadata_canonical_array_manifest_match_count"] != n:
+                result["manifest_reconciliation"] = "CANONICAL_AGGREGATION_DIFFERS"
+            elif snapshot is not None and result["current_source_row_manifest_match_count"] != n:
+                result["manifest_reconciliation"] = "LEGACY_AGGREGATION_DIFFERS"
+            else:
+                result["manifest_reconciliation"] = "PASS_CURRENT_SCHEMA_AND_AGGREGATES"
         if focus is not None:
             n = len(archives)
             if result["focus_probe_unavailable_count"] or result["offline_restore_failure_count"]                     or result["offline_restore_skipped_budget_count"]:
@@ -535,8 +619,8 @@ def run_offline() -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if args not in (["restore-offline"], ["diagnose-focus"]):
-        print("USAGE: python -m scripts.p1_owner_offline_restore_v223 [restore-offline|diagnose-focus]", file=sys.stderr)
+    if args not in (["restore-offline"], ["diagnose-focus"], ["diagnose-manifest"]):
+        print("USAGE: python -m scripts.p1_owner_offline_restore_v223 [restore-offline|diagnose-focus|diagnose-manifest]", file=sys.stderr)
         return 2
     try:
         report = run_offline()
@@ -544,6 +628,16 @@ def main(argv: list[str] | None = None) -> int:
         print('{"offline_restore_execution":"BLOCKED","overall":"BLOCKED","blocker":"UNEXPECTED_SAFE_RESTORE_ERROR"}')
         return 1
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+    if args == ["diagnose-manifest"]:
+        # A completed diagnostic can succeed even when individual fingerprints
+        # disagree. Never confuse completion with data parity PASS.
+        return 0 if (
+            report.get("offline_restore_execution") == "PASS_LOCAL_ONLY"
+            and report.get("container_removed") == "PASS"
+            and report.get("manifest_metadata_reference_provided") is True
+            and report.get("metadata_probe_unavailable_count") == 0
+            and report.get("manifest_reconciliation") not in ("NOT_RUN", "METADATA_PROBE_INCOMPLETE")
+        ) else 1
     if args == ["diagnose-focus"]:
         # Only the DIAGNOSTIC itself passes: successful full local restoration,
         # no unchecked files or failed focus probes. Real contents may differ
@@ -560,7 +654,9 @@ def main(argv: list[str] | None = None) -> int:
                  and report.get("current_source_comparison") in
                    ("NOT_RUN", "PASS_CURRENT_REFERENCE")
                  and report.get("focus_comparison") in
-                   ("NOT_RUN", "PASS_CURRENT_FOCUS_CONTENT")) else 1
+                   ("NOT_RUN", "PASS_CURRENT_FOCUS_CONTENT")
+                 and report.get("manifest_reconciliation") in
+                   ("NOT_RUN", "PASS_CURRENT_SCHEMA_AND_AGGREGATES")) else 1
 
 
 if __name__ == "__main__":
