@@ -401,3 +401,77 @@ def test_source_privilege_catalog_includes_views_and_nextval():
     assert "('r','p','v','m','f')" in sql
     assert "has_sequence_privilege(c.oid, 'USAGE')" in sql
     assert "has_sequence_privilege(c.oid, 'UPDATE')" in sql
+
+
+# V2 cryptographic nonce hardening + V1 legacy decrypt compatibility.
+@pytest.mark.parametrize("size", [0, 1, 1024, 1048576, 1048577, 2 * 1048576 + 17])
+def test_backup_v2_streaming_roundtrip_and_length(tmp_path: Path, size):
+    original = tmp_path / "source"
+    original.write_bytes((b"synthetic-v2-" * ((size // 13) + 1))[:size])
+    cipher = tmp_path / "new-format"
+    output = tmp_path / "output"
+    key = p.AESGCM.generate_key(bit_length=256)
+    receipt = p.encrypt_file(original, cipher, key)
+    assert cipher.read_bytes().startswith(p.MAGIC + cipher.read_bytes()[8:16])
+    assert receipt["format_version"] == 2
+    assert len(cipher.read_bytes()) >= 8 + 8 + 4 + 16
+    assert p.decrypt_file(cipher, output, key) == hashlib.sha256(original.read_bytes()).hexdigest()
+    assert output.read_bytes() == original.read_bytes()
+
+
+def _make_legacy_v1_fixture(path: Path, payload: bytes, key: bytes):
+    import struct
+    # Construct an original V1 encrypted fixture independently from encrypt_file.
+    prefix = bytes((13, 21, 34, 55))
+    chunks = [payload[i:i+p.CHUNK] for i in range(0, len(payload), p.CHUNK)] or [b""]
+    with path.open("wb") as f:
+        f.write(p.MAGIC_LEGACY + prefix)
+        for counter, plaintext in enumerate(chunks):
+            final = counter == len(chunks) - 1
+            nonce = prefix + struct.pack(">Q", counter)
+            aad = p.MAGIC_LEGACY + struct.pack(">QB", counter, int(final))
+            blob = p.AESGCM(key).encrypt(nonce, plaintext, aad)
+            f.write(struct.pack(">I", len(blob)))
+            f.write(blob)
+
+
+@pytest.mark.parametrize("size", [0, 32, 1048577])
+def test_existing_legacy_v1_archive_still_decrypts(tmp_path: Path, size):
+    data = (b"legacy-synthetic-" * ((size // 17) + 1))[:size]
+    key = p.AESGCM.generate_key(bit_length=256)
+    archive, output = tmp_path / "legacy", tmp_path / "output"
+    _make_legacy_v1_fixture(archive, data, key)
+    assert p.decrypt_file(archive, output, key) == hashlib.sha256(data).hexdigest()
+    assert output.read_bytes() == data
+
+
+@pytest.mark.parametrize("format_version", [1, 2])
+@pytest.mark.parametrize("corruption", ["tamper", "truncation"])
+def test_v1_v2_authenticity_negative_cases(tmp_path: Path, format_version, corruption):
+    key = p.AESGCM.generate_key(bit_length=256)
+    source = tmp_path / "plain"
+    source.write_bytes(b"synthetic data" * 42)
+    encrypted = tmp_path / "original"
+    if format_version == 1:
+        _make_legacy_v1_fixture(encrypted, source.read_bytes(), key)
+    else:
+        p.encrypt_file(source, encrypted, key)
+    mutated = tmp_path / "corrupted"
+    p.write_negative_cipher_copy(encrypted, mutated, corruption)
+    output = tmp_path / "output"
+    with pytest.raises(p.BackupError):
+        p.decrypt_file(mutated, output, key)
+    assert not output.exists()
+
+
+def test_v2_nonce_counter_overflow_is_rejected():
+    assert len(p._nonce(b"01234567", 0)) == 12
+    with pytest.raises(p.BackupError, match="CHUNK_COUNTER_EXHAUSTED"):
+        p._nonce(b"01234567", 2**32)
+    assert len(p._nonce(b"1234", 2**32)) == 12
+
+
+def test_v2_format_does_not_reuse_legacy_nonce_layout():
+    prefix = b"abcdefgh"
+    assert p._nonce(prefix, 7) == prefix + bytes((0, 0, 0, 7))
+    assert p._aad(7, True) != p._aad(7, True, p.MAGIC_LEGACY)

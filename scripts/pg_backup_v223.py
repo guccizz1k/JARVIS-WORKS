@@ -31,7 +31,10 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-MAGIC = b"JWPGBK1\n"
+# V1 has only 32 bits of random nonce prefix. Preserve decryption support for
+# historical archives, but NEVER generate more V1 backups under a reused key.
+MAGIC_LEGACY = b"JWPGBK1\n"
+MAGIC = b"JWPGBK2\n"
 CHUNK = 1 << 20
 MAX_CHUNK_CIPHERTEXT = CHUNK + 16
 SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
@@ -68,11 +71,20 @@ def load_key(value: str | None = None) -> bytes:
 
 # ------------------------------------------------- chunked AES-256-GCM file format
 def _nonce(prefix: bytes, counter: int) -> bytes:
-    return prefix + struct.pack(">Q", counter)
+    """AES-GCM 96-bit nonce: V1=32-bit prefix+64-bit counter; V2=64+32."""
+    if len(prefix) == 8:
+        if not 0 <= counter < 2**32:
+            raise BackupError("BLOCKED_V223_BACKUP_V2_CHUNK_COUNTER_EXHAUSTED")
+        return prefix + struct.pack(">I", counter)
+    if len(prefix) == 4:
+        if not 0 <= counter < 2**64:
+            raise BackupError("BLOCKED_V223_BACKUP_V1_CHUNK_COUNTER_EXHAUSTED")
+        return prefix + struct.pack(">Q", counter)
+    raise BackupError("BLOCKED_V223_BACKUP_BAD_NONCE_PREFIX")
 
 
-def _aad(counter: int, final: bool) -> bytes:
-    return MAGIC + struct.pack(">QB", counter, 1 if final else 0)
+def _aad(counter: int, final: bool, magic: bytes = MAGIC) -> bytes:
+    return magic + struct.pack(">QB", counter, 1 if final else 0)
 
 
 def _open_new(path: Path):
@@ -86,7 +98,9 @@ def encrypt_file(src: Path, dst: Path, key: bytes) -> dict:
     """Encrypt ``src`` to ``dst``. The final chunk is authenticated as final, so
     truncation (even at a chunk boundary), reordering and tampering all fail."""
     aes = AESGCM(key)
-    prefix = os.urandom(4)
+    # 64 random bits per archive reduce cross-archive nonce collisions.
+    # V2's 32-bit chunk counter supports up to 4 PiB per backup.
+    prefix = os.urandom(8)
     plain_hash, cipher_hash = hashlib.sha256(), hashlib.sha256()
     out = _open_new(Path(dst))
     try:
@@ -112,7 +126,7 @@ def encrypt_file(src: Path, dst: Path, key: bytes) -> dict:
         Path(dst).unlink(missing_ok=True)
         raise
     return {"plain_sha256": plain_hash.hexdigest(), "cipher_sha256": cipher_hash.hexdigest(),
-            "chunks": counter + 1}
+            "chunks": counter + 1, "format_version": 2}
 
 
 def decrypt_file(src: Path, dst: Path, key: bytes) -> str:
@@ -122,10 +136,12 @@ def decrypt_file(src: Path, dst: Path, key: bytes) -> str:
     out = _open_new(Path(dst))
     try:
         with open(src, "rb") as fin, out:
-            if fin.read(len(MAGIC)) != MAGIC:
+            magic = fin.read(len(MAGIC))
+            if magic not in (MAGIC, MAGIC_LEGACY):
                 raise BackupError("BLOCKED_V223_BACKUP_BAD_HEADER")
-            prefix = fin.read(4)
-            if len(prefix) != 4:
+            prefix_len = 8 if magic == MAGIC else 4
+            prefix = fin.read(prefix_len)
+            if len(prefix) != prefix_len:
                 raise BackupError("BLOCKED_V223_BACKUP_TRUNCATED")
             counter = 0
             while True:
@@ -142,7 +158,7 @@ def decrypt_file(src: Path, dst: Path, key: bytes) -> str:
                 if not final:
                     fin.seek(-1, os.SEEK_CUR)
                 try:
-                    plain = aes.decrypt(_nonce(prefix, counter), blob, _aad(counter, final))
+                    plain = aes.decrypt(_nonce(prefix, counter), blob, _aad(counter, final, magic))
                 except InvalidTag as exc:
                     raise BackupError("BLOCKED_V223_BACKUP_AUTH_FAILED") from exc
                 digest.update(plain)
@@ -163,7 +179,11 @@ def write_negative_cipher_copy(src: Path, dst: Path, kind: str) -> None:
     src, dst = Path(src), Path(dst)
     if kind not in ("tamper", "truncation"):
         raise BackupError("BLOCKED_V223_UNKNOWN_NEGATIVE_TEST")
-    payload_offset = len(MAGIC) + 4 + 4
+    with src.open("rb") as header:
+        magic = header.read(len(MAGIC))
+    if magic not in (MAGIC, MAGIC_LEGACY):
+        raise BackupError("BLOCKED_V223_BACKUP_BAD_HEADER")
+    payload_offset = len(magic) + (8 if magic == MAGIC else 4) + 4
     size = src.stat().st_size
     if size <= payload_offset:
         raise BackupError("BLOCKED_V223_ENCRYPTED_ARTIFACT_TOO_SHORT")
