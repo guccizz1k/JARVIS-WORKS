@@ -1,0 +1,16 @@
+name: Wrong App identity synthetic control
+on:
+  pull_request:
+    branches: [test/jw-dual-ci-base-20261124]
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  wrong-source:
+    name: JW isolated independent metadata
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.base_ref == 'test/jw-dual-ci-base-20261124' && github.event.pull_request.head.repo.full_name == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Inert wrong-source check
+        run: echo 'SYNTHETIC WRONG SOURCE ONLY; NOT INDEPENDENT APP PROOF'
