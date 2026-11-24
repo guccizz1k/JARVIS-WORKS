@@ -14,6 +14,9 @@ on:
       - tests/test_jw_attestation_ledger_v223.py
       - scripts/jw_anchored_ledger_v223.py
       - tests/test_jw_anchored_ledger_v223.py
+      - scripts/jw_current_authz_archive_v223.py
+      - tests/test_jw_current_authz_archive_v223.py
+      - db/review/jw_current_authz_sql_v1.sql
       - .github/workflows/jw-v223-role-proof-review.yml
 permissions:
   contents: read
@@ -108,7 +111,7 @@ jobs:
       - name: Compile and run current authorization regressions
         run: |
           python -m py_compile scripts/jw_current_authz_proof_v223.py tests/test_jw_current_authz_proof_v223.py live_checks/pg17_current_authz_smoke.py
-          python -m pytest --noconftest -q tests/test_jw_current_authz_proof_v223.py
+          python -m pytest --noconftest -q tests/test_jw_current_authz_proof_v223.py tests/test_jw_current_authz_archive_v223.py
       - name: Actual PostgreSQL 17 owner and ACL mutation test
         env:
           JW_SYNTHETIC_ROLE_CI: '1'
