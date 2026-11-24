@@ -1,0 +1,55 @@
+name: JW main required CI
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+concurrency:
+  group: jw-main-required-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  main-required:
+    name: JW main required regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify actual PR merge candidate
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_BASE: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_BASE_REF" = main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^1)" = "$EXPECTED_BASE"
+          test "$(git rev-parse HEAD^2)" = "$EXPECTED_HEAD"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated test dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt 'reportlab==4.4.9'
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+      - name: Test security, import, settlement and RLS contracts
+        run: |
+          python -m compileall -q app scripts/jw_main_ci_receipt.py
+          python -m pytest -q --strict-markers --junitxml="$RUNNER_TEMP/jw-main.xml" \
+            tests/test_security.py tests/test_auth_integrity_v89.py \
+            tests/test_security_hardening_v17.py tests/test_quote_import.py \
+            tests/test_complex_settlement_v69.py tests/test_pg_rls_gate_v79.py \
+            tests/test_jw_main_ci_receipt.py
+          python scripts/jw_main_ci_receipt.py "$RUNNER_TEMP/jw-main.xml"
