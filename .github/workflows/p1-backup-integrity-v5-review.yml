@@ -109,6 +109,10 @@ jobs:
         env:
           JW_V5_SYNTHETIC_CI: '1'
         run: python -m pytest --noconftest -q -s tests/test_p1_historical_baseline_pg17_integration_v223.py
+      - name: Verify full role graph mutations and reversals (synthetic only)
+        env:
+          JW_ROLE_GRAPH_SYNTHETIC_CI: '1'
+        run: python -m pytest --noconftest -q -s tests/test_jw_pg17_role_graph_integration_v223.py
       - name: Remove disposable PostgreSQL 17 instances
         if: always()
         shell: bash
