@@ -21,7 +21,7 @@ WITH objects AS (
  n.nspowner owner_oid,n.nspacl acl
  FROM pg_catalog.pg_namespace n WHERE n.nspname=%s
  UNION ALL
- SELECT 'relation:'||c.relkind,c.relname::text,'',c.relowner,c.relacl
+ SELECT 'relation:'::text||c.relkind::text,c.relname::text,'',c.relowner,c.relacl
  FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
  WHERE n.nspname=%s AND c.relkind IN ('r','p','v','m','S','f')
  UNION ALL
@@ -30,11 +30,11 @@ WITH objects AS (
  JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
  WHERE n.nspname=%s AND c.relkind IN ('r','p','v','m','f') AND a.attnum>0 AND NOT a.attisdropped
  UNION ALL
- SELECT 'routine:'||p.prokind,p.proname::text,pg_catalog.pg_get_function_identity_arguments(p.oid),p.proowner,p.proacl
+ SELECT 'routine:'::text||p.prokind::text,p.proname::text,pg_catalog.pg_get_function_identity_arguments(p.oid),p.proowner,p.proacl
  FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
  WHERE n.nspname=%s
  UNION ALL
- SELECT 'type:'||t.typtype,t.typname::text,'',t.typowner,t.typacl
+ SELECT 'type:'::text||t.typtype::text,t.typname::text,'',t.typowner,t.typacl
  FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid=t.typnamespace
  WHERE n.nspname=%s
 )
