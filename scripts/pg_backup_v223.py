@@ -852,7 +852,8 @@ def roles_in_acl(connection, schema: str) -> list[str]:
 
 
 def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
-        workdir: Path | None = None, real_source: bool = False) -> dict:
+        workdir: Path | None = None, real_source: bool = False, *,
+        authz_checkpoint_key: bytes | None = None) -> dict:
     # Validate pure inputs before importing optional DB dependencies. This also
     # ensures malformed DSNs fail closed in the isolated CI unit-test job.
     check_schema(schema)
@@ -866,6 +867,11 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     import psycopg
     from psycopg import sql
     key = load_key()
+    if authz_checkpoint_key is not None:
+        from scripts import jw_backup_authz_checkpoint_v223 as checkpoint
+        checkpoint.key_check(authz_checkpoint_key)
+        if authz_checkpoint_key == key or schema != "jw_dev":
+            raise BackupError("BLOCKED_AUTHZ_DISTINCT_KEY_AND_JW_DEV_REQUIRED")
     require_pg17_tools()
     # F1: prove the restore target is a disposable cluster BEFORE connecting to the source
     # or issuing any CREATE/DROP on the target.
@@ -881,6 +887,7 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
     t = time.monotonic
     created = False
     created_roles: list[str] = []
+    authz_doc = None
     try:
         # PostgreSQL exported snapshot keeps source signatures and pg_dump
         # consistent under concurrent writes (the transaction stays open until
@@ -908,6 +915,13 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
             summary["source_role_least_privilege"] = (not real_source) or not role_failures
             src_sig = fetch_signature(conn, schema)
             roles = roles_in_acl(conn, schema)
+            if authz_checkpoint_key is not None:
+                def check_authz_identity(c):
+                    if real_source and (not identity_verified(check_source_identity(
+                            src, fetch_live_identity(c, schema), read_identity_expectations()))
+                            or evaluate_source_privileges(fetch_role_facts(c, schema))):
+                        raise BackupError("BLOCKED_AUTHZ_SOURCE_IDENTITY_OR_ROLE")
+                authz_doc = checkpoint.capture(conn, check_authz_identity)
             t0 = t()
             run_tool(["pg_dump", "--format=custom", f"--schema={schema}", "--no-owner",
                       f"--snapshot={snapshot}", "--lock-wait-timeout=30s",
@@ -1038,6 +1052,29 @@ def run(source_dsn: str, target_admin_dsn: str, schema: str = "jw_dev",
                                     sql.SQL("DROP ROLE {}").format(sql.Identifier(role))
                                 )
     summary["verdict"] = verdict(summary)
+    if authz_checkpoint_key is not None:
+        # Only emit a bound sidecar after normal restoration, hash and negative
+        # checks. Synthetic tests use a separate isolated review environment.
+        if not all(summary.get(k) is True for k in (
+                "snapshot_consistent", "restore_verified", "decrypt_sha256_matches",
+                "signature_digest_matches", "archive_sha256_matches",
+                "tamper_rejected", "wrong_key_rejected", "truncation_rejected",
+                "partial_dump_restore_rejected")):
+            raise BackupError("BLOCKED_AUTHZ_BASE_BACKUP_NOT_VERIFIED")
+        if real_source and summary["verdict"] != "PASS":
+            raise BackupError("BLOCKED_AUTHZ_REAL_BACKUP_NOT_VERIFIED")
+        binding = dict(cipher_sha=summary["archive_sha256"],
+                       plain_sha=summary["encrypt"]["plain_sha256"])
+        sealed = checkpoint.seal(authz_doc, authz_checkpoint_key, **binding)
+        if checkpoint.unseal(sealed, authz_checkpoint_key, **binding) != authz_doc:
+            raise BackupError("BLOCKED_AUTHZ_CHECKPOINT_READBACK")
+        summary["authz_checkpoint"] = {
+            "sha256": checkpoint.write_new(work / (nonce + ".jwauthz"), sealed),
+            "scope": "CURRENT_SAME_SNAPSHOT_METADATA_ONLY",
+            "independent_source_signature": "NOT_ATTESTED",
+            "role_restoration": "NOT_RUN",
+            "activation_allowed": False,
+        }
     return summary
 
 

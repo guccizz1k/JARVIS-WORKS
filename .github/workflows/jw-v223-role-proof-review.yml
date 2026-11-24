@@ -1,0 +1,149 @@
+name: V22.3 role proof review
+on:
+  pull_request:
+    branches:
+      - review/jw-v223-external-custodian-pg17-20261123
+    paths:
+      - scripts/jw_role_proof_v223.py
+      - tests/test_jw_role_proof_v223.py
+      - live_checks/pg17_role_proof_smoke.py
+      - scripts/jw_current_authz_proof_v223.py
+      - tests/test_jw_current_authz_proof_v223.py
+      - live_checks/pg17_current_authz_smoke.py
+      - scripts/jw_attestation_ledger_v223.py
+      - tests/test_jw_attestation_ledger_v223.py
+      - scripts/jw_anchored_ledger_v223.py
+      - tests/test_jw_anchored_ledger_v223.py
+      - scripts/jw_current_authz_archive_v223.py
+      - tests/test_jw_current_authz_archive_v223.py
+      - db/review/jw_current_authz_sql_v1.sql
+      - scripts/jw_backup_authz_checkpoint_v223.py
+      - scripts/pg_backup_v223.py
+      - tests/test_jw_backup_authz_checkpoint_v223.py
+      - .github/workflows/jw-v223-role-proof-review.yml
+permissions:
+  contents: read
+concurrency:
+  group: jw-role-proof-review-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  role-proof:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.head_ref == 'review/jw-v223-role-proof-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      source:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: synthetic_role_ci_only
+          POSTGRES_DB: jw_role_source
+        ports:
+          - 127.0.0.1:55432:5432
+        options: --health-cmd "pg_isready -U postgres -d jw_role_source" --health-interval 3s --health-timeout 3s --health-retries 15
+      target:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: synthetic_role_ci_only
+          POSTGRES_DB: jw_role_target
+        ports:
+          - 127.0.0.1:55433:5432
+        options: --health-cmd "pg_isready -U postgres -d jw_role_target" --health-interval 3s --health-timeout 3s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exact commit and parent boundary
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check 'cryptography>=43,<47' 'psycopg[binary]>=3.2,<4' 'pytest>=8,<10'
+      - name: Compile and run role proof regressions
+        run: |
+          python -m py_compile scripts/jw_role_proof_v223.py tests/test_jw_role_proof_v223.py live_checks/pg17_role_proof_smoke.py
+          python -m pytest --noconftest -q tests/test_jw_role_proof_v223.py
+      - name: Actual PostgreSQL 17 role graph mutation test
+        env:
+          JW_SYNTHETIC_ROLE_CI: '1'
+        run: python -m live_checks.pg17_role_proof_smoke
+      - name: Existing independent review regression
+        run: python -m pytest --noconftest -q tests/jw_independent_review
+      - name: Scope boundary
+        if: always()
+        run: echo 'Synthetic PG17 only. No provider credentials, live database, key activation or deployment. Overall remains BLOCKED.'
+
+  current-authz:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.head_ref == 'review/jw-v223-role-proof-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      source:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: synthetic_role_ci_only
+          POSTGRES_DB: jw_role_source
+        ports:
+          - 127.0.0.1:55432:5432
+        options: --health-cmd "pg_isready -U postgres -d jw_role_source" --health-interval 3s --health-timeout 3s --health-retries 15
+      target:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: synthetic_role_ci_only
+          POSTGRES_DB: jw_role_target
+        ports:
+          - 127.0.0.1:55433:5432
+        options: --health-cmd "pg_isready -U postgres -d jw_role_target" --health-interval 3s --health-timeout 3s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exact commit and parent boundary
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check 'cryptography>=43,<47' 'psycopg[binary]>=3.2,<4' 'pytest>=8,<10'
+      - name: Compile and run current authorization regressions
+        run: |
+          python -m py_compile scripts/jw_current_authz_proof_v223.py tests/test_jw_current_authz_proof_v223.py live_checks/pg17_current_authz_smoke.py
+          python -m pytest --noconftest -q tests/test_jw_current_authz_proof_v223.py tests/test_jw_current_authz_archive_v223.py tests/test_jw_backup_authz_checkpoint_v223.py tests/test_p1_backup_integrity_v5.py
+      - name: Actual PostgreSQL 17 owner and ACL mutation test
+        env:
+          JW_SYNTHETIC_ROLE_CI: '1'
+        run: python -m live_checks.pg17_current_authz_smoke
+      - name: Scope boundary
+        if: always()
+        run: echo 'Synthetic PG17 only. No provider credentials, live database, key activation or deployment. Overall remains BLOCKED.'
+
+  attestation-ledger:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.head_ref == 'review/jw-v223-role-proof-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exact reviewed SHA
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'cryptography>=43,<47' 'pytest>=8,<10'
+      - name: Replay protection and independent process contention
+        run: |
+          python -m py_compile scripts/jw_attestation_ledger_v223.py tests/test_jw_attestation_ledger_v223.py scripts/jw_anchored_ledger_v223.py tests/test_jw_anchored_ledger_v223.py
+          python -m pytest --noconftest -q tests/test_jw_attestation_ledger_v223.py tests/test_jw_anchored_ledger_v223.py
+      - name: Scope boundary
+        if: always()
+        run: echo 'Synthetic local SQLite only; no live source, external credentials, key activation, trusted timestamp or independent custody claim.'
