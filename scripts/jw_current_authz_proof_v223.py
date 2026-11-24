@@ -118,32 +118,43 @@ def collect(conn, *, identity_check):
         try:
             cur.execute("SET LOCAL statement_timeout='15s'")
             cur.execute("SET LOCAL search_path=pg_catalog")
-            cur.execute("SELECT current_setting('server_version_num')::int,current_setting('transaction_read_only')")
-            v,ro=cur.fetchone()
-            need(type(v) is int and 170000<=v<180000 and ro=="on","PG17_READONLY_REQUIRED")
-            identity_check(conn)
-            cur.execute(OBJECT_SQL,(SCHEMA,)*5)
-            objects=object_rows(cur.fetchall())
-            cur.execute(role.ROLE_SQL); roles=cur.fetchall()
-            cur.execute(role.EDGE_SQL); edges=cur.fetchall()
-            # Expand global default ACL scope to membership-connected roles; stop
-            # rather than silently ignore a role discovered by another ACL.
-            scope=names(objects)
-            for _ in range(65):
-                g=role.graph(roles,edges,scope)
-                selected=sorted(r[0] for r in g["roles"])
-                need(len(selected)<=64,"ROLE_SCOPE_BUDGET")
-                cur.execute(DEFAULT_SQL,(SCHEMA,selected))
-                defaults=default_rows(cur.fetchall())
-                new=sorted(set(scope)|set(names(objects,defaults)))
-                if new==scope: break
-                scope=new
-            else: raise role.Blocked("DEFAULT_SCOPE_NOT_STABLE")
-            result={"schema":"jw-current-authz-v1","scope":SCHEMA,"role_graph":g,
-                    "objects":objects,"default_acl":defaults}
+            result=collect_in_snapshot(cur,conn,identity_check=identity_check)
         finally:
             cur.execute("ROLLBACK")
     need(conn.info.transaction_status==0,"ROLLBACK_NOT_IDLE")
+    return result
+
+def collect_in_snapshot(cur,conn,*,identity_check):
+    """Read within a caller-owned repeatable-read, read-only transaction.
+    Never begin/commit/rollback or export a new snapshot. Caller owns cleanup.
+    Caller must pin search_path and timeout before entering.
+    """
+    need(conn.info.transaction_status==2,"ACTIVE_SNAPSHOT_REQUIRED")
+    cur.execute("SELECT current_setting('transaction_isolation'), current_setting('transaction_read_only'), current_setting('search_path')")
+    need(cur.fetchone()==("repeatable read","on","pg_catalog"),"SNAPSHOT_GUARD_FAILED")
+    cur.execute("SELECT current_setting('server_version_num')::int,current_setting('transaction_read_only')")
+    v,ro=cur.fetchone()
+    need(type(v) is int and 170000<=v<180000 and ro=="on","PG17_READONLY_REQUIRED")
+    identity_check(conn)
+    cur.execute(OBJECT_SQL,(SCHEMA,)*5)
+    objects=object_rows(cur.fetchall())
+    cur.execute(role.ROLE_SQL); roles=cur.fetchall()
+    cur.execute(role.EDGE_SQL); edges=cur.fetchall()
+    # Expand global default ACL scope to membership-connected roles; stop
+    # rather than silently ignore a role discovered by another ACL.
+    scope=names(objects)
+    for _ in range(65):
+        g=role.graph(roles,edges,scope)
+        selected=sorted(r[0] for r in g["roles"])
+        need(len(selected)<=64,"ROLE_SCOPE_BUDGET")
+        cur.execute(DEFAULT_SQL,(SCHEMA,selected))
+        defaults=default_rows(cur.fetchall())
+        new=sorted(set(scope)|set(names(objects,defaults)))
+        if new==scope: break
+        scope=new
+    else: raise role.Blocked("DEFAULT_SCOPE_NOT_STABLE")
+    result={"schema":"jw-current-authz-v1","scope":SCHEMA,"role_graph":g,
+            "objects":objects,"default_acl":defaults}
     return result
 
 def summary(doc):
