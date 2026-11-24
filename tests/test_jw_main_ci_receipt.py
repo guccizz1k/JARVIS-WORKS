@@ -45,3 +45,8 @@ def test_duplicate():
 @pytest.mark.parametrize('raw', [b'',b'<testsuites/>',b'<x/>',b'bad',b'<!DOCTYPE x><x/>',b' '*8388609])
 def test_invalid(raw):
     with pytest.raises((ValueError,ET.ParseError)): m.verify(raw)
+
+
+def test_negative_control_never_merge():
+    """Intentional failure solely to demonstrate required-check enforcement."""
+    pytest.fail('JW_REQUIRED_CI_NEGATIVE_CONTROL_NEVER_MERGE')
