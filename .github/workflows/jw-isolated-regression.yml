@@ -1,0 +1,29 @@
+name: Isolated dual CI regression fixture
+on:
+  pull_request:
+    branches: [test/jw-dual-ci-base-20261124]
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  fixture:
+    name: JW isolated regression
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.base_ref == 'test/jw-dual-ci-base-20261124' && github.event.pull_request.head.repo.full_name == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify synthetic merge identity and fixture
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_BASE_REF" = test/jw-dual-ci-base-20261124
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^1)" = "$BASE_SHA"
+          test "$(git rev-parse HEAD^2)" = "$HEAD_SHA"
+          test "$(cat docs/regression.md)" = pass

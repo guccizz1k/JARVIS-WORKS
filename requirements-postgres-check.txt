@@ -1,2 +1,0 @@
-# Only used for separate PostgreSQL RLS integration audits. Not part of SQLite runtime.
-psycopg[binary]>=3.2,<4
