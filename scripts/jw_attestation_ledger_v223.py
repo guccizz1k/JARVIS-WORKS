@@ -36,9 +36,11 @@ def private_path(path, *, exists):
         need(stat.S_ISREG(st.st_mode) and st.st_uid==os.getuid() and stat.S_IMODE(st.st_mode)==0o600 and st.st_nlink==1,"PRIVATE_LEDGER_REQUIRED")
     for suffix in ("-wal","-shm","-journal"):
         side=Path(str(p)+suffix)
-        if os.path.lexists(side):
+        try:
             st=side.lstat()
-            need(stat.S_ISREG(st.st_mode) and st.st_uid==os.getuid() and not (st.st_mode & 0o077) and st.st_nlink==1,"UNSAFE_SIDECAR")
+        except FileNotFoundError:
+            continue
+        need(stat.S_ISREG(st.st_mode) and st.st_uid==os.getuid() and not (st.st_mode & 0o077) and st.st_nlink==1,"UNSAFE_SIDECAR")
     return p
 
 def connect(path):
