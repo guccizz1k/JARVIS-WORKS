@@ -23,6 +23,18 @@ def main():
         # Earlier CI role fixtures may exist; setup uses fresh independent names
         # except the helper checks jw_role_ci_* absent. Run on separate clusters.
         setup(a);setup(b)
+        # Same SQL digest profile used by the actual source metadata readback.
+        from pathlib import Path
+        from scripts import jw_current_authz_archive_v223 as archive
+        q=(Path(__file__).resolve().parents[1]/"db/review/jw_current_authz_sql_v1.sql").read_text()
+        def sql_profile(c):
+            import csv,io
+            output=io.StringIO()
+            csv.writer(output).writerows([["t" if x is True else "f" if x is False else x for x in row] for row in c.execute(q).fetchall()])
+            return archive.parse(output.getvalue())
+        sa,sb=sql_profile(a),sql_profile(b)
+        require(all(x["match"] for x in archive.compare(sb,{k:[v[0],v[1]] for k,v in sa.items()}).values()),"SQL_PROFILE_BASELINE")
+        print("PG17_SQL_PROFILE_BASELINE_PASS")
         src=capture(a);pin=role.digest(src)
         require(m.compare(src,capture(b),pin)["current_scoped_metadata"]=="PASS","BASELINE")
         count=1
