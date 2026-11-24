@@ -10,6 +10,8 @@ on:
       - scripts/jw_current_authz_proof_v223.py
       - tests/test_jw_current_authz_proof_v223.py
       - live_checks/pg17_current_authz_smoke.py
+      - scripts/jw_attestation_ledger_v223.py
+      - tests/test_jw_attestation_ledger_v223.py
       - .github/workflows/jw-v223-role-proof-review.yml
 permissions:
   contents: read
@@ -112,3 +114,28 @@ jobs:
       - name: Scope boundary
         if: always()
         run: echo 'Synthetic PG17 only. No provider credentials, live database, key activation or deployment. Overall remains BLOCKED.'
+
+  attestation-ledger:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.head_ref == 'review/jw-v223-role-proof-20261124'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exact reviewed SHA
+        env:
+          EXPECTED: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'cryptography>=43,<47' 'pytest>=8,<10'
+      - name: Replay protection and independent process contention
+        run: |
+          python -m py_compile scripts/jw_attestation_ledger_v223.py tests/test_jw_attestation_ledger_v223.py
+          python -m pytest --noconftest -q tests/test_jw_attestation_ledger_v223.py
+      - name: Scope boundary
+        if: always()
+        run: echo 'Synthetic local SQLite only; no live source, external credentials, key activation, trusted timestamp or independent custody claim.'
