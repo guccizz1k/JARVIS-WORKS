@@ -57,4 +57,25 @@ def main():
         require(role.digest(capture(a))==pin,"SOURCE_CHANGED");count+=1
         require(count==9,"COUNT_INVALID")
         print("PG17_CURRENT_AUTHZ_SYNTHETIC_PASS checks=9 overall=BLOCKED")
+        from scripts import jw_backup_authz_checkpoint_v223 as checkpoint
+        import psycopg
+        a.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        try:
+            a.execute("SELECT pg_export_snapshot()")
+            first=checkpoint.capture(a,lambda c:None)
+            require(role.digest(first)==pin,"CHECKPOINT_FIRST")
+            with psycopg.connect(host="127.0.0.1",hostaddr="127.0.0.1",port=55432,
+                    dbname="jw_role_source",user="postgres",password="synthetic_role_ci_only",
+                    sslmode="disable",connect_timeout=5,autocommit=True,
+                    options="-c statement_timeout=10000") as writer:
+                writer.execute("GRANT UPDATE(note) ON jw_dev.sample TO jw_app_dev")
+            second=checkpoint.capture(a,lambda c:None)
+            require(first==second,"CHECKPOINT_SNAPSHOT_DRIFT")
+            require(a.info.transaction_status==2,"CHECKPOINT_TRANSACTION_CHANGED")
+            blob=checkpoint.seal(second,b"x"*32,cipher_sha="a"*64,plain_sha="b"*64)
+            require(checkpoint.unseal(blob,b"x"*32,cipher_sha="a"*64,plain_sha="b"*64)==first,"CHECKPOINT_DECRYPT")
+        finally:
+            a.execute("ROLLBACK")
+        require(role.digest(capture(a))!=pin,"CHECKPOINT_MUTATION_NOT_VISIBLE_AFTER_ROLLBACK")
+        print("PG17_AUTHZ_SAME_SNAPSHOT_PASS")
 if __name__=="__main__": main()
