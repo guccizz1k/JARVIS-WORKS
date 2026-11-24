@@ -276,11 +276,13 @@ def _b2_readonly():
         raise Blocked("REAL_B2_EMPTY_BUCKET_READONLY_FAILED") from None
 
 
-def validate_upload_key_capabilities(allowed, *, now_ms):
+def validate_upload_key_capabilities(allowed, *, now_ms, expiration_ms=None):
     """Contract for a *future* distinct short-lived uploader, no API writes.
 
     UI Write-Only credentials may still be broader than required; never
     auto-assume a key is safe merely because it is labeled Write Only.
+    expiration_ms must come from the same v4 authorization response's
+    applicationKeyExpirationTimestamp (not the nested allowed object).
     """
     if not isinstance(allowed, dict):
         return "UPLOAD_KEY_SCOPE_UNVERIFIABLE"
@@ -299,10 +301,17 @@ def validate_upload_key_capabilities(allowed, *, now_ms):
     c = set(caps)
     if not {"writeFiles", "writeFileRetentions"}.issubset(c):
         return "UPLOAD_KEY_MISSING_COMPLIANCE_OR_WRITE_PERMISSION"
-    if any(x.startswith(("delete", "writeBucket", "writeKey")) or x in (
-            "bypassGovernance", "writeFileLegalHolds", "listAllBucketNames",
-            "readFiles", "shareFiles") for x in c):
+    if c != {"writeFiles", "writeFileRetentions"}:
         return "UPLOAD_KEY_UNNECESSARY_OR_DESTRUCTIVE_PERMISSION"
+    if len(caps) != len(c):
+        return "UPLOAD_KEY_CAPABILITIES_UNVERIFIABLE"
+    if type(now_ms) is not int or now_ms < 0:
+        return "UPLOAD_KEY_CLOCK_UNVERIFIABLE"
+    if type(expiration_ms) is not int:
+        return "UPLOAD_KEY_EXPIRY_UNVERIFIABLE"
+    # Match the existing WORM writer's strict minimum and maximum lifetime.
+    if not now_ms + 120000 < expiration_ms <= now_ms + 3600000:
+        return "UPLOAD_KEY_EXPIRY_OUT_OF_RANGE"
     return "UPLOAD_KEY_CAPABILITY_SCOPE_VALID"
 
 

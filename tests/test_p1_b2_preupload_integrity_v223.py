@@ -214,19 +214,67 @@ def test_local_symlinks_and_nonapproved_files_are_rejected(tmp_path):
 def test_future_writer_least_privilege_contract(caps,expected):
     allowed={"buckets":[{"name":"naruv-jw-backup-worm-2026","id":"fake"}],
              "namePrefix":gate.UPLOAD_PREFIX,"capabilities":caps}
-    assert gate.validate_upload_key_capabilities(allowed,now_ms=0)==expected
+    assert gate.validate_upload_key_capabilities(allowed,now_ms=0,expiration_ms=300000)==expected
 
 
 def test_wrong_bucket_or_prefix_denied_even_with_write_permission():
     allowed={"buckets":[{"name":"other-bucket"}],
              "namePrefix":gate.UPLOAD_PREFIX,
              "capabilities":["writeFiles","writeFileRetentions"]}
-    assert gate.validate_upload_key_capabilities(allowed,now_ms=0)==(
+    assert gate.validate_upload_key_capabilities(allowed,now_ms=0,expiration_ms=300000)==(
         "UPLOAD_KEY_NOT_RESTRICTED_TO_OWNER_BUCKET")
     allowed["buckets"]=[{"name":"naruv-jw-backup-worm-2026"}]
     allowed["namePrefix"]="unbounded-other-prefix"
-    assert gate.validate_upload_key_capabilities(allowed,now_ms=0)==(
+    assert gate.validate_upload_key_capabilities(allowed,now_ms=0,expiration_ms=300000)==(
         "UPLOAD_KEY_PREFIX_MISMATCH")
+
+
+@pytest.mark.parametrize("extra", ["listKeys", "listBuckets", "readBuckets",
+    "listFiles", "readFileRetentions", "readBucketEncryption",
+    "readBucketNotifications", "futureUnknownCapability", ""])
+def test_writer_rejects_every_unlisted_capability(extra):
+    allowed = {"buckets": [{"name": "naruv-jw-backup-worm-2026"}],
+               "namePrefix": gate.UPLOAD_PREFIX,
+               "capabilities": ["writeFiles", "writeFileRetentions", extra]}
+    assert gate.validate_upload_key_capabilities(
+        allowed, now_ms=1000000, expiration_ms=1300000
+    ) == "UPLOAD_KEY_UNNECESSARY_OR_DESTRUCTIVE_PERMISSION"
+
+
+@pytest.mark.parametrize("now_ms,expiration_ms,expected", [
+    (1000000, 999999, "UPLOAD_KEY_EXPIRY_OUT_OF_RANGE"),
+    (1000000, 1000000, "UPLOAD_KEY_EXPIRY_OUT_OF_RANGE"),
+    (1000000, 1120000, "UPLOAD_KEY_EXPIRY_OUT_OF_RANGE"),
+    (1000000, 1120001, "UPLOAD_KEY_CAPABILITY_SCOPE_VALID"),
+    (1000000, 4600000, "UPLOAD_KEY_CAPABILITY_SCOPE_VALID"),
+    (1000000, 4600001, "UPLOAD_KEY_EXPIRY_OUT_OF_RANGE"),
+    (1000000, None, "UPLOAD_KEY_EXPIRY_UNVERIFIABLE"),
+    (1000000, True, "UPLOAD_KEY_EXPIRY_UNVERIFIABLE"),
+    (1000000, "1300000", "UPLOAD_KEY_EXPIRY_UNVERIFIABLE"),
+    (1000000, 1300000.0, "UPLOAD_KEY_EXPIRY_UNVERIFIABLE"),
+    (True, 1300000, "UPLOAD_KEY_CLOCK_UNVERIFIABLE"),
+    (-1, 1300000, "UPLOAD_KEY_CLOCK_UNVERIFIABLE"),
+    (None, 1300000, "UPLOAD_KEY_CLOCK_UNVERIFIABLE"),
+    ("1000000", 1300000, "UPLOAD_KEY_CLOCK_UNVERIFIABLE"),
+])
+def test_writer_expiration_boundaries(now_ms, expiration_ms, expected):
+    allowed = {"buckets": [{"name": "naruv-jw-backup-worm-2026"}],
+               "namePrefix": gate.UPLOAD_PREFIX,
+               "capabilities": ["writeFiles", "writeFileRetentions"]}
+    assert gate.validate_upload_key_capabilities(
+        allowed, now_ms=now_ms, expiration_ms=expiration_ms) == expected
+
+
+def test_writer_missing_expiry_and_duplicate_caps_fail_closed():
+    allowed = {"buckets": [{"name": "naruv-jw-backup-worm-2026"}],
+               "namePrefix": gate.UPLOAD_PREFIX,
+               "capabilities": ["writeFiles", "writeFileRetentions"]}
+    assert gate.validate_upload_key_capabilities(allowed, now_ms=1000000) == (
+        "UPLOAD_KEY_EXPIRY_UNVERIFIABLE")
+    allowed["capabilities"].append("writeFiles")
+    assert gate.validate_upload_key_capabilities(
+        allowed, now_ms=1000000, expiration_ms=1300000
+    ) == "UPLOAD_KEY_CAPABILITIES_UNVERIFIABLE"
 
 
 def test_fail_closed_when_b2_bucket_read_only_reverification_fails():
