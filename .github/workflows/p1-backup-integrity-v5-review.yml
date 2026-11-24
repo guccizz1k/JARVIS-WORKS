@@ -44,6 +44,8 @@ jobs:
         run: python -m pytest --noconftest -q tests/test_p1_backup_integrity_v5.py tests/test_p1_owner_one_shot_v223.py tests/test_p1_owner_archive_inventory_v223.py tests/test_p1_owner_archive_deep_v223.py tests/test_p1_constraint_deparser_v5.py tests/test_p1_owner_offline_restore_v223.py tests/test_p1_owner_vault_readback_v223.py tests/test_p1_owner_vault_upload_v223.py tests/test_p1_owner_remote_recovery_v223.py tests/test_p1_cleanroom_key_recovery_v223.py tests/test_p1_external_custodian_pg17_v223.py tests/test_p1_external_worm_compliance_v223.py tests/test_p1_owner_vault_scope_pin_v223.py tests/test_p1_backblaze_b2_readonly_v223.py tests/test_p1_b2_codespace_probe_v223.py tests/test_p1_b2_isolated_launcher_v223.py tests/test_p1_b2_preupload_integrity_v223.py tests/test_jw_key_escrow_v223.py
       - name: Run isolated synthetic candidate rekey tests
         run: PYTHONPATH=scripts python -m pytest --noconftest -q tests/test_jw_rekey_candidate_v223.py
+      - name: Run independent recovery review regression in separate Python process
+        run: python -m pytest --noconftest -q tests/jw_independent_review
 
   synthetic-pg17-restore:
     name: PG17 synthetic backup and isolated restore (no production data)
@@ -101,6 +103,8 @@ jobs:
           python -m py_compile scripts/pg_backup_v223.py tests/test_p1_pg17_synthetic_e2e.py scripts/p1_owner_offline_restore_v223.py scripts/p1_external_custodian_pg17_v223.py tests/test_p1_external_custodian_pg17_integration_v223.py
       - name: Run actual PG17 synthetic source to disposable target restore
         run: python -m pytest --noconftest -q tests/test_p1_pg17_synthetic_e2e.py tests/test_p1_external_custodian_pg17_integration_v223.py
+      - name: Require real synthetic PG17 catalog and authorization assertions
+        run: python -m scripts.jw_independent_ci_receipt_v223
       - name: Remove disposable PostgreSQL 17 instances
         if: always()
         shell: bash

@@ -29,6 +29,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from scripts import p1_cleanroom_key_recovery_v223 as clean
 from scripts import p1_owner_offline_restore_v223 as offline
 from scripts import pg_backup_v223 as backup
+from scripts import jw_independent_equivalence_v223 as equivalence
+from scripts import jw_independent_catalog_v223 as catalog
 
 ACK = "OWNER_APPROVES_EXTERNAL_CUSTODIAN_NETWORKLESS_PG17_RESTORE"
 MAX_ARCHIVES = 11
@@ -151,7 +153,7 @@ def decrypt_verified(cipher: bytes, key: bytes) -> bytearray:
         raise
 
 
-def run() -> dict[str, object]:
+def run(reference_raw=None, reference_pin=None, *, catalog_required=False) -> dict[str, object]:
     result={
         "external_pg17_restore":"BLOCKED",
         "owner_scope_pin_checked":False,
@@ -168,6 +170,11 @@ def run() -> dict[str, object]:
         "production_release_ready":False,
         "overall":"BLOCKED",
     }
+    reference_required=catalog_required or reference_raw is not None or reference_pin is not None
+    if catalog_required:
+        result["normalized_catalog_comparison"]="BLOCKED"
+    if reference_required:
+        result["normalized_archive_comparison"]="BLOCKED"
     gate=preflight()
     if gate!="PASS":
         result["blocker"]=gate
@@ -175,10 +182,19 @@ def run() -> dict[str, object]:
 
     container=None
     key=None
+    comparison=None
     try:
         pin,key,pairs=clean._inputs()
         _require_owner_scope(pairs, os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""))
         result["owner_scope_pin_checked"]=True
+        if reference_required:
+            loader=catalog.load_reference if catalog_required else equivalence.load_reference
+            rows=loader(
+                reference_raw, expected_reference_sha256=reference_pin,
+                expected_vault=pin,
+                expected_scope=os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""),
+                provider_pairs=pairs)
+            comparison=catalog.CatalogComparison(*rows) if catalog_required else equivalence.Equivalence(rows)
         if not set(x[0] for x in pairs)<=clean._head_tree(pin):
             raise Blocked("PINNED_PRIVATE_VAULT_OBJECT_SET_INVALID")
         name="jw-p1-external-pg17-"+secrets.token_hex(8)
@@ -222,8 +238,22 @@ def run() -> dict[str, object]:
                 spent_plain+=len(plain)
                 if spent_plain>MAX_PLAIN_TOTAL:
                     raise Blocked("SECOND_SITE_PLAINTEXT_MEMORY_BUDGET_EXCEEDED")
-                status,tables,_,row_digest,rows,_,_,_=offline._restore_one(
-                    container,plain,i)
+                if catalog_required:
+                    observed=[]
+                    def collect(c,db):
+                        if c!=container or db!="jw_p1_offline_"+str(i) or observed:
+                            raise equivalence.Blocked("CATALOG_CALLBACK_TARGET_OR_REPLAY")
+                        observed.append(catalog.probe(offline._exec,c,db))
+                    restored=offline._restore_one(container,plain,i,catalog_probe=collect)
+                else:
+                    restored=offline._restore_one(container,plain,i)
+                status,tables,_,row_digest,rows,_,_,_=restored
+                if catalog_required:
+                    if len(observed)!=1:
+                        raise equivalence.Blocked("CATALOG_CALLBACK_MISSING")
+                    comparison.compare(blob,hashlib.sha256(cipher).hexdigest(),restored,observed[0])
+                elif comparison is not None:
+                    comparison.compare(blob,hashlib.sha256(cipher).hexdigest(),restored)
                 if (status!="LOCAL_DISPOSABLE_RESTORED"
                         or tables!=65 or rows is None
                         or not isinstance(row_digest,str)):
@@ -236,7 +266,7 @@ def run() -> dict[str, object]:
                 or result["restored_pg17_archive_count"]!=MAX_ARCHIVES):
             raise Blocked("SECOND_SITE_ELEVEN_ARCHIVES_NOT_FULLY_RESTORED")
         result["external_pg17_restore"]="PASS_ELEVEN_PROVIDER_CIPHERS_NETWORKLESS_PG17"
-    except (clean.Blocked,Blocked,backup.BackupError) as exc:
+    except (clean.Blocked,Blocked,backup.BackupError,equivalence.Blocked) as exc:
         safe=str(exc)
         result["blocker"]=safe if re.fullmatch(r"[A-Z_]{3,100}",safe) else "SECOND_SITE_RESTORE_FAIL_CLOSED"
         result["restore_failures"]+=1
@@ -254,6 +284,15 @@ def run() -> dict[str, object]:
             if result["disposable_pg17_removed"]!="PASS":
                 result["external_pg17_restore"]="BLOCKED_CLEANUP"
                 result["blocker"]="DISPOSABLE_PG17_CLEANUP_FAILED"
+    if reference_required:
+        if comparison is not None:
+            result.update(comparison.receipt(cleanup=result["disposable_pg17_removed"]))
+        if (result.get("normalized_archive_comparison")!="PASS_11_ARCHIVE_CHECKPOINTS"
+                or result["external_pg17_restore"]!="PASS_ELEVEN_PROVIDER_CIPHERS_NETWORKLESS_PG17"):
+            result["normalized_archive_comparison"]="BLOCKED"
+            if catalog_required:
+                result["normalized_catalog_comparison"]="BLOCKED"
+                result["rls_policy_definition_comparison"]="BLOCKED"
     # All necessary raw data and credentials are local to the external custodian.
     # This receipt is *not* an independent signature or source-era provenance.
     return result
@@ -261,6 +300,17 @@ def run() -> dict[str, object]:
 
 def main(argv=None):
     argv=sys.argv[1:] if argv is None else argv
+    if argv in (["restore-external-equivalence"],["restore-external-catalog"]):
+        catalog_required=argv==["restore-external-catalog"]
+        try:
+            raw=equivalence.read_reference_pipe(os.environ)
+            receipt=run(raw,os.environ.get("JW_PG_RESTORE_REFERENCE_SHA256", ""),catalog_required=catalog_required)
+        except equivalence.Blocked as exc:
+            receipt={"normalized_archive_comparison":"BLOCKED","blocker":str(exc),"overall":"BLOCKED"}
+        print(json.dumps(receipt,sort_keys=True,separators=(",",":")))
+        if catalog_required:
+            return 0 if receipt.get("normalized_catalog_comparison")=="PASS_11_SCOPED_CATALOG_CHECKPOINTS" else 1
+        return 0 if receipt.get("normalized_archive_comparison")=="PASS_11_ARCHIVE_CHECKPOINTS" else 1
     if argv!=["restore-external"]:
         print("USAGE: python -m scripts.p1_external_custodian_pg17_v223 restore-external",
               file=sys.stderr)
