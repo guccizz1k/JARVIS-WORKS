@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "e35f25d683f5de6ba3d97274737e85edc37312fd",
+      "sha": "5d5daccb09d05fb0a658b38e40b71de62d659f23",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "1abcb8983d5556725536ab4d7e1874666d03b83a",
+      "sha": "5be8e6351481426c96189ac7d136dbd09a75c336",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "82d1f9286d76d798fa4ecfdd97b798fade791c6b",
+      "sha": "a0f41ae0f028728eda216a568f4d721a3a097a85",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8736,5 +8736,9 @@
   "confirmed_attendance_kr_api_and_archive_fixture": {
     "parent": "07b663e4bfd351fc0bb8bd4fc4904a8fb5c95c60",
     "reason": "Optional disposable CI-only authenticated PG pay_source route; never trusts client tenant/rate/minutes, manual evidence explicitly unauthenticated. Pension ordinary collection reference Art117, synthetic archive lifecycle integration. No external agency or live hosting, payment, deletion or key change."
+  },
+  "kr_nested_parser_regression_repair": {
+    "parent": "97b2f989bc1e296ebcefe862b199bf5b924bb07b",
+    "reason": "Fix actual syntax error and flat finance decoder rejection; dedicated 32KiB bounded 5s nested payroll parser, strict types/keys and duplicate refusal, existing finance parser unchanged."
   }
 }

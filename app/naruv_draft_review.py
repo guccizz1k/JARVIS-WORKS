@@ -55,6 +55,54 @@ def _read(token,csrf,prior,kind,key,period=None):
             raise HTTPException(409,"DRAFT_SOURCE_CHANGED") from None
         raise write._db_error(exc) from None
 
+KR_BODY_LIMIT=32768
+
+def _decode_kr_body(raw):
+    import json
+    from . import naruv_inventory_review as inventory
+    from .naruv_kr_payroll_review import DEDUCTIONS,KINDS,HEX
+    try:
+        if type(raw) is not bytes or len(raw)>KR_BODY_LIMIT:raise ValueError("size")
+        d=json.loads(raw.decode("utf-8"),object_pairs_hook=inventory._pairs,
+            parse_constant=inventory._reject_constant)
+        if type(d) is not dict or set(d)!={"expected_draft_sha256","ordinary_hourly","classification_sha256",
+                "classified_days","deductions","pension_assessed_base_krw"}:raise ValueError("shape")
+        if any(type(d[k]) is not str or not HEX.fullmatch(d[k]) for k in ("expected_draft_sha256","classification_sha256")):
+            raise ValueError("digest")
+        if any(type(d[k]) is not int for k in ("ordinary_hourly","pension_assessed_base_krw")):raise ValueError("number")
+        days=d["classified_days"]; deductions=d["deductions"]
+        if type(days) is not list or len(days)>31 or type(deductions) is not dict or set(deductions)!=set(DEDUCTIONS):
+            raise ValueError("shape")
+        for row in days:
+            if type(row) is not dict or set(row)!={"date",*KINDS} or type(row["date"]) is not str or any(type(row[k]) is not int for k in KINDS):
+                raise ValueError("day")
+        for row in deductions.values():
+            if type(row) is not dict or set(row)!={"amount_krw","evidence_sha256","assessment"} or type(row["amount_krw"]) is not int or any(type(row[k]) is not str for k in ("evidence_sha256","assessment")):
+                raise ValueError("deduction")
+        return d
+    except (ValueError,UnicodeError,RecursionError):
+        raise HTTPException(422,"KR_REVIEW_INPUT") from None
+
+async def _kr_body(request):
+    import asyncio,re
+    from starlette.requests import ClientDisconnect
+    length=preview._one_header(request,"content-length")
+    if length is not None:
+        if not re.fullmatch(r"[0-9]{1,10}",length):raise HTTPException(400,"KR_REVIEW_LENGTH")
+        if int(length)>KR_BODY_LIMIT:raise HTTPException(413,"KR_REVIEW_BODY_LIMIT")
+    if preview._one_header(request,"content-encoding","identity")!="identity":
+        raise HTTPException(415,"KR_REVIEW_ENCODING")
+    buf=bytearray()
+    try:
+        async with asyncio.timeout(5):
+            async for chunk in request.stream():
+                if len(chunk)>KR_BODY_LIMIT-len(buf):raise HTTPException(413,"KR_REVIEW_BODY_LIMIT")
+                buf.extend(chunk)
+    except TimeoutError:raise HTTPException(408,"KR_REVIEW_TIMEOUT") from None
+    except ClientDisconnect:raise HTTPException(400,"KR_REVIEW_INCOMPLETE") from None
+    if length is not None and len(buf)!=int(length):raise HTTPException(400,"KR_REVIEW_LENGTH")
+    return _decode_kr_body(bytes(buf))
+
 def _kr_review(token,csrf,prior,worker,period,data):
     """Read only confirmed attendance in the authenticated PG transaction.
     Classification and assessments are manual submissions, not agency truth.
@@ -172,17 +220,13 @@ def create_router():
         @router.post("/payroll/{worker}/{period}/kr-review")
         async def kr_review(worker:str,period:str,request:Request,response:Response):
             import re
-            from . import naruv_finance_review as finance
             if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
             if not re.fullmatch(r"2026-(0[1-9]|1[0-2])",period):raise HTTPException(422,"KR_REVIEW_INPUT")
             token,csrf,_=write._request(request,worker,period,needs_digest=False)
             if preview._one_header(request,"content-type","")!="application/json":
                 raise HTTPException(415,"KR_REVIEW_CONTENT_TYPE")
             prior=await run_in_threadpool(write._auth,token,csrf)
-            data=await finance._body(request)
-            if set(data)!={"expected_draft_sha256","ordinary_hourly","classification_sha256","classified_days",
-                           "deductions","pension_assessed_base_krw"}:
-                raise HTTPException(422,"KR_REVIEW_INPUT")
+            data=await _kr_body(request)
             result=await run_in_threadpool(_kr_review,token,csrf,prior,worker,period,data)
             response.headers["Cache-Control"]="no-store"
             return result

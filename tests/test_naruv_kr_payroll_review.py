@@ -448,7 +448,7 @@ class AgencyDeductionReview(unittest.TestCase):
 class PensionCollectionReference(unittest.TestCase):
     def test_ordinary_rounding_and_mismatch(self):
         from app.naruv_kr_payroll_review import pension_collection_reference_2026
-        args=dict(tenant="a",worker="w",period="2026-07",assessment_sha256="b"*64",
+        args=dict(tenant="a",worker="w",period="2026-07",assessment_sha256="b"*64,
                   scope="ORDINARY_SINGLE_WORKPLACE_NO_RELIEF")
         for base,want in ((410000,19470),(411000,19520),(1000000,47500),(6590000,313020)):
             with self.subTest(base=base):
@@ -461,3 +461,24 @@ class PensionCollectionReference(unittest.TestCase):
         for change in (dict(scope="SUBSIDY"),dict(assessed_employee_krw=True),dict(assessed_base_krw=409000)):
             with self.assertRaises(PayrollBlocked):
                 pension_collection_reference_2026(**(dict(args,assessed_base_krw=411000,assessed_employee_krw=19520)|change))
+
+
+class KRRequestParser(unittest.TestCase):
+    def test_nested_manual_submission_and_strict_shape(self):
+        import json
+        from fastapi import HTTPException
+        from app.naruv_draft_review import _decode_kr_body
+        data=dict(expected_draft_sha256="a"*64,ordinary_hourly=12000,
+            classification_sha256="b"*64,classified_days=[day()],
+            deductions=deductions(),pension_assessed_base_krw=410000)
+        raw=json.dumps(data).encode()
+        self.assertEqual(_decode_kr_body(raw),data)
+        bad=[raw.replace(b'"ordinary_hourly": 12000',b'"ordinary_hourly": 12000,"ordinary_hourly": 1'),
+            raw.replace(b'"amount_krw": 1000',b'"amount_krw": true',1),
+            raw.replace(b'"amount_krw": 1000',b'"amount_krw": 1.0',1),
+            raw.replace(b'"amount_krw": 1000',b'"amount_krw": NaN',1),
+            json.dumps(dict(data,tenant="ci-b")).encode(), b"x"*32769, b"["*10000]
+        for v in bad:
+            with self.subTest(prefix=v[:30]),self.assertRaises(HTTPException) as ex:
+                _decode_kr_body(v)
+            self.assertEqual(ex.exception.status_code,422)

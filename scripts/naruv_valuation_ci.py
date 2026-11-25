@@ -759,6 +759,9 @@ def run_valuation(base):
                 self.check(self.call(krpath,dict(manual,expected_draft_sha256="0"*64)),409)
                 self.check(self.call(krpath,dict(manual,tenant="ci-b")),422)
                 self.check(self.call(krpath,dict(manual,classified_days=[])),409)
+                bad=dict(manual,deductions=dict(manual["deductions"],pension=dict(manual["deductions"]["pension"],amount_krw=True)))
+                self.check(self.call(krpath,bad),422)
+                self.check(self.call(krpath,manual,extra={"content-encoding":"gzip"}),415)
                 with patch.dict(os.environ,{integrated.drafts.KR_FLAG:""}):
                     self.check(self.call(krpath,manual),404)
                 print("NARUV_KR_CONFIRMED_ATTENDANCE_API_PASS manual reference only, cross-tenant and stale source denial",flush=True)
