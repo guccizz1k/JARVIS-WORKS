@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "988e74981fc26b8a1939fae6c61bb4e84761a6bb",
+      "sha": "c48e6b71b778383347436fd004415e72b1b40f43",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8490,7 +8490,7 @@
       "mode": "100644"
     },
     "scripts/naruv_workspace_browser_ci.py": {
-      "sha": "1f1d90594461bc9bc1969fb6a968a7209d60d3ab",
+      "sha": "78a7e872d61239272c19299c0aebe4239a28c165",
       "mode": "100644"
     },
     "app/naruv_workspace/hr-pilot.html": {
@@ -8498,7 +8498,7 @@
       "mode": "100644"
     },
     "app/naruv_workspace/hr-pilot.js": {
-      "sha": "3c7f5d5d441c8a6139dcf9089a0b6b82f1af0e3b",
+      "sha": "f2093ec2beb4b707c77f381cb3938336444ac837",
       "mode": "100644"
     }
   },
@@ -8551,5 +8551,9 @@
   "combined_erp_acceptance_extension": {
     "parent": "e066c1f39e10da8500484b0ba70e0e6b06fb611f",
     "reason": "Actual disposable PG17 combined production, sale, payment, confirmed attendance, source-bound manual payroll, document and parallel reads with tenant denial and invariant ledger. Not real operations or load benchmark."
+  },
+  "hr_browser_resize_and_metrics": {
+    "parent": "e2d4878c7ce846bb65becf1c2641a21f297d02d0",
+    "reason": "CI 45617232393 round 1 failed because immediate resize roundtrip preceded DOM clearing; await empty DOM during mobile, assert after desktop, add media query change reset to isolated HR UI, preserve original populated workspace clearing check. Record real disposable PG HTTP 32-read p95/p99/max/rps, not production SLO."
   }
 }

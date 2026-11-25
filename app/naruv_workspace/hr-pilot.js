@@ -32,5 +32,5 @@ $('review').onclick=()=>run('review',period+'/review',undefined,false);
 $('confirm').onclick=()=>run('confirm',period+'/confirm/pilot-ui-confirm',undefined,true);
 $('pay').onclick=()=>run('pay','/drafts/payroll/pilot-ui/2026-06',undefined,false);
 $('archive').onclick=()=>run('archive',worker+'/archive/pilot-ui-archive',undefined,true);
-$('clear').onclick=()=>reset();window.addEventListener('pagehide',()=>reset());document.addEventListener('visibilitychange',()=>{if(document.hidden)reset()});window.addEventListener('resize',()=>{if(innerWidth<1100)reset()});
+$('clear').onclick=()=>reset();window.addEventListener('pagehide',()=>reset());document.addEventListener('visibilitychange',()=>{if(document.hidden)reset()});window.addEventListener('resize',()=>{if(innerWidth<1100)reset()});matchMedia('(max-width:1099px)').addEventListener('change',()=>reset());
 })();

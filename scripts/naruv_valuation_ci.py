@@ -737,11 +737,23 @@ def run_valuation(base):
                 self.assertFalse(result["payment_authorized"]);self.assertFalse(result["statutory_validated"])
                 self.check(self.call("/drafts/payroll/combined-worker/2026-07",who="B"),404)
                 self.assertFalse(self.check(self.call("/drafts/documents/shared"),200)["posting_authorized"])
-                # Parallel, independently authenticated reads across modules.
-                paths=["/valuation/overview", "/valuation/audit", "/drafts/payroll/combined-worker/2026-07", "/drafts/documents/shared"]*2
+                # Bounded disposable benchmark; no production SLO claim.
+                import time,math
+                paths=["/valuation/overview", "/valuation/audit", "/drafts/payroll/combined-worker/2026-07", "/drafts/documents/shared"]*8
+                def measured(path):
+                    start=time.perf_counter()
+                    r=self.call(path)
+                    return r.status_code,(time.perf_counter()-start)*1000
+                start=time.perf_counter()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-                    results=list(pool.map(lambda p:self.call(p),paths))
-                self.assertTrue(all(r.status_code==200 for r in results))
+                    results=list(pool.map(measured,paths))
+                elapsed=time.perf_counter()-start
+                self.assertEqual(len(results),32)
+                self.assertTrue(all(code==200 for code,_ in results))
+                samples=sorted(ms for _,ms in results)
+                p95=samples[math.ceil(len(samples)*.95)-1]
+                p99=samples[math.ceil(len(samples)*.99)-1]
+                print(f"NARUV_ISOLATED_READ_METRICS n={len(samples)} concurrency=4 p95_ms={p95:.2f} p99_ms={p99:.2f} max_ms={samples[-1]:.2f} rps={len(samples)/elapsed:.2f}",flush=True)
                 self.assertEqual(self.audit_ledger(),baseline)
                 self.assertEqual(self.check(self.call("/valuation/overview"),200),overview)
         def test_cost_hr_period_snapshot_confirm_and_retry(self):
