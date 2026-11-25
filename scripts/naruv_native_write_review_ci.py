@@ -58,6 +58,8 @@ class NativeWrite(unittest.TestCase):
             tables="naruv_native_review.receipts,naruv_native_review.records,naruv_native_review.approvals,naruv_native_review.stages"
             if getattr(self,"bridge_active",False):
                 tables+=",naruv_customer_bridge.crosswalk"
+            if getattr(self,"inventory_active",False):
+                tables+=",naruv_inventory.movements,naruv_inventory.balances,naruv_inventory.items"
             c.execute("TRUNCATE "+tables)
             c.execute("DELETE FROM jw_dev.staff_disabled")
             c.execute("DELETE FROM jw_dev.sessions WHERE id='A2'")
@@ -435,3 +437,5 @@ if __name__=="__main__":
     print("NARUV_NATIVE_WRITE_REVIEW_PASS: 28 isolated PG17 HTTP and direct transaction cases; no production ERP import.")
     from scripts.naruv_customer_bridge_ci import run_bridge
     run_bridge(NativeWrite)
+    from scripts.naruv_inventory_ci import run_inventory
+    run_inventory(NativeWrite)
