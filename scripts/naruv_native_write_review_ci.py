@@ -60,6 +60,8 @@ class NativeWrite(unittest.TestCase):
                 tables+=",naruv_customer_bridge.crosswalk"
             if getattr(self,"inventory_active",False):
                 tables+=",naruv_inventory.movements,naruv_inventory.balances,naruv_inventory.items"
+            if getattr(self,"trade_active",False):
+                tables+=",naruv_trade.events,naruv_trade.documents"
             c.execute("TRUNCATE "+tables)
             c.execute("DELETE FROM jw_dev.staff_disabled")
             c.execute("DELETE FROM jw_dev.sessions WHERE id='A2'")
@@ -439,3 +441,5 @@ if __name__=="__main__":
     run_bridge(NativeWrite)
     from scripts.naruv_inventory_ci import run_inventory
     run_inventory(NativeWrite)
+    from scripts.naruv_trade_ci import run_trade
+    run_trade(NativeWrite)
