@@ -466,8 +466,20 @@ def run_valuation(base):
             self.assertEqual(self.value(),(3,303));self.assertEqual(self.inspect("bill")["paid"],333)
             self.close();self.adjusted_return("r",3,"other",code=409)
             self.assertEqual(self.value(),(3,303));self.assertEqual(self.audit_ledger()["status"],"RECONCILED")
+        def test_cost_integrated_independent_restore(self):
+            from scripts.naruv_erp_restore_ci import prove_restore
+            self.billed_purchase();self.receive("other","0001",3,201)
+            self.fin("pay","paid",{"amount":333,"reference":"paid-ref"},bill="bill")
+            self.adjusted_return("r",3,"refund-ref")
+            self.seed_cost("B");self.receive("opening","0001",1,25,"B")
+            self.assertEqual(self.audit_ledger()["inventory_krw"],"453")
+            self.assertEqual(self.audit_ledger("B")["inventory_krw"],"25")
+            proof=prove_restore(fixture.root_dsn)
+            self.assertGreater(proof["tables"],10)
+            self.assertEqual(proof["distinct_clusters"],True)
+            self.assertEqual(self.audit_ledger()["inventory_krw"],"453")
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=40:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=41:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=40 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 40 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=41 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 41 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

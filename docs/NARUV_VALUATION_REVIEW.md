@@ -22,3 +22,6 @@ Cumulative per-bill quantity, original net/VAT/cost half-up allocation with exac
 
 ## Explicit adjusted return candidate
 New opt-in endpoint, legacy exact-cost and no-refund endpoints unchanged. Computes refund required from existing paid/credit balance; records externally confirmed reference and opposite cash clearing journal, never initiates a bank transfer. Purchase cost variance is original allocated cost minus actual moving-average withdrawal; synthetic purchase variance account offsets clearing, capped and immutable. Refund and credit share stock transaction, period guard and idempotency. Ambiguous payment reversals after refund blocked. Four additional PG17 cases. Policy and statutory review pending.
+
+## Integrated recovery candidate
+Native write CI now provisions a second disposable PG17 service per round. The new test seeds a paid purchase with adjusted return/refund and tenant B, dumps the entire synthetic database, restores to a different cluster, and compares application row digests, ownership, ACLs, RLS policies, functions, constraints and triggers. All restored application roles are deliberately NOLOGIN without passwords. No production backup, external storage, real credentials or active failover. Actual CI proof pending.

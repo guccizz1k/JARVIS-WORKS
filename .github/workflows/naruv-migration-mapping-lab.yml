@@ -473,7 +473,7 @@ jobs:
   native-file-write-pg17:
     name: NARUV native approval and write PG17 (round ${{ matrix.round }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 9
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -490,7 +490,21 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
+      erp_restore:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: naruv-erp-restore-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
     env:
+      NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
+      NARUV_ERP_SOURCE_SERVICE: ${{ job.services.postgres.id }}
+      NARUV_ERP_DEST_SERVICE: ${{ job.services.erp_restore.id }}
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
       JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
@@ -507,5 +521,5 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py app/naruv_production_review.py scripts/naruv_production_ci.py app/naruv_valuation_review.py scripts/naruv_valuation_ci.py
+          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py app/naruv_production_review.py scripts/naruv_production_ci.py app/naruv_valuation_review.py scripts/naruv_valuation_ci.py scripts/naruv_erp_restore_ci.py
           python -m scripts.naruv_native_write_review_ci
