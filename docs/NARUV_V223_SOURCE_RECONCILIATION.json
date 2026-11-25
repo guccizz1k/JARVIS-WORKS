@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "2b6bd33636e5b559e9caf4e14ef5b76a769957ed",
+      "sha": "ea56e1f12317b3a5ab12ab9c4d0f12df9e326515",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8524,6 +8524,14 @@
     "scripts/naruv_pg_tls_admission_ci.py": {
       "sha": "ccaadda19ba64919356f1781b20d7579ea44b83c",
       "mode": "100644"
+    },
+    "app/naruv_pg_auth_review.py": {
+      "sha": "d3a739ade2fa0c3283a159d4149a7110fd4687a8",
+      "mode": "100644"
+    },
+    "scripts/naruv_pg_auth_acceptance_ci.py": {
+      "sha": "1387dd7500b6ac5254913c74296f7a8fc0e044ce",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8611,5 +8619,9 @@
   "hosted_pg_tls_acceptance": {
     "parent": "fe8b2165bfcf15225f3c9409706c7bd5aa0ba662",
     "reason": "Actual verify-full PG17 TLS connection for three separated roles, wrong trust root and hostname refusal, exact disposable Docker cluster identity, temporary settings and cert cleanup. No hosted endpoint or system root store changes."
+  },
+  "pg_native_auth_ci": {
+    "parent": "40403523d60734edf57a54409c456ab656f753b6",
+    "reason": "Default-off PG-native CI auth perimeter, exact origin, bounded strict JSON, existing V85 auth and actual TLS separated auth/business accounts; actual login/logout, single-use MFA recovery, tenant payroll, persistent lockout and disabled-account negatives. No hosted deployment or legacy auth changes."
   }
 }

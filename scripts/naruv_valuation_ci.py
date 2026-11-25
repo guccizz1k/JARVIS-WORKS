@@ -854,6 +854,8 @@ def run_valuation(base):
                             with self.assertRaises(psycopg.OperationalError):
                                 with psycopg.connect(bad_dsn):pass
                     print("NARUV_PG_TLS_ADMISSION_PASS three actual verified TLS roles, six wrong-root/hostname denials",flush=True)
+                    from scripts.naruv_pg_auth_acceptance_ci import verify as verify_auth
+                    verify_auth(cert,dsns)
                 print("NARUV_HOSTED_REAL_PG_CATALOG_PASS three restricted roles, 3 non-TLS denials, column grant, marker grant and drift refusals",flush=True)
             finally:
                 # Only fixture-owned resources created in this test.
