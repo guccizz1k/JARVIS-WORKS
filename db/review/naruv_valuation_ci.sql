@@ -187,7 +187,7 @@ BEGIN
 END $$;
 -- Read-only reconciliation: no GL posting, no client-supplied amounts.
 CREATE FUNCTION naruv_valuation.reconcile_bill(p_bill text,p_csrf text)
- RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; b naruv_finance.bills; f naruv_trade.events;
  d naruv_trade.documents; m naruv_inventory.movements; e naruv_valuation.entries;
  j jsonb; clearing numeric; sales numeric;
@@ -228,7 +228,7 @@ BEGIN
  'purchase_clearing_difference_krw',CASE WHEN b.kind='purchase' THEN (clearing-e.amount_krw)::text ELSE NULL END,
  'sales_margin_krw',CASE WHEN b.kind='sale' THEN (sales-e.amount_krw)::text ELSE NULL END,
  'outstanding_krw',j->>'outstanding','statutory_posted',false,'production_authorized',false);
-END $;
+END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_valuation FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text) TO jw_app_dev;
 RESET ROLE;
