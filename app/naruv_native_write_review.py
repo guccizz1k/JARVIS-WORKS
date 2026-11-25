@@ -134,6 +134,9 @@ def _control(token_hash,csrf,prior,action,stage_id,digests=None,reservation=None
         with v90._pg_validated_cursor(token_hash) as (cur,identity):
             if preview._verify_identity(identity,csrf)!=prior:
                 raise HTTPException(409,"SESSION_SCOPE_CHANGED")
+            cur.execute("SELECT pg_has_role(session_user,'naruv_native_stage','MEMBER'),pg_has_role(session_user,'naruv_native_owner','MEMBER')")
+            if cur.fetchone()!=(False,False):
+                raise HTTPException(503,"UNSAFE_BUSINESS_LOGIN")
             cur.execute("SET LOCAL statement_timeout='8s'")
             cur.execute("SET LOCAL lock_timeout='4s'")
             if action=="approve":

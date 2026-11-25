@@ -230,6 +230,55 @@ class NativeWrite(unittest.TestCase):
                   has_function_privilege(current_user,'naruv_native_review.commit_stage(text,text,text,text,text,text)','EXECUTE')""").fetchone()
                 self.assertEqual(row,(False,role=="naruv_native_stage",role=="jw_app_dev"))
         self.assertEqual(self.counts(),(0,0))
+    def test_overlapping_roles_fail_in_http_and_database(self):
+        d=self.stage();self.check(self.approve(d),200)
+        with psycopg.connect(fixture.root_dsn) as c:
+            c.execute("GRANT naruv_native_stage TO jw_ci_trade WITH INHERIT FALSE, SET TRUE")
+        try:
+            self.check(self.commit(d),503)
+            with psycopg.connect(fixture.TRADE_DSN) as c:
+                c.execute("SET LOCAL ROLE jw_app_dev")
+                c.execute("SELECT set_config('jw.session_hash',%s,true)",(hashlib.sha256(fixture.TOKENS["A"].encode()).hexdigest(),))
+                with self.assertRaisesRegex(psycopg.Error,"NARUV_PERMISSION_DENIED"):
+                    c.execute("SELECT naruv_native_review.commit_stage(%s,%s,%s,%s,%s,%s)",
+                        ("stage-1",d["stage_sha256"],d["canonical_rows_sha256"],d["target_snapshot_sha256"],"request-1",fixture.CSRF["A"]))
+                c.rollback()
+        finally:
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("REVOKE naruv_native_stage FROM jw_ci_trade")
+        q=self.review(RAW.replace(b"001",b"002"))
+        with psycopg.connect(fixture.root_dsn) as c:
+            c.execute("GRANT jw_app_dev TO naruv_ci_ingest WITH INHERIT FALSE, SET TRUE")
+        try:
+            self.check(self.req("/sources/source-a/item/csv/stages/stage-2","A",RAW.replace(b"001",b"002"),"csv",q),503)
+            with psycopg.connect(self.ingest_dsn) as c:
+                c.execute("SET LOCAL ROLE naruv_native_stage")
+                c.execute("SELECT set_config('jw.session_hash',%s,true)",(hashlib.sha256(fixture.TOKENS["A"].encode()).hexdigest(),))
+                with self.assertRaisesRegex(psycopg.Error,"NARUV_PERMISSION_DENIED"):
+                    c.execute("SELECT * FROM naruv_native_review.read_source(%s,%s,%s)",("source-a","item",fixture.CSRF["A"]))
+                c.rollback()
+        finally:
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("REVOKE jw_app_dev FROM naruv_ci_ingest")
+        self.assertEqual(self.counts(),(0,0))
+        self.check(self.commit(d),200)
+    def test_database_independently_rejects_forged_stage_digests(self):
+        import json
+        d=self.review()
+        correct=json.dumps(d["rows"],ensure_ascii=False,sort_keys=True,separators=(",",":"))
+        with psycopg.connect(self.ingest_dsn) as c:
+            c.execute("SET LOCAL ROLE naruv_native_stage")
+            c.execute("SELECT set_config('jw.session_hash',%s,true)",(hashlib.sha256(fixture.TOKENS["A"].encode()).hexdigest(),))
+            q="SELECT naruv_native_review.store_stage(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            def args(rows,snapshot):
+                return ("forged","source-a","item","csv",d["raw_sha256"],d["byte_count"],d["stage_sha256"],
+                    d["canonical_rows_sha256"],"a"*64,snapshot,"rev-a",["EXISTING-A"],rows,fixture.CSRF["A"])
+            for rows,snapshot,error in [(correct.replace("Widget","Other"),d["target_snapshot_sha256"],"NARUV_STAGE_INPUT"),
+                                       (correct,"f"*64,"NARUV_TARGET_CHANGED")]:
+                with self.assertRaisesRegex(psycopg.Error,error):
+                    with c.transaction():c.execute(q,args(rows,snapshot))
+        with psycopg.connect(fixture.root_dsn) as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM naruv_native_review.stages").fetchone()[0],0)
     def test_transport_and_default_off(self):
         d=self.stage()
         self.check(self.req("/stages/stage-1/approve",d=d,raw=b"unexpected",extra={"x-naruv-confirm":"yes"}),413)
@@ -242,6 +291,6 @@ class NativeWrite(unittest.TestCase):
 if __name__=="__main__":
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(NativeWrite)
     result=unittest.TextTestRunner(verbosity=2).run(suite)
-    if not result.wasSuccessful() or result.testsRun!=16 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
+    if not result.wasSuccessful() or result.testsRun!=18 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
         raise SystemExit(1)
-    print("NARUV_NATIVE_WRITE_REVIEW_PASS: 16 real isolated PG17 HTTP cases; no production ERP import.")
+    print("NARUV_NATIVE_WRITE_REVIEW_PASS: 18 real isolated PG17 HTTP cases; no production ERP import.")

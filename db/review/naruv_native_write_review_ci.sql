@@ -75,12 +75,22 @@ DO $$ DECLARE t text; BEGIN
   EXECUTE format('REVOKE ALL ON naruv_native_review.%I FROM PUBLIC,jw_app_dev,naruv_native_stage',t);
  END LOOP;
 END $$;
-CREATE FUNCTION naruv_native_review.guard(p_csrf text)
+CREATE FUNCTION naruv_native_review.guard(p_csrf text,p_kind text)
  RETURNS TABLE(actor_id text,org_id text,session_binding_sha256 text)
  LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog AS $$
-DECLARE a record; h text;
+DECLARE a record; h text; login record; business boolean; stage boolean;
 BEGIN
  h:=current_setting('jw.session_hash',true);
+ SELECT r.rolsuper,r.rolbypassrls,r.rolcreaterole,r.rolcreatedb INTO login FROM pg_catalog.pg_roles r WHERE r.rolname=session_user;
+ IF NOT FOUND OR login.rolsuper OR login.rolbypassrls OR login.rolcreaterole OR login.rolcreatedb
+ OR session_user IN ('postgres','supabase_admin','service_role','naruv_native_owner','naruv_native_stage','jw_app_dev','jw_auth_stage_v85')
+ OR pg_has_role(session_user,'naruv_native_owner','MEMBER') OR pg_has_role(session_user,'jw_auth_stage_v85','MEMBER')
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ business:=pg_has_role(session_user,'jw_app_dev','MEMBER');
+ stage:=pg_has_role(session_user,'naruv_native_stage','MEMBER');
+ IF p_kind IS NULL OR p_kind NOT IN ('stage','business')
+ OR (p_kind='stage' AND (NOT stage OR business)) OR (p_kind='business' AND (NOT business OR stage))
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
  SELECT i.actor_id,i.org_id,i.actor_role,i.csrf_token INTO a FROM jw_dev.stage_identity_v84() i;
  IF NOT FOUND OR a.actor_id IS NULL OR a.org_id IS NULL OR a.actor_role IS DISTINCT FROM 'admin'
  OR h IS NULL OR h !~ '^[a-f0-9]{64}$'
@@ -140,7 +150,7 @@ CREATE FUNCTION naruv_native_review.read_source(p_source text,p_entity text,p_cs
  LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record;
 BEGIN
- SELECT * INTO a FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'stage');
  RETURN QUERY SELECT s.revision,ARRAY(SELECT x FROM unnest(s.existing_ids) x ORDER BY x COLLATE "C")
  FROM jw_dev.naruv_review_sources s WHERE s.org_id=a.org_id AND s.source_id=p_source AND s.entity=p_entity AND s.active;
 END $$;
@@ -150,7 +160,7 @@ CREATE FUNCTION naruv_native_review.store_stage(p_id text,p_source text,p_entity
  RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; target record; old naruv_native_review.stages; stamp timestamptz;
 BEGIN
- SELECT * INTO a FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'stage');
  IF p_id IS NULL OR p_id !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' OR p_format IS NULL OR p_format NOT IN ('csv','xlsx')
  OR p_raw IS NULL OR p_raw !~ '^[a-f0-9]{64}$' OR p_digest IS NULL OR p_digest !~ '^[a-f0-9]{64}$'
  OR p_canonical IS NULL OR p_canonical !~ '^[a-f0-9]{64}$'
@@ -162,7 +172,7 @@ BEGIN
  SELECT s.revision,s.existing_ids INTO target FROM jw_dev.naruv_review_sources s
  WHERE s.org_id=a.org_id AND s.source_id=p_source AND s.entity=p_entity AND s.active FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_SOURCE_NOT_FOUND'; END IF;
- SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'stage');
  IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  IF target.revision IS DISTINCT FROM p_revision OR
  ARRAY(SELECT x FROM unnest(target.existing_ids) x ORDER BY x COLLATE "C") IS DISTINCT FROM p_expected
@@ -190,7 +200,7 @@ CREATE FUNCTION naruv_native_review.approve(p_id text,p_digest text,p_canonical 
  RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; s naruv_native_review.stages; old naruv_native_review.approvals; target record; stamp timestamptz;
 BEGIN
- SELECT * INTO a FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  IF p_confirmed IS DISTINCT FROM true THEN RAISE EXCEPTION 'NARUV_CONFIRM_REQUIRED'; END IF;
  SELECT * INTO s FROM naruv_native_review.stages t WHERE t.org_id=a.org_id AND t.stage_id=p_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_STAGE_MISSING'; END IF;
@@ -198,7 +208,7 @@ BEGIN
  SELECT t.revision,t.existing_ids INTO target FROM jw_dev.naruv_review_sources t
  WHERE t.org_id=a.org_id AND t.source_id=s.source_id AND t.entity=s.entity AND t.active FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_SOURCE_NOT_FOUND'; END IF;
- SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
  IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  IF target.revision IS DISTINCT FROM s.expected_revision OR ARRAY(SELECT x FROM unnest(target.existing_ids) x ORDER BY x COLLATE "C") IS DISTINCT FROM s.expected_ids
  THEN RAISE EXCEPTION 'NARUV_TARGET_CHANGED'; END IF;
@@ -217,11 +227,11 @@ CREATE FUNCTION naruv_native_review.revoke(p_id text,p_digest text,p_canonical t
  RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; old naruv_native_review.approvals;
 BEGIN
- SELECT * INTO a FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  SELECT * INTO old FROM naruv_native_review.approvals t WHERE t.org_id=a.org_id AND t.stage_id=p_id FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_STAGE_MISSING'; END IF;
  IF (old.actor_id,old.stage_sha256,old.canonical_sha256,old.snapshot_sha256) IS DISTINCT FROM (a.actor_id,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
- SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
  IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  IF old.status='REVOKED' THEN RETURN 'ALREADY_REVOKED'; END IF;
  IF old.status<>'APPROVED' THEN RAISE EXCEPTION 'NARUV_APPROVAL_TERMINAL'; END IF;
@@ -239,7 +249,7 @@ CREATE FUNCTION naruv_native_review.commit_stage(p_id text,p_digest text,p_canon
 DECLARE a record; a2 record; s naruv_native_review.stages; ap naruv_native_review.approvals;
  r naruv_native_review.receipts; target record; new_ids text[]; v jsonb; id_key text; new_revision text;
 BEGIN
- SELECT * INTO a FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  IF p_reservation IS NULL OR p_reservation !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' THEN RAISE EXCEPTION 'NARUV_STAGE_INPUT'; END IF;
  SELECT * INTO s FROM naruv_native_review.stages t WHERE t.org_id=a.org_id AND t.stage_id=p_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_STAGE_MISSING'; END IF;
@@ -254,7 +264,7 @@ BEGIN
  SELECT t.revision,t.existing_ids,t.active INTO target FROM jw_dev.naruv_review_sources t
  WHERE t.org_id=a.org_id AND t.source_id=s.source_id AND t.entity=s.entity FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_SOURCE_NOT_FOUND'; END IF;
- SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
  IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  -- Check receipt again after serialization for concurrent same-request retry.
  SELECT * INTO r FROM naruv_native_review.receipts t WHERE t.org_id=a.org_id AND t.stage_id=p_id;
@@ -291,7 +301,7 @@ CREATE FUNCTION naruv_native_review.inspect(p_id text,p_reservation text,p_csrf 
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; r naruv_native_review.receipts;
 BEGIN
- SELECT * INTO a FROM naruv_native_review.guard(p_csrf);
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  SELECT * INTO r FROM naruv_native_review.receipts t WHERE t.org_id=a.org_id AND t.stage_id=p_id AND t.actor_id=a.actor_id AND t.reservation_id=p_reservation;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_STAGE_MISSING'; END IF;
  RETURN naruv_native_review.receipt_json(r);
