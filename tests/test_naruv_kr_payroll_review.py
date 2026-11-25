@@ -103,3 +103,26 @@ class PensionReference2026(unittest.TestCase):
         for kw in ({"worker":"other"},{"tenant":"b"},{"assessment_sha256":"c"*64},{"period":"2026-08"}):
             self.assertNotEqual(self.ref()["reference_sha256"],self.ref(**kw)["reference_sha256"])
         with self.assertRaisesRegex(PayrollBlocked,"KR_NPS_EVIDENCE"):self.ref(assessment_sha256="bad")
+
+
+class InsuranceReference2026(unittest.TestCase):
+    def ref(self,**kw):
+        from app.naruv_kr_payroll_review import insurance_reference_2026
+        return insurance_reference_2026(**dict(dict(tenant="a",worker="w",period="2026-11",
+            health_base_krw=2000000,employment_base_krw=3000000,assessment_sha256="a"*64,
+            scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES"),**kw))
+    def test_rates_and_independent_bases(self):
+        r=self.ref()
+        self.assertEqual(r["employee_exact"],{
+            "health":{"numerator":71900,"denominator":1},
+            "long_term_care":{"numerator":9448,"denominator":1},
+            "employment_insurance":{"numerator":27000,"denominator":1}})
+        self.assertEqual(r["employee_total_exact"],{"numerator":108348,"denominator":1})
+        self.assertFalse(r["statutory_validated"]);self.assertFalse(r["payment_authorized"])
+    def test_restricted_scope_and_binding(self):
+        for kw in ({"period":"2027-01"},{"health_base_krw":999999},{"health_base_krw":10000001},
+                   {"employment_base_krw":True},{"scope":"RELIEF"},{"assessment_sha256":"bad"}):
+            with self.assertRaises(PayrollBlocked):self.ref(**kw)
+        for kw in ({"tenant":"b"},{"worker":"other"},{"period":"2026-12"},
+                   {"assessment_sha256":"b"*64},{"employment_base_krw":3000001}):
+            self.assertNotEqual(self.ref()["reference_sha256"],self.ref(**kw)["reference_sha256"])

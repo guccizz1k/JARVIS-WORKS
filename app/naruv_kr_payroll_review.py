@@ -144,3 +144,34 @@ def pension_reference_2026(*,tenant,worker,period,assessed_base_krw,assessment_s
         "reference_sha256":hash_input({"policy":PENSION_REFERENCE_2026,"tenant":tenant,"worker":worker,
             "period":period,"base":assessed_base_krw,"assessment":assessment_sha256}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False}
+
+
+def insurance_reference_2026(*,tenant,worker,period,health_base_krw,employment_base_krw,
+                             assessment_sha256,scope):
+    """Unrounded references only, ordinary full-month employee, no relief.
+
+    Health base is agency-assessed and must be in the uncapped/unfloored
+    range; employment base is separately assessed. Do not infer from gross.
+    LTC is calculated as exact health contribution x 0.9448 / 7.19.
+    Source: https://edi.nhis.or.kr/portal/images/popup/20251204_pop01longdesc.html
+    https://www.law.go.kr/lsLawLinkInfo.do?chrClsCd=010202&lsJoLnkSeq=1000953537
+    https://www.law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1029337291
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_INSURANCE_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_INSURANCE_PERIOD")
+    require(scope=="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES","KR_INSURANCE_SCOPE")
+    # Conservative supported subrange, not statutory thresholds.
+    require(_whole(health_base_krw,1000000,10000000)
+            and _whole(employment_base_krw,0,10**9),"KR_INSURANCE_BASE")
+    require(type(assessment_sha256) is str and HEX.fullmatch(assessment_sha256),"KR_INSURANCE_EVIDENCE")
+    amounts={"health":Fraction(health_base_krw*719,20000),
+             "long_term_care":Fraction(health_base_krw*9448,2000000),
+             "employment_insurance":Fraction(employment_base_krw*9,1000)}
+    return {"policy":"KR_INSURANCE_2026_RESTRICTED_V1","status":"UNROUNDED_REFERENCE_ONLY",
+        "employee_exact":{k:_money(v) for k,v in amounts.items()},
+        "employee_total_exact":_money(sum(amounts.values(),Fraction())),
+        "reference_sha256":hash_input({"v":"KR_INSURANCE_2026_RESTRICTED_V1","tenant":tenant,"worker":worker,
+            "period":period,"health_base":health_base_krw,"employment_base":employment_base_krw,
+            "assessment":assessment_sha256,"scope":scope}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
+        "unresolved":["ELIGIBILITY","RELIEF_AND_CAPS","STATUTORY_ROUNDING","ASSESSMENT_RECONCILIATION","TAX"]}

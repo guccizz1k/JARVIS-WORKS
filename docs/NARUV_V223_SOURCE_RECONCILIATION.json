@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "89a315ecce54d3bb4362589d3b584cbaf5c74d77",
+      "sha": "9ca6d1a904ad457695529b5f875df263aef94f42",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "6d196c5c175994497da51d74e70741b30f0fdf09",
+      "sha": "711d964d01271c59e862badf11b582408f769eb8",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8623,5 +8623,9 @@
   "pg_native_auth_ci": {
     "parent": "40403523d60734edf57a54409c456ab656f753b6",
     "reason": "Default-off PG-native CI auth perimeter, exact origin, bounded strict JSON, existing V85 auth and actual TLS separated auth/business accounts; actual login/logout, single-use MFA recovery, tenant payroll, persistent lockout and disabled-account negatives. No hosted deployment or legacy auth changes."
+  },
+  "insurance_reference_2026": {
+    "parent": "5c826a1df16a122a42c527dccb3ea914d5d2889a",
+    "reason": "NHIS 7.19%/0.9448% and employment 1.8% shared contribution, separate assessed bases, exact unrounded restricted references only; no withholding or statutory certification."
   }
 }
