@@ -161,3 +161,4 @@ def run_production(base):
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Production(n) for n in names))
     if not result.wasSuccessful() or result.testsRun!=10 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
     print("NARUV_PRODUCTION_PASS: 10 isolated PG17 BOM and production quantity cases; no inventory valuation.")
+    return Production

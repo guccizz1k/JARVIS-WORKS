@@ -1,0 +1,158 @@
+"""Actual PG17 valuation / quantity and material cost integrity."""
+import concurrent.futures
+import os
+from pathlib import Path
+import threading
+import unittest
+import psycopg
+from fastapi import FastAPI
+from app import naruv_valuation_review as valuation
+from scripts import ci_v90_postgres_browser as fixture
+ROOT=Path(__file__).resolve().parents[1]
+RAW=b"sku,item_name,unit\n0001,Widget,EA\n0002,Bolt,EA\n0003,Assembly,EA\n"
+
+def run_valuation(base):
+    class Valuation(base):
+        valuation_active=True
+        @classmethod
+        def setUpClass(cls):
+            if os.environ.get("GITHUB_ACTIONS")!="true" or os.environ.get("JW_ENV")!="dev":raise RuntimeError("CI_ONLY")
+            cls.app=base.app;cls.ingest_dsn=base.ingest_dsn
+            # Clear the previous synthetic test's rows before installing the valuation fence.
+            base("test_prod_strict_input_and_role_revocation").setUp()
+            os.environ.update(NARUV_PRODUCTION_REVIEW="ISOLATED_SYNTHETIC_ONLY",NARUV_VALUATION_REVIEW="ISOLATED_SYNTHETIC_ONLY")
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("SELECT set_config('naruv.valuation_ci','DISPOSABLE_ONLY',true)")
+                c.execute((ROOT/"db/review/naruv_valuation_ci.sql").read_text())
+            if not valuation.register_valuation(cls.app):raise RuntimeError("COST_DISABLED")
+        def setUp(self):
+            super().setUp()
+            os.environ["NARUV_VALUATION_REVIEW"]="ISOLATED_SYNTHETIC_ONLY"
+        def seed_cost(self,who="A"):
+            src="source-a" if who=="A" else "source-b"
+            d=self.stage("stage-1",RAW,src,"item","csv",who)
+            self.check(self.approve(d,"stage-1",who),200);self.check(self.commit(d,"stage-1","import-1",who),200)
+        def receive(self,rid,item,qty,price,who="A",wh="W1",code=200,extra=None,raw=None):
+            return self.check(self.call(f"/valuation/items/{item}/receive/{rid}",{"source_id":"source-a" if who=="A" else "source-b",
+                "warehouse_id":wh,"quantity":qty,"unit_cost":price},who,extra,raw),code)
+        def value(self,item="0001",who="A",wh="W1",code=200):
+            src="source-a" if who=="A" else "source-b"
+            r=self.check(self.call(f"/valuation/sources/{src}/items/{item}/stock/{wh}",who=who),code)
+            if code!=200:return r
+            self.assertIs(type(r["value_krw"]),str)
+            return r["quantity"],int(r["value_krw"])
+        def buy(self,doc,rid,item,qty,price,who="A",code=200):
+            self.trade("open",rid+"-o",{"kind":"purchase","counterparty_id":"ci-customer-a" if who=="A" else "ci-customer-b",
+                "source_id":"source-a" if who=="A" else "source-b","item_id":item,"warehouse_id":"W1","quantity":qty,"unit_price":price,"vat_mode":"taxable"},doc=doc,who=who)
+            return self.trade("fulfill",rid+"-f",{"quantity":qty},doc=doc,who=who,code=code)
+        def cost_counts(self):
+            with psycopg.connect(fixture.root_dsn) as c:
+                return c.execute("""SELECT (SELECT count(*) FROM naruv_inventory.movements),
+                 (SELECT count(*) FROM naruv_valuation.entries),(SELECT coalesce(sum(value_krw),0) FROM naruv_valuation.balances)""").fetchone()
+        def cost_entries(self,kind):
+            with psycopg.connect(fixture.root_dsn) as c:
+                return [int(x[0]) for x in c.execute("SELECT amount_krw FROM naruv_valuation.entries WHERE kind=%s ORDER BY amount_krw",(kind,)).fetchall()]
+        def ready_cost_prod(self):
+            self.seed_cost();self.receive("init-1","0001",10,101);self.receive("init-2","0002",10,51)
+            self.define();self.open_job()
+        def test_cost_purchase_moving_average_and_final_drain(self):
+            self.seed_cost();self.buy("p1","r1","0001",3,100);self.buy("p2","r2","0001",2,201)
+            self.assertEqual(self.value(),(5,702))
+            self.manual("issue","0001","W1",None,2)
+            self.assertEqual(self.value(),(3,421))
+            self.manual("last","0001","W1",None,3)
+            self.assertEqual(self.value(),(0,0))
+            self.assertEqual(self.cost_entries("adjustment_issue"),[281,421])
+            self.assertEqual(self.cost_counts(),(4,4,0))
+        def test_cost_transfer_conserves_value_and_retry(self):
+            self.seed_cost();self.receive("r1","0001",3,101);self.receive("r2","0001",1,102)
+            r=self.manual("transfer","0001","W1","W2",2)
+            self.assertEqual(self.value(),(2,202));self.assertEqual(self.value(wh="W2"),(2,203))
+            self.assertEqual(self.manual("transfer","0001","W1","W2",2),r)
+            self.assertEqual(self.cost_counts(),(3,3,405))
+        def test_cost_production_material_and_output_conservation(self):
+            self.ready_cost_prod();self.complete()
+            self.assertEqual([self.value(i) for i in ("0001","0002","0003")],[(8,808),(9,459),(1,253)])
+            self.complete(2,"c2")
+            self.assertEqual([self.value(i) for i in ("0001","0002","0003")],[(4,404),(7,357),(3,759)])
+            self.assertEqual(self.cost_entries("output"),[253,506])
+            self.assertEqual(self.cost_counts(),(8,8,1520))
+        def test_cost_sale_cost_and_billing_independent(self):
+            self.ready_cost_prod();self.complete(3)
+            q=self.quote(names=("Assembly",),qty=2)
+            self.trade("open","sale-o",{"kind":"sale","quote_id":q["quote_id"],"source_id":"source-a","item_id":"0003","warehouse_id":"W1"},doc="sale")
+            self.trade("fulfill","sale-f",{"quantity":2},doc="sale")
+            self.assertEqual(self.value("0003"),(1,253));self.assertEqual(self.cost_entries("sale"),[506])
+            bill=self.fin("bill","sale-b",{"doc_id":"sale","fulfillment_id":"sale-f"},bill="sale-b")
+            self.assertEqual(bill["subtotal"],210);self.assertEqual(self.acct("sale-b")["ar"],231)
+            self.assertEqual(self.cost_counts()[2],1014)
+        def test_cost_opening_retry_zero_and_unpriced_denial(self):
+            self.seed_cost();self.manual("unpriced","0001",None,"W1",2,code=422)
+            r=self.receive("r1","0001",3,101)
+            self.assertEqual(r["cost_krw"],"303")
+            self.assertEqual(self.receive("r1","0001",3,101),r)
+            self.receive("r1","0001",3,102,code=409)
+            self.receive("free","0002",1,0);self.assertEqual(self.value("0002"),(1,0))
+            self.manual("zero-issue","0002","W1",None,1)
+            self.assertEqual(self.value("0002"),(0,0));self.assertEqual(self.cost_counts(),(3,3,303))
+        def test_cost_output_failure_rolls_back_quantity_and_value(self):
+            self.ready_cost_prod()
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("""CREATE FUNCTION naruv_valuation.fail_output() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN IF NEW.kind='output' THEN RAISE EXCEPTION 'SYNTHETIC_COST_FAILURE'; END IF; RETURN NEW; END $$""")
+                c.execute("CREATE TRIGGER cost_fail BEFORE INSERT ON naruv_valuation.entries FOR EACH ROW EXECUTE FUNCTION naruv_valuation.fail_output()")
+            try:
+                self.complete(code=503);self.assertEqual(self.stocks(),[10,10,0])
+                self.assertEqual(self.cost_counts(),(2,2,1520));self.assertEqual(self.inspect_job()["completed"],0)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("DROP TRIGGER cost_fail ON naruv_valuation.entries")
+                    c.execute("DROP FUNCTION naruv_valuation.fail_output()")
+            self.complete();self.assertEqual(self.value("0003"),(1,253))
+        def test_cost_unposted_movement_rejected_at_commit(self):
+            self.seed_cost()
+            with psycopg.connect(fixture.root_dsn) as c:c.execute("ALTER TABLE naruv_trade.events DISABLE TRIGGER valuation_trade")
+            try:
+                self.buy("p1","r1","0001",3,100,code=503)
+                self.assertEqual(self.value(),(0,0));self.assertEqual(self.cost_counts(),(0,0,0))
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:c.execute("ALTER TABLE naruv_trade.events ENABLE TRIGGER valuation_trade")
+            self.trade("fulfill","r1-f",{"quantity":3},doc="p1")
+            self.assertEqual(self.value(),(3,300))
+        def test_cost_concurrent_issue_and_tenant_scope(self):
+            self.seed_cost();self.receive("r1","0001",5,100);bar=threading.Barrier(2)
+            def go(i):
+                bar.wait(timeout=10)
+                return self.call(f"/inventory/sources/source-a/items/0001/movements/issue-{i}",{"from_warehouse":"W1","to_warehouse":None,"quantity":4})
+            with concurrent.futures.ThreadPoolExecutor(2) as pool:rs=list(pool.map(go,range(2)))
+            self.assertEqual(sorted(r.status_code for r in rs),[200,409]);self.assertEqual(self.value(),(1,100))
+            self.value(who="B",code=404)
+            self.seed_cost("B");self.receive("r1","0001",2,200,"B")
+            self.assertEqual(self.value(who="B"),(2,400));self.assertEqual(self.value(),(1,100))
+        def test_cost_permissions_immutable_and_default_off(self):
+            self.seed_cost();r=self.receive("r1","0001",3,101)
+            self.manual(r["request_id"],"0001",None,"W1",3,code=422)
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("SELECT count(*) FROM pg_class WHERE relnamespace='naruv_valuation'::regnamespace AND relkind='r' AND relrowsecurity AND relforcerowsecurity").fetchone()[0],2)
+                for role in ("jw_app_dev","naruv_native_stage"):
+                    self.assertEqual(c.execute("""SELECT has_table_privilege(%s,'naruv_valuation.balances','UPDATE'),
+                     has_function_privilege(%s,'naruv_valuation.apply(text,text,text,text,numeric)','EXECUTE'),
+                     has_function_privilege(%s,'naruv_valuation.receive(text,text,jsonb,boolean,text)','EXECUTE')""",(role,role,role)).fetchone(),(False,False,role=="jw_app_dev"))
+                with self.assertRaisesRegex(psycopg.Error,"NARUV_IMMUTABLE"):c.execute("UPDATE naruv_valuation.entries SET amount_krw=0")
+                c.rollback()
+            os.environ.pop("NARUV_VALUATION_REVIEW",None)
+            self.assertFalse(valuation.register_valuation(FastAPI()));self.value(code=404)
+        def test_cost_large_exact_integer_and_strict_input(self):
+            self.seed_cost()
+            for price in (-1,True,1.5,1000000001):self.receive("bad","0001",1,price,code=422)
+            self.receive("bad","0001",1,1,extra={"x-naruv-confirm":"no"},code=422)
+            self.receive("bad","0001",1,1,raw=b'{"unit_cost":1,"unit_cost":2}',code=422)
+            self.receive("huge","0001",1000000000,1000000000)
+            self.assertEqual(self.value(),(1000000000,1000000000000000000))
+            self.manual("huge-issue","0001","W1",None,999999999)
+            self.assertEqual(self.value(),(1,1000000000))
+    names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
+    if len(names)!=10:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
+    if not result.wasSuccessful() or result.testsRun!=10 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 10 isolated PG17 cost and quantity cases; no statutory posting.")
