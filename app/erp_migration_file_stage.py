@@ -32,6 +32,9 @@ def prepare_file_stage(raw, *, format, organization_id, source_id, entity, targe
     review=prepare_header_review(organization_id,source_id,entity,headers)
     p=prepare_row_preflight(review,organization_id=organization_id,
         source_id=source_id,entity=entity,headers=headers,rows=rows,target=target)
+    return _build(raw,format,review,p,rows)
+
+def _build(raw,format,review,p,rows):
     canonical=tuple(tuple(sorted((field,row[i]) for i,field in review.fields)) for row in rows)
     raw_hash=hashlib.sha256(raw).hexdigest()
     payload={"version":1,"purpose":"file-stage-only","format":format,
@@ -50,14 +53,14 @@ def check_file_stage(previous,raw,*,format,organization_id,source_id,entity,targ
              and type(previous.raw_sha256) is str and previous.raw_sha256.isascii()
              and hmac.compare_digest(previous.raw_sha256,hashlib.sha256(raw).hexdigest()),
              "FILE_SOURCE_CHANGED")
-    current=prepare_file_stage(raw,format=format,organization_id=organization_id,
-                      source_id=source_id,entity=entity,target=target)
-    # Reuse exact nested validators, not dataclass equality alone (bool == int).
+    # Reject unsupported format and existing review scope before target evaluation.
+    _require(type(format) is str and format in ("csv","xlsx"),"FILE_FORMAT")
     headers,rows=(parse_csv if format=="csv" else parse_xlsx)(raw)
     review=check_header_review(previous.review,organization_id=organization_id,
                          source_id=source_id,entity=entity,headers=headers)
-    check_row_preflight(previous.preflight,review,organization_id=organization_id,
+    preflight=check_row_preflight(previous.preflight,review,organization_id=organization_id,
                       source_id=source_id,entity=entity,headers=headers,rows=rows,target=target)
+    current=_build(raw,format,review,preflight,rows)
     _require(type(previous.stage_sha256) is str and previous.stage_sha256.isascii()
              and hmac.compare_digest(previous.stage_sha256,current.stage_sha256)
              and type(previous.canonical_rows) is tuple
