@@ -30,7 +30,7 @@ def review_document(*,tenant,source_bytes,registered_sha256,observations):
     actual=hashlib.sha256(source_bytes).hexdigest()
     require(hmac.compare_digest(actual,registered_sha256),"DOC_SOURCE_CHANGED")
     require(type(observations) in (list,tuple) and 1<=len(observations)<=128,"DOC_OBSERVATION_COUNT")
-    values={};positions={};issues=set()
+    values={};positions={};invalid=set();issues=set()
     for entry in observations:
         require(type(entry) is dict and set(entry)=={"field","value","page"},"DOC_OBSERVATION_SHAPE")
         field,value,page=entry["field"],entry["value"],entry["page"]
@@ -48,6 +48,11 @@ def review_document(*,tenant,source_bytes,registered_sha256,observations):
         else:
             valid=type(value) is str and ID.fullmatch(value) is not None
         if not valid:
+            # Invalid observations also affect the proof; never echo their raw values.
+            require(value is None or type(value) in (str,int,bool), "DOC_VALUE_TYPE")
+            require(type(value) is not str or len(value)<=1024,"DOC_VALUE_LIMIT")
+            require(type(value) is not int or abs(value)<=10**15,"DOC_VALUE_LIMIT")
+            invalid.add((field,page,digest(value)))
             issues.add("INVALID_"+field.upper());continue
         values.setdefault(field,set()).add(value)
         positions.setdefault(field,set()).add((page,value))
@@ -59,7 +64,7 @@ def review_document(*,tenant,source_bytes,registered_sha256,observations):
         if a+b!=c or c<=0:issues.add("AMOUNT_MISMATCH")
     proof={"version":1,"tenant":tenant,"source_sha256":actual,
            "candidates":{k:sorted(v) for k,v in values.items()},
-           "page_candidates":{k:sorted(v) for k,v in positions.items()},"issues":sorted(issues)}
+           "page_candidates":{k:sorted(v) for k,v in positions.items()},"invalid_candidates":sorted(invalid),"issues":sorted(issues)}
     return {"source_sha256":actual,"review_sha256":digest(proof),
             "status":"MANUAL_CORRECTION_REQUIRED" if issues else "ORIGINAL_REVIEW_REQUIRED",
             "issues":sorted(issues),"field_count":sum(len(v)==1 for v in values.values()),

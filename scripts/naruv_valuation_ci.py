@@ -913,7 +913,7 @@ stage._connect=lambda:psycopg.connect(dsn,connect_timeout=5)
 c=TestClient(app,base_url='https://testserver')
 try:
     paths=app.openapi()['paths']
-    assert len([x for x in paths if x.startswith('/api/naruv-review/v1/')])==41
+    assert len([x for x in paths if x.startswith('/api/naruv-review/v1/')])==42
     assert '/api/pg-stage/v92/quotes' in paths and '/api/pg-stage/v85/login' in paths
     assert c.get('/api/health').status_code==200
     home=c.get('/')
@@ -964,8 +964,36 @@ finally:c.close()
             with psycopg.connect(fixture.root_dsn) as c:
                 self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.document_admissions','INSERT')").fetchone()[0])
                 self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.admit_document(text,text,text,bytea,jsonb,boolean,text)','EXECUTE')").fetchone()[0])
+        def test_cost_document_revision_history_and_stale_rejection(self):
+            import base64,json
+            path="/drafts/documents/revision-doc"
+            obs=[{"field":"subtotal","value":100,"page":1},{"field":"vat","value":10,"page":1},{"field":"gross_amount","value":110,"page":1}]
+            original=b"PK"+bytes((3,4))+b"synthetic opaque fixture"
+            initial=self.check(self.call(path+"/register/rev-original",{"format":"xlsx","original_base64":base64.b64encode(original).decode(),"observations":obs}),200)
+            before=self.check(self.call(path),200)
+            changed=[dict(x,value=120) if x["field"]=="gross_amount" else x for x in obs]
+            data={"previous_revision":before["revision"],"source_sha256":initial["source_sha256"],"observations":changed}
+            self.check(self.call(path+"/revise/rev-first",data,who="B"),404)
+            first=self.check(self.call(path+"/revise/rev-first",data),200)
+            self.assertEqual(first,self.check(self.call(path+"/revise/rev-first",data),200))
+            self.check(self.call(path+"/revise/stale",data),409)
+            after=self.check(self.call(path),200)
+            self.assertEqual(after["revision"],"rev-first")
+            self.assertIn("AMOUNT_MISMATCH",after["issues"])
+            self.assertEqual(after["source_sha256"],before["source_sha256"])
+            self.assertNotEqual(after["source_binding_sha256"],before["source_binding_sha256"])
+            current=dict(data,previous_revision="rev-first",observations=obs)
+            self.check(self.call(path+"/revise/rev-second",current),200)
+            self.assertEqual(first,self.check(self.call(path+"/revise/rev-first",data),200))
+            final=self.check(self.call(path),200)
+            self.assertEqual(final["review_sha256"],before["review_sha256"])
+            self.assertNotEqual(final["source_binding_sha256"],before["source_binding_sha256"])
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("SELECT original_bytes,observations FROM naruv_draft.documents WHERE org_id='ci-a' AND document_id='revision-doc'").fetchone(),(original,obs))
+                self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.document_revisions WHERE org_id='ci-a' AND document_id='revision-doc'").fetchone()[0],2)
+                self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.document_revisions','UPDATE')").fetchone()[0])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=70:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=71:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=70 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 70 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=71 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 71 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

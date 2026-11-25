@@ -118,7 +118,7 @@ jobs:
           import unittest
           suite=unittest.defaultTestLoader.loadTestsFromName("tests.test_naruv_document_payroll")
           r=unittest.TextTestRunner(verbosity=1).run(suite)
-          if not r.wasSuccessful() or r.testsRun != 21 or r.skipped or r.expectedFailures or r.unexpectedSuccesses:
+          if not r.wasSuccessful() or r.testsRun != 22 or r.skipped or r.expectedFailures or r.unexpectedSuccesses:
               raise SystemExit(1)
           PY
           done

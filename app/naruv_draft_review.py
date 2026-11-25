@@ -30,6 +30,7 @@ def _read(token,csrf,prior,kind,key,period=None):
                 revision,raw,sha,observations=row
                 result=review_document(tenant=org,source_bytes=bytes(raw),registered_sha256=sha,observations=observations)
                 result["source_binding_sha256"]=digest({"tenant":org,"document":key,"revision":revision,"review":result["review_sha256"]})
+                result["revision"]=revision
             elif kind=="pay":
                 cur.execute("SELECT * FROM naruv_draft.pay_source(%s,%s,%s)",(key,period,csrf))
                 row=cur.fetchone()
@@ -69,6 +70,36 @@ def _admit_document(token,csrf,prior,key,rid,fmt,raw,observations):
     except ReviewBlocked:raise HTTPException(422,"DOC_INPUT") from None
     except psycopg.Error as exc:
         reason=getattr(getattr(exc,"diag",None),"message_primary","")
+        if reason=="DOC_INPUT":raise HTTPException(422,reason) from None
+        if reason in ("DOC_CONFLICT","DOC_CAPACITY"):raise HTTPException(409,reason) from None
+        raise write._db_error(exc) from None
+
+def _revise_document(token,csrf,prior,key,rid,data):
+    import json,psycopg
+    if not enabled():raise HTTPException(404,"DRAFT_DISABLED")
+    try:
+        with v90._pg_validated_cursor(token) as (cur,identity):
+            actor,org=preview._verify_identity(identity,csrf)
+            if (actor,org)!=prior:raise HTTPException(409,"SESSION_SCOPE_CHANGED")
+            cur.execute("SET LOCAL statement_timeout='8s'")
+            cur.execute("SET LOCAL lock_timeout='4s'")
+            cur.execute("SELECT * FROM naruv_draft.document_source(%s,%s)",(key,csrf))
+            row=cur.fetchone()
+            if row is None:raise HTTPException(404,"DRAFT_SOURCE_NOT_FOUND")
+            _,raw,sha,_=row
+            if sha!=data["source_sha256"]:raise HTTPException(409,"DOC_CONFLICT")
+            review=review_document(tenant=org,source_bytes=bytes(raw),registered_sha256=sha,observations=data["observations"])
+            if any(x.startswith("INVALID_") for x in review["issues"]):raise HTTPException(422,"DOC_INPUT")
+            cur.execute("SELECT naruv_draft.revise_document(%s,%s,%s,%s,%s::jsonb,true,%s)",
+                        (key,rid,data["previous_revision"],sha,json.dumps(data["observations"],ensure_ascii=True,separators=(",",":")),csrf))
+            row=cur.fetchone()
+            if not row or type(row[0]) is not dict or row[0].get("source_sha256")!=sha or row[0].get("posting_authorized") is not False or row[0].get("production_authorized") is not False:
+                raise HTTPException(503,"DOC_UNAVAILABLE")
+            return row[0]
+    except ReviewBlocked:raise HTTPException(422,"DOC_INPUT") from None
+    except psycopg.Error as exc:
+        reason=getattr(getattr(exc,"diag",None),"message_primary","")
+        if reason=="DOC_NOT_FOUND":raise HTTPException(404,reason) from None
         if reason=="DOC_INPUT":raise HTTPException(422,reason) from None
         if reason in ("DOC_CONFLICT","DOC_CAPACITY"):raise HTTPException(409,reason) from None
         raise write._db_error(exc) from None
@@ -113,6 +144,28 @@ def create_router():
         except (ValueError,UnicodeError,RecursionError,binascii.Error):
             raise HTTPException(422,"DOC_INPUT") from None
         result=await run_in_threadpool(_admit_document,token,csrf,prior,key,rid,fmt,raw,obs)
+        response.headers["Cache-Control"]="no-store"
+        return result
+    @router.post("/documents/{key}/revise/{rid}")
+    async def revise_document(key:str,rid:str,request:Request,response:Response):
+        import json,re
+        from . import naruv_inventory_review as inventory
+        if not enabled():raise HTTPException(404,"DRAFT_DISABLED")
+        token,csrf,_=write._request(request,key,rid,needs_digest=False)
+        if preview._one_header(request,"x-naruv-confirm","")!="yes":raise HTTPException(422,"DOC_CONFIRM_REQUIRED")
+        if preview._one_header(request,"content-type","")!="application/json":raise HTTPException(415,"DOC_CONTENT_TYPE")
+        prior=await run_in_threadpool(write._auth,token,csrf)
+        raw=await preview._bounded_body(request)
+        if len(raw)>32768:raise HTTPException(413,"DOC_INPUT")
+        try:
+            data=json.loads(raw.decode("utf-8"),object_pairs_hook=inventory._pairs,parse_constant=inventory._reject_constant)
+            if (type(data) is not dict or set(data)!={"previous_revision","source_sha256","observations"}
+                or type(data["previous_revision"]) is not str or not preview.IDENT.fullmatch(data["previous_revision"])
+                or type(data["source_sha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}",data["source_sha256"])
+                or type(data["observations"]) is not list or len(json.dumps(data["observations"],ensure_ascii=True,separators=(",",":")))>30000):
+                raise ValueError("shape")
+        except (ValueError,UnicodeError,RecursionError):raise HTTPException(422,"DOC_INPUT") from None
+        result=await run_in_threadpool(_revise_document,token,csrf,prior,key,rid,data)
         response.headers["Cache-Control"]="no-store"
         return result
     return router

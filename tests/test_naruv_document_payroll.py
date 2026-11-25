@@ -46,6 +46,13 @@ class Document(unittest.TestCase):
         b=base+[dict(field="subtotal",value=200,page=1),dict(field="subtotal",value=100,page=2)]
         self.assertEqual(doc(observations=a)["issues"],doc(observations=b)["issues"])
         self.assertNotEqual(doc(observations=a)["review_sha256"],doc(observations=b)["review_sha256"])
+    def test_invalid_observation_proof(self):
+        a=doc(observations=[dict(x,value="bad-a") if x["field"]=="document_date" else x for x in OBS])
+        b=doc(observations=[dict(x,value="bad-b") if x["field"]=="document_date" else x for x in OBS])
+        self.assertEqual(a["issues"],b["issues"])
+        self.assertNotEqual(a["review_sha256"],b["review_sha256"])
+        self.assertNotIn("bad-a",str(a))
+        self.assertNotIn("bad-b",str(b))
     def test_scope_binding(self):
         self.assertNotEqual(doc(tenant="b")["review_sha256"],doc()["review_sha256"])
     def test_type_bounds(self):
