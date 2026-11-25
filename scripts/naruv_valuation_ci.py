@@ -948,7 +948,7 @@ try:
             return cut.Identity(ident[2],ident[1],ident[3])
     erp=FastAPI()
     assert bridge.integrated.register_integrated_review(erp,include_drafts=True,include_hr=True)
-    front=cut.CutoverFront(main.app,FastAPI(),legacy_identity,pg_identity,lambda:frozenset(("ci-a",)))
+    front=cut.CutoverFront(main.app,main.app,legacy_identity,pg_identity,lambda:frozenset(("ci-a",)))
     with TestClient(bridge.ReadBridge(front,erp),base_url='https://testserver') as dual:
         dual.cookies.set(cut.LEGACY_COOKIE,legacy_token)
         dual.cookies.set(cut.PG_COOKIE,os.environ['NARUV_TEST_TOKEN'])
@@ -956,11 +956,19 @@ try:
         pay='/api/naruv-review/v1/drafts/payroll/worker-1/2026-11'
         r=dual.post(pay,headers=dh)
         assert r.status_code==200 and r.json()['gross_krw']==114000
+        page=dual.get('/naruv-workspace')
+        assert page.status_code==200 and '기업 업무 검토' in page.text
+        assert dual.get('/naruv-workspace/app.js').status_code==200
+        assert dual.get('/api/pg-stage/v90/me').json()['csrf_token']==os.environ['NARUV_TEST_CSRF']
+        if os.environ.get('NARUV_WORKSPACE_BROWSER')=='EPHEMERAL_ONLY':
+            from scripts.naruv_workspace_browser_ci import verify_browser
+            verify_browser(bridge.ReadBridge(front,erp),legacy_token,os.environ['NARUV_TEST_TOKEN'])
         assert dual.post(pay,headers=dict(dh,origin='https://evil.test')).status_code==403
         assert dual.post('/api/naruv-review/v1/hr/workers/bridge-spoof/register/bridge-rid',headers=dh).status_code==403
         with main.conn() as db:
             db.execute("DELETE FROM sessions WHERE id='bridge-legacy'")
         assert dual.post(pay,headers=dh).status_code==401
+        assert dual.get('/naruv-workspace').status_code==401
     os.environ['NARUV_INTEGRATED_REVIEW']=''
     assert c.post('/api/naruv-review/v1/drafts/payroll/worker-1/2026-11',headers=h).status_code==404
     assert c.get('/api/health').status_code==200

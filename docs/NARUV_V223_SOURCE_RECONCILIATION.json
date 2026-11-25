@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "96a4f203970d67e10792fcab433a7a191012e997",
+      "sha": "4f8fbdf5b77a31c883746077effb668322de7f12",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8470,11 +8470,27 @@
       "mode": "100644"
     },
     "app/naruv_v223_read_bridge.py": {
-      "sha": "e640a6279e1d5db82f21b86349065979a11da7da",
+      "sha": "7a1658e014908f759414a8c58db1b83c65fdffec",
       "mode": "100644"
     },
     "tests/test_naruv_v223_read_bridge.py": {
-      "sha": "a3c4e0b4e6f89400e7d807cb1989dc19b699617b",
+      "sha": "77f31477a46000614214bed6af9b794798678e24",
+      "mode": "100644"
+    },
+    "app/naruv_workspace/index.html": {
+      "sha": "ac9890fbb71de33dd10ceaf6252bd3ffd4e34d14",
+      "mode": "100644"
+    },
+    "app/naruv_workspace/style.css": {
+      "sha": "676417799c8a4a531a1eb21abb5b4e05addb6304",
+      "mode": "100644"
+    },
+    "app/naruv_workspace/app.js": {
+      "sha": "f9ea25194fd843d92849be2be965ef126d9b0181",
+      "mode": "100644"
+    },
+    "scripts/naruv_workspace_browser_ci.py": {
+      "sha": "8a864203402b6f978ba7e9e462a6345393a14496",
       "mode": "100644"
     }
   },
@@ -8486,5 +8502,9 @@
   "review_extension": {
     "parent": "d8768e538b5ba26a1ea2ed12d475ddbcba05bd22",
     "reason": "Explicit read-only bridge and real dual-session integration regression; original protected blobs unchanged."
+  },
+  "workspace_extension": {
+    "parent": "c88aa92698c1d2b5f3261454cf78771e2654107f",
+    "reason": "Separate opt-in PC review workspace, real browser test on disposable dual-session fixture. Original UI untouched."
   }
 }

@@ -111,3 +111,18 @@ async def test_duplicate_headers_and_websocket_denied():
         await app({"type":"websocket","path":PATH},receive,send)
         assert sent==[{"type":"websocket.close","code":1008}]
         assert not calls
+
+@pytest.mark.asyncio
+async def test_workspace_gate_and_original_ui_custody():
+    with patch.dict(os.environ,ENV,clear=True):
+        app,calls=front()
+        r=await request(app,bridge.WORKSPACE,method="GET")
+        assert r.status_code==200 and "기업 업무 검토" in r.text
+        assert "script-src 'self'" in r.headers["content-security-policy"]
+        assert r.headers["cache-control"]=="no-store"
+        for suffix in ("/app.js","/style.css"):
+            assert (await request(app,bridge.WORKSPACE+suffix,method="GET")).status_code==200
+        assert (await request(app,bridge.WORKSPACE+"/unknown",method="GET")).status_code==403
+        assert (await request(app,bridge.WORKSPACE,method="POST")).status_code==403
+        assert (await request(app,bridge.WORKSPACE,method="GET",headers={"cookie":cut.LEGACY_COOKIE+"="+L})).status_code==401
+        assert not calls

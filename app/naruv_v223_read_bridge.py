@@ -7,13 +7,16 @@ import os
 import re
 from fastapi import FastAPI
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse,Response
+from pathlib import Path
 from . import naruv_integrated_review as integrated
 from . import pg_cinema_cutover_front_v223 as cut
 
 FLAG="NARUV_V223_READ_BRIDGE"
 ACK="ISOLATED_SYNTHETIC_READ_ONLY"
 PREFIX=integrated.PREFIX
+WORKSPACE='/naruv-workspace'
+ASSETS=Path(__file__).resolve().parent/'naruv_workspace'
 IDENT=r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
 PERIOD=r"[0-9]{4}-(?:0[1-9]|1[0-2])"
 READ_PATHS=tuple(re.compile(PREFIX+pattern,re.ASCII) for pattern in (
@@ -44,7 +47,8 @@ class ReadBridge:
 
     async def __call__(self,scope,receive,send):
         path=scope.get("path","")
-        if not (path==PREFIX or path.startswith(PREFIX+"/")):
+        workspace=path==WORKSPACE or path.startswith(WORKSPACE+"/")
+        if not workspace and not (path==PREFIX or path.startswith(PREFIX+"/")):
             return await self.front(scope,receive,send)
         if scope.get("type")=="websocket":
             return await send({"type":"websocket.close","code":1008})
@@ -53,16 +57,20 @@ class ReadBridge:
         try:
             if not enabled():raise cut.CutoverRefused("naruv_bridge_disabled",404)
             if scope.get("scheme")!="https":raise cut.CutoverRefused("https_required",403)
-            if scope.get("method")!="POST" or not is_read_path(path):
+            if workspace:
+                if scope.get("method")!="GET" or path not in (WORKSPACE,WORKSPACE+"/app.js",WORKSPACE+"/style.css"):
+                    raise cut.CutoverRefused("naruv_read_scope_only",403)
+            elif scope.get("method")!="POST" or not is_read_path(path):
                 raise cut.CutoverRefused("naruv_read_scope_only",403)
             if scope.get("query_string"):raise cut.CutoverRefused("naruv_read_scope_only",422)
             request=Request(scope)
-            origins=request.headers.getlist("origin")
-            if len(origins)!=1 or origins[0] not in integrated.v90._origins():
-                raise cut.CutoverRefused("origin_denied",403)
-            csrf=request.headers.getlist("x-jw-pg-csrf")
-            if len(csrf)!=1 or not 16<=len(csrf[0])<=512 or not csrf[0].isascii():
-                raise cut.CutoverRefused("invalid_pg_csrf",403)
+            if not workspace:
+                origins=request.headers.getlist("origin")
+                if len(origins)!=1 or origins[0] not in integrated.v90._origins():
+                    raise cut.CutoverRefused("origin_denied",403)
+                csrf=request.headers.getlist("x-jw-pg-csrf")
+                if len(csrf)!=1 or not 16<=len(csrf[0])<=512 or not csrf[0].isascii():
+                    raise cut.CutoverRefused("invalid_pg_csrf",403)
             # Inspect every Cookie header, including a hidden old session in a
             # second header that the framework's cookie parser may ignore.
             if any(part.partition(b"=")[0].strip()==cut.UPSTREAM_COOKIE.encode("ascii")
@@ -80,6 +88,14 @@ class ReadBridge:
             # the real NARUV backend repeats authorization under PG RLS.
             if not enabled() or pg.org_id not in self.front.enabled_orgs():
                 raise cut.CutoverRefused("naruv_bridge_disabled",404)
+            if workspace:
+                asset,kind={WORKSPACE:("index.html","text/html"),WORKSPACE+"/app.js":("app.js","application/javascript"),WORKSPACE+"/style.css":("style.css","text/css")}[path]
+                return await Response((ASSETS/asset).read_bytes(),media_type=kind,headers={
+                    "Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+                    "X-Frame-Options":"DENY","Referrer-Policy":"no-referrer",
+                    "Strict-Transport-Security":"max-age=31536000",
+                    "Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
+                })(scope,receive,send)
             return await self.front._forward(self.erp,scope,receive,send,cut.PG_COOKIE)
         except cut.CutoverRefused as exc:
             return await JSONResponse({"code":exc.code},status_code=exc.status,headers={

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NARUV ONE · 업무 검토</title><link rel="stylesheet" href="/naruv-workspace/style.css"><script defer src="/naruv-workspace/app.js"></script></head>
+<body><header><a href="/">WORKS 홈</a><span>NARUV ONE / REVIEW</span></header>
+<main><h1>기업 업무 검토</h1><p>격리 검토 환경 · 조회 전용 · 실제 지급 및 전표 처리 불가</p>
+<p id="mobile" role="status">PC 화면에서 이용할 수 있습니다.</p>
+<section id="desk" aria-label="업무 조회">
+<div class="toolbar"><button id="overview">ERP 현황 조회</button><button id="staff">직원 목록 조회</button><button id="clear">화면 지우기</button></div>
+<div class="fields"><label>직원 식별번호<input id="worker" maxlength="128" autocomplete="off"></label><label>급여 기간 (YYYY-MM)<input id="period" maxlength="7" placeholder="2026-11" autocomplete="off"></label><button id="pay">세전 급여 검토</button></div>
+<div class="fields"><label>문서 식별번호<input id="doc" maxlength="128" autocomplete="off"></label><button id="document">문서 검토</button></div>
+<p id="status" role="status" aria-live="polite">조회 항목을 선택하세요.</p>
+<section aria-label="조회 결과"><h2>조회 결과</h2><dl id="result"></dl></section>
+</section></main></body></html>
