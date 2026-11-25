@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: b4b56c84ef68a2db68494a8a39219899fef33f3f
+      EXPECTED_SOURCE: 756f8c0c1400ed7b8a461be368c81b47d5dcc481
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: b4b56c84ef68a2db68494a8a39219899fef33f3f
+          ref: 756f8c0c1400ed7b8a461be368c81b47d5dcc481
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -98,7 +98,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: b4b56c84ef68a2db68494a8a39219899fef33f3f
+      EXPECTED_SOURCE: 756f8c0c1400ed7b8a461be368c81b47d5dcc481
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -106,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: b4b56c84ef68a2db68494a8a39219899fef33f3f
+          ref: 756f8c0c1400ed7b8a461be368c81b47d5dcc481
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -134,3 +134,28 @@ jobs:
           python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py app/naruv_production_review.py scripts/naruv_production_ci.py app/naruv_valuation_review.py scripts/naruv_valuation_ci.py scripts/naruv_erp_restore_ci.py
           python -m unittest tests.test_naruv_workflow_context tests.test_naruv_integrated_review
           python -m scripts.naruv_native_write_review_ci
+
+  independent-official-tax-source:
+    if: github.event.pull_request.number == 164 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    permissions:
+      contents: read
+    env:
+      EXPECTED_SOURCE: 756f8c0c1400ed7b8a461be368c81b47d5dcc481
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 756f8c0c1400ed7b8a461be368c81b47d5dcc481
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Independently obtain and compare official Appendix 2 PDF
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          python scripts/naruv_v223_source_custody.py
+          command -v pdftotext || (sudo apt-get update -qq && sudo apt-get install -y poppler-utils)
+          pdf="$(mktemp --suffix=.pdf)"
+          trap 'rm -f "$pdf"' EXIT
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 3 --connect-timeout 12 --max-time 60 --max-filesize 10000000 'https://law.go.kr/flDownload.do?bylClsCd=110201&flSeq=163623339&gubun=' --output "$pdf"
+          python -m scripts.naruv_tax_source_audit "$pdf" app/naruv_kr_payroll_review.py
