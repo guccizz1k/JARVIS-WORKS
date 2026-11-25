@@ -783,18 +783,28 @@ def run_valuation(base):
                 self.assertEqual(root.execute("SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s)",(users+[owner],)).fetchone()[0],0)
                 self.assertIsNone(root.execute("SELECT to_regnamespace('naruv_hosted_qa')").fetchone()[0])
                 root.execute(sql.SQL("CREATE ROLE {} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB").format(sql.Identifier(owner)))
-                root.execute(sql.SQL("CREATE SCHEMA naruv_hosted_qa AUTHORIZATION {}").format(sql.Identifier(owner)))
-                root.execute("REVOKE ALL ON SCHEMA naruv_hosted_qa FROM PUBLIC")
-                root.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(owner)))
-                root.execute("CREATE TABLE naruv_hosted_qa.boundary(marker text PRIMARY KEY,source_sha text NOT NULL)")
-                root.execute("INSERT INTO naruv_hosted_qa.boundary VALUES(%s,%s)",(marker,source))
-                root.execute("REVOKE ALL ON naruv_hosted_qa.boundary FROM PUBLIC")
-                root.execute("RESET ROLE")
+                from app.naruv_hosted_qa_boundary import initialize_ci
                 for _,u,r in PURPOSES.values():
                     root.execute(sql.SQL("CREATE ROLE {} LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION PASSWORD {}").format(sql.Identifier(u),sql.Literal(passwords[u])))
                     root.execute(sql.SQL("GRANT {} TO {} WITH INHERIT FALSE, SET TRUE").format(sql.Identifier(r),sql.Identifier(u)))
-                    root.execute(sql.SQL("GRANT USAGE ON SCHEMA naruv_hosted_qa TO {}").format(sql.Identifier(u)))
-                    root.execute(sql.SQL("GRANT SELECT ON naruv_hosted_qa.boundary TO {}").format(sql.Identifier(u)))
+                # All DDL shares the caller transaction. A deliberately
+                # rolled-back savepoint must leave no schema or marker.
+                class RollbackProbe(Exception):pass
+                try:
+                    with root.transaction(),root.cursor() as cur:
+                        initialize_ci(cur,marker=marker,source_sha=source)
+                        raise RollbackProbe()
+                except RollbackProbe:pass
+                self.assertIsNone(root.execute("SELECT to_regnamespace('naruv_hosted_qa')").fetchone()[0])
+                with root.cursor() as cur:
+                    initialize_ci(cur,marker=marker,source_sha=source)
+                    with self.assertRaisesRegex(AdmissionBlocked,"BOUNDARY_EXISTS"):
+                        initialize_ci(cur,marker=marker,source_sha="b"*40)
+                self.assertEqual(root.execute("SELECT marker,source_sha FROM naruv_hosted_qa.boundary").fetchall(),[(marker,source)])
+                with self.assertRaises(psycopg.errors.UniqueViolation):
+                    with root.transaction():
+                        root.execute("INSERT INTO naruv_hosted_qa.boundary(marker,source_sha) VALUES(%s,%s)",("c"*64,source))
+                print("NARUV_BOUNDARY_INITIALIZER_PASS transactional rollback, duplicate refusal, singleton, exact source marker",flush=True)
             def check(purpose,expected=None):
                 with psycopg.connect(dsns[purpose]) as db:
                     with db.transaction(),db.cursor() as cur:

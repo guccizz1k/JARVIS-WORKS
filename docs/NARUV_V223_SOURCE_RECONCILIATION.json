@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "ab3441e2616bc7105c95cd02695099e6bd602eda",
+      "sha": "7b5fd2090781c28b9454d52197a4c770f836a456",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8516,6 +8516,10 @@
     "tests/test_naruv_hosted_qa_admission.py": {
       "sha": "1e65e1262e18b7462984363bdc6cbf9248edd337",
       "mode": "100644"
+    },
+    "app/naruv_hosted_qa_boundary.py": {
+      "sha": "4d59023cf67d322ffd9b74da451907dfcdc91295",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8595,5 +8599,9 @@
   "hosted_actual_catalog_fixture": {
     "parent": "6a5f8ff285590bcc4ff0f2a7837fa3cec0931530",
     "reason": "Actual disposable PG17 three login/delegated roles, catalog OID privilege checks, column grant/marker mutation refusals, non-TLS gate denial and cleanup. No hosted DSN, no TLS bypass in admission."
+  },
+  "hosted_boundary_initializer": {
+    "parent": "283d10615a6fc636b7b0b5a32ca8a68bda7d849d",
+    "reason": "Extract boundary schema initialization into explicit CI-only transactional primitive, assert prerequisite roles and FORCE RLS, refuse overwrite, enforce singleton marker, verify rollback and duplicate refusal in existing actual PG catalog test. No remote provisioning."
   }
 }
