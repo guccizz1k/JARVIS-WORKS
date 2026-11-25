@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: c88aa92698c1d2b5f3261454cf78771e2654107f
+      EXPECTED_SOURCE: 07642339114582e1483627f23600970ad339d291
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: c88aa92698c1d2b5f3261454cf78771e2654107f
+          ref: 07642339114582e1483627f23600970ad339d291
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -98,7 +98,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: c88aa92698c1d2b5f3261454cf78771e2654107f
+      EXPECTED_SOURCE: 07642339114582e1483627f23600970ad339d291
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -106,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: c88aa92698c1d2b5f3261454cf78771e2654107f
+          ref: 07642339114582e1483627f23600970ad339d291
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -114,10 +114,18 @@ jobs:
           python-version: '3.12'
       - name: Install existing staged API test dependencies
         run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Install isolated Chromium test dependencies
+        if: matrix.round == 1
+        run: |
+          python -m pip install 'playwright==1.56.0'
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y libnss3-tools
       - name: Verify native file stage approval and atomic PG17 write
         env:
           NARUV_ERP_SOURCE_SERVICE: ${{ job.services.postgres.id }}
           NARUV_ERP_DEST_SERVICE: ${{ job.services.erp_restore.id }}
+          NARUV_WORKSPACE_BROWSER: ${{ matrix.round == 1 && 'EPHEMERAL_ONLY' || 'OFF' }}
+          JW_V93_TRUST_LOCAL_CA: ${{ matrix.round == 1 && 'EPHEMERAL_RUNNER_ONLY' || 'OFF' }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
