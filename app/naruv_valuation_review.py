@@ -4,13 +4,14 @@ import os
 from fastapi import APIRouter,HTTPException,Request,Response
 from starlette.concurrency import run_in_threadpool
 from . import naruv_production_review as production
+from . import naruv_finance_review as finance
 from . import naruv_native_file_preview as preview
 from . import naruv_native_write_review as write
 from . import pg_v90_integrated_entry as v90
 PREFIX=preview.PREFIX+"/valuation"
 def enabled():
     return production.enabled() and os.getenv("NARUV_VALUATION_REVIEW")=="ISOLATED_SYNTHETIC_ONLY"
-def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None,bill=None,return_id=None,audit=False,return_qty=None):
+def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None,bill=None,return_id=None,audit=False,return_qty=None,adjusted=False,refund_ref=None):
     import psycopg
     if not enabled():raise HTTPException(404,"COST_DISABLED")
     try:
@@ -19,6 +20,7 @@ def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None
             cur.execute("SET LOCAL statement_timeout='8s'")
             cur.execute("SET LOCAL lock_timeout='4s'")
             if audit:cur.execute("SELECT naruv_valuation.audit_ledger(%s)",(csrf,))
+            elif adjusted:cur.execute("SELECT naruv_valuation.return_adjusted(%s,%s,%s,true,%s,true,%s)",(bill,return_id,return_qty,refund_ref,csrf))
             elif return_id is not None and return_qty is not None:cur.execute("SELECT naruv_valuation.return_quantity(%s,%s,%s,true,%s)",(bill,return_id,return_qty,csrf))
             elif return_id is not None:cur.execute("SELECT naruv_valuation.return_bill(%s,%s,true,%s)",(bill,return_id,csrf))
             elif bill is not None:cur.execute("SELECT naruv_valuation.reconcile_bill(%s,%s)",(bill,csrf))
@@ -84,6 +86,20 @@ def create_router():
         prior=await run_in_threadpool(write._auth,token,csrf)
         await write._empty_body(request)
         result=await run_in_threadpool(_call,token,csrf,prior,None,bill=bill,return_id=rid,return_qty=int(quantity))
+        response.headers["Cache-Control"]="no-store"
+        return result
+    @router.post("/bills/{bill}/return/{rid}/quantity/{quantity}/adjusted")
+    async def return_adjusted(bill:str,rid:str,quantity:str,request:Request,response:Response):
+        if not enabled():raise HTTPException(404,"COST_DISABLED")
+        token,csrf,_=write._request(request,bill,rid,needs_digest=False)
+        if not quantity.isascii() or not quantity.isdecimal() or len(quantity)>6 or not 1<=int(quantity)<=100000:raise HTTPException(422,"COST_INPUT")
+        if preview._one_header(request,"x-naruv-confirm","")!="yes":raise HTTPException(422,"COST_CONFIRM_REQUIRED")
+        if preview._one_header(request,"content-type","")!="application/json":raise HTTPException(415,"FIN_CONTENT_TYPE")
+        prior=await run_in_threadpool(write._auth,token,csrf)
+        data=await finance._body(request)
+        if set(data)-{"refund_reference"} or ("refund_reference" in data and (type(data["refund_reference"]) is not str or not preview.IDENT.fullmatch(data["refund_reference"]))):
+            raise HTTPException(422,"COST_INPUT")
+        result=await run_in_threadpool(_call,token,csrf,prior,None,bill=bill,return_id=rid,return_qty=int(quantity),adjusted=True,refund_ref=data.get("refund_reference"))
         response.headers["Cache-Control"]="no-store"
         return result
     @router.post("/audit")

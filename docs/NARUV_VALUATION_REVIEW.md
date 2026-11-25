@@ -19,3 +19,6 @@ The audit also reconstructs signed quantities and amounts for each item/warehous
 
 ## Partial credit candidate
 Cumulative per-bill quantity, original net/VAT/cost half-up allocation with exact final drain; multiple immutable credit events, each tied to its own reversed movement. Existing full-return endpoint retains full original quantity semantics; explicit quantity endpoint permits partial returns. Paid bills may return only up to unpaid balance; no negative receivable, real refund or cash movement. Purchase moving-average difference still fails closed. Four new PG17 cases, not production or statutory approval.
+
+## Explicit adjusted return candidate
+New opt-in endpoint, legacy exact-cost and no-refund endpoints unchanged. Computes refund required from existing paid/credit balance; records externally confirmed reference and opposite cash clearing journal, never initiates a bank transfer. Purchase cost variance is original allocated cost minus actual moving-average withdrawal; synthetic purchase variance account offsets clearing, capped and immutable. Refund and credit share stock transaction, period guard and idempotency. Ambiguous payment reversals after refund blocked. Four additional PG17 cases. Policy and statutory review pending.

@@ -18,7 +18,7 @@ CREATE TABLE naruv_accounting.periods(
 );
 CREATE TABLE naruv_accounting.journals(
  org_id text NOT NULL,event_id text NOT NULL,bill_id text NOT NULL,period_start date NOT NULL,
- actor_id text NOT NULL,action text NOT NULL CHECK(action IN ('bill','pay','reverse','credit')),
+ actor_id text NOT NULL,action text NOT NULL CHECK(action IN ('bill','pay','reverse','credit','refund')),
  posted_at timestamptz NOT NULL,reversal_of text,
  PRIMARY KEY(org_id,event_id),UNIQUE(org_id,reversal_of),
  FOREIGN KEY(org_id,event_id) REFERENCES naruv_finance.events(org_id,request_id),
@@ -28,8 +28,8 @@ CREATE TABLE naruv_accounting.journals(
  CHECK((action='reverse')=(reversal_of IS NOT NULL))
 );
 CREATE TABLE naruv_accounting.lines(
- org_id text NOT NULL,event_id text NOT NULL,line_no smallint NOT NULL CHECK(line_no BETWEEN 1 AND 3),
- account text NOT NULL CHECK(account IN ('AR','AP','SALES','PURCHASE_CLEARING','VAT_OUTPUT','VAT_INPUT','CASH_CLEARING')),
+ org_id text NOT NULL,event_id text NOT NULL,line_no smallint NOT NULL CHECK(line_no BETWEEN 1 AND 5),
+ account text NOT NULL CHECK(account IN ('AR','AP','SALES','PURCHASE_CLEARING','VAT_OUTPUT','VAT_INPUT','CASH_CLEARING','PURCHASE_COST_VARIANCE')),
  debit bigint NOT NULL CHECK(debit BETWEEN 0 AND 110000000000000),
  credit bigint NOT NULL CHECK(credit BETWEEN 0 AND 110000000000000),
  PRIMARY KEY(org_id,event_id,line_no),FOREIGN KEY(org_id,event_id) REFERENCES naruv_accounting.journals,
@@ -59,15 +59,15 @@ CREATE TRIGGER period_guard BEFORE UPDATE OR DELETE ON naruv_accounting.periods
  FOR EACH ROW EXECUTE FUNCTION naruv_accounting.period_guard();
 CREATE FUNCTION naruv_accounting.validate_journal() RETURNS trigger
  LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE expected bigint; dr numeric; cr numeric; cnt bigint;
+DECLARE expected numeric; dr numeric; cr numeric; cnt bigint;
 BEGIN
- SELECT CASE WHEN e.action='bill' THEN b.total ELSE e.amount END INTO expected
+ SELECT CASE WHEN e.action='bill' THEN b.total WHEN e.action='credit' THEN e.amount::numeric+abs(coalesce((e.payload->>'variance')::numeric,0)) ELSE e.amount END INTO expected
  FROM naruv_finance.events e JOIN naruv_finance.bills b ON (b.org_id,b.bill_id)=(e.org_id,e.bill_id)
  WHERE e.org_id=NEW.org_id AND e.request_id=NEW.event_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'ACCT_SOURCE_MISSING'; END IF;
  SELECT coalesce(sum(l.debit),0),coalesce(sum(l.credit),0),count(*) INTO dr,cr,cnt
  FROM naruv_accounting.lines l WHERE l.org_id=NEW.org_id AND l.event_id=NEW.event_id;
- IF dr<>expected OR cr<>expected OR (expected>0 AND cnt NOT BETWEEN 2 AND 3)
+ IF dr<>expected OR cr<>expected OR (expected>0 AND cnt NOT BETWEEN 2 AND 5)
  OR (expected=0 AND cnt<>0) THEN RAISE EXCEPTION 'ACCT_UNBALANCED'; END IF;
  RETURN NULL;
 END $$;
@@ -77,7 +77,7 @@ CREATE CONSTRAINT TRIGGER line_balance AFTER INSERT ON naruv_accounting.lines
  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION naruv_accounting.validate_journal();
 CREATE FUNCTION naruv_accounting.post_finance() RETURNS trigger
  LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog AS $$
-DECLARE b naruv_finance.bills; p naruv_accounting.periods; a record; month_start date; net bigint; tax bigint;
+DECLARE b naruv_finance.bills; p naruv_accounting.periods; a record; month_start date; net bigint; tax bigint; variance bigint;
 BEGIN
  IF current_user<>'naruv_native_owner' THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
  SELECT i.actor_id,i.org_id,i.actor_role INTO a FROM jw_dev.stage_identity_v84() i;
@@ -106,6 +106,13 @@ BEGIN
   ELSE
    INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AP',NEW.amount,0),(NEW.org_id,NEW.request_id,2,'CASH_CLEARING',0,NEW.amount);
   END IF;
+ ELSIF NEW.action='refund' THEN
+  IF NEW.amount<1 THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
+  IF b.kind='sale' THEN
+   INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AR',NEW.amount,0),(NEW.org_id,NEW.request_id,2,'CASH_CLEARING',0,NEW.amount);
+  ELSE
+   INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AP',0,NEW.amount),(NEW.org_id,NEW.request_id,2,'CASH_CLEARING',NEW.amount,0);
+  END IF;
  ELSIF NEW.action='credit' THEN
   net:=(NEW.payload->>'net')::bigint;tax:=(NEW.payload->>'vat')::bigint;
   IF net IS NULL OR tax IS NULL OR net<0 OR tax<0 OR NEW.amount<>net+tax
@@ -113,15 +120,21 @@ BEGIN
   THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
   IF NOT EXISTS(SELECT 1 FROM naruv_accounting.journals j WHERE j.org_id=NEW.org_id AND j.bill_id=NEW.bill_id AND j.action='bill')
   THEN RAISE EXCEPTION 'ACCT_SOURCE_MISSING'; END IF;
-  IF NEW.amount=0 THEN RETURN NEW; END IF;
-  IF b.kind='sale' THEN
+  variance:=coalesce((NEW.payload->>'variance')::bigint,0);
+  IF b.kind='sale' AND variance<>0 THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
+  IF NEW.amount>0 AND b.kind='sale' THEN
    INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AR',0,NEW.amount);
    IF net>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,2,'SALES',net,0); END IF;
    IF tax>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,3,'VAT_OUTPUT',tax,0); END IF;
-  ELSE
+  ELSIF NEW.amount>0 THEN
    INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AP',NEW.amount,0);
    IF net>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,2,'PURCHASE_CLEARING',0,net); END IF;
    IF tax>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,3,'VAT_INPUT',0,tax); END IF;
+  END IF;
+  IF variance>0 THEN
+   INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,4,'PURCHASE_CLEARING',variance,0),(NEW.org_id,NEW.request_id,5,'PURCHASE_COST_VARIANCE',0,variance);
+  ELSIF variance<0 THEN
+   INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,4,'PURCHASE_CLEARING',0,-variance),(NEW.org_id,NEW.request_id,5,'PURCHASE_COST_VARIANCE',-variance,0);
   END IF;
  ELSE
   IF NOT EXISTS(SELECT 1 FROM naruv_accounting.journals j WHERE j.org_id=NEW.org_id AND j.event_id=NEW.reversal_of AND j.bill_id=NEW.bill_id AND j.action='pay')

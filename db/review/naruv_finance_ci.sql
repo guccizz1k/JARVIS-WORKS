@@ -21,15 +21,15 @@ CREATE TABLE naruv_finance.bills(
 );
 CREATE TABLE naruv_finance.events(
  org_id text NOT NULL,request_id text NOT NULL,bill_id text NOT NULL,actor_id text NOT NULL,
- action text NOT NULL CHECK(action IN ('bill','pay','reverse','credit')),payload jsonb NOT NULL,
+ action text NOT NULL CHECK(action IN ('bill','pay','reverse','credit','refund')),payload jsonb NOT NULL,
  amount bigint NOT NULL CHECK(amount BETWEEN 0 AND 110000000000000),
  payment_ref text,reversal_of text,receipt jsonb NOT NULL,created_at timestamptz NOT NULL,
  PRIMARY KEY(org_id,request_id),UNIQUE(org_id,payment_ref),UNIQUE(org_id,reversal_of),
  FOREIGN KEY(org_id,bill_id) REFERENCES naruv_finance.bills,
  FOREIGN KEY(org_id,reversal_of) REFERENCES naruv_finance.events(org_id,request_id),
- CHECK((action='pay')=(payment_ref IS NOT NULL)),
+ CHECK((action IN ('pay','refund'))=(payment_ref IS NOT NULL)),
  CHECK((action='reverse')=(reversal_of IS NOT NULL)),
- CHECK((action='bill' AND amount=0) OR (action IN ('pay','reverse') AND amount>0) OR action='credit')
+ CHECK((action='bill' AND amount=0) OR (action IN ('pay','reverse','refund') AND amount>0) OR action='credit')
 );
 CREATE INDEX finance_credit_bill ON naruv_finance.events(org_id,bill_id) WHERE action='credit';
 CREATE INDEX finance_bill_doc ON naruv_finance.bills(org_id,doc_id);
@@ -46,7 +46,7 @@ CREATE TRIGGER bills_immutable BEFORE UPDATE OR DELETE ON naruv_finance.bills FO
 CREATE TRIGGER events_immutable BEFORE UPDATE OR DELETE ON naruv_finance.events FOR EACH ROW EXECUTE FUNCTION naruv_native_review.immutable();
 CREATE FUNCTION naruv_finance.paid(p_org text,p_bill text) RETURNS bigint
  LANGUAGE sql VOLATILE SET search_path=pg_catalog AS $$
- SELECT coalesce(sum(CASE WHEN action='pay' THEN amount WHEN action='reverse' THEN -amount ELSE 0 END),0)::bigint
+ SELECT coalesce(sum(CASE WHEN action='pay' THEN amount WHEN action IN ('reverse','refund') THEN -amount ELSE 0 END),0)::bigint
  FROM naruv_finance.events WHERE org_id=p_org AND bill_id=p_bill
 $$;
 CREATE FUNCTION naruv_finance.credited(p_org text,p_bill text) RETURNS boolean
@@ -151,6 +151,9 @@ BEGIN
    IF p_payload-'payment_request_id'<>'{}'::jsonb OR jsonb_typeof(p_payload->'payment_request_id') IS DISTINCT FROM 'string'
    THEN RAISE EXCEPTION 'FIN_INPUT'; END IF;
    rev:=p_payload->>'payment_request_id';
+   -- A refund is allocated against aggregate paid cash; prohibit ambiguous original payment reversal.
+   IF EXISTS(SELECT 1 FROM naruv_finance.events x WHERE x.org_id=a.org_id AND x.bill_id=p_bill AND x.action='refund')
+   THEN RAISE EXCEPTION 'FIN_CONFLICT'; END IF;
    SELECT * INTO original FROM naruv_finance.events x WHERE x.org_id=a.org_id AND x.bill_id=p_bill AND x.request_id=rev AND x.action='pay';
    IF NOT FOUND THEN RAISE EXCEPTION 'FIN_NOT_FOUND'; END IF;
    IF EXISTS(SELECT 1 FROM naruv_finance.events x WHERE x.org_id=a.org_id AND x.reversal_of=rev) THEN RAISE EXCEPTION 'FIN_CONFLICT'; END IF;
