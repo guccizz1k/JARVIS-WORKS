@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "b99be43067ea5dbbbf28870e47dd5819538ae6f2",
+      "sha": "0e75be8fa79cf791aac4724b8389b895487940fe",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "1d758dcf9601c6414afd180d42629b154ea7a6ab",
+      "sha": "eb4000786ab2fe4e5c9072c858219cb281025cf7",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "3b6fa85a76d78d9f9ba2791e64e61bcd0d76bae1",
+      "sha": "d5325f640a6d3eb93b2fdbdbe4f1f5b05b9714af",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "9b3cea9c9dfc10f9183e9d98f3c54cdfb53f4bf5",
+      "sha": "9f56edcb554e7db9e04162cefab4149964cda9cc",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8728,5 +8728,9 @@
   "verified_source_pin_local_collection_and_db_time": {
     "parent": "440a7697432b866f426062eb2849bf4f22130d00",
     "reason": "Pin independently observed official source digest from job 139567400667 (7117 cells zero mismatch), preserve V1 proof and add opt-in V2 local assessed collection reference, reject invalid policies, keep insurance rounding review-only; database records actual consumption time."
+  },
+  "agency_source_bound_archive_lifecycle": {
+    "parent": "8aea77a89cd9b85a053450b5c2a04592951c33ea",
+    "reason": "Declared NPS income base clamp from official sources; source-bound agency decision routing incl subsidy, leave, non-enrollment and exceptions; evidence snapshot drift denial, not legal entitlement or insurance rounding. Offline archive lifecycle review binds complete asset set and records retention, legal hold and old key dependencies; no deletion or key action."
   }
 }

@@ -1080,3 +1080,65 @@ def local_collection_review_2026(*,tenant,worker,period,assessed_national_collec
           "assessment":assessment_sha256,"scope":scope,"local":collected}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
         "production_authorized":False}
+
+
+def pension_declared_base_review_2026(*,tenant,worker,period,declared_income_krw,
+                                     assessed_base_krw,assessment_sha256):
+    """Single ordinary workplace reference for a separately classified declared
+    monthly income. Not gross-pay inference, enrollment or subsidy approval.
+    NPS Enforcement Decree Art.5 and 2026 July limits notice.
+    """
+    require(_whole(declared_income_krw,0,10**9),"KR_NPS_DECLARED_INCOME")
+    reference=pension_reference_2026(tenant=tenant,worker=worker,period=period,
+        assessed_base_krw=assessed_base_krw,assessment_sha256=assessment_sha256)
+    low,high=reference["base_limits_krw"]
+    calculated=max(low,min(high,(declared_income_krw//1000)*1000))
+    return {"status":"DECLARED_BASE_REFERENCE_MATCH_ONLY" if calculated==assessed_base_krw else "AGENCY_BASE_DIFFERENCE_REVIEW_REQUIRED",
+        "reference_base_krw":calculated,"assessed_base_krw":assessed_base_krw,"assessment_reference":reference,
+        "review_sha256":hash_input({"v":"KR_NPS_DECLARED_BASE_2026_V1","reference":reference["reference_sha256"],
+            "declared":declared_income_krw,"calculated":calculated}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+# These labels route agency decisions, not automatic determinations of entitlement.
+_AGENCY_CASES={
+    "pension":("ORDINARY","SUBSIDY","CONTRIBUTION_EXCEPTION","NOT_ENROLLED","ADJUSTMENT"),
+    "health":("ORDINARY","REDUCTION","EXEMPTION","LEAVE","NOT_ENROLLED","ADJUSTMENT"),
+    "long_term_care":("ORDINARY","REDUCTION","EXEMPTION","LEAVE","NOT_ENROLLED","ADJUSTMENT"),
+    "employment_insurance":("ORDINARY","SUBSIDY","LEAVE","NOT_ENROLLED","ADJUSTMENT"),
+}
+
+def source_bound_agency_deduction_review_2026(*,tenant,worker,period,policy_revision,hourly_krw,
+        minutes_by_day,additional_bps,expected_draft_sha256,ordinary_hourly,classification_sha256,
+        classified_days,deductions,agency_cases,expected_agency_snapshot_sha256):
+    """Review separately assessed deductions, including exceptional insurance.
+    Caller loads the attendance and agency decisions from authenticated,
+    authorized server-owned sources. The digest detects drift, not authenticity.
+    No automatic eligibility, rounding, refund, disbursement or posting.
+    """
+    bound=source_bound_review(tenant=tenant,worker=worker,period=period,policy_revision=policy_revision,
+        hourly_krw=hourly_krw,minutes_by_day=minutes_by_day,additional_bps=additional_bps,
+        expected_draft_sha256=expected_draft_sha256,ordinary_hourly=ordinary_hourly,
+        classification_sha256=classification_sha256,classified_days=classified_days,deductions=deductions)
+    require(type(agency_cases) is dict and set(agency_cases)==set(_AGENCY_CASES),"KR_AGENCY_CASES")
+    normalized={}
+    for kind,row in agency_cases.items():
+        require(type(row) is dict and set(row)=={"tenant","worker","period","case","amount_krw","evidence_sha256"},"KR_AGENCY_SHAPE")
+        require((row["tenant"],row["worker"],row["period"])==(tenant,worker,period),"KR_AGENCY_SCOPE")
+        require(type(row["case"]) is str and row["case"] in _AGENCY_CASES[kind],"KR_AGENCY_CASE")
+        amount=row["amount_krw"];proof=row["evidence_sha256"]
+        require(_whole(amount,0,10**12) and type(proof) is str and HEX.fullmatch(proof),"KR_AGENCY_EVIDENCE")
+        deduction=deductions[kind]
+        require(amount==deduction["amount_krw"] and proof==deduction["evidence_sha256"],"KR_AGENCY_AMOUNT_OR_EVIDENCE_CHANGED")
+        zero_case=row["case"] in ("NOT_ENROLLED","EXEMPTION","CONTRIBUTION_EXCEPTION")
+        require(not zero_case or amount==0,"KR_AGENCY_ZERO_REQUIRED")
+        require(deduction["assessment"]==("NOT_APPLICABLE" if row["case"]=="NOT_ENROLLED" else "ASSESSED"),"KR_AGENCY_ASSESSMENT")
+        normalized[kind]=dict(row)
+    digest=hash_input({"v":"KR_AGENCY_SNAPSHOT_2026_V1","tenant":tenant,"worker":worker,"period":period,
+        "cases":normalized})
+    require(type(expected_agency_snapshot_sha256) is str and digest==expected_agency_snapshot_sha256,"KR_AGENCY_SNAPSHOT_CHANGED")
+    exceptions=sorted(k for k,v in normalized.items() if v["case"]!="ORDINARY")
+    return {"status":"AGENCY_EXCEPTION_REVIEW_REQUIRED" if exceptions else "AGENCY_ASSESSED_REVIEW_ONLY",
+        "exception_items":exceptions,"source_bound_review":bound,"agency_snapshot_sha256":digest,
+        "review_sha256":hash_input({"v":"KR_AGENCY_SOURCE_BOUND_2026_V1","source":bound["review_binding_sha256"],"agency":digest}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}

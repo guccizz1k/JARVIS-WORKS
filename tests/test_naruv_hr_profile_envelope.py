@@ -127,3 +127,37 @@ class HRProfileEnvelope(unittest.TestCase):
                        dict(recovery_public_key=args["inventory_public_key"]),dict(review=dict(review,status="BLOCKED")),
                        dict(review=dict(review,review_sha256="f"*64))):
             with self.subTest(change=list(change)),self.assertRaises(ProfileBlocked):verify_retirement_attestations(**dict(args,**change))
+
+
+    def test_archive_lifecycle_holds_and_old_key_dependencies(self):
+        import hashlib
+        from datetime import datetime,timezone,timedelta
+        from app.naruv_hr_profile_envelope import archive_lifecycle_review,_canonical
+        now=datetime(2026,11,26,tzinfo=timezone.utc)
+        row=dict(asset="old-copy",tenant="ci-a",archive_sha256="a"*64,
+                 retain_until=now+timedelta(days=1),legal_hold=True,old_key_required=True)
+        other=dict(row,asset="new-copy",archive_sha256="b"*64,retain_until=now,legal_hold=False,old_key_required=False)
+        expected=["old-copy","new-copy"]
+        def digest(records):
+            values=[[x["asset"],x["archive_sha256"],None if x["retain_until"] is None else x["retain_until"].isoformat(),
+                     x["legal_hold"],x["old_key_required"]] for x in records]
+            return hashlib.sha256(_canonical(["NARUV_ARCHIVE_LIFECYCLE_V1","ci-a",sorted(expected),sorted(values)])).hexdigest()
+        args=dict(tenant="ci-a",as_of=now,expected_assets=expected,records=[row,other],inventory_sha256=digest([row,other]))
+        r=archive_lifecycle_review(**args)
+        self.assertEqual(r["status"],"BLOCKED")
+        self.assertEqual(r["old_key_assets"],["old-copy"])
+        self.assertEqual(r["legal_hold_assets"],["old-copy"])
+        self.assertEqual(r["retained_assets"],["old-copy"])
+        self.assertFalse(r["deletion_authorized"])
+        self.assertEqual(r,archive_lifecycle_review(**dict(args,records=[other,row])))
+        with self.assertRaises(ProfileBlocked):archive_lifecycle_review(**dict(args,records=[other]))
+        incomplete=archive_lifecycle_review(**dict(args,records=[other],inventory_sha256=digest([other])))
+        self.assertEqual(incomplete["missing_assets"],["old-copy"])
+        unknown=dict(row,retain_until=None,legal_hold=False,old_key_required=False)
+        r=archive_lifecycle_review(**dict(args,records=[unknown,other],inventory_sha256=digest([unknown,other])))
+        self.assertEqual(r["unknown_retention_assets"],["old-copy"])
+        clear=dict(row,retain_until=now,legal_hold=False,old_key_required=False)
+        r=archive_lifecycle_review(**dict(args,records=[clear,other],inventory_sha256=digest([clear,other])))
+        self.assertEqual(r["status"],"EVIDENCE_REVIEW_ONLY")
+        self.assertFalse(r["key_retirement_authorized"])
+        self.assertFalse(r["production_authorized"])

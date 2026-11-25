@@ -205,3 +205,40 @@ def consume_retirement_attestation_ci(cur,**args):
         (args["challenge"],args["inventory_sha256"],args["review"]["review_sha256"],args["issued_at"]))
     _require(cur.rowcount==1)
     return {"status":"SINGLE_USE_EVIDENCE_REVIEW_ONLY","key_retirement_authorized":False,"production_authorized":False}
+
+
+def archive_lifecycle_review(*,tenant,as_of,expected_assets,inventory_sha256,records):
+    """Offline review of a trusted archive inventory, not deletion or release.
+    All existing copies must be included. A legal hold, unknown retention,
+    or old-key dependency must remain visible even after a new copy exists.
+    """
+    from datetime import datetime,timedelta
+    import hashlib
+    _require(type(tenant) is str and ID.fullmatch(tenant) and type(as_of) is datetime
+             and as_of.utcoffset()==timedelta(0))
+    _require(type(expected_assets) in (list,tuple) and 1<=len(expected_assets)<=10000
+             and all(type(x) is str and ID.fullmatch(x) for x in expected_assets)
+             and len(set(expected_assets))==len(expected_assets))
+    _require(type(records) in (list,tuple) and len(records)<=10000)
+    expected=set(expected_assets);seen=set();normalized=[];holds=[];retained=[];old_keys=[];unknown=[]
+    for row in records:
+        _require(type(row) is dict and set(row)=={"asset","tenant","archive_sha256","retain_until","legal_hold","old_key_required"})
+        asset=row["asset"];until=row["retain_until"]
+        _require(type(asset) is str and asset in expected and asset not in seen and row["tenant"]==tenant
+            and type(row["archive_sha256"]) is str and re.fullmatch(r"[0-9a-f]{64}",row["archive_sha256"])
+            and type(row["legal_hold"]) is bool and type(row["old_key_required"]) is bool
+            and (until is None or (type(until) is datetime and until.utcoffset()==timedelta(0))))
+        seen.add(asset)
+        normalized.append([asset,row["archive_sha256"],None if until is None else until.isoformat(),row["legal_hold"],row["old_key_required"]])
+        if row["legal_hold"]:holds.append(asset)
+        if until is None:unknown.append(asset)
+        elif as_of<until:retained.append(asset)
+        if row["old_key_required"]:old_keys.append(asset)
+    digest=hashlib.sha256(_canonical(["NARUV_ARCHIVE_LIFECYCLE_V1",tenant,sorted(expected),sorted(normalized)])).hexdigest()
+    _require(type(inventory_sha256) is str and secrets.compare_digest(digest,inventory_sha256))
+    missing=sorted(expected-seen)
+    return {"status":"BLOCKED" if missing or holds or retained or unknown or old_keys else "EVIDENCE_REVIEW_ONLY",
+        "missing_assets":missing,"legal_hold_assets":sorted(holds),"retained_assets":sorted(retained),
+        "unknown_retention_assets":sorted(unknown),"old_key_assets":sorted(old_keys),
+        "review_sha256":hashlib.sha256(_canonical(["NARUV_ARCHIVE_LIFECYCLE_REVIEW_V1",digest,as_of.isoformat()])).hexdigest(),
+        "deletion_authorized":False,"key_retirement_authorized":False,"production_authorized":False}

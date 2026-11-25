@@ -399,3 +399,47 @@ class SourceEditionPin(unittest.TestCase):
         self.assertRegex(OFFICIAL_PDF_SHA256,r"^[0-9a-f]{64}$")
         for raw in (b"%PDF-modified",b"",None):
             with self.assertRaisesRegex(ValueError,"SOURCE_EDITION_DIGEST_CHANGED"):verify_source_digest(raw)
+
+
+class AgencyDeductionReview(unittest.TestCase):
+    def test_declared_base_clamp_and_assessment(self):
+        from app.naruv_kr_payroll_review import pension_declared_base_review_2026
+        args=dict(tenant="a",worker="w",assessment_sha256="a"*64)
+        for period,declared,base in (("2026-06",399999,400000),("2026-07",409999,410000),
+            ("2026-07",1234567,1234000),("2026-07",6600000,6590000),("2026-06",6600000,6370000)):
+            with self.subTest(period=period,declared=declared):
+                r=pension_declared_base_review_2026(**args,period=period,declared_income_krw=declared,assessed_base_krw=base)
+                self.assertEqual(r["reference_base_krw"],base)
+                self.assertEqual(r["status"],"DECLARED_BASE_REFERENCE_MATCH_ONLY")
+                self.assertFalse(r["payment_authorized"])
+        r=pension_declared_base_review_2026(**args,period="2026-07",declared_income_krw=1234567,assessed_base_krw=1235000)
+        self.assertEqual(r["status"],"AGENCY_BASE_DIFFERENCE_REVIEW_REQUIRED")
+        for val in (True,-1,10**9+1):
+            with self.assertRaises(PayrollBlocked):pension_declared_base_review_2026(**args,period="2026-07",declared_income_krw=val,assessed_base_krw=410000)
+
+    def test_agency_scope_and_snapshot(self):
+        from app.naruv_kr_payroll_review import source_bound_agency_deduction_review_2026
+        from app.naruv_payroll_draft import hash_input
+        args=SourceBoundKRReview().inputs()
+        args["deductions"]["pension"]=dict(amount_krw=0,evidence_sha256="c"*64,assessment="ASSESSED")
+        args["deductions"]["employment_insurance"]=dict(amount_krw=0,evidence_sha256="d"*64,assessment="NOT_APPLICABLE")
+        cases={k:dict(tenant="a",worker="w",period="2026-11",case="ORDINARY",
+            amount_krw=args["deductions"][k]["amount_krw"],evidence_sha256=args["deductions"][k]["evidence_sha256"])
+            for k in ("pension","health","long_term_care","employment_insurance")}
+        cases["pension"]["case"]="CONTRIBUTION_EXCEPTION"
+        cases["employment_insurance"]["case"]="NOT_ENROLLED"
+        cases["health"]["case"]="LEAVE"
+        digest=lambda rows:hash_input({"v":"KR_AGENCY_SNAPSHOT_2026_V1","tenant":"a","worker":"w","period":"2026-11","cases":rows})
+        args.update(agency_cases=cases,expected_agency_snapshot_sha256=digest(cases))
+        r=source_bound_agency_deduction_review_2026(**args)
+        self.assertEqual(r["exception_items"],["employment_insurance","health","pension"])
+        self.assertEqual(r["source_bound_review"]["deductions"]["net_estimate_krw"],116000)
+        self.assertFalse(r["payment_authorized"])
+        self.assertFalse(r["statutory_validated"])
+        for change in (dict(expected_draft_sha256="0"*64),dict(expected_agency_snapshot_sha256="0"*64),
+                       dict(agency_cases={}),dict(classified_days=[day(o=59)])):
+            with self.assertRaises(PayrollBlocked):source_bound_agency_deduction_review_2026(**dict(args,**change))
+        for change in (dict(tenant="b"),dict(worker="other"),dict(period="2026-12"),
+                       dict(amount_krw=1001),dict(evidence_sha256="e"*64),dict(case="EXEMPTION")):
+            bad=dict(cases,health=dict(cases["health"],**change))
+            with self.assertRaises(PayrollBlocked):source_bound_agency_deduction_review_2026(**dict(args,agency_cases=bad,expected_agency_snapshot_sha256=digest(bad)))
