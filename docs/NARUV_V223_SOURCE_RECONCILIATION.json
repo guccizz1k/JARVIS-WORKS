@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "536d393f7e6a6010f283c3f4615e0f8806437fa3",
+      "sha": "62f08302281d98bf63d7742d21ee9a9af4b29dfe",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "198efd403abf7fa8ffe9085ad57b5c19ff34cdb7",
+      "sha": "d0e0f512ba5eb309a72eb8495a551601e580d978",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8510,11 +8510,11 @@
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
-      "sha": "74526848743a8f5cbce6fa849571162bcd6b2864",
+      "sha": "7a42f216895532ed8279d49be29ad3abc071866b",
       "mode": "100644"
     },
     "tests/test_naruv_hosted_qa_admission.py": {
-      "sha": "af195df5faa50d435a8536f3d7da3ac18645f6d6",
+      "sha": "fc9f8e6b9966381034dc320ea9d5c908dc325132",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_boundary.py": {
@@ -8684,5 +8684,9 @@
   "hosted_metadata_provider_shape": {
     "parent": "292e920bde09c98207ee199f755391545ff1aaf1",
     "reason": "Real Render list_deploys response from existing read-only service omits serviceId; bind query scope explicitly and reject inconsistent optional serviceId. Avoid duplicate inherited tax tests."
+  },
+  "expanded_table_and_provider_scope": {
+    "parent": "f4d9d081cb2b253fc0d20db94ef11674b5a28844",
+    "reason": "Append official PDF pages 17–18 (52 bands/572 cells, preserve prior lookup proofs), check workspace, repo, suspend and free plan against actual Render metadata shape; no hosted deployment or statutory certification."
   }
 }
