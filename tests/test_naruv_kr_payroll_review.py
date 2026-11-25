@@ -361,3 +361,22 @@ class IndependentSourceAudit(unittest.TestCase):
         pages[-1]+=last
         with self.assertRaisesRegex(ValueError,"SOURCE_DUPLICATE_10M"):
             extract("\f".join(pages)+"\f")
+
+
+class LocalCollectionReference(unittest.TestCase):
+    def test_assessed_base_and_truncation(self):
+        from app.naruv_kr_payroll_review import local_collection_review_2026
+        args=dict(tenant="a",worker="w",period="2026-11",assessment_sha256="a"*64,
+                  scope="ASSESSED_ORDINARY_MONTHLY_WITHHOLDING_NO_EXCEPTIONS")
+        for national,expected in ((0,0),(1000,100),(1010,100),(1090,100),(1100,110),(74350,7430)):
+            with self.subTest(national=national):
+                r=local_collection_review_2026(**args,assessed_national_collection_krw=national)
+                self.assertEqual(r["local_collection_krw"],expected)
+                self.assertFalse(r["payment_authorized"])
+                self.assertFalse(r["statutory_validated"])
+        for val in (True,-10,990,1001,10**9+10):
+            with self.assertRaises(PayrollBlocked):
+                local_collection_review_2026(**args,assessed_national_collection_krw=val)
+        for change in (dict(scope="INSTALLMENT"),dict(assessment_sha256="bad"),dict(period="2027-01")):
+            with self.assertRaises(PayrollBlocked):
+                local_collection_review_2026(**dict(args,**change),assessed_national_collection_krw=1000)

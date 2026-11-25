@@ -1045,3 +1045,27 @@ def ordinary_monthly_deduction_review_2026(*,tenant,worker,period,base_hourly,or
             "pension":pension["reference_sha256"],"insurance":insurance["reference_sha256"],
             "manual":manual["reconciliation_sha256"]}),"requires_human_review":True,
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def local_collection_review_2026(*,tenant,worker,period,assessed_national_collection_krw,
+                                 assessment_sha256,scope):
+    """Separate ordinary assessed withholding reference, not a filing.
+    Local Tax Act 103-13: 10% of withheld national tax.
+    Framework Act on Local Taxes 59 applies Treasury Act 47 to collections.
+    No relief, aggregated remittance, installments, corrections or refunds.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_LOCAL_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_LOCAL_PERIOD")
+    require(scope=="ASSESSED_ORDINARY_MONTHLY_WITHHOLDING_NO_EXCEPTIONS","KR_LOCAL_SCOPE")
+    require(_whole(assessed_national_collection_krw,0,10**9)
+            and assessed_national_collection_krw%10==0
+            and (assessed_national_collection_krw==0 or assessed_national_collection_krw>=1000),"KR_LOCAL_BASE")
+    require(type(assessment_sha256) is str and HEX.fullmatch(assessment_sha256),"KR_LOCAL_EVIDENCE")
+    exact=Fraction(assessed_national_collection_krw,10)
+    collected=(exact//10)*10
+    return {"status":"RESTRICTED_LOCAL_COLLECTION_REFERENCE_ONLY","local_exact":_money(exact),
+        "local_collection_krw":collected,"review_sha256":hash_input({"v":"KR_LOCAL_COLLECTION_2026_V1",
+          "tenant":tenant,"worker":worker,"period":period,"national":assessed_national_collection_krw,
+          "assessment":assessment_sha256,"scope":scope,"local":collected}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
+        "production_authorized":False}

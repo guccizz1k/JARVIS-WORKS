@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "569c84b4901a7c872b05d2c09f79c34f469d4039",
+      "sha": "82811b24d23e511a0ae46a842da6744f8149cc7f",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "7a437531be3fb9f303cf84889c28de119717b223",
+      "sha": "794e2a7f36502b95fd2af06a9e1f7c5bb092513c",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8720,5 +8720,9 @@
   "source_parser_threshold_and_db_clock": {
     "parent": "756f8c0c1400ed7b8a461be368c81b47d5dcc481",
     "reason": "Disambiguate last-page formula heading, preserve duplicate numeric rejection, report affected official rows; DB clock independently rejects expired signed challenges. Full source comparison remains pending."
+  },
+  "local_collection_assessed_reference": {
+    "parent": "997ee692b03bcc625520952144a66321812e1367",
+    "reason": "Local Tax Act 103-13, Framework Act on Local Taxes 59 and Treasury Act 47; separate assessed national tax reference and 10-won truncation; no automatic posting or unsupported special cases."
   }
 }
