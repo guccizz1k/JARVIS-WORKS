@@ -32,6 +32,9 @@ on:
       - app/naruv_native_file_preview.py
       - db/review/naruv_native_file_preview_ci.sql
       - scripts/naruv_native_file_preview_ci.py
+      - app/naruv_native_write_review.py
+      - db/review/naruv_native_write_review_ci.sql
+      - scripts/naruv_native_write_review_ci.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -440,3 +443,43 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python -m py_compile app/naruv_native_file_preview.py scripts/naruv_native_file_preview_ci.py
           python -m scripts.naruv_native_file_preview_ci
+
+  native-file-write-pg17:
+    name: NARUV native approval and write PG17 (round ${{ matrix.round }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        round: [1, 2, 3, 4, 5]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing staged API test dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Verify native file stage approval and atomic PG17 write
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py
+          python -m scripts.naruv_native_write_review_ci

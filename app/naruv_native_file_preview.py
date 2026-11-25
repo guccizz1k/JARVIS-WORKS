@@ -5,6 +5,8 @@ A separate server-managed source registry is required; it is not the ERP ledger.
 """
 import asyncio
 import hmac
+import hashlib
+import json
 import os
 import re
 
@@ -75,11 +77,13 @@ def _preview(token_hash, csrf, prior, source_id, entity, file_format, raw):
             if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,95}", reason):
                 reason = "FILE_REJECTED"
             raise HTTPException(422, reason) from None
+        rows = [dict(row) for row in stage.canonical_rows]
+        canonical = hashlib.sha256(json.dumps(rows,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode('utf-8')).hexdigest()
         return {"source_id": source_id, "entity": entity, "format": file_format,
                 "raw_sha256": stage.raw_sha256, "byte_count": stage.byte_count,
                 "stage_sha256": stage.stage_sha256, "row_count": stage.preflight.row_count,
                 "target_snapshot_sha256": stage.preflight.target_snapshot_sha256,
-                "rows": [dict(row) for row in stage.canonical_rows],
+                "canonical_rows_sha256": canonical, "rows": rows,
                 "row_import_authorized": False, "persisted": False}
 
 async def _bounded_body(request):
