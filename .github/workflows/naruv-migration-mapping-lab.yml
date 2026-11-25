@@ -63,6 +63,8 @@ on:
       - scripts/naruv_valuation_ci.py
       - scripts/naruv_erp_restore_ci.py
       - tests/test_naruv_workflow_context.py
+      - app/naruv_integrated_review.py
+      - tests/test_naruv_integrated_review.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -525,5 +527,5 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py app/naruv_production_review.py scripts/naruv_production_ci.py app/naruv_valuation_review.py scripts/naruv_valuation_ci.py scripts/naruv_erp_restore_ci.py
-          python -m unittest tests.test_naruv_workflow_context
+          python -m unittest tests.test_naruv_workflow_context tests.test_naruv_integrated_review
           python -m scripts.naruv_native_write_review_ci

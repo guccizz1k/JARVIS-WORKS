@@ -34,3 +34,6 @@ All five native write rounds failed at the integrated independent restore compar
 
 ## Recovery regression correction
 CI 45593989469 failed all five rounds at snapshot column ACL expansion (InvalidParameterValue: ACL arrays must be one-dimensional); 45593989677 passed. New implementation unnests each ACL and expands only single-element arrays, retaining NULL/default semantics for tables/functions/schemas and no direct grants for NULL columns. Actual PG17 preflight tests NULL, empty, grant and grant option before backup. Column-only and table grant mutations must fail and roll back. Original restored catalog mismatch remains unproven until new CI succeeds. No production state changed.
+
+## Next isolated route composition candidate
+Adds a default-off all-or-none router for existing 29 ERP endpoints, no live entrypoint edits. Requires every original isolated gate, HTTPS Origin, rejects production, namespace occupancy, route collisions and catch-all shadowing. Seven composition cases added; CI execution not yet proven. Does not integrate actual deployed UI, HR/payroll, external DB or bank. Candidate is intentionally separate from pending restore-fix branch to avoid cancelling active CI.
