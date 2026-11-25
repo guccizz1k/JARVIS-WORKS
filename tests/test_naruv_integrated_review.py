@@ -1,5 +1,6 @@
 """Composition tests: actual FastAPI route constructors, no external DB."""
 import os
+import re
 import unittest
 from unittest.mock import patch
 from fastapi import FastAPI, APIRouter
@@ -29,11 +30,22 @@ class IntegratedReview(unittest.TestCase):
         for module in mod.MODULES:
             for route in module.create_router().routes:
                 expected.update(mod.route_key(route))
-        actual=set()
-        for route in app.routes[len(before):]:actual.update(mod.route_key(route))
+        # Public schema enumerates effective paths on both eager and lazy FastAPI.
+        actual={(method.upper(),re.sub(r"\{[^}:]+(?=[:}])","{parameter",path))
+                for path,ops in app.openapi()["paths"].items() if path.startswith(mod.PREFIX+"/")
+                for method in ops if method in {"post","get","put","delete","patch","head","options","trace"}}
         self.assertEqual(actual,expected)
         self.assertEqual(len(actual),29)
         self.assertIn(("POST",mod.PREFIX+"/valuation/overview"),actual)
+        # Exercise every mounted path with the integration gate disabled;
+        # a missing route must not pass simply because it returns HTTP 404.
+        with TestClient(app,base_url="https://testserver") as c:
+            with patch.dict(os.environ,{mod.FLAG:""}):
+                for method,path in sorted(actual):
+                    concrete=path.replace("{parameter}","probe")
+                    r=c.request(method,concrete)
+                    self.assertEqual((r.status_code,r.json().get("detail")),(404,"NARUV_INTEGRATION_DISABLED"),path)
+            self.assertEqual(c.get("/legacy").json(),{"existing":True})
     def test_default_off_and_each_gate_is_required(self):
         for key in (mod.FLAG,*(k for k in FLAGS if k.startswith("NARUV_") and k!=mod.FLAG)):
             with self.subTest(key=key),patch.dict(os.environ,{key:""}):
@@ -90,3 +102,18 @@ class IntegratedReview(unittest.TestCase):
             before=tuple(app.routes)
             with self.assertRaises(RuntimeError):mod.register_integrated_review(app)
             self.assertEqual(tuple(app.routes),before)
+    def test_existing_included_namespace_is_refused_even_when_hidden(self):
+        app=FastAPI()
+        inner=APIRouter()
+        @inner.post("/overview",include_in_schema=False)
+        def hidden():return {}
+        app.include_router(inner,prefix=mod.PREFIX+"/valuation")
+        before=tuple(app.routes)
+        with self.assertRaisesRegex(RuntimeError,"NAMESPACE_OCCUPIED|UNVERIFIED_ROUTE_TREE"):
+            mod.register_integrated_review(app)
+        self.assertEqual(tuple(app.routes),before)
+    def test_openapi_cache_is_refreshed_after_success(self):
+        app=FastAPI()
+        self.assertNotIn(mod.PREFIX+"/valuation/overview",app.openapi()["paths"])
+        self.assertTrue(mod.register_integrated_review(app))
+        self.assertIn(mod.PREFIX+"/valuation/overview",app.openapi()["paths"])

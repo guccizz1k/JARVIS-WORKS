@@ -51,11 +51,18 @@ def create_integrated_router():
 def register_integrated_review(app):
     """All-or-none opt-in, preserving existing route table on refusal."""
     if not enabled():return False
+    if getattr(app.state,"naruv_integrated_review_registered",False):
+        raise RuntimeError("NARUV_INTEGRATION_NAMESPACE_OCCUPIED")
     combined=create_integrated_router()
     # Reserve the namespace; refuse partial/duplicate mounts, including route
     # variants using different parameter names.
     for route in app.routes:
-        path=getattr(route,"path","")
+        path=getattr(route,"path",None)
+        # FastAPI >=0.137 may expose opaque lazily included router nodes.
+        # Do not guess their effective routes or ignore potentially hidden
+        # endpoints. The isolated composer refuses this unproven topology.
+        if not isinstance(path,str):
+            raise RuntimeError("NARUV_INTEGRATION_UNVERIFIED_ROUTE_TREE")
         if path==PREFIX or path.startswith(PREFIX+"/"):
             raise RuntimeError("NARUV_INTEGRATION_NAMESPACE_OCCUPIED")
         if isinstance(route,Mount) and (not path or PREFIX.startswith(path.rstrip("/")+"/")):
@@ -64,4 +71,6 @@ def register_integrated_review(app):
             # An earlier catch-all could shadow the whole API.
             raise RuntimeError("NARUV_INTEGRATION_CATCH_ALL")
     app.include_router(combined)
+    app.state.naruv_integrated_review_registered=True
+    app.openapi_schema=None
     return True
