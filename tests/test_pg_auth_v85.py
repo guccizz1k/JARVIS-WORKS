@@ -231,7 +231,11 @@ def test_two_dsns_must_not_be_equal(monkeypatch):
 def test_no_legacy_main_mutation():
     import hashlib
     current=Path(__file__).parents[1]/'app'/'main.py'
-    assert hashlib.sha256(current.read_bytes()).hexdigest()=='e4584787c8ee97a417656e62297507caa7d618f4146398342dabc23c8a6ab25f'
+    # Verify both the historic V8.5 baseline and the current protected main.
+    # A stale historic digest must never be used to claim modern main changed.
+    historical=Path(__file__).parents[1]/'v78_addon/payload/app/main.py'
+    assert hashlib.sha256(historical.read_bytes()).hexdigest()=='e4584787c8ee97a417656e62297507caa7d618f4146398342dabc23c8a6ab25f'
+    assert hashlib.sha256(current.read_bytes()).hexdigest()=='91deef5315aca3edfe5b24145f5a7a79b7cc9de038eac27b91c7cf95cb95e345'
 
 
 def test_migration_sql_role_grants_and_no_password_exposure():

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 
-from scripts.ci_playwright_cli_smoke import BASE, PROOF, assertion, cli, login, wait_http
+from scripts.ci_playwright_cli_smoke import BASE, PROOF, UI_URL, assertion, cli, login, wait_http
 
 TITLE = "JW-J1-J6-DOM-QUOTE-1309"
 FORM_PROOF = r"""async () => {
@@ -152,7 +152,7 @@ def main() -> int:
     PROOF.mkdir(parents=True, exist_ok=True)
     opened=False
     try:
-        cli("open",BASE)
+        cli("open",UI_URL)
         opened=True
         login("demo@hanbit.example","JW_FORM_TENANT_A")
         proof=assertion(FORM_PROOF,"JW_J1_J6_REAL_FORM_PASS:",timeout=140)

@@ -52,7 +52,7 @@ def prepare_real_auth(fixture) -> None:
         pg.execute(sql.SQL(
             "GRANT jw_auth_stage_v85 TO {} WITH INHERIT FALSE, SET TRUE"
         ).format(sql.Identifier(LOGIN)))
-        for who in ("ci-ua", "ci-ub"):
+        for who in ("ci-ua", "ci-ub", "ci-uc"):
             pg.execute("UPDATE jw_dev.users SET password_hash=%s WHERE id=%s",
                        (_pbkdf2(PASSWORD), who))
         # The auth role is permitted to run auth RPCs, but can never adopt the

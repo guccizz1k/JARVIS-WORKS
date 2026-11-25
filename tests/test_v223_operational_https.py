@@ -1,0 +1,438 @@
+"""Real loopback HTTPS messenger/admin smoke against disposable tenant SQLite.
+
+Never touches connected Supabase, Render or production accounts.
+"""
+import os
+import socket
+import sqlite3
+import ssl
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+import httpx
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_v223_messenger_and_admin_real_loopback_https(tmp_path):
+    cert = tmp_path / 'server.crt'
+    key = tmp_path / 'server.key'
+    subprocess.run([
+        'openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', '1',
+        '-nodes', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
+        '-keyout', str(key), '-out', str(cert)
+    ], check=True, capture_output=True)
+    key.chmod(0o600)
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    db_path = tmp_path / 'isolated-messenger.db'
+    env = {
+        **os.environ,
+        'JW_ENV': 'review',
+        'DEMO_SEED': '1',
+        'JARVIS_DB_PATH': str(db_path),
+        'JW_ROOT_UI': 'owner-visual-review',
+        'JW_APPROVED_UI_REVIEW': 'ISOLATED_REVIEW_ONLY',
+        'JW_NO_EXTERNAL_DATABASE': '1',
+    }
+    for secret in ('BOOTSTRAP_EMAIL', 'BOOTSTRAP_PASSWORD', 'BOOTSTRAP_ORG', 'JW_INSECURE_LOCAL_DEV'):
+        env.pop(secret, None)
+    origin = f'https://127.0.0.1:{port}'
+    tls_context = ssl.create_default_context(cafile=str(cert))
+    with (tmp_path / 'https-server.log').open('w') as server_log:
+        proc = subprocess.Popen([
+            sys.executable, '-m', 'uvicorn', 'app.owner_review_app_v223:app', '--host', '127.0.0.1',
+            '--port', str(port), '--ssl-certfile', str(cert), '--ssl-keyfile', str(key)
+        ], cwd=ROOT, env=env, stdout=server_log, stderr=subprocess.STDOUT)
+        clients = []
+        try:
+            def client():
+                c = httpx.Client(verify=tls_context, trust_env=False, timeout=8.0)
+                clients.append(c)
+                return c
+
+            probe = client()
+            for _ in range(120):
+                assert proc.poll() is None, 'Isolated HTTPS process exited'
+                try:
+                    if probe.get(origin + '/api/health').status_code == 200:
+                        break
+                except httpx.TransportError:
+                    pass
+                time.sleep(0.1)
+            else:
+                raise AssertionError('Isolated HTTPS readiness timeout')
+
+            def login(c, email):
+                r = c.post(origin + '/api/login', json={
+                    'email': email, 'password': 'Demo!2026secure',
+                })
+                assert r.status_code == 200, (email, r.status_code)
+                assert r.cookies.get('jw_session') or r.headers.get('set-cookie')
+                return r.json()
+
+            a, b = client(), client()
+            alice = login(a, 'demo@hanbit.example')
+            bob = login(b, 'demo@bada.example')
+            org_a, org_b = alice['user']['org_id'], bob['user']['org_id']
+            assert org_a != org_b
+            csrf_a, csrf_b = alice['csrf_token'], bob['csrf_token']
+            headers_a = {'X-CSRF-Token': csrf_a}
+            headers_b = {'X-CSRF-Token': csrf_b}
+
+            directory = a.get(origin + '/api/messenger/directory')
+            assert directory.status_code == 200
+            assert any(x['org_id'] == org_b for x in directory.json())
+            assert all(x['org_id'] != org_a for x in directory.json())
+
+            # Creation is explicit. CSRF-free writes must be rejected.
+            url = origin + '/api/messenger/threads'
+            assert a.post(url, json={'recipient_org_id': org_b}).status_code == 403
+            made = a.post(url, json={'recipient_org_id': org_b}, headers=headers_a)
+            assert made.status_code == 201, made.status_code
+            tid = made.json()['id']
+            assert len(tid) == 32
+            assert b.get(origin + '/api/messenger/threads').status_code == 200
+
+            send_url = origin + f'/api/messenger/threads/{tid}/messages'
+            request_id = uuid.uuid4().hex
+            payload = {'content': 'Synthetic real HTTPS message', 'request_id': request_id}
+            assert a.post(send_url, json=payload).status_code == 403
+            sent = a.post(send_url, json=payload, headers=headers_a)
+            assert sent.status_code == 201, sent.status_code
+            mid = sent.json()['id']
+            repeated = a.post(send_url, json=payload, headers=headers_a)
+            assert repeated.status_code == 201
+            assert repeated.json()['id'] == mid  # idempotent retry
+            messages_b = b.get(send_url)
+            assert messages_b.status_code == 200
+            found = [m for m in messages_b.json() if m['id'] == mid]
+            assert len(found) == 1 and found[0]['mine'] is False
+            assert found[0]['sender_org'] == org_a
+            assert found[0]['body'] == payload['content']
+            read = b.post(origin + f'/api/messenger/threads/{tid}/read',
+                          json={'last_message_id': mid}, headers=headers_b)
+            assert read.status_code == 200 and read.json()['status'] == 'read'
+
+            # Authenticated personal profile & UI preferences are real HTTPS server state.
+            p_before=a.get(origin+'/api/account/profile')
+            assert p_before.status_code==200
+            p_obj=p_before.json()
+            assert p_obj['id']==alice['user']['id'] and p_obj['org_id']==org_a
+            assert p_obj['version']==0
+            assert a.post(origin+'/api/account/profile',
+                          json={'version':0,'name':'Synthetic HTTPS Renamed'}).status_code==403
+            p_update=a.post(origin+'/api/account/profile',
+                            headers=headers_a,json={'version':0,'name':'Synthetic HTTPS Renamed'})
+            assert p_update.status_code==200, p_update.status_code
+            assert p_update.json()['version']==1
+            assert a.get(origin+'/api/account/profile').json()['name']=='Synthetic HTTPS Renamed'
+            assert a.get(origin+'/api/me').json()['name']=='Synthetic HTTPS Renamed'
+            assert a.post(origin+'/api/account/profile',headers=headers_a,
+                          json={'version':0,'name':'Stale'}).status_code==409
+            assert b.get(origin+'/api/account/profile').json()['name']!= 'Synthetic HTTPS Renamed'
+            options=a.get(origin+'/api/account/preferences')
+            assert options.status_code==200
+            assert options.json()['version']==0
+            op=a.post(origin+'/api/account/preferences',headers=headers_a,json={
+                'version':0,'compact_view':True,'messenger_auto_refresh':False})
+            assert op.status_code==200, op.status_code
+            assert op.json()['version']==1
+            assert a.get(origin+'/api/account/preferences').json()['compact_view'] is True
+            assert b.get(origin+'/api/account/preferences').json()['compact_view'] is False
+            assert a.post(origin+'/api/account/preferences',headers=headers_a,json={
+                'version':0,'compact_view':False,'messenger_auto_refresh':True}).status_code==409
+
+            # Verified HTTPS review customer edit: atomic original-snapshot CAS
+            # and cross-tenant/CSRF protection; no production records touched.
+            made_customer=a.post(origin+'/api/customers',headers=headers_a,
+              json={'name':'Synthetic HTTPS CAS Customer'})
+            assert made_customer.status_code==201,made_customer.status_code
+            before=made_customer.json()
+            keys=('name','business_number','contact_name','email','phone')
+            expected={key:before[key] for key in keys}
+            updated={**expected,'name':'HTTPS CAS Updated'}
+            url_customer=origin+'/api/review/customers/'+before['id']+'/update'
+            assert a.post(url_customer,json={'expected':expected,'updated':updated}).status_code==403
+            assert b.post(url_customer,headers=headers_b,
+              json={'expected':expected,'updated':updated}).status_code==404
+            committed=a.post(url_customer,headers=headers_a,
+              json={'expected':expected,'updated':updated})
+            assert committed.status_code==200,committed.status_code
+            assert committed.json()['name']=='HTTPS CAS Updated'
+            assert any(r['name']=='HTTPS CAS Updated' for r in a.get(origin+'/api/customers').json())
+            stale=a.post(url_customer,headers=headers_a,
+              json={'expected':expected,'updated':{**updated,'name':'Stale Lost Update'}})
+            assert stale.status_code==409
+            assert any(r['name']=='HTTPS CAS Updated' for r in a.get(origin+'/api/customers').json())
+
+            # Immutable trade-statement index: production-style flow, isolated HTTPS only.
+            quotes=a.get(origin+'/api/quotes')
+            assert quotes.status_code==200 and quotes.json()
+            quote_id=quotes.json()[0]['id']
+            for transition in ('sent','accepted'):
+                changed=a.post(origin+f'/api/quotes/{quote_id}/status',
+                               headers=headers_a,json={'status':transition})
+                assert changed.status_code==200,(transition,changed.status_code)
+            ordered=a.post(origin+'/api/orders/from-quote',headers=headers_a,
+                           json={'quote_id':quote_id,'due_date':'2099-12-30'})
+            assert ordered.status_code==201,ordered.status_code
+            order_id=ordered.json()['id']
+            for transition in ('processing','fulfilled'):
+                changed=a.post(origin+f'/api/orders/{order_id}/status',
+                               headers=headers_a,json={'status':transition})
+                assert changed.status_code==200,(transition,changed.status_code)
+            minted=a.post(origin+'/api/automation/statements/from-order',headers=headers_a,
+                          json={'order_id':order_id})
+            assert minted.status_code==201,minted.status_code
+            statement=minted.json()
+            assert statement['org_id']==org_a and statement['order_id']==order_id
+            listing=a.get(origin+'/api/automation/statements')
+            assert listing.status_code==200
+            assert any(x['id']==statement['id'] and x['order_id']==order_id
+                       for x in listing.json())
+            foreign=b.get(origin+'/api/automation/statements')
+            assert foreign.status_code==200
+            assert all(x['org_id']!=org_a for x in foreign.json())
+            assert b.get(origin+'/api/automation/statements/'+statement['id']).status_code==404
+
+            # Isolated HTTPS draft quotation edit: CAS, multi-line totals,
+            # tenant isolation, CSRF and immutable sent status.
+            qcust=a.get(origin+'/api/customers')
+            assert qcust.status_code==200 and qcust.json()
+            customer_id=qcust.json()[0]['id']
+            body={'customer_id':customer_id,'title':'HTTPS Quote Before',
+                'vat_mode':'taxable','items':[{'name':'Part A','quantity':2,'unit_price':300}]}
+            created=a.post(origin+'/api/quotes',headers=headers_a,json=body)
+            assert created.status_code==201,created.status_code
+            qid=created.json()['id']
+            context_url=origin+'/api/review/quotes/'+qid+'/edit-context'
+            edit_url=origin+'/api/review/quotes/'+qid+'/update'
+            quote_context_response=a.get(context_url)
+            assert quote_context_response.status_code==200,quote_context_response.status_code
+            old=quote_context_response.json()
+            assert len(old['fingerprint'])==64
+            assert old['quote']['status']=='draft'
+            update_body={'expected_sha256':old['fingerprint'],'updated':{
+                **body,'title':'HTTPS Quote Changed',
+                'items':[{'name':'Part B','quantity':4,'unit_price':900}]}}
+            assert a.post(edit_url,json=update_body).status_code==403
+            assert b.get(context_url).status_code==404
+            assert b.post(edit_url,headers=headers_b,json=update_body).status_code==404
+            edited=a.post(edit_url,headers=headers_a,json=update_body)
+            assert edited.status_code==200,edited.status_code
+            assert edited.json()['quote']['money']['total']==3960
+            assert edited.json()['fingerprint']!=old['fingerprint']
+            checked=a.get(context_url)
+            assert checked.status_code==200
+            assert checked.json()['quote']['title']=='HTTPS Quote Changed'
+            assert checked.json()['fingerprint']==edited.json()['fingerprint']
+            assert a.post(edit_url,headers=headers_a,json=update_body).status_code==409
+            finalized=a.post(origin+'/api/quotes/'+qid+'/status',
+                headers=headers_a,json={'status':'sent'})
+            assert finalized.status_code==200
+            assert a.get(context_url).status_code==409
+            assert a.post(edit_url,headers=headers_a,json={
+                **update_body,'expected_sha256':checked.json()['fingerprint']}).status_code==409
+
+            # Review-only order edit / explicit admin acknowledgement via real TLS.
+            quote_request={'customer_id':customer_id,'title':'HTTPS Order Review',
+                'vat_mode':'taxable','items':[{'name':'Power cable','quantity':2,'unit_price':1000}]}
+            order_quote=a.post(origin+'/api/quotes',headers=headers_a,json=quote_request)
+            assert order_quote.status_code==201,order_quote.status_code
+            oqid=order_quote.json()['id']
+            for transition in ('sent','accepted'):
+                progressed=a.post(origin+'/api/quotes/'+oqid+'/status',
+                    headers=headers_a,json={'status':transition})
+                assert progressed.status_code==200,progressed.status_code
+            order_created=a.post(origin+'/api/orders/from-quote',
+                headers=headers_a,json={'quote_id':oqid,'due_date':'2099-12-30'})
+            assert order_created.status_code==201,order_created.status_code
+            oid=order_created.json()['id']
+            order_context_url=origin+'/api/review/orders/'+oid+'/edit-context'
+            order_update_url=origin+'/api/review/orders/'+oid+'/update'
+            order_ack_url=origin+'/api/review/orders/'+oid+'/acknowledge'
+            beginning=a.get(order_context_url)
+            assert beginning.status_code==200,beginning.status_code
+            original_order=beginning.json()
+            original_line=original_order['order']['items'][0]
+            order_changes={'fingerprint':original_order['fingerprint'],
+                'updated':{'due_date':'2099-12-30',
+                    'change_reason':'합성 HTTPS 수주 품목 변경',
+                    'items':[{'source_quote_item_id':original_line['source_quote_item_id'],
+                              'name':'Power cable','quantity':3,'unit_price':1000}]}}
+            assert a.post(order_update_url,json=order_changes).status_code==403
+            assert b.get(order_context_url).status_code==404
+            assert b.post(order_update_url,headers=headers_b,json=order_changes).status_code==404
+            updated_order=a.post(order_update_url,headers=headers_a,json=order_changes)
+            assert updated_order.status_code==200,updated_order.status_code
+            assert updated_order.json()['order']['review_state']=='pending'
+            assert updated_order.json()['order']['money']['total']==3300
+            assert a.post(order_update_url,headers=headers_a,json=order_changes).status_code==409
+            current_order=a.get(order_context_url).json()
+            assert current_order['order']['review_state']=='pending'
+            assert a.post(origin+'/api/orders/'+oid+'/status',headers=headers_a,
+                          json={'status':'processing'}).status_code==200
+            assert a.post(origin+'/api/orders/'+oid+'/status',headers=headers_a,
+                          json={'status':'fulfilled'}).status_code==409
+            latest_order=a.get(order_context_url).json()
+            assert b.post(order_ack_url,headers=headers_b,json={
+                'fingerprint':latest_order['fingerprint'],'confirm':True}).status_code==404
+            assert a.post(order_ack_url,json={
+                'fingerprint':latest_order['fingerprint'],'confirm':True}).status_code==403
+            assert a.post(order_ack_url,headers=headers_a,json={
+                'fingerprint':original_order['fingerprint'],'confirm':True}).status_code==409
+            approved_order=a.post(order_ack_url,headers=headers_a,json={
+                'fingerprint':latest_order['fingerprint'],'confirm':True})
+            assert approved_order.status_code==200,approved_order.status_code
+            assert approved_order.json()['order']['review_state']=='acknowledged'
+            assert a.post(origin+'/api/orders/'+oid+'/status',headers=headers_a,
+                          json={'status':'fulfilled'}).status_code==200
+
+            # Real review TLS, full order -> invoice -> payment -> reversal
+            # -> server reconciliation using the original protected ledger.
+            invoice_create=a.post(origin+'/api/invoices/from-order',headers=headers_a,
+                json={'order_id':oid,'due_date':'2099-12-31'})
+            assert invoice_create.status_code==201,invoice_create.status_code
+            issued_invoice=invoice_create.json()
+            invoice_id=issued_invoice['id']
+            assert issued_invoice['money']['total']==3300
+            assert issued_invoice['balance']==3300
+            invoice_recon=a.get(origin+'/api/reconciliation/'+oid)
+            assert invoice_recon.status_code==200
+            assert invoice_recon.json()['order_money']['total']==3300
+            assert invoice_recon.json()['invoice_money']['total']==3300
+            payment_url=origin+'/api/invoices/'+invoice_id+'/payments'
+            from app.main import today as jw_today
+            payment_payload={'reference':'HTTPS-PAY-ORDER-0001','amount':1100,
+                             'paid_at':jw_today(),'note':''}
+            assert a.post(payment_url,json=payment_payload).status_code==403
+            assert b.get(origin+'/api/invoices/'+invoice_id).status_code==404
+            assert b.post(payment_url,headers=headers_b,json=payment_payload).status_code==404
+            first=a.post(payment_url,headers=headers_a,json=payment_payload)
+            assert first.status_code==201,first.status_code
+            assert first.json()['paid']==1100 and first.json()['balance']==2200
+            repeat=a.post(payment_url,headers=headers_a,json=payment_payload)
+            assert repeat.status_code==201,repeat.status_code
+            assert repeat.json()['paid']==1100
+            assert len(repeat.json()['payments'])==1
+            assert a.post(payment_url,headers=headers_a,
+                json={**payment_payload,'amount':1200}).status_code==409
+            assert a.post(payment_url,headers=headers_a,
+                json={**payment_payload,'reference':'HTTPS-PAY-OVER-0001','amount':2201}).status_code==409
+            remainder=a.post(payment_url,headers=headers_a,json={
+                **payment_payload,'reference':'HTTPS-PAY-ORDER-0002','amount':2200})
+            assert remainder.status_code==201,remainder.status_code
+            assert remainder.json()['paid']==3300 and remainder.json()['balance']==0
+            latest_invoice=a.get(origin+'/api/invoices/'+invoice_id)
+            assert latest_invoice.status_code==200
+            assert latest_invoice.json()['payment_status']=='paid'
+            target_payment=next(p for p in latest_invoice.json()['payments']
+                                if p['reference']=='HTTPS-PAY-ORDER-0002')
+            reverse_url=payment_url+'/'+target_payment['id']+'/reverse'
+            assert a.post(reverse_url).status_code==403
+            assert b.post(reverse_url,headers=headers_b).status_code==404
+            reversed_payment=a.post(reverse_url,headers=headers_a)
+            assert reversed_payment.status_code==200,reversed_payment.status_code
+            assert reversed_payment.json()['paid']==1100
+            assert reversed_payment.json()['balance']==2200
+            assert a.post(reverse_url,headers=headers_a).status_code==409
+            assert a.post(payment_url,headers=headers_a,json={
+                **payment_payload,'reference':'HTTPS-PAY-ORDER-0002',
+                'amount':2200}).status_code==409
+            assert a.get(origin+'/api/reconciliation/'+oid).json()['order_to_invoice']==[]
+
+            # An unrelated company can neither enumerate thread nor read messages.
+            from app.main import hash_password, now
+            other_org = uuid.uuid4().hex
+            other_user = uuid.uuid4().hex
+            with sqlite3.connect(db_path) as db:
+                db.execute('INSERT INTO organizations VALUES(?,?,?)', (other_org, 'Isolated C', now()))
+                db.execute('INSERT INTO users VALUES(?,?,?,?,?,?,?)', (
+                    other_user, other_org, 'tenant-c@example.invalid',
+                    hash_password('StrongSynthetic!2026'), 'C admin', 'admin', now()))
+            other = client()
+            r = other.post(origin + '/api/login', json={
+                'email': 'tenant-c@example.invalid', 'password': 'StrongSynthetic!2026'})
+            assert r.status_code == 200
+            assert other.get(send_url).status_code == 404
+
+            # Staff management: reauthentication, tenant check, and session revocation.
+            staff_id = uuid.uuid4().hex
+            with sqlite3.connect(db_path) as db:
+                db.execute('INSERT INTO users VALUES(?,?,?,?,?,?,?)', (
+                    staff_id, org_a, 'staff-e2e@example.invalid',
+                    hash_password('StrongSynthetic!2026'), 'QA employee', 'member', now()))
+            staff = client()
+            sr = staff.post(origin + '/api/login', json={
+                'email': 'staff-e2e@example.invalid', 'password': 'StrongSynthetic!2026'})
+            assert sr.status_code == 200
+            staff_url = origin + f'/api/security/users/{staff_id}/disable'
+            assert a.post(staff_url, json={'admin_password': 'Demo!2026secure'}).status_code == 403
+            assert b.post(staff_url, headers=headers_b,
+                          json={'admin_password': 'Demo!2026secure'}).status_code == 404
+            disabled = a.post(staff_url, headers=headers_a,
+                              json={'admin_password': 'Demo!2026secure'})
+            assert disabled.status_code == 200, disabled.status_code
+            assert disabled.json().get('sessions_revoked') is True
+            assert staff.get(origin + '/api/me').status_code == 401
+            enabled = a.post(origin + f'/api/security/users/{staff_id}/enable',
+                             headers=headers_a, json={'admin_password': 'Demo!2026secure'})
+            assert enabled.status_code == 200, enabled.status_code
+            assert staff.post(origin + '/api/login', json={
+                'email': 'staff-e2e@example.invalid',
+                'password': 'StrongSynthetic!2026'}).status_code == 200
+
+            # Review-only staff role control: reauthentication, tenant and session safety.
+            role_url=origin+f'/api/account/staff/{staff_id}/role'
+            promote={'expected_role':'member','target_role':'admin',
+                     'admin_password':'Demo!2026secure'}
+            assert a.post(role_url,json=promote).status_code==403  # missing CSRF
+            assert a.post(role_url,headers=headers_a,json={
+                **promote,'admin_password':'bad'}).status_code==403
+            assert b.post(role_url,headers=headers_b,json=promote).status_code==404
+            changed=a.post(role_url,headers=headers_a,json=promote)
+            assert changed.status_code==200,changed.status_code
+            assert changed.json()['role']=='admin'
+            assert changed.json()['sessions_revoked'] is True
+            assert staff.get(origin+'/api/me').status_code==401
+            assert a.post(role_url,headers=headers_a,json=promote).status_code==409
+            relogin=staff.post(origin+'/api/login',json={
+                'email':'staff-e2e@example.invalid',
+                'password':'StrongSynthetic!2026'})
+            assert relogin.status_code==200 and relogin.json()['user']['role']=='admin'
+            demoted=a.post(role_url,headers=headers_a,json={
+                'expected_role':'admin','target_role':'member',
+                'admin_password':'Demo!2026secure'})
+            assert demoted.status_code==200
+            assert demoted.json()['role']=='member'
+            assert staff.get(origin+'/api/me').status_code==401
+            assert a.post(origin+f'/api/account/staff/{alice["user"]["id"]}/role',
+                headers=headers_a,json={
+                    'expected_role':'admin','target_role':'member',
+                    'admin_password':'Demo!2026secure'}).status_code==409
+
+            # Admin session revocation is scoped to company, never global.
+            a_other = client()
+            login(a_other, 'demo@hanbit.example')
+            overview = a.get(origin + '/api/security/overview')
+            assert overview.status_code == 200
+            extra = [s for s in overview.json()['sessions'] if not s['is_current']]
+            assert extra
+            sid = extra[-1]['id']
+            rev = a.post(origin + f'/api/security/sessions/{sid}/revoke', headers=headers_a)
+            assert rev.status_code == 200, rev.status_code
+            assert b.post(origin + f'/api/security/sessions/{sid}/revoke', headers=headers_b).status_code == 404
+        finally:
+            for c in clients:
+                c.close()
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()

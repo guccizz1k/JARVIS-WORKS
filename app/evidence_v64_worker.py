@@ -15,7 +15,10 @@ from pathlib import Path
 from zipfile import ZipFile
 
 MAX_BYTES = 5 * 1024 * 1024
-MAX_PIXELS = 12_000_000
+MAX_PIXELS = 12_000_000  # Existing OCR worker pixel ceiling; never increased.
+MAX_SOURCE_IMAGE_PIXELS = 20_000_000  # Strict source decode limit before downsampling.
+MAX_SOURCE_EDGE = 9000
+DOWNSAMPLE_TARGET_PIXELS = 5_500_000  # Bounded time, memory and OCR input size.
 MAX_PDF_PAGES = 4
 
 class EvidenceError(ValueError): pass
@@ -88,14 +91,27 @@ def ocr_image(raw):
  from PIL import Image,ImageOps,UnidentifiedImageError
  try:
   with Image.open(io.BytesIO(raw)) as im:
-   if im.width*im.height>MAX_PIXELS or im.width<50 or im.height<50:
+   if (im.width<50 or im.height<50 or im.width>MAX_SOURCE_EDGE
+       or im.height>MAX_SOURCE_EDGE or im.width*im.height>MAX_SOURCE_IMAGE_PIXELS):
     raise EvidenceError('사진의 해상도가 허용 범위를 벗어났습니다')
-   # Normalize input and strip metadata. A dedicated temporary directory is erased on exit.
+   # Keep existing 5 MiB file ceiling. Downsample *only* images over the
+   # 12M-pixel worker ceiling; neither the source nor raw metadata is stored.
    image=ImageOps.exif_transpose(im).convert('RGB')
+   large=image.width*image.height>MAX_PIXELS
+   if large:
+    factor=(DOWNSAMPLE_TARGET_PIXELS/(image.width*image.height))**0.5
+    image=image.resize((max(50,int(image.width*factor)),
+                        max(50,int(image.height*factor))),Image.Resampling.LANCZOS)
+   if image.width*image.height>MAX_PIXELS:
+    raise EvidenceError('사진의 해상도가 허용 범위를 벗어났습니다')
    with tempfile.TemporaryDirectory(prefix='jw-ocr-') as temp:
-    image.save(Path(temp)/'input.png',format='PNG')
+    # For newly downsampled inputs, avoid unbounded PNG expansion on disk.
+    # Original in-range image handling remains bit-for-bit on the old path.
+    imagepath=Path(temp)/('input.jpg' if large else 'input.png')
+    if large:image.save(imagepath,format='JPEG',quality=90,optimize=False)
+    else:image.save(imagepath,format='PNG')
     try:
-     p=subprocess.run(['tesseract',str(Path(temp)/'input.png'),'stdout','-l','kor+eng','--psm','6'],
+     p=subprocess.run(['tesseract',str(imagepath),'stdout','-l','kor+eng','--psm','6'],
                       stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=15,check=False)
     except FileNotFoundError as exc:raise EvidenceError('OCR 엔진이 설치되지 않았습니다') from exc
     except subprocess.TimeoutExpired as exc:raise EvidenceError('OCR 제한시간 초과') from exc
@@ -186,7 +202,7 @@ def xlsx_line_suggestions(raw):
  finally:wb.close()
 
 def parse_pdf(raw):
- import fitz
+ import pymupdf as fitz  # Import the supported module without printing a stdout warning.
  try:
   doc=fitz.open(stream=raw,filetype='pdf')
   try:

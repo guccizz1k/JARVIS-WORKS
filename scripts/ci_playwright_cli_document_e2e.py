@@ -7,7 +7,7 @@ Only isolated loopback demo credentials and ephemeral SQLite are permitted.
 from __future__ import annotations
 import os
 import sys
-from scripts.ci_playwright_cli_smoke import BASE, PROOF, assertion, cli, login, wait_http
+from scripts.ci_playwright_cli_smoke import BASE, PROOF, UI_URL, assertion, cli, login, wait_http
 
 FINANCIAL_FLOW = r"""async () => {
   const meResponse = await fetch('/api/me', {credentials:'same-origin'});
@@ -165,7 +165,7 @@ def main() -> int:
     PROOF.mkdir(parents=True,exist_ok=True)
     opened=False
     try:
-        cli('open',BASE)
+        cli('open',UI_URL)
         opened=True
         assertion("() => {if(location.origin!=='http://127.0.0.1:8765') throw new Error('Nonlocal origin');return 'JW_LOOPBACK_ONLY_PASS'}",
                   'JW_LOOPBACK_ONLY_PASS')

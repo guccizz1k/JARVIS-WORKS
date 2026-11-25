@@ -14,6 +14,7 @@ import time
 import urllib.request
 
 BASE = "http://127.0.0.1:8765"
+UI_URL = BASE + "/_legacy-ui"
 ROOT = Path(__file__).resolve().parents[1]
 PROOF = ROOT / "artifacts/playwright-cli"
 
@@ -84,14 +85,16 @@ def main() -> int:
     PROOF.mkdir(parents=True,exist_ok=True)
     opened=False
     try:
-        cli("open",BASE)
+        cli("open",UI_URL)
         opened=True
-        assertion("() => {if (location.origin !== 'http://127.0.0.1:8765' || !document.querySelector('#login-form')) throw new Error('Unexpected web origin or missing login DOM'); return 'JW_HTTP_LOGIN_RENDER_PASS'}","JW_HTTP_LOGIN_RENDER_PASS")
+        assertion("() => {if (location.origin !== 'http://127.0.0.1:8765' || location.pathname !== '/_legacy-ui' || !document.querySelector('#login-form')) throw new Error('Unexpected web origin or missing login DOM'); return 'JW_HTTP_LOGIN_RENDER_PASS'}","JW_HTTP_LOGIN_RENDER_PASS")
         a = login("demo@hanbit.example","JW_TENANT_A")
         assertion("""async () => {
           document.querySelector('nav [data-page="dashboard"]').click();
           for(let i=0;i<60;i++) {
-            if(document.body.innerText.includes('업무 대시보드')) return 'JW_DASHBOARD_PASS';
+            const workspace = document.querySelector('#main-content .jw210-home');
+            if(workspace?.getClientRects().length &&
+               document.querySelector('#crumb-title')?.textContent === '대시보드') return 'JW_DASHBOARD_PASS';
             await new Promise(r=>setTimeout(r,100));
           }
           throw new Error('Dashboard not rendered');
@@ -114,12 +117,15 @@ def main() -> int:
             raise AssertionError("Cross-company demo logins returned same organization")
         cli("resize","390","844")
         assertion("""() => {
-          if(window.innerWidth > 420 || document.querySelector('#app-shell')?.classList.contains('hidden')) throw new Error('Mobile workspace not visible');
-          if(!document.querySelector('#toggle-menu')) throw new Error('Mobile menu missing');
-          return 'JW_MOBILE_VIEW_PASS';
-        }""","JW_MOBILE_VIEW_PASS")
+          const workspace = document.querySelector('#app-shell');
+          const notice = document.querySelector('.jw214-desktop-notice');
+          if (window.innerWidth > 420 || !workspace || !notice?.getClientRects().length ||
+              getComputedStyle(workspace).visibility !== 'hidden' ||
+              !notice.innerText.includes('PC 전용')) throw new Error('Desktop-only boundary missing');
+          return 'JW_NARROW_SCREEN_POLICY_PASS';
+        }""","JW_NARROW_SCREEN_POLICY_PASS")
         cli("screenshot",f"--filename={PROOF/'tenant_b_mobile.png'}")
-        print("PASS: Playwright CLI actual Chromium over loopback FastAPI: login A, dashboard, logout revocation, login B, tenant isolation, mobile viewport",flush=True)
+        print("PASS: Playwright CLI actual Chromium over loopback FastAPI: login A, dashboard, logout revocation, login B, tenant isolation, desktop-only narrow-screen policy",flush=True)
         return 0
     finally:
         if opened:

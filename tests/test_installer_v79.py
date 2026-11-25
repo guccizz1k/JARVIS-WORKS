@@ -1,6 +1,7 @@
 """Installer isolation tests. Uses only disposable temporary directories."""
 from pathlib import Path
 import shutil
+import hashlib
 
 import pytest
 from scripts.install_v79 import install,InstallBlocked
@@ -13,7 +14,11 @@ BASE_FILES=('app/main.py','app/pg_rls_full_review_v78.py','scripts/release_audit
 def stage(tmp_path):
     root=tmp_path/'stage';root.mkdir()
     for name in BASE_FILES:
-        p=root/name;p.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(ROOT/name,p)
+        p=root/name;p.parent.mkdir(parents=True,exist_ok=True)
+        historical=(ROOT/'v78_addon/payload/app/main.py') if name=='app/main.py' else (ROOT/name)
+        if name=='app/main.py':
+            assert hashlib.sha256(historical.read_bytes()).hexdigest()=='e4584787c8ee97a417656e62297507caa7d618f4146398342dabc23c8a6ab25f'
+        shutil.copy2(historical,p)
     return root
 
 def test_clean_install_and_idempotent(stage):

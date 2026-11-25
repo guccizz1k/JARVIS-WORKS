@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 570" role="img" aria-labelledby="jw210-orbit-title">
+<title id="jw210-orbit-title">JARVIS WORKS 투명 유리 무한대 조형물과 왕복하는 빛</title>
+<defs>
+ <linearGradient id="glass" x1="0" x2="1" y1="0" y2="1">
+  <stop stop-color="#5d6b88" offset="0"/><stop stop-color="#f9fcff" offset=".17"/>
+  <stop stop-color="#9cb0d2" offset=".31"/><stop stop-color="#f9fbff" offset=".49"/>
+  <stop stop-color="#aebbd7" offset=".68"/><stop stop-color="#ffffff" offset=".84"/>
+  <stop stop-color="#536078" offset="1"/>
+ </linearGradient>
+ <linearGradient id="glassHighlight" x1="0" y1="0" x2="1" y2=".9">
+  <stop stop-color="#eef4ff" offset="0"/><stop stop-color="#aebcde" offset=".21"/>
+  <stop stop-color="#fff" offset=".46"/><stop stop-color="#879dcb" offset=".69"/><stop stop-color="#f6faff" offset="1"/>
+ </linearGradient>
+ <linearGradient id="silver" x1="0" x2="0" y1="0" y2="1">
+  <stop offset="0" stop-color="#fff"/><stop offset=".18" stop-color="#a8b8d3"/><stop offset=".45" stop-color="#485269"/>
+  <stop offset=".67" stop-color="#dbeaff"/><stop offset=".83" stop-color="#161b29"/><stop offset="1" stop-color="#8c9ab7"/>
+ </linearGradient>
+ <linearGradient id="ring" x1="0" x2="1" y1=".2" y2=".8">
+  <stop stop-color="#8793b6" stop-opacity="0" offset="0"/><stop stop-color="#f7fbff" offset=".2"/>
+  <stop stop-color="#6b799e" offset=".47"/><stop stop-color="#fff" offset=".69"/><stop stop-color="#eef3ff" stop-opacity=".1" offset="1"/>
+ </linearGradient>
+ <radialGradient id="ground"><stop stop-color="#e9f0ff" stop-opacity=".76"/><stop offset=".35" stop-color="#90a3ce" stop-opacity=".34"/><stop offset="1" stop-color="#111622" stop-opacity="0"/></radialGradient>
+ <radialGradient id="spark"><stop stop-color="#fff" offset="0"/><stop stop-color="#e8f2ff" stop-opacity=".85" offset=".24"/><stop stop-color="#c4dcff" stop-opacity="0" offset="1"/></radialGradient>
+ <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="7"/></filter>
+ <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3"/></filter>
+ <path id="orbitFront" d="M135 305 C 180 225 340 191 580 192 S 950 242 947 310 S 728 391 536 389 S 171 362 135 305Z"/>
+ <path id="orbitBack" d="M240 230 C 307 132 505 105 689 140 S 929 252 868 313 S 659 394 443 337 S 208 288 240 230Z"/>
+ <path id="infinity" d="M550 284 C465 176 331 162 284 247 C237 332 346 390 425 348 C492 311 522 251 577 224 C666 177 781 188 809 262 C839 346 724 396 642 355 C589 329 572 304 550 284Z"/>
+</defs>
+<ellipse cx="555" cy="473" rx="478" ry="88" fill="url(#ground)"/>
+<g opacity=".67">
+ <path d="M540 40V470" stroke="#fff" stroke-width="4" opacity=".45" filter="url(#glow)"/>
+ <path d="M560 0V480" stroke="#d5e4ff" stroke-width="2" opacity=".62"/>
+ <path d="M583 45V475" stroke="#fff" stroke-width="5" opacity=".33" filter="url(#glow)"/>
+</g>
+<ellipse cx="553" cy="455" rx="488" ry="68" fill="#1d2330" opacity=".3"/>
+<ellipse cx="553" cy="448" rx="482" ry="60" fill="none" stroke="url(#silver)" stroke-width="9" opacity=".94"/>
+<ellipse cx="553" cy="437" rx="424" ry="52" fill="none" stroke="url(#ring)" stroke-width="14" opacity=".83"/>
+<ellipse cx="553" cy="415" rx="343" ry="34" fill="#3d4b67" opacity=".21"/>
+<ellipse cx="553" cy="415" rx="343" ry="34" fill="none" stroke="url(#silver)" stroke-width="17"/>
+<ellipse cx="553" cy="401" rx="281" ry="20" fill="none" stroke="#fff" stroke-opacity=".85" stroke-width="2"/>
+<ellipse cx="553" cy="405" rx="315" ry="33" stroke="#d2e4ff" stroke-width="13" opacity=".53" filter="url(#glow)" fill="none"/>
+<g opacity=".62" fill="none"><use href="#orbitBack" stroke="#cad7fb" stroke-width="9" filter="url(#glow)"/><use href="#orbitBack" stroke="url(#ring)" stroke-width="2.4"/></g>
+<g fill="none" stroke-linecap="round" stroke-linejoin="round">
+ <use href="#infinity" stroke="#f5faff" stroke-width="100" opacity=".33" filter="url(#glow)"/>
+ <use href="#infinity" stroke="#424e70" stroke-width="87" opacity=".48"/>
+ <use href="#infinity" stroke="url(#glass)" stroke-width="75" opacity=".94"/>
+ <use href="#infinity" stroke="url(#glassHighlight)" stroke-width="48" opacity=".76"/>
+ <use href="#infinity" stroke="#fff" stroke-width="12" opacity=".79" filter="url(#softGlow)"/>
+ <use href="#infinity" stroke="#eef7ff" stroke-width="3.3" opacity=".88"/>
+</g>
+<g opacity=".93">
+ <use href="#orbitFront" fill="none" stroke="#d3e0ff" stroke-width="9" filter="url(#glow)"/>
+ <use href="#orbitFront" fill="none" stroke="url(#ring)" stroke-width="2.2" stroke-dasharray="540 18 180 90"/>
+ <circle r="20" fill="url(#spark)"><animateMotion dur="8s" repeatCount="indefinite" calcMode="linear" keyPoints="0;1;0" keyTimes="0;.5;1"><mpath href="#orbitFront"/></animateMotion></circle>
+ <circle r="6" fill="#fff"><animateMotion dur="8s" repeatCount="indefinite" calcMode="linear" keyPoints="0;1;0" keyTimes="0;.5;1"><mpath href="#orbitFront"/></animateMotion></circle>
+ <circle r="12" fill="url(#spark)"><animateMotion dur="12s" repeatCount="indefinite" calcMode="linear" keyPoints="1;0;1" keyTimes="0;.5;1"><mpath href="#orbitBack"/></animateMotion></circle>
+</g>
+<g opacity=".74">
+ <path d="M375 398V464M428 401V460M501 390V458M558 375V462M609 390V463M664 392V460M715 401V459" stroke="#f4f7ff" stroke-width="3" opacity=".55"/>
+ <path d="M375 398V464M428 401V460M501 390V458M558 375V462M609 390V463M664 392V460M715 401V459" stroke="#fff" stroke-width="9" opacity=".5" filter="url(#glow)"/>
+</g>
+</svg>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+<defs>
+ <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#687080"/><stop offset=".26" stop-color="#a28a86"/><stop offset=".47" stop-color="#d29d82"/><stop offset=".64" stop-color="#f6b57d"/><stop offset=".78" stop-color="#8f8490"/><stop offset="1" stop-color="#464954"/></linearGradient>
+ <radialGradient id="sun"><stop stop-color="#fff4c7" stop-opacity=".92"/><stop offset=".22" stop-color="#ffcf9a" stop-opacity=".58"/><stop offset="1" stop-color="#fbb680" stop-opacity="0"/></radialGradient>
+ <linearGradient id="floor" x2="0" y2="1"><stop stop-color="#493b3d"/><stop offset="1" stop-color="#1b181d"/></linearGradient>
+ <linearGradient id="sofa" x2="0" y2="1"><stop stop-color="#9b8175"/><stop offset="1" stop-color="#574745"/></linearGradient>
+ <filter id="blur"><feGaussianBlur stdDeviation="14"/></filter>
+ <filter id="blur2"><feGaussianBlur stdDeviation="6"/></filter>
+</defs>
+<rect width="1920" height="1080" fill="#302a34"/>
+<rect width="1920" height="800" fill="url(#sky)"/>
+<circle cx="1750" cy="520" r="330" fill="url(#sun)"/>
+<circle cx="1770" cy="520" r="52" fill="#ffe0a5" opacity=".8" filter="url(#blur2)"/>
+<path d="M0 650L100 618L186 638L310 591L450 645L568 610L690 658L825 585L940 610L1122 554L1330 624L1450 586L1620 628L1730 570L1920 600V850H0Z" fill="#5b606d" opacity=".5"/>
+<path d="M0 711L145 658L238 679L330 640L468 688L566 659L676 695L804 634L944 683L1082 620L1245 673L1367 635L1465 681L1570 630L1700 683L1850 631L1920 663V895H0Z" fill="#4e5260" opacity=".78"/>
+<path d="M0 780L155 736L235 750L330 712L439 736L578 688L695 737L813 705L939 750L1070 716L1180 731L1379 688L1514 741L1640 706L1786 740L1920 697V840H0Z" fill="#333c49" opacity=".9"/>
+<path d="M0 780Q410 743 810 781T1920 749V868H0Z" fill="#b57b71" opacity=".16"/>
+<path d="M0 808H1920V1080H0Z" fill="url(#floor)"/>
+<path d="M0 808H1920" stroke="#cfa18a" stroke-opacity=".35" stroke-width="8"/>
+<path d="M0 1014L1920 878M0 925L1920 1016M0 1080L1260 822" stroke="#98776b" stroke-opacity=".13" stroke-width="3"/>
+<rect x="45" y="0" width="18" height="809" fill="#11161b" opacity=".90"/>
+<rect x="488" y="0" width="21" height="808" fill="#11161b" opacity=".87"/>
+<rect x="975" y="0" width="22" height="808" fill="#11161b" opacity=".87"/>
+<rect x="1430" y="0" width="20" height="808" fill="#11161b" opacity=".85"/>
+<rect x="1898" y="0" width="22" height="808" fill="#14191d" opacity=".90"/>
+<path d="M0 0H1920" stroke="#242327" stroke-width="27" opacity=".86"/>
+<!-- floor rug -->
+<ellipse cx="1045" cy="960" rx="585" ry="105" fill="#b6a08b" opacity=".20" filter="url(#blur)"/>
+<!-- left lounge -->
+<ellipse cx="165" cy="955" rx="165" ry="28" fill="#000" opacity=".3" filter="url(#blur)"/>
+<rect x="-55" y="804" width="320" height="133" rx="47" fill="url(#sofa)"/>
+<rect x="-58" y="777" width="136" height="141" rx="42" fill="#867066"/>
+<rect x="103" y="802" width="177" height="113" rx="43" fill="#75615b"/>
+<path d="M51 920V974M222 913V964" stroke="#262326" stroke-width="14"/>
+<!-- coffee table -->
+<ellipse cx="485" cy="980" rx="187" ry="30" fill="#0e1015" opacity=".4" filter="url(#blur)"/>
+<ellipse cx="485" cy="890" rx="164" ry="38" fill="#4e332b"/>
+<ellipse cx="485" cy="882" rx="165" ry="33" fill="#aa765a"/>
+<path d="M423 919V1010M559 915V1012" stroke="#35221d" stroke-width="13"/>
+<!-- back sofa -->
+<rect x="1475" y="822" width="490" height="108" rx="40" fill="url(#sofa)"/>
+<rect x="1464" y="787" width="169" height="142" rx="42" fill="#978078"/>
+<rect x="1782" y="798" width="201" height="121" rx="44" fill="#76645d"/>
+<!-- foreground lamps -->
+<circle cx="1806" cy="839" r="24" fill="#ffc990" opacity=".65" filter="url(#blur)"/>
+<rect x="1798" y="827" width="18" height="92" rx="7" fill="#85593e"/>
+<ellipse cx="1807" cy="823" rx="27" ry="10" fill="#e8b074"/>
+<!-- tree silhouette -->
+<path d="M1899 900Q1840 697 1895 535M1881 736Q1790 698 1777 633M1890 670Q1960 595 1965 586" stroke="#2e3630" stroke-width="17" fill="none"/>
+<g fill="#24382e" opacity=".9"><ellipse cx="1760" cy="609" rx="79" ry="26" transform="rotate(31 1760 609)"/><ellipse cx="1805" cy="654" rx="88" ry="28" transform="rotate(-19 1805 654)"/><ellipse cx="1848" cy="546" rx="83" ry="24" transform="rotate(25 1848 546)"/><ellipse cx="1880" cy="590" rx="68" ry="29" transform="rotate(-35 1880 590)"/><ellipse cx="1925" cy="666" rx="82" ry="32" transform="rotate(-22 1925 666)"/></g>
+<rect width="1920" height="1080" fill="#322d3b" opacity=".15"/>
+</svg>

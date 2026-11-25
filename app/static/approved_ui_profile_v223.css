@@ -1,0 +1,13 @@
+/* Optional compact presentation for the protected owner review shell.
+   Never edits the approved original stylesheet. */
+body.jw-approved-review.jw-compact-view .jw-review-row {padding-top:5px;padding-bottom:5px}
+body.jw-approved-review.jw-compact-view .jw-review-card {margin-block-end:8px}
+body.jw-approved-review.jw-compact-view .jw-review-view {row-gap:8px}
+
+/* Reserve the full expanded review rail width. Without this the focused
+   262px fixed rail overlays the first 190px of all desktop content. */
+@media (min-width:901px) {
+  body.jw-owner-visual.jw-approved-review #app .jw-review-main.main {
+    margin-left:294px;
+  }
+}

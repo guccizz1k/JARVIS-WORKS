@@ -1,0 +1,15 @@
+{
+  "schema": "jw-review-verified-source-v149",
+  "source_head_sha": "bc77323c7b93fc004fa1f23ccfdc063db3355e14",
+  "sha1_git_blob": {
+    "app/pg_delivery_evidence_gate_v147.py": "a433b5f169702b5fdd99a6a8291a5efc62599bb7",
+    "app/pg_invoice_preview_v145.py": "f33271fbf7c76d8b8b7cf5391d4ede65329c0abd",
+    "app/pg_signup_review_gate_v146.py": "6a48c0efea4673b02081ab4a25cf5e7667ad77c0",
+    "scripts/review/v147_enrollment_atomic_model.py": "9198c6ed1ff7435822d94b1eec990c94850294ef",
+    "tests/test_pg_delivery_evidence_gate_v147.py": "ad055e6abd4f9100f5bf593d424215d2657741b4",
+    "tests/test_pg_invoice_preview_v145.py": "827a572b30ad92467afc944790284cf24d5a2b38",
+    "tests/test_pg_review_readonly_contracts_v146.py": "a13bb3d92f7a2069eb1ccb8c435ab672635bf242",
+    "tests/test_pg_signup_review_gate_v146.py": "c797fbf466f32c8ff38fd57d56a763e47cd04d8d",
+    "tests/test_v147_enrollment_atomic_model.py": "5f73fbca02c4ebd395c52dcdd85478ab78785ffd"
+  }
+}
