@@ -279,6 +279,142 @@ class NativeWrite(unittest.TestCase):
                     with c.transaction():c.execute(q,args(rows,snapshot))
         with psycopg.connect(fixture.root_dsn) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM naruv_native_review.stages").fetchone()[0],0)
+    def test_permission_generation_never_resurrects_approval(self):
+        d=self.stage();self.check(self.approve(d),200)
+        with psycopg.connect(fixture.root_dsn) as c:
+            c.execute("UPDATE jw_dev.users SET role='member' WHERE id='ci-ua'")
+            c.execute("UPDATE jw_dev.users SET role='admin' WHERE id='ci-ua'")
+        self.check(self.commit(d),409)
+        self.assertEqual(self.counts(),(0,0))
+        q=self.stage("stage-2")
+        self.check(self.approve(q,"stage-2"),200)
+        with psycopg.connect(fixture.root_dsn) as c:
+            c.execute("INSERT INTO jw_dev.staff_disabled VALUES('ci-ua')")
+            c.execute("DELETE FROM jw_dev.staff_disabled WHERE user_id='ci-ua'")
+        self.check(self.commit(q,"stage-2"),409)
+        self.assertEqual(self.counts(),(0,0))
+        r=self.stage("stage-3");self.check(self.approve(r,"stage-3"),200)
+        self.check(self.commit(r,"stage-3"),200)
+    def test_session_generation_never_resurrects_approval(self):
+        d=self.stage();self.check(self.approve(d),200)
+        with psycopg.connect(fixture.root_dsn) as c:
+            expiry=c.execute("SELECT expires_at FROM jw_dev.sessions WHERE id='A'").fetchone()[0]
+            c.execute("UPDATE jw_dev.sessions SET expires_at=(now()-interval '1 hour')::text WHERE id='A'")
+            c.execute("UPDATE jw_dev.sessions SET expires_at=%s WHERE id='A'",(expiry,))
+        self.check(self.commit(d),409)
+        self.assertEqual(self.counts(),(0,0))
+    def _direct_commit(self,c,d):
+        c.execute("SET LOCAL ROLE jw_app_dev")
+        c.execute("SELECT set_config('jw.session_hash',%s,true)",(hashlib.sha256(fixture.TOKENS["A"].encode()).hexdigest(),))
+        return c.execute("SELECT naruv_native_review.commit_stage(%s,%s,%s,%s,%s,%s)",
+            ("stage-1",d["stage_sha256"],d["canonical_rows_sha256"],d["target_snapshot_sha256"],"request-1",fixture.CSRF["A"])).fetchone()[0]
+    def _wait_blocked(self,pid,blocker):
+        import time
+        deadline=time.monotonic()+5
+        with psycopg.connect(fixture.root_dsn,autocommit=True) as c:
+            while time.monotonic()<deadline:
+                if blocker in c.execute("SELECT pg_blocking_pids(%s)",(pid,)).fetchone()[0]:
+                    return
+                time.sleep(.02)
+        self.fail("Expected database lock wait was not observed")
+    def test_revocation_wins_and_waiting_commit_is_denied(self):
+        import queue
+        d=self.stage();self.check(self.approve(d),200)
+        pids=queue.Queue()
+        def attempt():
+            try:
+                with psycopg.connect(fixture.TRADE_DSN,options="-c statement_timeout=12000") as c:
+                    pids.put(c.info.backend_pid)
+                    self._direct_commit(c,d)
+            except psycopg.Error as e:
+                return e.sqlstate,e.diag.message_primary
+            return ("UNEXPECTED_SUCCESS","")
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            with psycopg.connect(fixture.root_dsn) as root:
+                root.execute("UPDATE jw_dev.users SET role='member' WHERE id='ci-ua'")
+                fut=pool.submit(attempt)
+                self._wait_blocked(pids.get(timeout=5),root.info.backend_pid)
+            self.assertEqual(fut.result(timeout=10),("42501","NARUV_PERMISSION_DENIED"))
+        self.assertEqual(self.counts(),(0,0))
+    def test_commit_wins_and_revocation_waits(self):
+        import queue
+        d=self.stage();self.check(self.approve(d),200)
+        pids=queue.Queue()
+        def revoke():
+            with psycopg.connect(fixture.root_dsn,options="-c statement_timeout=12000") as c:
+                pids.put(c.info.backend_pid)
+                c.execute("INSERT INTO jw_dev.staff_disabled VALUES('ci-ua')")
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            with psycopg.connect(fixture.TRADE_DSN) as c:
+                self.assertEqual(self._direct_commit(c,d)["status"],"REVIEW_COMMITTED")
+                fut=pool.submit(revoke)
+                self._wait_blocked(pids.get(timeout=5),c.info.backend_pid)
+            fut.result(timeout=10)
+        self.assertEqual(self.counts(),(1,1))
+        self.check(self.commit(d),401)
+    def test_repeatable_read_rejected(self):
+        d=self.stage();self.check(self.approve(d),200)
+        with psycopg.connect(fixture.TRADE_DSN) as c:
+            c.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            with self.assertRaisesRegex(psycopg.Error,"NARUV_AUTH_FENCE_UNSAFE"):
+                self._direct_commit(c,d)
+            c.rollback()
+        self.assertEqual(self.counts(),(0,0))
+    def test_tenant_quota_cross_source_and_retry(self):
+        d=self.stage()
+        with psycopg.connect(fixture.root_dsn) as c:
+            # Deliberately seed synthetic immutable rows for quota-boundary testing.
+            c.execute("""INSERT INTO naruv_native_review.stages
+              SELECT (jsonb_populate_record(NULL::naruv_native_review.stages,
+                  to_jsonb(s)||jsonb_build_object('stage_id','quota-'||g))).*
+              FROM naruv_native_review.stages s CROSS JOIN generate_series(1,127) g
+              WHERE s.stage_id='stage-1' AND s.org_id='ci-a'""")
+        retry=self.req("/sources/source-a/item/csv/stages/stage-1","A",RAW,"csv",d)
+        self.assertEqual(self.check(retry,200)["status"],"ALREADY_STAGED")
+        raw=b"customer_id,customer_name\nC001,Sample\n"
+        q=self.review(raw,entity="customer")
+        r=self.req("/sources/source-a/customer/csv/stages/extra","A",raw,"csv",q)
+        self.assertEqual(self.check(r,422)["detail"],"NARUV_CAPACITY")
+        self.stage("other-tenant",source="source-b",who="B")
+        with psycopg.connect(fixture.root_dsn) as c:
+            self.assertEqual(c.execute("SELECT count(*) FROM naruv_native_review.stages WHERE org_id='ci-a'").fetchone()[0],128)
+        self.assertEqual(self.counts(),(0,0))
+    def test_tenant_byte_quota(self):
+        d=self.stage()
+        with psycopg.connect(fixture.root_dsn) as c:
+            # Catalog-constrained synthetic payloads, not parser acceptance evidence.
+            c.execute("""WITH payload AS (
+              SELECT jsonb_build_array(jsonb_build_object('fixture',repeat('x',1048576)))::text AS v
+            ) INSERT INTO naruv_native_review.stages
+              SELECT (jsonb_populate_record(NULL::naruv_native_review.stages,
+                  to_jsonb(s)||jsonb_build_object('stage_id','bytes-'||g,'rows_canonical',p.v,
+                  'canonical_sha256',encode(sha256(convert_to(p.v,'UTF8')),'hex')))).*
+              FROM naruv_native_review.stages s CROSS JOIN payload p CROSS JOIN generate_series(1,16) g
+              WHERE s.stage_id='stage-1' AND s.org_id='ci-a'""")
+        r=self.req("/sources/source-a/item/csv/stages/extra","A",RAW,"csv",d)
+        self.assertEqual(self.check(r,422)["detail"],"NARUV_CAPACITY")
+        self.stage("other-tenant",source="source-b",who="B")
+    def test_future_approval_denied(self):
+        d=self.stage();self.check(self.approve(d),200)
+        with psycopg.connect(fixture.root_dsn) as c:
+            c.execute("UPDATE naruv_native_review.approvals SET approved_at=now()+interval '1 minute',expires_at=now()+interval '10 minutes'")
+        self.check(self.commit(d),409)
+        self.assertEqual(self.counts(),(0,0))
+    def test_rolled_back_revocation_does_not_invalidate(self):
+        d=self.stage();self.check(self.approve(d),200)
+        with psycopg.connect(fixture.root_dsn) as c:
+            c.execute("UPDATE jw_dev.users SET role='member' WHERE id='ci-ua'")
+            c.rollback()
+        self.check(self.commit(d),200)
+        self.assertEqual(self.counts(),(1,1))
+    def test_actor_lock_does_not_block_other_tenant(self):
+        d=self.stage("stage-b",source="source-b",who="B")
+        self.check(self.approve(d,"stage-b","B"),200)
+        with psycopg.connect(fixture.root_dsn) as c:
+            c.execute("UPDATE jw_dev.users SET role='member' WHERE id='ci-ua'")
+            self.check(self.commit(d,"stage-b","request-b","B"),200)
+            c.rollback()
+        self.assertEqual(self.counts(),(1,1))
     def test_transport_and_default_off(self):
         d=self.stage()
         self.check(self.req("/stages/stage-1/approve",d=d,raw=b"unexpected",extra={"x-naruv-confirm":"yes"}),413)
@@ -291,6 +427,6 @@ class NativeWrite(unittest.TestCase):
 if __name__=="__main__":
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(NativeWrite)
     result=unittest.TextTestRunner(verbosity=2).run(suite)
-    if not result.wasSuccessful() or result.testsRun!=18 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
+    if not result.wasSuccessful() or result.testsRun!=28 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
         raise SystemExit(1)
-    print("NARUV_NATIVE_WRITE_REVIEW_PASS: 18 real isolated PG17 HTTP cases; no production ERP import.")
+    print("NARUV_NATIVE_WRITE_REVIEW_PASS: 28 isolated PG17 HTTP and direct transaction cases; no production ERP import.")

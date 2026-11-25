@@ -19,10 +19,81 @@ CREATE POLICY naruv_native_owner_source ON jw_dev.naruv_review_sources TO naruv_
    SELECT 1 FROM jw_dev.stage_identity_v84() i WHERE i.org_id=naruv_review_sources.org_id AND i.actor_role='admin'))
  WITH CHECK(org_id=jw_dev.current_org_from_session() AND EXISTS(
    SELECT 1 FROM jw_dev.stage_identity_v84() i WHERE i.org_id=naruv_review_sources.org_id AND i.actor_role='admin'));
+-- Disposable auth fence; not a migration for any persistent database.
+CREATE ROLE naruv_auth_fence_owner NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB;
+CREATE SCHEMA naruv_auth_fence AUTHORIZATION naruv_auth_fence_owner;
+REVOKE ALL ON SCHEMA naruv_auth_fence FROM PUBLIC;
+GRANT USAGE ON SCHEMA naruv_auth_fence TO naruv_native_owner;
+SET ROLE naruv_auth_fence_owner;
+CREATE TABLE naruv_auth_fence.epochs(actor_id text PRIMARY KEY, epoch bigint NOT NULL CHECK(epoch>=0));
+ALTER TABLE naruv_auth_fence.epochs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_auth_fence.epochs FORCE ROW LEVEL SECURITY;
+CREATE POLICY fence_internal ON naruv_auth_fence.epochs TO naruv_auth_fence_owner USING(true) WITH CHECK(true);
+REVOKE ALL ON naruv_auth_fence.epochs FROM PUBLIC;
+CREATE FUNCTION naruv_auth_fence.lock_actor(p_actor text)
+ RETURNS bigint LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE generation bigint;
+BEGIN
+ IF p_actor IS NULL OR p_actor='' OR current_setting('transaction_isolation') <> 'read committed'
+ THEN RAISE EXCEPTION 'NARUV_AUTH_FENCE_UNSAFE' USING ERRCODE='42501'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-native-auth-v1:'||p_actor,0));
+ SELECT e.epoch INTO generation FROM naruv_auth_fence.epochs e WHERE e.actor_id=p_actor;
+ RETURN coalesce(generation,0);
+END $$;
+CREATE FUNCTION naruv_auth_fence.auth_change()
+ RETURNS trigger LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE old_actor text; new_actor text; actor text; bump boolean:=true;
+BEGIN
+ IF TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'NARUV_AUTH_TRUNCATE_DENIED'; END IF;
+ IF TG_TABLE_NAME='users' THEN
+  IF TG_OP<>'INSERT' THEN old_actor:=OLD.id; END IF;
+  IF TG_OP<>'DELETE' THEN new_actor:=NEW.id; END IF;
+  IF TG_OP='UPDATE' THEN
+   IF (OLD.id,OLD.org_id,OLD.role) IS NOT DISTINCT FROM (NEW.id,NEW.org_id,NEW.role)
+   THEN RETURN NEW; END IF;
+  END IF;
+ ELSE
+  IF TG_OP<>'INSERT' THEN old_actor:=OLD.user_id; END IF;
+  IF TG_OP<>'DELETE' THEN new_actor:=NEW.user_id; END IF;
+  IF TG_TABLE_NAME='sessions' THEN
+   IF TG_OP='INSERT' THEN bump:=false; END IF;
+   IF TG_OP='UPDATE' THEN
+    IF (OLD.id,OLD.user_id,OLD.token_hash,OLD.csrf_token,OLD.expires_at)
+       IS NOT DISTINCT FROM (NEW.id,NEW.user_id,NEW.token_hash,NEW.csrf_token,NEW.expires_at)
+    THEN RETURN NEW; END IF;
+   END IF;
+  END IF;
+ END IF;
+ FOR actor IN SELECT DISTINCT x FROM unnest(ARRAY[old_actor,new_actor]) x WHERE x IS NOT NULL ORDER BY x LOOP
+  PERFORM naruv_auth_fence.lock_actor(actor);
+  IF bump THEN
+   INSERT INTO naruv_auth_fence.epochs AS e VALUES(actor,1)
+   ON CONFLICT(actor_id) DO UPDATE SET epoch=e.epoch+1;
+  END IF;
+ END LOOP;
+ IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_auth_fence FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION naruv_auth_fence.lock_actor(text) TO naruv_native_owner;
+RESET ROLE;
+CREATE TRIGGER naruv_fence_users BEFORE INSERT OR UPDATE OR DELETE ON jw_dev.users
+ FOR EACH ROW EXECUTE FUNCTION naruv_auth_fence.auth_change();
+CREATE TRIGGER naruv_fence_sessions BEFORE INSERT OR UPDATE OR DELETE ON jw_dev.sessions
+ FOR EACH ROW EXECUTE FUNCTION naruv_auth_fence.auth_change();
+CREATE TRIGGER naruv_fence_disabled BEFORE INSERT OR UPDATE OR DELETE ON jw_dev.staff_disabled
+ FOR EACH ROW EXECUTE FUNCTION naruv_auth_fence.auth_change();
+CREATE TRIGGER naruv_fence_users_truncate BEFORE TRUNCATE ON jw_dev.users
+ FOR EACH STATEMENT EXECUTE FUNCTION naruv_auth_fence.auth_change();
+CREATE TRIGGER naruv_fence_sessions_truncate BEFORE TRUNCATE ON jw_dev.sessions
+ FOR EACH STATEMENT EXECUTE FUNCTION naruv_auth_fence.auth_change();
+CREATE TRIGGER naruv_fence_disabled_truncate BEFORE TRUNCATE ON jw_dev.staff_disabled
+ FOR EACH STATEMENT EXECUTE FUNCTION naruv_auth_fence.auth_change();
 SET ROLE naruv_native_owner;
 CREATE TABLE naruv_native_review.stages(
  org_id text NOT NULL, stage_id text NOT NULL CHECK(stage_id ~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'),
  actor_id text NOT NULL, session_binding_sha256 text NOT NULL CHECK(session_binding_sha256 ~ '^[a-f0-9]{64}$'),
+ auth_epoch bigint NOT NULL CHECK(auth_epoch>=0),
  source_id text NOT NULL, entity text NOT NULL CHECK(entity IN ('item','customer')),
  file_format text NOT NULL CHECK(file_format IN ('csv','xlsx')),
  raw_sha256 text NOT NULL CHECK(raw_sha256 ~ '^[a-f0-9]{64}$'),
@@ -76,9 +147,9 @@ DO $$ DECLARE t text; BEGIN
  END LOOP;
 END $$;
 CREATE FUNCTION naruv_native_review.guard(p_csrf text,p_kind text)
- RETURNS TABLE(actor_id text,org_id text,session_binding_sha256 text)
+ RETURNS TABLE(actor_id text,org_id text,session_binding_sha256 text,auth_epoch bigint)
  LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog AS $$
-DECLARE a record; h text; login record; business boolean; stage boolean;
+DECLARE a record; fresh record; generation bigint; h text; login record; business boolean; stage boolean;
 BEGIN
  h:=current_setting('jw.session_hash',true);
  SELECT r.rolsuper,r.rolbypassrls,r.rolcreaterole,r.rolcreatedb INTO login FROM pg_catalog.pg_roles r WHERE r.rolname=session_user;
@@ -96,7 +167,12 @@ BEGIN
  OR h IS NULL OR h !~ '^[a-f0-9]{64}$'
  OR p_csrf IS NULL OR length(p_csrf) NOT BETWEEN 1 AND 512 OR p_csrf IS DISTINCT FROM a.csrf_token
  THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
- RETURN QUERY SELECT a.actor_id,a.org_id,encode(sha256(convert_to('naruv-native-session-v1:'||h,'UTF8')),'hex');
+ generation:=naruv_auth_fence.lock_actor(a.actor_id);
+ SELECT i.actor_id,i.org_id,i.actor_role,i.csrf_token INTO fresh FROM jw_dev.stage_identity_v84() i;
+ IF NOT FOUND OR (fresh.actor_id,fresh.org_id,fresh.actor_role,fresh.csrf_token)
+ IS DISTINCT FROM (a.actor_id,a.org_id,a.actor_role,a.csrf_token)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ RETURN QUERY SELECT a.actor_id,a.org_id,encode(sha256(convert_to('naruv-native-session-v1:'||h,'UTF8')),'hex'),generation;
 END $$;
 CREATE FUNCTION naruv_native_review.immutable()
  RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
@@ -168,12 +244,14 @@ BEGIN
  OR p_rows_sha IS NULL OR p_rows_sha !~ '^[a-f0-9]{64}$' OR p_snapshot IS NULL OR p_snapshot !~ '^[a-f0-9]{64}$'
  OR p_bytes IS NULL OR p_bytes NOT BETWEEN 1 AND 1048576
  THEN RAISE EXCEPTION 'NARUV_STAGE_INPUT'; END IF;
+ -- Tenant quota lock precedes the source lock.
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-native-quota-v1:'||a.org_id,0));
  -- Serialize all writes for a tenant/source/entity. Target is never browser authority.
  SELECT s.revision,s.existing_ids INTO target FROM jw_dev.naruv_review_sources s
  WHERE s.org_id=a.org_id AND s.source_id=p_source AND s.entity=p_entity AND s.active FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_SOURCE_NOT_FOUND'; END IF;
  SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'stage');
- IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
+ IF (a.actor_id,a.org_id,a.session_binding_sha256,a.auth_epoch) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256,a2.auth_epoch) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  IF target.revision IS DISTINCT FROM p_revision OR
  ARRAY(SELECT x FROM unnest(target.existing_ids) x ORDER BY x COLLATE "C") IS DISTINCT FROM p_expected
  THEN RAISE EXCEPTION 'NARUV_TARGET_CHANGED'; END IF;
@@ -182,17 +260,20 @@ BEGIN
  SELECT * INTO old FROM naruv_native_review.stages s WHERE s.org_id=a.org_id AND s.stage_id=p_id;
  stamp:=clock_timestamp();
  IF FOUND THEN
-  IF (old.actor_id,old.session_binding_sha256,old.source_id,old.entity,old.file_format,old.raw_sha256,old.byte_count,old.stage_sha256,old.canonical_sha256,old.rows_sha256,
+  IF (old.actor_id,old.session_binding_sha256,old.auth_epoch,old.source_id,old.entity,old.file_format,old.raw_sha256,old.byte_count,old.stage_sha256,old.canonical_sha256,old.rows_sha256,
       old.snapshot_sha256,old.expected_revision,old.expected_ids,old.rows_canonical)
-  IS DISTINCT FROM (a.actor_id,a.session_binding_sha256,p_source,p_entity,p_format,p_raw,p_bytes,p_digest,p_canonical,p_rows_sha,p_snapshot,p_revision,p_expected,p_rows_text)
+  IS DISTINCT FROM (a.actor_id,a.session_binding_sha256,a.auth_epoch,p_source,p_entity,p_format,p_raw,p_bytes,p_digest,p_canonical,p_rows_sha,p_snapshot,p_revision,p_expected,p_rows_text)
   THEN RAISE EXCEPTION 'NARUV_STAGE_CONFLICT'; END IF;
-  IF stamp>=old.expires_at THEN RAISE EXCEPTION 'NARUV_STAGE_EXPIRED'; END IF;
+  IF stamp<old.created_at OR stamp>=old.expires_at THEN RAISE EXCEPTION 'NARUV_STAGE_EXPIRED'; END IF;
   RETURN 'ALREADY_STAGED';
  END IF;
- -- Per-source bound, serialized by source lock; no global count race.
- IF (SELECT count(*) FROM naruv_native_review.stages s WHERE s.org_id=a.org_id AND s.source_id=p_source AND s.entity=p_entity)>=1000
+ -- Logical UTF-8 payload budget, not physical disk usage. No automatic purge.
+ IF (SELECT count(*) FROM naruv_native_review.stages s WHERE s.org_id=a.org_id)>=128
+ OR (SELECT coalesce(sum(octet_length(s.rows_canonical)::bigint+octet_length(array_to_json(s.expected_ids)::text)),0)
+     FROM naruv_native_review.stages s WHERE s.org_id=a.org_id)
+      +octet_length(p_rows_text)+octet_length(array_to_json(p_expected)::text)>16777216
  THEN RAISE EXCEPTION 'NARUV_CAPACITY'; END IF;
- INSERT INTO naruv_native_review.stages VALUES(a.org_id,p_id,a.actor_id,a.session_binding_sha256,p_source,p_entity,p_format,p_raw,p_bytes,p_digest,p_canonical,p_rows_sha,
+ INSERT INTO naruv_native_review.stages VALUES(a.org_id,p_id,a.actor_id,a.session_binding_sha256,a.auth_epoch,p_source,p_entity,p_format,p_raw,p_bytes,p_digest,p_canonical,p_rows_sha,
   p_snapshot,p_revision,p_expected,p_rows_text,stamp,stamp+interval '15 minutes');
  RETURN 'STAGED';
 END $$;
@@ -204,19 +285,19 @@ BEGIN
  IF p_confirmed IS DISTINCT FROM true THEN RAISE EXCEPTION 'NARUV_CONFIRM_REQUIRED'; END IF;
  SELECT * INTO s FROM naruv_native_review.stages t WHERE t.org_id=a.org_id AND t.stage_id=p_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_STAGE_MISSING'; END IF;
- IF (s.actor_id,s.session_binding_sha256,s.stage_sha256,s.canonical_sha256,s.snapshot_sha256) IS DISTINCT FROM (a.actor_id,a.session_binding_sha256,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
+ IF (s.actor_id,s.session_binding_sha256,s.auth_epoch,s.stage_sha256,s.canonical_sha256,s.snapshot_sha256) IS DISTINCT FROM (a.actor_id,a.session_binding_sha256,a.auth_epoch,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
  SELECT t.revision,t.existing_ids INTO target FROM jw_dev.naruv_review_sources t
  WHERE t.org_id=a.org_id AND t.source_id=s.source_id AND t.entity=s.entity AND t.active FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_SOURCE_NOT_FOUND'; END IF;
  SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
- IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
+ IF (a.actor_id,a.org_id,a.session_binding_sha256,a.auth_epoch) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256,a2.auth_epoch) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  IF target.revision IS DISTINCT FROM s.expected_revision OR ARRAY(SELECT x FROM unnest(target.existing_ids) x ORDER BY x COLLATE "C") IS DISTINCT FROM s.expected_ids
  THEN RAISE EXCEPTION 'NARUV_TARGET_CHANGED'; END IF;
  stamp:=clock_timestamp();
- IF stamp>=s.expires_at THEN RAISE EXCEPTION 'NARUV_STAGE_EXPIRED'; END IF;
+ IF stamp<s.created_at OR stamp>=s.expires_at THEN RAISE EXCEPTION 'NARUV_STAGE_EXPIRED'; END IF;
  SELECT * INTO old FROM naruv_native_review.approvals t WHERE t.org_id=a.org_id AND t.stage_id=p_id FOR UPDATE;
  IF FOUND THEN
-  IF old.status<>'APPROVED' OR stamp>=old.expires_at THEN RAISE EXCEPTION 'NARUV_APPROVAL_TERMINAL'; END IF;
+  IF old.status<>'APPROVED' OR stamp<old.approved_at OR stamp>=old.expires_at THEN RAISE EXCEPTION 'NARUV_APPROVAL_TERMINAL'; END IF;
   IF (old.actor_id,old.stage_sha256,old.canonical_sha256,old.snapshot_sha256) IS DISTINCT FROM (a.actor_id,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
   RETURN 'ALREADY_APPROVED';
  END IF;
@@ -232,7 +313,7 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_STAGE_MISSING'; END IF;
  IF (old.actor_id,old.stage_sha256,old.canonical_sha256,old.snapshot_sha256) IS DISTINCT FROM (a.actor_id,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
  SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
- IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
+ IF (a.actor_id,a.org_id,a.session_binding_sha256,a.auth_epoch) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256,a2.auth_epoch) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  IF old.status='REVOKED' THEN RETURN 'ALREADY_REVOKED'; END IF;
  IF old.status<>'APPROVED' THEN RAISE EXCEPTION 'NARUV_APPROVAL_TERMINAL'; END IF;
  UPDATE naruv_native_review.approvals t SET status='REVOKED' WHERE t.org_id=a.org_id AND t.stage_id=p_id;
@@ -253,7 +334,7 @@ BEGIN
  IF p_reservation IS NULL OR p_reservation !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' THEN RAISE EXCEPTION 'NARUV_STAGE_INPUT'; END IF;
  SELECT * INTO s FROM naruv_native_review.stages t WHERE t.org_id=a.org_id AND t.stage_id=p_id;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_STAGE_MISSING'; END IF;
- IF (s.actor_id,s.session_binding_sha256,s.stage_sha256,s.canonical_sha256,s.snapshot_sha256) IS DISTINCT FROM (a.actor_id,a.session_binding_sha256,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
+ IF (s.actor_id,s.session_binding_sha256,s.auth_epoch,s.stage_sha256,s.canonical_sha256,s.snapshot_sha256) IS DISTINCT FROM (a.actor_id,a.session_binding_sha256,a.auth_epoch,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
  -- A committed receipt can be recovered even though the target revision advanced.
  SELECT * INTO r FROM naruv_native_review.receipts t WHERE t.org_id=a.org_id AND t.stage_id=p_id;
  IF FOUND THEN
@@ -265,7 +346,7 @@ BEGIN
  WHERE t.org_id=a.org_id AND t.source_id=s.source_id AND t.entity=s.entity FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_SOURCE_NOT_FOUND'; END IF;
  SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
- IF (a.actor_id,a.org_id,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
+ IF (a.actor_id,a.org_id,a.session_binding_sha256,a.auth_epoch) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256,a2.auth_epoch) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED'; END IF;
  -- Check receipt again after serialization for concurrent same-request retry.
  SELECT * INTO r FROM naruv_native_review.receipts t WHERE t.org_id=a.org_id AND t.stage_id=p_id;
  IF FOUND THEN
@@ -277,7 +358,7 @@ BEGIN
  SELECT * INTO ap FROM naruv_native_review.approvals t WHERE t.org_id=a.org_id AND t.stage_id=p_id FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_APPROVAL_REQUIRED'; END IF;
  IF (ap.actor_id,ap.stage_sha256,ap.canonical_sha256,ap.snapshot_sha256) IS DISTINCT FROM (a.actor_id,p_digest,p_canonical,p_snapshot) THEN RAISE EXCEPTION 'NARUV_BINDING_CHANGED'; END IF;
- IF ap.status<>'APPROVED' OR clock_timestamp()>=ap.expires_at OR clock_timestamp()>=s.expires_at
+ IF ap.status<>'APPROVED' OR clock_timestamp()<ap.approved_at OR clock_timestamp()<s.created_at OR clock_timestamp()>=ap.expires_at OR clock_timestamp()>=s.expires_at
  THEN RAISE EXCEPTION 'NARUV_APPROVAL_TERMINAL'; END IF;
  IF target.revision IS DISTINCT FROM s.expected_revision OR ARRAY(SELECT x FROM unnest(target.existing_ids) x ORDER BY x COLLATE "C") IS DISTINCT FROM s.expected_ids
  THEN RAISE EXCEPTION 'NARUV_TARGET_CHANGED'; END IF;
@@ -292,6 +373,14 @@ BEGIN
  existing_ids=ARRAY(SELECT x FROM unnest(s.expected_ids||new_ids) x ORDER BY x COLLATE "C")
  WHERE t.org_id=a.org_id AND t.source_id=s.source_id AND t.entity=s.entity;
  IF NOT FOUND THEN RAISE EXCEPTION 'NARUV_TARGET_CHANGED'; END IF;
+ -- Recheck after all record writes and target update, before durable receipt.
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.session_binding_sha256,a.auth_epoch)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.session_binding_sha256,a2.auth_epoch)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ IF clock_timestamp()<ap.approved_at OR clock_timestamp()<s.created_at
+ OR clock_timestamp()>=ap.expires_at OR clock_timestamp()>=s.expires_at
+ THEN RAISE EXCEPTION 'NARUV_APPROVAL_TERMINAL'; END IF;
  INSERT INTO naruv_native_review.receipts VALUES(a.org_id,p_id,a.actor_id,p_reservation,p_digest,p_canonical,p_snapshot,s.raw_sha256,s.rows_sha256,
  cardinality(new_ids),clock_timestamp()) RETURNING * INTO r;
  UPDATE naruv_native_review.approvals t SET status='COMMITTED' WHERE t.org_id=a.org_id AND t.stage_id=p_id;
