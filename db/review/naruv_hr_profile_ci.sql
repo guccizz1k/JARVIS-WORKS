@@ -30,6 +30,19 @@ CREATE POLICY profile_history_scope ON naruv_draft.profile_revision_history TO n
 REVOKE ALL ON naruv_draft.profile_revision_history FROM PUBLIC,jw_app_dev,naruv_native_stage;
 CREATE TRIGGER profile_history_immutable BEFORE UPDATE OR DELETE ON naruv_draft.profile_revision_history
  FOR EACH ROW EXECUTE FUNCTION naruv_native_review.immutable();
+-- Custodian-only synthetic closure record; ordinary users cannot alter it.
+CREATE TABLE naruv_draft.profile_retention(
+ org_id text NOT NULL,worker_id text NOT NULL,eligible_at timestamptz NOT NULL,
+ legal_hold boolean NOT NULL,approval_sha256 text NOT NULL,purged_at timestamptz,
+ PRIMARY KEY(org_id,worker_id),
+ FOREIGN KEY(org_id,worker_id) REFERENCES naruv_draft.staff(org_id,worker_id),
+ CHECK(approval_sha256 ~ '^[0-9a-f]{64}$'));
+ALTER TABLE naruv_draft.profile_retention ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_draft.profile_retention FORCE ROW LEVEL SECURITY;
+CREATE POLICY profile_retention_scope ON naruv_draft.profile_retention TO naruv_native_owner
+ USING(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'))
+ WITH CHECK(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'));
+REVOKE ALL ON naruv_draft.profile_retention FROM PUBLIC,jw_app_dev,naruv_native_stage;
 CREATE FUNCTION naruv_draft.profile_envelope(p_worker text,p_revision text,p_envelope jsonb,p_expected text,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; fresh record; saved jsonb; current_revision text;
@@ -46,6 +59,10 @@ BEGIN
  THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
  PERFORM 1 FROM naruv_draft.staff s WHERE s.org_id=a.org_id AND s.worker_id=p_worker AND s.active FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'PROFILE_NOT_FOUND'; END IF;
+ IF EXISTS(SELECT 1 FROM naruv_draft.profile_retention r WHERE (r.org_id,r.worker_id)=(a.org_id,p_worker) AND r.purged_at IS NOT NULL)
+ THEN RAISE EXCEPTION 'PROFILE_PURGED'; END IF;
+ IF EXISTS(SELECT 1 FROM naruv_draft.profile_retention r WHERE (r.org_id,r.worker_id)=(a.org_id,p_worker))
+ THEN RAISE EXCEPTION 'PROFILE_RETAINED'; END IF;
  IF p_envelope IS NOT NULL THEN
   IF p_revision !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
    OR jsonb_typeof(p_envelope) IS DISTINCT FROM 'object'
@@ -55,7 +72,7 @@ BEGIN
    OR jsonb_typeof(p_envelope->'key_id') IS DISTINCT FROM 'string'
    OR jsonb_typeof(p_envelope->'nonce') IS DISTINCT FROM 'string'
    OR jsonb_typeof(p_envelope->'ciphertext') IS DISTINCT FROM 'string'
-   OR p_envelope->>'key_id' IS DISTINCT FROM 'ci-profile-key'
+   OR p_envelope->>'key_id' NOT IN ('ci-profile-key','ci-profile-key-2')
    OR p_envelope->>'nonce' !~ '^[A-Za-z0-9+/]{16}$'
    OR length(p_envelope->>'ciphertext') NOT BETWEEN 24 AND 4096
    OR p_envelope->>'ciphertext' !~ '^[A-Za-z0-9+/]+={0,2}$'
@@ -94,4 +111,31 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION naruv_draft.profile_envelope(text,text,jsonb,text,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_draft.profile_envelope(text,text,jsonb,text,text) TO jw_app_dev;
+CREATE FUNCTION naruv_draft.purge_profile(p_worker text,p_expected text,p_approval text,p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; fresh record; r naruv_draft.profile_retention; rev text;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF a.org_id NOT IN ('ci-a','ci-b') OR p_worker IS DISTINCT FROM 'worker-1'
+ OR p_expected IS NULL OR p_expected !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_approval IS NULL OR p_approval !~ '^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'PROFILE_INPUT'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-profile-ci:'||a.org_id,0));
+ SELECT * INTO r FROM naruv_draft.profile_retention x WHERE (x.org_id,x.worker_id)=(a.org_id,p_worker) FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'PROFILE_PURGE_BLOCKED'; END IF;
+ IF r.purged_at IS NOT NULL OR r.legal_hold OR r.eligible_at>clock_timestamp()
+ OR r.approval_sha256 IS DISTINCT FROM p_approval THEN RAISE EXCEPTION 'PROFILE_PURGE_BLOCKED'; END IF;
+ SELECT x.revision INTO rev FROM naruv_draft.profile_envelopes x
+ WHERE (x.org_id,x.worker_id)=(a.org_id,p_worker) FOR UPDATE;
+ IF rev IS DISTINCT FROM p_expected THEN RAISE EXCEPTION 'PROFILE_STALE'; END IF;
+ SELECT * INTO fresh FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (fresh.actor_id,fresh.org_id,fresh.auth_epoch,fresh.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ DELETE FROM naruv_draft.profile_envelopes x WHERE (x.org_id,x.worker_id,x.revision)=(a.org_id,p_worker,p_expected);
+ IF NOT FOUND THEN RAISE EXCEPTION 'PROFILE_STALE'; END IF;
+ UPDATE naruv_draft.profile_retention x SET purged_at=clock_timestamp() WHERE (x.org_id,x.worker_id)=(a.org_id,p_worker);
+ RETURN jsonb_build_object('status','PURGED');
+END $$;
+REVOKE ALL ON FUNCTION naruv_draft.purge_profile(text,text,text,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
+GRANT EXECUTE ON FUNCTION naruv_draft.purge_profile(text,text,text,text) TO jw_app_dev;
 RESET ROLE;

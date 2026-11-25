@@ -8506,7 +8506,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "879d8449577f23e113081b90085f1bfb3cf75afe",
+      "sha": "47f89e90d9042c725a73b808c253da9ef8041da0",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8530,15 +8530,15 @@
       "mode": "100644"
     },
     "scripts/naruv_pg_auth_acceptance_ci.py": {
-      "sha": "b8077207895597cc012e8ebf6cd267eb820640e4",
+      "sha": "f2be704dcd6ef2a249037bb86489a312e77dbe11",
       "mode": "100644"
     },
     "app/naruv_hr_profile_review.py": {
-      "sha": "c44036dbfd1aacf782cbfd778494bdb188f400d9",
+      "sha": "8f6378935850cd862cf0e2afdefe06e5cd4b6126",
       "mode": "100644"
     },
     "db/review/naruv_hr_profile_ci.sql": {
-      "sha": "f68a739d4d828f1f9e93dbbbd386ebd0f7f1e82d",
+      "sha": "835b0d6b6210d0e6151d701848f9276f6f5a7be2",
       "mode": "100644"
     }
   },
@@ -8659,5 +8659,9 @@
   "retention_rotation_tax_review": {
     "parent": "609f5d4a5ec7617caab2b9aae177103cfbc716f8",
     "reason": "Add decision-only HR retention policy, verified-envelope rotation helper, restricted withholding reference and regression tests. No DB purge, runtime key activation, official table lookup or production authorization."
+  },
+  "profile_retention_rotation_ci_candidate": {
+    "parent": "c9599cab38d4aca14f55027fa49b9dcc7de934bd",
+    "reason": "Synthetic custodian-controlled retention closure and logical purge; revision-bound confirmed key rotation, actual PG acceptance additions; no production physical erasure, key retirement or hosted changes."
   }
 }

@@ -55,7 +55,7 @@ def verify(cert,dsns):
             root.execute((ROOT/"db/review/naruv_hr_profile_ci.sql").read_text())
         tls={p:make_conninfo(d,sslmode="verify-full",sslrootcert=str(cert),gssencmode="disable",connect_timeout=3) for p,d in dsns.items()}
         env={review.FLAG:review.ACK,integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK,integrated.hr.FLAG:integrated.ACK,"JW_PG_AUTH_STAGE_DSN":tls["auth"],"JW_PG_STAGE_DSN":tls["business"],
-            "JW_V90_ALLOWED_ORIGINS":"https://testserver","JW_DATA_KEY":key.decode(),"JW_ENV":"dev",profiles.FLAG:"DISPOSABLE_FIXTURE_ONLY",profiles.KEY:secrets.token_hex(32)}
+            "JW_V90_ALLOWED_ORIGINS":"https://testserver","JW_DATA_KEY":key.decode(),"JW_ENV":"dev",profiles.FLAG:"DISPOSABLE_FIXTURE_ONLY",profiles.KEY:secrets.token_hex(32),profiles.NEXT_KEY:secrets.token_hex(32)}
         with patch.dict(os.environ,env),patch.object(v90.stage,"_connect",lambda:psycopg.connect(tls["business"])):
             app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
             assert integrated.register_integrated_review(app,include_drafts=True,include_hr=True)
@@ -129,6 +129,44 @@ def verify(cert,dsns):
                     profile_status("read",409,headers=ah)
                 assert profile_status("read",200,headers=ah).json()["profile"]==replacement["profile"]
                 print("NARUV_HR_PROFILE_REVISION_PASS stale, reuse, tenant and wrong-key denials; immutable metadata",flush=True)
+                rotate={"revision":"r3","expected_revision":"r2"}
+                with patch.dict(os.environ,{profiles.NEXT_KEY:os.environ[profiles.KEY]}):
+                    profile_status("rotate",409,headers=create,json=rotate)
+                profile_status("rotate",200,headers=create,json=rotate)
+                profile_status("rotate",409,headers=create,json=rotate)
+                with patch.dict(os.environ,{profiles.KEY:""}):
+                    assert profile_status("read",200,headers=ah).json()["profile"]==replacement["profile"]
+                with patch.dict(os.environ,{profiles.NEXT_KEY:secrets.token_hex(32)}):
+                    profile_status("read",409,headers=ah)
+                assert profile_status("read",200,headers=ah).json()["profile"]==replacement["profile"]
+                with psycopg.connect(fixture.root_dsn) as root:
+                    assert root.execute("SELECT revision,envelope->>'key_id' FROM naruv_draft.profile_envelopes").fetchone()==("r3","ci-profile-key-2")
+                print("NARUV_HR_PROFILE_ROTATION_PASS verified replacement and old-key-unavailable read",flush=True)
+                approval=secrets.token_hex(32);purge={"expected_revision":"r3","approval_sha256":approval}
+                profile_status("purge",409,headers=create,json=purge)
+                with psycopg.connect(fixture.root_dsn) as root:
+                    root.execute("INSERT INTO naruv_draft.profile_retention(org_id,worker_id,eligible_at,legal_hold,approval_sha256) VALUES('ci-a','worker-1',clock_timestamp()+interval '1 day',true,%s)",(approval,))
+                    assert root.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.profile_retention','SELECT,INSERT,UPDATE,DELETE')").fetchone()==(False,)
+                profile_status("read",409,headers=ah)
+                profile_status("purge",409,headers=create,json=purge)
+                with psycopg.connect(fixture.root_dsn) as root:
+                    root.execute("UPDATE naruv_draft.profile_retention SET legal_hold=false")
+                profile_status("purge",409,headers=create,json=purge)
+                with psycopg.connect(fixture.root_dsn) as root:
+                    root.execute("UPDATE naruv_draft.profile_retention SET eligible_at=clock_timestamp()-interval '1 second'")
+                profile_status("purge",409,headers=create,json=dict(purge,approval_sha256="0"*64))
+                assert b.post(profile+"/purge",headers=dict(bh,**{"x-naruv-confirm":"yes"}),json=purge).status_code==409
+                profile_status("purge",409,headers=create,json=dict(purge,expected_revision="r2"))
+                profile_status("purge",200,headers=create,json=purge)
+                profile_status("purge",409,headers=create,json=purge)
+                profile_status("read",409,headers=ah)
+                profile_status("create",409,headers=create,json=dict(value,revision="r4"))
+                with psycopg.connect(fixture.root_dsn) as root:
+                    assert root.execute("SELECT count(*) FROM naruv_draft.profile_envelopes").fetchone()==(0,)
+                    assert root.execute("SELECT purged_at IS NOT NULL FROM naruv_draft.profile_retention").fetchone()==(True,)
+                    assert root.execute("SELECT count(*) FROM naruv_draft.staff WHERE org_id='ci-a' AND worker_id='worker-1'").fetchone()==(1,)
+                assert a.post(path,headers=ah).json()["gross_krw"]==114000
+                print("NARUV_HR_PROFILE_PURGE_PASS synthetic logical deletion, hold/time/approval/stale/tenant denials, no resurrection, payroll preserved",flush=True)
                 assert a.post(logout,headers=dict(origin,**{"x-csrf-token":"x"*32})).status_code==403
                 assert a.post(logout,headers=ah).status_code==200
                 assert a.cookies.get(auth.COOKIE) is None
@@ -161,6 +199,8 @@ def verify(cert,dsns):
             for signature in ("v85_auth_candidate(text)","v85_auth_failed(text)","v85_auth_issue_session(text,text,text,bigint,text)","v85_auth_revoke_session(text)","v85_auth_check_csrf(text,text)"):
                 root.execute("DROP FUNCTION IF EXISTS jw_dev."+signature)
             root.execute("DROP FUNCTION IF EXISTS naruv_draft.profile_envelope(text,text,jsonb,text,text)")
+            root.execute("DROP FUNCTION IF EXISTS naruv_draft.purge_profile(text,text,text,text)")
+            root.execute("DROP TABLE IF EXISTS naruv_draft.profile_retention")
             root.execute("DROP TABLE IF EXISTS naruv_draft.profile_revision_history")
             root.execute("DROP TABLE IF EXISTS naruv_draft.profile_envelopes")
             for name in names:root.execute("DROP TABLE jw_dev."+name)
