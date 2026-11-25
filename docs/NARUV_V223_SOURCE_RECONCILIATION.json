@@ -8508,6 +8508,14 @@
     "tests/test_naruv_hr_profile_envelope.py": {
       "sha": "0999718079f1f339e91f755d5087370b6547df09",
       "mode": "100644"
+    },
+    "app/naruv_hosted_qa_admission.py": {
+      "sha": "ddc833ae326792b1fb31794709199913dfac96e9",
+      "mode": "100644"
+    },
+    "tests/test_naruv_hosted_qa_admission.py": {
+      "sha": "7aaacad2b52db6fca6572b51c965783664f87e6a",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8575,5 +8583,9 @@
   "real_https_read_metrics": {
     "parent": "b2cf2218f03419e7e6bf2df00c61abedf22e7524",
     "reason": "Add 64 actual TCP HTTPS requests with trusted loopback CA, eight concurrency, five missing/cross-origin/CSRF negatives and four post-load exact equality reads; no production or DB TLS claim."
+  },
+  "hosted_qa_admission": {
+    "parent": "efe705aeb308e290f4e586f5cab60f75bf0bf0fe",
+    "reason": "Offline config and read-only remote admission candidate with exact Render hostname and source, dedicated three non-inherited roles, TLS verification, protected RLS/table grants and owner-provisioned marker. No connection or provision performed."
   }
 }
