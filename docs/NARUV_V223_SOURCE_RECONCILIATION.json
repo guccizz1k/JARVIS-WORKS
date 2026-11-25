@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "9db58b6d033dbb59f627c211474eebe892e046ea",
+      "sha": "43c19ccefb7d3bce5e89edce1fc67cf33b6ab3be",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,7 +8502,7 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "1587d14edee6f875931e32068794855d2fc5d1f6",
+      "sha": "c60720a2f14f9fd807fec0d35fa467a0436fd58c",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
@@ -8542,7 +8542,11 @@
       "mode": "100644"
     },
     "scripts/naruv_hr_archive_ci.py": {
-      "sha": "42306bca1578053d33a9f651f7a5c763abc2045b",
+      "sha": "9637b47c3d327c2a98b33a27b9ad104bdc77c83a",
+      "mode": "100644"
+    },
+    "scripts/naruv_tax_source_audit.py": {
+      "sha": "683b048b25b33b65701ed9f16aa0a8b2e8bd09ff",
       "mode": "100644"
     }
   },
@@ -8708,5 +8712,9 @@
   "integrated_deduction_and_single_use_ci": {
     "parent": "6a7c6ae96de54bfcda1981ca32b26778c03e7f11",
     "reason": "Scoped same-snapshot payroll references and assessed reconciliation; family >11 formula bounded to 128; actual disposable quarantine PG atomic dual attestation consumption race, no production key retirement."
+  },
+  "independent_official_source_and_ledger_rollback": {
+    "parent": "b4b56c84ef68a2db68494a8a39219899fef33f3f",
+    "reason": "Independent PDF layout parser and full 7117 cell comparison, external input must be official; source audit separately enforced by review CI, no assertion of successful full comparison yet. CI-only ledger scope plus invalid signature and rollback mutation refusal."
   }
 }

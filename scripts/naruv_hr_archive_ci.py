@@ -160,6 +160,19 @@ def verify_single_use_attestations(dsn,archive_digest):
                 except ProfileBlocked:return False
                 need(r["key_retirement_authorized"] is False,"RETIREMENT_UNEXPECTED_AUTHORIZATION")
                 return True
+    # Failed signature and rolled-back consumption must leave the challenge available.
+    with psycopg.connect(dsn) as db:
+        with db.cursor() as cur:
+            try:consume_retirement_attestation_ci(cur,**dict(args,recovery_signature=b"x"*64))
+            except ProfileBlocked:pass
+            else:raise RuntimeError("RETIREMENT_TAMPER_ACCEPTED")
+        need(db.execute("SELECT consumed_at IS NULL FROM naruv_retirement_ci.challenge").fetchone()==(True,),
+             "RETIREMENT_INVALID_SIGNATURE_MUTATED")
+    with psycopg.connect(dsn) as db:
+        with db.cursor() as cur:consume_retirement_attestation_ci(cur,**args)
+        db.rollback()
+        need(db.execute("SELECT consumed_at IS NULL FROM naruv_retirement_ci.challenge").fetchone()==(True,),
+             "RETIREMENT_ROLLBACK_LOST_CHALLENGE")
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=list(pool.map(lambda _:attempt(),range(2)))
     need(sorted(results)==[False,True] and not attempt(),"RETIREMENT_REPLAY_ACCEPTED")

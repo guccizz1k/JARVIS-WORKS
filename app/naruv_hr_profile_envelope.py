@@ -189,6 +189,12 @@ def consume_retirement_attestation_ci(cur,**args):
     """Disposable QA ledger only; caller owns transaction and trusted scope.
     A valid dual signature is necessary, never sufficient for actual retirement.
     """
+    import os
+    _require(os.getenv("GITHUB_ACTIONS")=="true"
+             and os.getenv("JW_PG_CI_ALLOW")=="ONLY_EPHEMERAL_LOCAL_DATABASE"
+             and os.getenv("NARUV_ERP_RESTORE_ALLOW")=="TWO_DISPOSABLE_SERVICES_ONLY")
+    cur.execute("SELECT current_database(),current_setting('server_version_num')::int/10000,session_user")
+    _require(cur.fetchone()==("naruv_profile_quarantine_ci",17,"postgres"))
     verify_retirement_attestations(**args)
     cur.execute("""UPDATE naruv_retirement_ci.challenge
         SET consumed_at=%s

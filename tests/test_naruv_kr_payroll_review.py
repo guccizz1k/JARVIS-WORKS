@@ -314,3 +314,26 @@ class HighWageAndNationalCollection(unittest.TestCase):
         for change in (dict(expected_wage_sha256="0"*64),dict(tenant="b"),dict(withholding_date="2026-12-01"),
                        dict(taxable_monthly_krw=3000001),dict(assessed_deductions={})):
             with self.assertRaises(PayrollBlocked):ordinary_monthly_deduction_review_2026(**dict(args,**change))
+
+
+
+class IndependentSourceAudit(unittest.TestCase):
+    def test_exact_cells_no_guessing(self):
+        from scripts.naruv_tax_source_audit import cells,compare,expected_rows
+        from pathlib import Path
+        self.assertEqual(cells("1,040 - - - - - - - - - -"),(1040,)+(0,)*10)
+        for malformed in ("1040 ----------","1,04 - - - - - - - - - -","1040 - -","1040 - - - - - - - - - - -"):
+            with self.assertRaises(ValueError):cells(malformed)
+        actual=({9900000:(9920000,(1476690,1401010,1181180,1151180,1121180,1091180,1061180,1031180,1001180,971180,941180))},
+            (1507400,1431570,1200840,1170840,1140840,1110840,1080840,1050840,1020840,990840,960840))
+        source=(Path(__file__).resolve().parents[1]/"app/naruv_kr_payroll_review.py").read_text("utf-8")
+        rows,base=expected_rows(source)
+        self.assertEqual(len(rows),646)
+        self.assertEqual(compare(actual,({9900000:rows[9900000]},base)),[])
+        bad=dict(rows);bad[9900000]=(9920000,(1476680,)+rows[9900000][1][1:])
+        self.assertEqual(compare(actual,({9900000:bad[9900000]},base)),[(9900000,1,1476690,1476680)])
+        with self.assertRaisesRegex(ValueError,"SOURCE_BAND_MISMATCH"):compare(actual,(rows,base))
+    def test_incomplete_source_never_passes(self):
+        from scripts.naruv_tax_source_audit import extract
+        for bad in ("2026. 2. 27.", "2026. 2. 27.\f"+"empty\f"*26):
+            with self.assertRaises(ValueError):extract(bad)
