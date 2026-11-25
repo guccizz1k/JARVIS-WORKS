@@ -1,0 +1,41 @@
+name: NARUV isolated migration mapping lab
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - app/erp_migration_mapping.py
+      - tests/test_erp_migration_mapping.py
+      - .github/workflows/naruv-migration-mapping-lab.yml
+permissions:
+  contents: read
+concurrency:
+  group: naruv-migration-mapping-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  mapping-lab:
+    name: NARUV metadata-only migration lab
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Isolated standard-library tests in five fresh processes
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python -m py_compile app/erp_migration_mapping.py tests/test_erp_migration_mapping.py
+          for seed in 17 101 617 2027 65537; do
+            NARUV_TEST_SEED="$seed" PYTHONHASHSEED="$seed" python - <<'PY'
+          import os, unittest
+          suite=unittest.defaultTestLoader.loadTestsFromName("tests.test_erp_migration_mapping")
+          result=unittest.TextTestRunner(verbosity=1).run(suite)
+          if not result.wasSuccessful() or result.testsRun != 12 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
+              raise SystemExit(1)
+          print("NARUV_MAPPING_ROUND_PASS", os.environ["NARUV_TEST_SEED"], "12 cases; 100 permutations; 100 unknown-header mutations")
+          PY
+          done
+          echo 'NARUV_MAPPING_LAB_PASS 5 rounds; no row import or ERP connection'
