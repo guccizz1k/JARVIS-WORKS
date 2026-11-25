@@ -25,6 +25,14 @@ def run_valuation(base):
                 c.execute("SELECT set_config('naruv.valuation_ci','DISPOSABLE_ONLY',true)")
                 c.execute((ROOT/"db/review/naruv_valuation_ci.sql").read_text())
             if not valuation.register_valuation(cls.app):raise RuntimeError("COST_DISABLED")
+            from app import naruv_draft_review as drafts
+            from scripts.naruv_draft_ci import seed
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("SELECT set_config('naruv.draft_ci','DISPOSABLE_ONLY',true)")
+                c.execute((ROOT/"db/review/naruv_draft_ci.sql").read_text())
+                seed(c)
+            os.environ[drafts.FLAG]="ISOLATED_SYNTHETIC_ONLY"
+            if not drafts.register_drafts(cls.app):raise RuntimeError("DRAFT_DISABLED")
         def setUp(self):
             super().setUp()
             os.environ["NARUV_VALUATION_REVIEW"]="ISOLATED_SYNTHETIC_ONLY"
@@ -548,8 +556,50 @@ def run_valuation(base):
                 self.assertEqual(self.value(),before)
                 self.check(self.call("/valuation/overview",extra={"origin":"https://evil.test"}),403)
                 self.check(self.call("/valuation/overview"),200)
+        def test_cost_draft_server_owned_sources(self):
+            a=self.check(self.call("/drafts/documents/shared"),200)
+            b=self.check(self.call("/drafts/documents/shared",who="B"),200)
+            self.assertNotEqual(a["source_sha256"],b["source_sha256"])
+            self.assertNotEqual(a["source_binding_sha256"],b["source_binding_sha256"])
+            self.assertFalse(a["posting_authorized"]);self.assertFalse(a["persisted"])
+            self.assertEqual(self.check(self.call("/drafts/payroll/worker-1/2026-11"),200)["gross_krw"],114000)
+            self.assertEqual(self.check(self.call("/drafts/payroll/worker-1/2026-11",who="B"),200)["gross_krw"],171000)
+            self.check(self.call("/drafts/payroll/worker-1/2026-11",{"hourly_krw":1}),413)
+            self.check(self.call("/drafts/documents/shared",{"registered_sha256":"x"}),413)
+        def test_cost_draft_auth_and_scope(self):
+            self.check(self.call("/drafts/documents/shared",extra={"origin":"https://evil.test"}),403)
+            self.check(self.call("/drafts/documents/shared",extra={"x-csrf-token":"wrong"}),403)
+            self.check(self.call("/drafts/documents/missing"),404)
+            self.check(self.call("/drafts/payroll/worker-1/2026-13"),422)
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("UPDATE jw_dev.users SET role='member' WHERE id='ci-ua'")
+            try:self.check(self.call("/drafts/payroll/worker-1/2026-11"),403)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:c.execute("UPDATE jw_dev.users SET role='admin' WHERE id='ci-ua'")
+        def test_cost_draft_changed_source_and_unconfirmed_pay(self):
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("UPDATE naruv_draft.documents SET original_sha256=repeat('0',64) WHERE org_id='ci-a'")
+                c.execute("UPDATE naruv_draft.pay_periods SET confirmed=false WHERE org_id='ci-a'")
+            try:
+                self.check(self.call("/drafts/documents/shared"),409)
+                self.check(self.call("/drafts/payroll/worker-1/2026-11"),404)
+                self.check(self.call("/drafts/documents/shared",who="B"),200)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("UPDATE naruv_draft.documents SET original_sha256=encode(sha256(original_bytes),'hex') WHERE org_id='ci-a'")
+                    c.execute("UPDATE naruv_draft.pay_periods SET confirmed=true WHERE org_id='ci-a'")
+        def test_cost_draft_direct_access_and_disable(self):
+            from unittest.mock import patch
+            from app import naruv_draft_review as drafts
+            with psycopg.connect(fixture.root_dsn) as c:
+                for table in ("documents","staff","pay_periods","attendance"):
+                    self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev',%s,'SELECT')",("naruv_draft."+table,)).fetchone()[0])
+                    self.assertTrue(c.execute("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid=%s::regclass",("naruv_draft."+table,)).fetchone()[0])
+            with patch.dict(os.environ,{drafts.FLAG:""}):
+                self.check(self.call("/drafts/documents/shared"),404)
+            self.check(self.call("/drafts/documents/shared"),200)
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=46:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=50:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=46 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 46 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=50 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 50 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

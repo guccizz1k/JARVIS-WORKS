@@ -68,6 +68,9 @@ on:
       - app/naruv_document_review.py
       - app/naruv_payroll_draft.py
       - tests/test_naruv_document_payroll.py
+      - app/naruv_draft_review.py
+      - db/review/naruv_draft_ci.sql
+      - scripts/naruv_draft_ci.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read

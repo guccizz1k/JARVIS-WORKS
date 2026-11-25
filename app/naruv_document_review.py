@@ -50,7 +50,7 @@ def review_document(*,tenant,source_bytes,registered_sha256,observations):
         if not valid:
             issues.add("INVALID_"+field.upper());continue
         values.setdefault(field,set()).add(value)
-        positions.setdefault(field,set()).add(page)
+        positions.setdefault(field,set()).add((page,value))
     for field in FIELDS:
         if not values.get(field):issues.add("MISSING_"+field.upper())
         elif len(values[field])!=1:issues.add("CONFLICT_"+field.upper())
@@ -59,7 +59,7 @@ def review_document(*,tenant,source_bytes,registered_sha256,observations):
         if a+b!=c or c<=0:issues.add("AMOUNT_MISMATCH")
     proof={"version":1,"tenant":tenant,"source_sha256":actual,
            "candidates":{k:sorted(v) for k,v in values.items()},
-           "pages":{k:sorted(v) for k,v in positions.items()},"issues":sorted(issues)}
+           "page_candidates":{k:sorted(v) for k,v in positions.items()},"issues":sorted(issues)}
     return {"source_sha256":actual,"review_sha256":digest(proof),
             "status":"MANUAL_CORRECTION_REQUIRED" if issues else "ORIGINAL_REVIEW_REQUIRED",
             "issues":sorted(issues),"field_count":sum(len(v)==1 for v in values.values()),
