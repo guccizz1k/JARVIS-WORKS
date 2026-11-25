@@ -8490,7 +8490,7 @@
       "mode": "100644"
     },
     "scripts/naruv_workspace_browser_ci.py": {
-      "sha": "5afbf5a3b59c199424045cdba756698f437ea4e3",
+      "sha": "6fa01cada437a87d7c16e603670c945244833486",
       "mode": "100644"
     }
   },
@@ -8511,5 +8511,9 @@
     "parent": "07642339114582e1483627f23600970ad339d291",
     "source": "https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md",
     "reason": "Use installed stable Chrome supported by Ubuntu AppArmor; sandbox and TLS verification remain enabled."
+  },
+  "browser_csp_test_correction": {
+    "parent": "ff873f80e72a1b129ba9643f6f8ff9e3543c8919",
+    "reason": "Use locator count assertion instead of string eval blocked by script-src self. Product CSP, sandbox, TLS and empty-result assertion unchanged."
   }
 }

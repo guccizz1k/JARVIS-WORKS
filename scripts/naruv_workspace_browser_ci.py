@@ -4,7 +4,7 @@ Never runs outside an ephemeral Actions runner. No ignored certificate errors.
 import os,socket,tempfile,threading,time
 from pathlib import Path
 import uvicorn
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 from app import pg_cinema_cutover_front_v223 as cut
 from scripts.ci_v93_https_pg_browser import _ssl_files
 
@@ -57,7 +57,8 @@ def verify_browser(app,legacy_token,pg_token):
                         page.locator("#mobile").wait_for(state="visible")
                         assert not page.locator("#desk").is_visible()
                         page.set_viewport_size({"width":1440,"height":900})
-                        page.wait_for_function("document.querySelector('#result').childElementCount===0")
+                        # Locator assertions avoid string evaluation blocked by the product CSP.
+                        expect(page.locator("#result > *")).to_have_count(0,timeout=5000)
                         ctx.clear_cookies()
                         page.locator("#overview").click()
                         page.locator("#status").get_by_text("조회 실패",exact=False).wait_for(timeout=20000)
