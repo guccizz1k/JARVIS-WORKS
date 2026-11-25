@@ -8530,7 +8530,7 @@
       "mode": "100644"
     },
     "scripts/naruv_pg_auth_acceptance_ci.py": {
-      "sha": "f2be704dcd6ef2a249037bb86489a312e77dbe11",
+      "sha": "8166a8098b879c208e909eb6c4a66ae9b72297f7",
       "mode": "100644"
     },
     "app/naruv_hr_profile_review.py": {
@@ -8539,6 +8539,10 @@
     },
     "db/review/naruv_hr_profile_ci.sql": {
       "sha": "835b0d6b6210d0e6151d701848f9276f6f5a7be2",
+      "mode": "100644"
+    },
+    "scripts/naruv_hr_archive_ci.py": {
+      "sha": "1d17513ba17411ac8f966d751347be5fb189b8e5",
       "mode": "100644"
     }
   },
@@ -8668,5 +8672,9 @@
     "parent": "aa22a464ea5d3c91b41991efa404ad62857dfe79",
     "source": "https://law.go.kr/flDownload.do?bylClsCd=110201&flSeq=163623339&gubun=",
     "reason": "2026-02-27 amended decree Appendix2 PDF page14: 26 rows, 286 amounts, 572 boundary lookups and independent anchor assertions; child adjustment, withholding date and exact source binding. No full table or statutory payroll claims."
+  },
+  "hr_archive_quarantine": {
+    "parent": "eaa39fc6907174bac64b2720a2bc1426b54dc44b",
+    "reason": "Separate disposable PG17 data-only archive before synthetic purge; independent quarantine database restore, row hashes, current key decryption, old-key and cross-tenant denial; reconcile newer authoritative purge tombstone and require exact post-purge snapshot; no runtime release or original archive deletion."
   }
 }

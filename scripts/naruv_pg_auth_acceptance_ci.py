@@ -142,6 +142,8 @@ def verify(cert,dsns):
                 with psycopg.connect(fixture.root_dsn) as root:
                     assert root.execute("SELECT revision,envelope->>'key_id' FROM naruv_draft.profile_envelopes").fetchone()==("r3","ci-profile-key-2")
                 print("NARUV_HR_PROFILE_ROTATION_PASS verified replacement and old-key-unavailable read",flush=True)
+                from scripts.naruv_hr_archive_ci import capture,verify_after_purge
+                archived=capture(fixture.root_dsn)
                 approval=secrets.token_hex(32);purge={"expected_revision":"r3","approval_sha256":approval}
                 profile_status("purge",409,headers=create,json=purge)
                 with psycopg.connect(fixture.root_dsn) as root:
@@ -167,6 +169,7 @@ def verify(cert,dsns):
                     assert root.execute("SELECT count(*) FROM naruv_draft.staff WHERE org_id='ci-a' AND worker_id='worker-1'").fetchone()==(1,)
                 assert a.post(path,headers=ah).json()["gross_krw"]==114000
                 print("NARUV_HR_PROFILE_PURGE_PASS synthetic logical deletion, hold/time/approval/stale/tenant denials, no resurrection, payroll preserved",flush=True)
+                verify_after_purge(fixture.root_dsn,archived,profiles.key("ci-profile-key-2"),profiles.key(),replacement["profile"])
                 assert a.post(logout,headers=dict(origin,**{"x-csrf-token":"x"*32})).status_code==403
                 assert a.post(logout,headers=ah).status_code==200
                 assert a.cookies.get(auth.COOKIE) is None
