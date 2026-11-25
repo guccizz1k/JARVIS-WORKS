@@ -1,5 +1,5 @@
 import unittest
-from app.naruv_hosted_qa_admission import ACK,PURPOSES,AdmissionBlocked,parse_config,run
+from app.naruv_hosted_qa_admission import ACK,PURPOSES,AdmissionBlocked,parse_config,run,verify_catalog,PROTECTED
 
 class HostedQAAdmission(unittest.TestCase):
     def env(self):
@@ -38,3 +38,34 @@ class HostedQAAdmission(unittest.TestCase):
         e=self.env();e[PURPOSES["auth"][0]]=e[PURPOSES["auth"][0]].replace("x"*24+"1","x"*24+"0")
         with self.assertRaisesRegex(AdmissionBlocked,"HOSTED_QA_DSN_SCOPE"):parse_config(e)
         with self.assertRaisesRegex(AdmissionBlocked,"HOSTED_QA_ENV_OVERRIDE"):run(self.env())
+
+    def test_catalog_fail_closed_logic(self):
+        # Scripted cursor tests only: actual remote DB and TLS remain unverified.
+        c=parse_config(self.env())
+        def rows():
+            return [(c.database,"naruv_qa_business","naruv_qa_business",17,"on",True),
+              (True,False,False,False,False,False,False),
+              (False,False,False,False,False,False),[("jw_app_dev",)],(True,False),
+              *[(True,True),(False,False),(False,False)]*len(PROTECTED),
+              ("naruv_qa_boundary_owner",False),(False,False,False,False),
+              (False,False,False,False),[(c.marker,c.source_sha)]]
+        class Cursor:
+            def __init__(self,responses):self.pending=iter(responses);self.current=None
+            def execute(self,sql,args=()):self.current=next(self.pending)
+            def fetchone(self):return self.current
+            def fetchall(self):return self.current
+        verify_catalog(Cursor(rows()),purpose="business",config=c)
+        for index,bad,reason in (
+          (0,(c.database,"naruv_qa_business","naruv_qa_business",17,"on",False),"HOSTED_QA_DB_TLS"),
+          (1,(True,True,False,False,False,False,False),"HOSTED_QA_LOGIN_ROLE"),
+          (2,(True,False,False,False,False,False),"HOSTED_QA_DELEGATED_ROLE"),
+          (3,[("jw_app_dev",),("naruv_native_owner",)],"HOSTED_QA_ROLE_MEMBERSHIP"),
+          (4,(True,True),"HOSTED_QA_ROLE_DELEGATION"),
+          (5,(True,False),"HOSTED_QA_RLS"),
+          (6,(False,True),"HOSTED_QA_DIRECT_GRANT"),
+          (-4,("wrong_owner",False),"HOSTED_QA_BOUNDARY_OWNER"),
+          (-3,(False,False,True,False),"HOSTED_QA_BOUNDARY_WRITABLE"),
+          (-1,[("wrong",c.source_sha)],"HOSTED_QA_BOUNDARY_MISMATCH")):
+            values=rows();values[index]=bad
+            with self.subTest(reason=reason),self.assertRaisesRegex(AdmissionBlocked,reason):
+                verify_catalog(Cursor(values),purpose="business",config=c)

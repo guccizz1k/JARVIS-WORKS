@@ -8514,7 +8514,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_hosted_qa_admission.py": {
-      "sha": "7aaacad2b52db6fca6572b51c965783664f87e6a",
+      "sha": "1e65e1262e18b7462984363bdc6cbf9248edd337",
       "mode": "100644"
     }
   },
@@ -8587,5 +8587,9 @@
   "hosted_qa_admission": {
     "parent": "efe705aeb308e290f4e586f5cab60f75bf0bf0fe",
     "reason": "Offline config and read-only remote admission candidate with exact Render hostname and source, dedicated three non-inherited roles, TLS verification, protected RLS/table grants and owner-provisioned marker. No connection or provision performed."
+  },
+  "hosted_qa_admission_negative_cases": {
+    "parent": "7daf2dccd8d5cf52c63616db098a09f8e956ace3",
+    "reason": "Scripted cursor negative coverage for wrong database TLS, roles, memberships, forced RLS, column grants and boundary marker. No actual remote proof."
   }
 }
