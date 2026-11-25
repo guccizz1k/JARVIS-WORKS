@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "c48e6b71b778383347436fd004415e72b1b40f43",
+      "sha": "cfb13d4fc0bf4004ae22c701ac5d7ed087df1afa",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8567,5 +8567,9 @@
   "hr_privacy_pension_reference": {
     "parent": "58886f05bd113355ca67bf9e0d9444a945d25b08",
     "reason": "Offline AES-256-GCM minimal profile envelope with tenant/worker/revision/key AAD and tests; 2026 NPS exact unrounded assessed-base reference with effective July bounds. No real PII, production storage, key provisioning, statutory clearance or payment."
+  },
+  "combined_quote_composition_correction": {
+    "parent": "b7d57c494b9a93ee6f0c715df603faea3b7b956c",
+    "reason": "CI 45621356993 all five PG rounds failed same 404 on V92 quote create in freshly composed ERP-only app. Register existing guarded V92 writer after NARUV namespace reservation, assert route manifest; no bypass, no mocked quote or changed expected status. Both real HTTPS browser markers passed round 1."
   }
 }

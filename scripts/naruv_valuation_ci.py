@@ -706,6 +706,13 @@ def run_valuation(base):
             with patch.dict(os.environ,{integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK,integrated.hr.FLAG:integrated.ACK}):
                 self.app=FastAPI()
                 self.assertTrue(integrated.register_integrated_review(self.app,include_drafts=True,include_hr=True))
+                # Register the original quote writer AFTER reserving the NARUV
+                # namespace; the isolated composer deliberately rejects opaque
+                # preexisting FastAPI router nodes. Preserve the real V92 gate.
+                from app import pg_quote_api_v92 as v92
+                self.assertTrue(v92.enabled())
+                self.assertTrue(v92.register_v92_quote_api(self.app))
+                self.assertIn("/api/pg-stage/v92/quotes",self.app.openapi()["paths"])
                 self.ready_cost_prod();self.complete(3)
                 q=self.quote(names=("Assembly",),qty=2)
                 self.trade("open","combined-sale-o",{"kind":"sale","quote_id":q["quote_id"],"source_id":"source-a","item_id":"0003","warehouse_id":"W1"},doc="combined-sale")
