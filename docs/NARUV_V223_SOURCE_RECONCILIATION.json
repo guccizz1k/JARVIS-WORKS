@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "7a1f826059f8fb747449b5c71a6ed3bb3e7a4ae4",
+      "sha": "89a315ecce54d3bb4362589d3b584cbaf5c74d77",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "087e9c5a6215440abbe3240dde6591cc88cfa859",
+      "sha": "6d196c5c175994497da51d74e70741b30f0fdf09",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8500,6 +8500,14 @@
     "app/naruv_workspace/hr-pilot.js": {
       "sha": "f2093ec2beb4b707c77f381cb3938336444ac837",
       "mode": "100644"
+    },
+    "app/naruv_hr_profile_envelope.py": {
+      "sha": "f979151f031e5dab1e8658cac45f5087f68b9181",
+      "mode": "100644"
+    },
+    "tests/test_naruv_hr_profile_envelope.py": {
+      "sha": "0999718079f1f339e91f755d5087370b6547df09",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8555,5 +8563,9 @@
   "hr_browser_resize_and_metrics": {
     "parent": "e2d4878c7ce846bb65becf1c2641a21f297d02d0",
     "reason": "CI 45617232393 round 1 failed because immediate resize roundtrip preceded DOM clearing; await empty DOM during mobile, assert after desktop, add media query change reset to isolated HR UI, preserve original populated workspace clearing check. Record real disposable PG HTTP 32-read p95/p99/max/rps, not production SLO."
+  },
+  "hr_privacy_pension_reference": {
+    "parent": "58886f05bd113355ca67bf9e0d9444a945d25b08",
+    "reason": "Offline AES-256-GCM minimal profile envelope with tenant/worker/revision/key AAD and tests; 2026 NPS exact unrounded assessed-base reference with effective July bounds. No real PII, production storage, key provisioning, statutory clearance or payment."
   }
 }

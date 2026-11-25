@@ -1,0 +1,67 @@
+"""Offline HR profile encryption candidate; never mounted or persisted.
+
+Caller owns authorization, key custody, lawful purpose, retention and audit.
+No resident registration number, bank account or medical fields are accepted.
+AES-GCM binds the immutable tenant, worker, revision and key identifier.
+"""
+import base64
+import binascii
+import json
+import re
+import secrets
+import unicodedata
+from datetime import date
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.exceptions import InvalidTag
+from .naruv_payroll_draft import ID
+
+class ProfileBlocked(ValueError):pass
+
+def _require(ok):
+    if not ok:raise ProfileBlocked("HR_PROFILE_INVALID")
+
+def _canonical(obj):
+    return json.dumps(obj,ensure_ascii=True,sort_keys=True,separators=(",",":")).encode("ascii")
+
+def _context(tenant,worker,revision,key_id):
+    _require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker,revision,key_id)))
+    return _canonical(["NARUV_HR_PROFILE_V1",tenant,worker,revision,key_id])
+
+def _profile(profile):
+    _require(type(profile) is dict and set(profile)=={"display_name","work_email","employment_start"})
+    name,email,start=(profile[k] for k in ("display_name","work_email","employment_start"))
+    _require(type(name) is str and 1<=len(name)<=80 and name==name.strip()
+        and any(c.isalpha() for c in name)
+        and all(unicodedata.category(c)[0] in ("L","M") or c in " -'." for c in name))
+    _require(type(email) is str and len(email)<=254 and re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,187}[A-Za-z0-9])?\.[A-Za-z]{2,24}",email))
+    _require(type(start) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",start))
+    try:date.fromisoformat(start)
+    except ValueError:raise ProfileBlocked("HR_PROFILE_INVALID") from None
+    return dict(profile)
+
+def seal_profile(*,tenant,worker,revision,key_id,key,profile):
+    _require(type(key) is bytes and len(key)==32)
+    aad=_context(tenant,worker,revision,key_id)
+    plaintext=_canonical(_profile(profile))
+    nonce=secrets.token_bytes(12)
+    ciphertext=AESGCM(key).encrypt(nonce,plaintext,aad)
+    return {"v":1,"key_id":key_id,"nonce":base64.b64encode(nonce).decode("ascii"),
+            "ciphertext":base64.b64encode(ciphertext).decode("ascii")}
+
+def open_profile(*,tenant,worker,revision,key_id,key,envelope):
+    _require(type(key) is bytes and len(key)==32)
+    aad=_context(tenant,worker,revision,key_id)
+    _require(type(envelope) is dict and set(envelope)=={"v","key_id","nonce","ciphertext"}
+        and type(envelope["v"]) is int and envelope["v"]==1 and envelope["key_id"]==key_id)
+    try:
+        _require(type(envelope["nonce"]) is str and len(envelope["nonce"])==16
+            and type(envelope["ciphertext"]) is str and 24<=len(envelope["ciphertext"])<=4096)
+        nonce=base64.b64decode(envelope["nonce"],validate=True)
+        ciphertext=base64.b64decode(envelope["ciphertext"],validate=True)
+        _require(len(nonce)==12 and base64.b64encode(nonce).decode("ascii")==envelope["nonce"]
+            and base64.b64encode(ciphertext).decode("ascii")==envelope["ciphertext"])
+        plaintext=AESGCM(key).decrypt(nonce,ciphertext,aad)
+        return _profile(json.loads(plaintext.decode("ascii")))
+    except (InvalidTag,ValueError,UnicodeError,TypeError,binascii.Error,RecursionError):
+        raise ProfileBlocked("HR_PROFILE_INVALID") from None

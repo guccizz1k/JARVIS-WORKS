@@ -119,3 +119,28 @@ def source_bound_review(*,tenant,worker,period,policy_revision,hourly_krw,
             "wage":review["review_sha256"],"deductions":net["reconciliation_sha256"]}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
         "production_authorized":False}
+
+
+PENSION_REFERENCE_2026="KR_NPS_2026_EMPLOYEE_REFERENCE_V1"
+
+def pension_reference_2026(*,tenant,worker,period,assessed_base_krw,assessment_sha256):
+    """Exact arithmetic on the agency-assessed monthly base, NOT current gross.
+
+    Single ordinary workplace, full-month, before statutory rounding or relief.
+    Eligibility, multi-workplace allocation, subsidies, exceptions and actual
+    withholding are not established by this function.
+    Source: https://www.nps.or.kr/pnsinfo/ntpsklg/getOHAF0038M0.do
+    https://www.nps.or.kr/pnsinfo/ntpsklg/getOHAF0097M0.do
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_NPS_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_NPS_PERIOD")
+    low,high=(400000,6370000) if int(period[-2:])<=6 else (410000,6590000)
+    require(_whole(assessed_base_krw,low,high) and assessed_base_krw%1000==0,"KR_NPS_BASE")
+    require(type(assessment_sha256) is str and HEX.fullmatch(assessment_sha256),"KR_NPS_EVIDENCE")
+    half=Fraction(assessed_base_krw*475,10000)
+    return {"status":"UNROUNDED_REFERENCE_ONLY","policy":PENSION_REFERENCE_2026,
+        "employee_exact":_money(half),"employer_exact":_money(half),
+        "total_exact":_money(half*2),"base_limits_krw":[low,high],
+        "reference_sha256":hash_input({"policy":PENSION_REFERENCE_2026,"tenant":tenant,"worker":worker,
+            "period":period,"base":assessed_base_krw,"assessment":assessment_sha256}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False}

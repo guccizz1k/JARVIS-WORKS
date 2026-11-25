@@ -1,5 +1,5 @@
 import unittest
-from app.naruv_kr_payroll_review import wage_review,deduction_reconciliation,DEDUCTIONS,source_bound_review
+from app.naruv_kr_payroll_review import wage_review,deduction_reconciliation,DEDUCTIONS,source_bound_review,pension_reference_2026
 from app.naruv_payroll_draft import PayrollBlocked
 
 def day(d="2026-11-02",r=480,o=0,h=0,x=0,n=0):
@@ -79,3 +79,27 @@ class SourceBoundKRReview(unittest.TestCase):
         kw=self.inputs();r=source_bound_review(**kw)
         kw["deductions"]["health"]["evidence_sha256"]="c"*64
         self.assertNotEqual(r["review_binding_sha256"],source_bound_review(**kw)["review_binding_sha256"])
+
+
+class PensionReference2026(unittest.TestCase):
+    def ref(self,**kw):
+        return pension_reference_2026(**dict(dict(tenant="a",worker="w",period="2026-07",
+            assessed_base_krw=1000000,assessment_sha256="b"*64),**kw))
+    def test_official_example_and_scope(self):
+        r=self.ref();self.assertEqual(r["employee_exact"],{"numerator":47500,"denominator":1})
+        self.assertEqual(r["total_exact"],{"numerator":95000,"denominator":1})
+        self.assertFalse(r["statutory_validated"]);self.assertFalse(r["payment_authorized"])
+    def test_effective_month_and_bounds(self):
+        for month,low,high in (("06",400000,6370000),("07",410000,6590000)):
+            for base in (low,high):
+                self.assertEqual(self.ref(period="2026-"+month,assessed_base_krw=base)["base_limits_krw"],[low,high])
+            for base in (low-1000,high+1000,low+1,True):
+                with self.assertRaisesRegex(PayrollBlocked,"KR_NPS_BASE"):
+                    self.ref(period="2026-"+month,assessed_base_krw=base)
+        self.assertEqual(self.ref(assessed_base_krw=411000)["employee_exact"],{"numerator":39045,"denominator":2})
+    def test_invalid_period_and_binding(self):
+        for period in ("2025-12","2027-01","2026-00","2026-13"):
+            with self.assertRaisesRegex(PayrollBlocked,"KR_NPS_PERIOD"):self.ref(period=period)
+        for kw in ({"worker":"other"},{"tenant":"b"},{"assessment_sha256":"c"*64},{"period":"2026-08"}):
+            self.assertNotEqual(self.ref()["reference_sha256"],self.ref(**kw)["reference_sha256"])
+        with self.assertRaisesRegex(PayrollBlocked,"KR_NPS_EVIDENCE"):self.ref(assessment_sha256="bad")
