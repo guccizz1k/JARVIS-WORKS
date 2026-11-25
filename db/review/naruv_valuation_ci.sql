@@ -256,7 +256,7 @@ CREATE FUNCTION naruv_valuation.reconcile_bill(p_bill text,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; b naruv_finance.bills; f naruv_trade.events;
  d naruv_trade.documents; m naruv_inventory.movements; e naruv_valuation.entries;
- j jsonb; cj naruv_valuation.cost_journals; clearing numeric; sales numeric; credited boolean; ce naruv_finance.events; re naruv_valuation.entries; rm naruv_inventory.movements; q bigint:=0; rq bigint; rn numeric:=0; rv numeric:=0; rc numeric:=0; en numeric; ev numeric; ec numeric; variance numeric; vs numeric:=0; rf naruv_finance.events; refund_amount bigint; refund_id text;
+ j jsonb; cj naruv_valuation.cost_journals; clearing numeric; sales numeric; credited boolean; ce naruv_finance.events; re naruv_valuation.entries; rm naruv_inventory.movements; q bigint:=0; rq bigint; rn numeric:=0; rv numeric:=0; rc numeric:=0; en numeric; ev numeric; ec numeric; variance numeric; vs numeric:=0; rf naruv_finance.events; refund_amount bigint; refund_id text; refund_total numeric:=0; vat_balance numeric; cash_balance numeric; variance_balance numeric;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  IF NOT naruv_production.ident(p_bill) THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
@@ -311,11 +311,22 @@ BEGIN
    IF NOT FOUND OR (rf.action,rf.bill_id,rf.actor_id,rf.amount,rf.payload->>'credit_request_id')
     IS DISTINCT FROM ('refund'::text,p_bill,ce.actor_id,refund_amount,ce.request_id) THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
   ELSIF refund_id IS NOT NULL THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+  refund_total:=refund_total+refund_amount;
   SELECT * INTO rm FROM naruv_inventory.movements z WHERE z.org_id=a.org_id AND z.request_id=re.movement_id;
   IF NOT FOUND OR (rm.source_id,rm.normalized_id,rm.from_warehouse,rm.to_warehouse,rm.quantity,rm.actor_id)
    IS DISTINCT FROM (m.source_id,m.normalized_id,m.to_warehouse,m.from_warehouse,rq,ce.actor_id) THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
   q:=q+rq;rn:=rn+en;rv:=rv+ev;rc:=rc+ec;
  END LOOP;
+ IF refund_total<>(SELECT coalesce(sum(amount),0) FROM naruv_finance.events WHERE org_id=a.org_id AND bill_id=p_bill AND action='refund')
+ OR EXISTS(SELECT 1 FROM naruv_finance.events x WHERE x.org_id=a.org_id AND x.bill_id=p_bill AND x.action='refund'
+ AND NOT EXISTS(SELECT 1 FROM naruv_finance.events z WHERE z.org_id=x.org_id AND z.bill_id=x.bill_id AND z.action='credit' AND z.request_id=x.payload->>'credit_request_id' AND z.payload->>'refund_id'=x.request_id))
+ THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ SELECT coalesce(sum(CASE WHEN b.kind='sale' AND l.account='VAT_OUTPUT' THEN l.credit-l.debit WHEN b.kind='purchase' AND l.account='VAT_INPUT' THEN l.debit-l.credit ELSE 0 END),0),
+ coalesce(sum(CASE WHEN l.account='CASH_CLEARING' THEN CASE WHEN b.kind='sale' THEN l.debit-l.credit ELSE l.credit-l.debit END ELSE 0 END),0),
+ coalesce(sum(CASE WHEN l.account='PURCHASE_COST_VARIANCE' THEN l.credit-l.debit ELSE 0 END),0)
+ INTO vat_balance,cash_balance,variance_balance FROM naruv_accounting.lines l JOIN naruv_accounting.journals h USING(org_id,event_id)
+ WHERE h.org_id=a.org_id AND h.bill_id=p_bill;
+ IF vat_balance<>b.vat-rv OR cash_balance<>naruv_finance.paid(a.org_id,p_bill) OR variance_balance<>vs THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
  credited:=q=b.quantity;
  IF clearing<>(CASE WHEN b.kind='purchase' THEN b.subtotal-rn+vs ELSE 0 END)
  OR sales<>(CASE WHEN b.kind='sale' THEN b.subtotal-rn ELSE 0 END)
@@ -326,7 +337,7 @@ BEGIN
  'sales_margin_krw',CASE WHEN b.kind='sale' THEN (sales-e.amount_krw+rc)::text ELSE NULL END,
  'credited',credited,'returned_quantity',q,'purchase_cost_variance_krw',vs::text,'credited_krw',(rn+rv)::text,'outstanding_krw',j->>'outstanding','cost_journal_posted',true,'statutory_posted',false,'production_authorized',false);
 END $$;
--- Whole original billed fulfillment, unpaid only, same warehouse, no refund.
+-- Original billed fulfillment return: legacy exact-cost/no-refund or explicit adjusted review.
 CREATE FUNCTION naruv_valuation.return_adjusted(p_bill text,p_request text,p_qty bigint,p_advanced boolean,p_ref text,p_confirm boolean,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; b naruv_finance.bills; f naruv_trade.events; m naruv_inventory.movements;

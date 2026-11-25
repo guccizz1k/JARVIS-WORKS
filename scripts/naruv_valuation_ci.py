@@ -478,8 +478,23 @@ def run_valuation(base):
             self.assertGreater(proof["tables"],10)
             self.assertEqual(proof["distinct_clusters"],True)
             self.assertEqual(self.audit_ledger()["inventory_krw"],"453")
+        def test_cost_adjusted_audit_detects_balanced_wrong_account(self):
+            self.billed_purchase();self.receive("other","0001",3,201)
+            self.fin("pay","paid",{"amount":333,"reference":"paid-ref"},bill="bill")
+            self.adjusted_return("r",3,"refund-ref")
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("ALTER TABLE naruv_accounting.lines DISABLE TRIGGER lines_immutable")
+                c.execute("UPDATE naruv_accounting.lines SET account='CASH_CLEARING' WHERE account='PURCHASE_COST_VARIANCE'")
+                c.execute("ALTER TABLE naruv_accounting.lines ENABLE TRIGGER lines_immutable")
+            try:self.audit_ledger(code=503)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("ALTER TABLE naruv_accounting.lines DISABLE TRIGGER lines_immutable")
+                    c.execute("UPDATE naruv_accounting.lines SET account='PURCHASE_COST_VARIANCE' WHERE event_id='r' AND line_no=5")
+                    c.execute("ALTER TABLE naruv_accounting.lines ENABLE TRIGGER lines_immutable")
+            self.assertEqual(self.audit_ledger()["status"],"RECONCILED")
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=41:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=42:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=41 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 41 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=42 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 42 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

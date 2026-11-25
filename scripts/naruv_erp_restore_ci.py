@@ -35,7 +35,7 @@ def snapshot(c):
     # All application tables, row multisets, schema owners, ACLs, RLS policies,
     # constraints, and function definitions. No data or credentials in logs.
     tables=c.execute("""SELECT n.nspname,t.relname,t.relrowsecurity,t.relforcerowsecurity,
-      pg_get_userbyid(t.relowner),coalesce(t.relacl::text,'')
+      pg_get_userbyid(t.relowner),CASE WHEN t.relacl IS NULL THEN '' ELSE array_to_string(ARRAY(SELECT x::text FROM unnest(t.relacl) x ORDER BY x::text),',') END
       FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace
       WHERE t.relkind IN ('r','p') AND (n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%')
       ORDER BY 1,2""").fetchall()
@@ -52,13 +52,15 @@ def snapshot(c):
       FROM pg_constraint k JOIN pg_class t ON t.oid=k.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
       WHERE n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%' ORDER BY 1,2,3""").fetchall()
     functions=c.execute("""SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_functiondef(p.oid),
-      pg_get_userbyid(p.proowner),coalesce(p.proacl::text,'')
+      pg_get_userbyid(p.proowner),CASE WHEN p.proacl IS NULL THEN '' ELSE array_to_string(ARRAY(SELECT x::text FROM unnest(p.proacl) x ORDER BY x::text),',') END
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE p.prokind IN ('f','p') AND (n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%') ORDER BY 1,2,3""").fetchall()
     triggers=c.execute("""SELECT n.nspname,t.relname,g.tgname,g.tgenabled,pg_get_triggerdef(g.oid)
       FROM pg_trigger g JOIN pg_class t ON t.oid=g.tgrelid JOIN pg_namespace n ON n.oid=t.relnamespace
       WHERE NOT g.tgisinternal AND (n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%') ORDER BY 1,2,3""").fetchall()
-    return (tables,rows,policies,constraints,functions,triggers)
+    indexes=c.execute("""SELECT schemaname,tablename,indexname,indexdef FROM pg_indexes
+      WHERE schemaname='jw_dev' OR schemaname LIKE 'naruv_%' ORDER BY 1,2,3""").fetchall()
+    return (tables,rows,policies,constraints,functions,triggers,indexes)
 
 def prove_restore(source_dsn):
     need(os.environ.get("GITHUB_ACTIONS")=="true" and os.environ.get("NARUV_ERP_RESTORE_ALLOW")=="TWO_DISPOSABLE_SERVICES_ONLY"

@@ -25,3 +25,6 @@ New opt-in endpoint, legacy exact-cost and no-refund endpoints unchanged. Comput
 
 ## Integrated recovery candidate
 Native write CI now provisions a second disposable PG17 service per round. The new test seeds a paid purchase with adjusted return/refund and tenant B, dumps the entire synthetic database, restores to a different cluster, and compares application row digests, ownership, ACLs, RLS policies, functions, constraints and triggers. All restored application roles are deliberately NOLOGIN without passwords. No production backup, external storage, real credentials or active failover. Actual CI proof pending.
+
+## Cross-ledger negative assurance
+Audit verifies net VAT, cash clearing, purchase variance and refund-to-credit links in addition to stock and invoice totals. A balanced but deliberately misclassified journal must fail audit. Restore comparator normalizes ACL ordering and checks index definitions. This is engineering QA, not independent reviewer sign-off or production release.
