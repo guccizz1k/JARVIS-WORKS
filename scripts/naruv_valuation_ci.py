@@ -133,7 +133,7 @@ def run_valuation(base):
             self.seed_cost();r=self.receive("r1","0001",3,101)
             self.manual(r["request_id"],"0001",None,"W1",3,code=422)
             with psycopg.connect(fixture.root_dsn) as c:
-                self.assertEqual(c.execute("SELECT count(*) FROM pg_class WHERE relnamespace='naruv_valuation'::regnamespace AND relkind='r' AND relrowsecurity AND relforcerowsecurity").fetchone()[0],2)
+                self.assertEqual(c.execute("SELECT count(*) FROM pg_class WHERE relnamespace='naruv_valuation'::regnamespace AND relkind='r' AND relrowsecurity AND relforcerowsecurity").fetchone()[0],3)
                 for role in ("jw_app_dev","naruv_native_stage"):
                     self.assertEqual(c.execute("""SELECT has_table_privilege(%s,'naruv_valuation.balances','UPDATE'),
                      has_function_privilege(%s,'naruv_valuation.apply(text,text,text,text,numeric)','EXECUTE'),
@@ -198,8 +198,80 @@ def run_valuation(base):
                     c.execute("UPDATE naruv_valuation.entries SET amount_krw=300 WHERE kind='purchase'")
                     c.execute("ALTER TABLE naruv_valuation.entries ENABLE TRIGGER cost_entries_immutable")
             self.assertEqual(self.reconcile("bill")["purchase_clearing_difference_krw"],"0")
+        def posting(self):
+            with psycopg.connect(fixture.root_dsn) as c:
+                return sorted((d or "",cr or "",int(a)) for d,cr,a in c.execute(
+                    "SELECT debit_account,credit_account,amount_krw FROM naruv_valuation.cost_journals").fetchall())
+        def test_cost_journal_purchase_sale_and_clearing(self):
+            self.seed_cost();self.buy("p1","r1","0003",3,101)
+            self.fin("bill","bill-r",{"doc_id":"p1","fulfillment_id":"r1-f"},bill="bill")
+            self.assertTrue(self.reconcile("bill")["cost_journal_posted"])
+            q=self.quote(names=("Assembly",),qty=2)
+            self.trade("open","sale-o",{"kind":"sale","quote_id":q["quote_id"],"source_id":"source-a","item_id":"0003","warehouse_id":"W1"},doc="sale")
+            self.trade("fulfill","sale-f",{"quantity":2},doc="sale")
+            self.fin("bill","sale-b",{"doc_id":"sale","fulfillment_id":"sale-f"},bill="sale-b")
+            self.assertEqual(self.posting(),[("COGS","INVENTORY",202),("INVENTORY","PURCHASE_CLEARING",303)])
+            self.assertEqual(self.reconcile("sale-b")["sales_margin_krw"],"8")
+            self.assertEqual(self.value("0003"),(1,101))
+        def test_cost_journal_production_transfer_and_zero(self):
+            self.ready_cost_prod();self.complete()
+            self.manual("move","0003","W1","W2",1)
+            self.receive("free","0001",1,0)
+            self.assertEqual(self.posting(),sorted([("INVENTORY","OPENING_EQUITY",1010),("INVENTORY","OPENING_EQUITY",510),
+                ("WIP","INVENTORY",202),("WIP","INVENTORY",51),("INVENTORY","WIP",253),("","",0),("","",0)]))
+        def test_cost_journal_closed_period_and_retry(self):
+            self.seed_cost();r=self.receive("opening","0001",3,100);self.close()
+            self.assertEqual(self.receive("opening","0001",3,100),r)
+            self.receive("new","0001",1,100,code=409)
+            self.manual("issue","0001","W1",None,1,code=409)
+            self.assertEqual(self.value(),(3,300))
+            self.assertEqual(self.posting(),[("INVENTORY","OPENING_EQUITY",300)])
+            self.seed_cost("B");self.receive("opening","0001",1,5,"B")
+            self.assertEqual(self.value(who="B"),(1,5))
+        def test_cost_journal_close_race(self):
+            self.seed_cost();bar=threading.Barrier(2)
+            def go(i):
+                bar.wait(timeout=10)
+                if i==0:return self.call(f"/accounting/periods/{self.month}/close")
+                return self.call("/valuation/items/0001/receive/race",{"source_id":"source-a","warehouse_id":"W1","quantity":1,"unit_cost":100})
+            with concurrent.futures.ThreadPoolExecutor(2) as pool:rs=list(pool.map(go,range(2)))
+            self.assertEqual(rs[0].status_code,200);self.assertIn(rs[1].status_code,(200,409))
+            self.assertEqual(self.value(),(1,100) if rs[1].status_code==200 else (0,0))
+            self.receive("late","0001",1,100,code=409)
+        def test_cost_journal_missing_rollback(self):
+            self.seed_cost()
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("ALTER TABLE naruv_valuation.entries DISABLE TRIGGER cost_journal_post")
+            try:
+                self.receive("opening","0001",3,100,code=503)
+                self.assertEqual(self.cost_counts(),(0,0,0));self.assertEqual(self.posting(),[])
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("ALTER TABLE naruv_valuation.entries ENABLE TRIGGER cost_journal_post")
+            self.receive("opening","0001",3,100)
+            self.assertEqual(self.posting(),[("INVENTORY","OPENING_EQUITY",300)])
+        def test_cost_journal_cancel_preserves_fulfilled(self):
+            self.seed_cost()
+            self.trade("open","open-p",{"kind":"purchase","counterparty_id":"ci-customer-a","source_id":"source-a",
+                "item_id":"0001","warehouse_id":"W1","quantity":5,"unit_price":100,"vat_mode":"taxable"},doc="p1")
+            self.trade("fulfill","receipt",{"quantity":2},doc="p1")
+            self.fin("bill","bill-r",{"doc_id":"p1","fulfillment_id":"receipt"},bill="bill")
+            before=self.reconcile("bill");posting=self.posting()
+            self.trade("cancel","cancel-p",{},doc="p1")
+            self.assertEqual(self.reconcile("bill"),before);self.assertEqual(self.posting(),posting)
+            self.assertEqual(self.value(),(2,200))
+            self.trade("fulfill","late",{"quantity":1},doc="p1",code=409)
+        def test_cost_journal_direct_access_denied(self):
+            self.seed_cost();self.receive("r1","0001",1,5)
+            with psycopg.connect(fixture.root_dsn) as c:
+                for role in ("jw_app_dev","naruv_native_stage"):
+                    for privilege in ("SELECT","INSERT","UPDATE","DELETE"):
+                        self.assertFalse(c.execute("SELECT has_table_privilege(%s,'naruv_valuation.cost_journals',%s)",(role,privilege)).fetchone()[0])
+                with self.assertRaisesRegex(psycopg.Error,"NARUV_IMMUTABLE"):
+                    c.execute("UPDATE naruv_valuation.cost_journals SET amount_krw=1")
+                c.rollback()
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=14:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=21:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=14 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 14 isolated PG17 cost, quantity and reconciliation cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=21 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 21 isolated PG17 cost, quantity, reconciliation and posting cases; no statutory posting.")

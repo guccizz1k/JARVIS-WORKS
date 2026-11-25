@@ -37,6 +37,72 @@ DO $$ DECLARE t text; BEGIN
 END $$;
 CREATE TRIGGER cost_entries_immutable BEFORE UPDATE OR DELETE ON naruv_valuation.entries
  FOR EACH ROW EXECUTE FUNCTION naruv_native_review.immutable();
+-- Internal double-entry cost journal; each nonzero posting is one balanced pair.
+CREATE TABLE naruv_valuation.cost_journals(
+ org_id text NOT NULL,movement_id text NOT NULL,period_start date NOT NULL,
+ debit_account text,credit_account text,amount_krw numeric(24,0) NOT NULL
+ CHECK(amount_krw BETWEEN 0 AND 1000000000000000000000),
+ PRIMARY KEY(org_id,movement_id),FOREIGN KEY(org_id,movement_id) REFERENCES naruv_valuation.entries,
+ FOREIGN KEY(org_id,period_start) REFERENCES naruv_accounting.periods,
+ CHECK((amount_krw=0 AND debit_account IS NULL AND credit_account IS NULL)
+ OR (amount_krw>0 AND debit_account IS NOT NULL AND credit_account IS NOT NULL AND debit_account<>credit_account)),
+ CHECK(debit_account IN ('INVENTORY','COGS','WIP','ADJUSTMENT_EXPENSE')),
+ CHECK(credit_account IN ('INVENTORY','PURCHASE_CLEARING','WIP','OPENING_EQUITY'))
+);
+ALTER TABLE naruv_valuation.cost_journals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_valuation.cost_journals FORCE ROW LEVEL SECURITY;
+CREATE POLICY valuation_scope ON naruv_valuation.cost_journals TO naruv_native_owner
+ USING (org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'))
+ WITH CHECK (org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'));
+REVOKE ALL ON naruv_valuation.cost_journals FROM PUBLIC,jw_app_dev,naruv_native_stage;
+CREATE TRIGGER cost_journals_immutable BEFORE UPDATE OR DELETE ON naruv_valuation.cost_journals
+ FOR EACH ROW EXECUTE FUNCTION naruv_native_review.immutable();
+CREATE FUNCTION naruv_valuation.expected_posting(p_kind text,p_amount numeric,
+ OUT dr text,OUT cr text,OUT amount numeric)
+ LANGUAGE plpgsql IMMUTABLE SET search_path=pg_catalog AS $$
+BEGIN
+ amount:=CASE WHEN p_kind='transfer' THEN 0 ELSE p_amount END;
+ IF amount=0 THEN RETURN; END IF;
+ dr:=CASE p_kind WHEN 'opening' THEN 'INVENTORY' WHEN 'purchase' THEN 'INVENTORY'
+ WHEN 'sale' THEN 'COGS' WHEN 'adjustment_issue' THEN 'ADJUSTMENT_EXPENSE'
+ WHEN 'material' THEN 'WIP' WHEN 'output' THEN 'INVENTORY' END;
+ cr:=CASE p_kind WHEN 'opening' THEN 'OPENING_EQUITY' WHEN 'purchase' THEN 'PURCHASE_CLEARING'
+ WHEN 'sale' THEN 'INVENTORY' WHEN 'adjustment_issue' THEN 'INVENTORY'
+ WHEN 'material' THEN 'INVENTORY' WHEN 'output' THEN 'WIP' END;
+ IF dr IS NULL OR cr IS NULL THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+END $$;
+CREATE FUNCTION naruv_valuation.post_cost_journal() RETURNS trigger
+ LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog AS $$
+DECLARE m naruv_inventory.movements; p naruv_accounting.periods; mon date; expected record;
+BEGIN
+ SELECT * INTO STRICT m FROM naruv_inventory.movements z WHERE z.org_id=NEW.org_id AND z.request_id=NEW.movement_id;
+ mon:=date_trunc('month',m.created_at AT TIME ZONE 'Asia/Seoul')::date;
+ SELECT * INTO p FROM naruv_accounting.periods z WHERE z.org_id=NEW.org_id AND z.period_start=mon FOR UPDATE;
+ IF NOT FOUND OR p.closed_at IS NOT NULL THEN RAISE EXCEPTION 'COST_PERIOD_CLOSED'; END IF;
+ SELECT * INTO expected FROM naruv_valuation.expected_posting(NEW.kind,NEW.amount_krw);
+ INSERT INTO naruv_valuation.cost_journals VALUES(NEW.org_id,NEW.movement_id,mon,expected.dr,expected.cr,expected.amount);
+ RETURN NEW;
+END $$;
+CREATE TRIGGER cost_journal_post AFTER INSERT ON naruv_valuation.entries
+ FOR EACH ROW EXECUTE FUNCTION naruv_valuation.post_cost_journal();
+CREATE FUNCTION naruv_valuation.validate_cost_journal() RETURNS trigger
+ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE e naruv_valuation.entries; j naruv_valuation.cost_journals; m naruv_inventory.movements; expected record;
+BEGIN
+ SELECT * INTO STRICT e FROM naruv_valuation.entries z WHERE z.org_id=NEW.org_id AND z.movement_id=NEW.movement_id;
+ SELECT * INTO j FROM naruv_valuation.cost_journals z WHERE z.org_id=NEW.org_id AND z.movement_id=NEW.movement_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'COST_JOURNAL_MISSING'; END IF;
+ SELECT * INTO STRICT m FROM naruv_inventory.movements z WHERE z.org_id=e.org_id AND z.request_id=e.movement_id;
+ SELECT * INTO expected FROM naruv_valuation.expected_posting(e.kind,e.amount_krw);
+ IF (j.debit_account,j.credit_account,j.amount_krw,j.period_start) IS DISTINCT FROM
+ (expected.dr,expected.cr,expected.amount,date_trunc('month',m.created_at AT TIME ZONE 'Asia/Seoul')::date)
+ THEN RAISE EXCEPTION 'COST_JOURNAL_MISMATCH'; END IF;
+ RETURN NULL;
+END $$;
+CREATE CONSTRAINT TRIGGER cost_entry_journal_required AFTER INSERT ON naruv_valuation.entries
+ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION naruv_valuation.validate_cost_journal();
+CREATE CONSTRAINT TRIGGER cost_journal_check AFTER INSERT ON naruv_valuation.cost_journals
+ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION naruv_valuation.validate_cost_journal();
 CREATE FUNCTION naruv_valuation.apply(p_org text,p_mid text,p_kind text,p_event text,p_incoming numeric)
  RETURNS numeric LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog AS $$
 DECLARE m naruv_inventory.movements; b naruv_valuation.balances; amount numeric; fv numeric; tv numeric;
@@ -190,7 +256,7 @@ CREATE FUNCTION naruv_valuation.reconcile_bill(p_bill text,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; b naruv_finance.bills; f naruv_trade.events;
  d naruv_trade.documents; m naruv_inventory.movements; e naruv_valuation.entries;
- j jsonb; clearing numeric; sales numeric;
+ j jsonb; cj naruv_valuation.cost_journals; clearing numeric; sales numeric;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  IF NOT naruv_production.ident(p_bill) THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
@@ -215,6 +281,12 @@ BEGIN
  OR m.to_warehouse IS DISTINCT FROM (CASE WHEN d.kind='purchase' THEN d.warehouse_id ELSE NULL END)
  OR (b.kind='purchase' AND e.amount_krw<>b.subtotal)
  THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ SELECT * INTO cj FROM naruv_valuation.cost_journals z WHERE z.org_id=a.org_id AND z.movement_id=m.request_id;
+ IF NOT FOUND OR cj.amount_krw<>e.amount_krw
+ OR (e.amount_krw>0 AND (cj.debit_account,cj.credit_account) IS DISTINCT FROM
+ (CASE WHEN b.kind='purchase' THEN 'INVENTORY' ELSE 'COGS' END,
+  CASE WHEN b.kind='purchase' THEN 'PURCHASE_CLEARING' ELSE 'INVENTORY' END))
+ THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
  j:=naruv_accounting.inspect_bill(p_bill,p_csrf);
  SELECT coalesce(sum(l.debit::numeric-l.credit) FILTER(WHERE l.account='PURCHASE_CLEARING'),0),
  coalesce(sum(l.credit::numeric-l.debit) FILTER(WHERE l.account='SALES'),0)
@@ -227,7 +299,7 @@ BEGIN
  'net_krw',b.subtotal::text,'inventory_cost_krw',e.amount_krw::text,
  'purchase_clearing_difference_krw',CASE WHEN b.kind='purchase' THEN (clearing-e.amount_krw)::text ELSE NULL END,
  'sales_margin_krw',CASE WHEN b.kind='sale' THEN (sales-e.amount_krw)::text ELSE NULL END,
- 'outstanding_krw',j->>'outstanding','statutory_posted',false,'production_authorized',false);
+ 'outstanding_krw',j->>'outstanding','cost_journal_posted',true,'statutory_posted',false,'production_authorized',false);
 END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_valuation FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text) TO jw_app_dev;

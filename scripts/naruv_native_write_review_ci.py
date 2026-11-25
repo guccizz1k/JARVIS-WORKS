@@ -73,7 +73,7 @@ class NativeWrite(unittest.TestCase):
             if getattr(self,"production_active",False):
                 tables+=",naruv_production.events,naruv_production.orders,naruv_production.components,naruv_production.boms"
             if getattr(self,"valuation_active",False):
-                tables+=",naruv_valuation.entries,naruv_valuation.balances"
+                tables+=",naruv_valuation.cost_journals,naruv_valuation.entries,naruv_valuation.balances"
             c.execute("TRUNCATE "+tables)
             c.execute("DELETE FROM jw_dev.staff_disabled")
             c.execute("DELETE FROM jw_dev.sessions WHERE id='A2'")
