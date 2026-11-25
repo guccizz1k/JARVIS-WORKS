@@ -35,6 +35,8 @@ on:
       - app/naruv_native_write_review.py
       - db/review/naruv_native_write_review_ci.sql
       - scripts/naruv_native_write_review_ci.py
+      - db/review/naruv_customer_bridge_ci.sql
+      - scripts/naruv_customer_bridge_ci.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -481,5 +483,5 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py
+          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py
           python -m scripts.naruv_native_write_review_ci

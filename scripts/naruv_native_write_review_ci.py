@@ -55,7 +55,10 @@ class NativeWrite(unittest.TestCase):
         os.environ["NARUV_NATIVE_WRITE_REVIEW"]="ISOLATED_SYNTHETIC_ONLY"
         os.environ["JW_ENV"]="dev"
         with psycopg.connect(fixture.root_dsn) as c:
-            c.execute("TRUNCATE naruv_native_review.receipts,naruv_native_review.records,naruv_native_review.approvals,naruv_native_review.stages")
+            tables="naruv_native_review.receipts,naruv_native_review.records,naruv_native_review.approvals,naruv_native_review.stages"
+            if getattr(self,"bridge_active",False):
+                tables+=",naruv_customer_bridge.crosswalk"
+            c.execute("TRUNCATE "+tables)
             c.execute("DELETE FROM jw_dev.staff_disabled")
             c.execute("DELETE FROM jw_dev.sessions WHERE id='A2'")
             c.execute("UPDATE jw_dev.users SET role='admin' WHERE id IN ('ci-ua','ci-ub','ci-uc')")
@@ -430,3 +433,5 @@ if __name__=="__main__":
     if not result.wasSuccessful() or result.testsRun!=28 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
         raise SystemExit(1)
     print("NARUV_NATIVE_WRITE_REVIEW_PASS: 28 isolated PG17 HTTP and direct transaction cases; no production ERP import.")
+    from scripts.naruv_customer_bridge_ci import run_bridge
+    run_bridge(NativeWrite)
