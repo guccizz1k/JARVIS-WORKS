@@ -188,7 +188,8 @@ class OfficialTablePage14(unittest.TestCase):
             self.assertNotEqual(a,self.ref(**kw)["review_sha256"])
 
 
-class OfficialTableExtendedPages(OfficialTablePage14):
+class OfficialTableExtendedPages(unittest.TestCase):
+    ref=OfficialTablePage14.ref
     def test_extended_anchors(self):
         for wage,family,amount,lo,hi in ((2810000,1,57660,2810000,2820000),(2899999,10,1170,2890000,2900000),
               (2999999,11,0,2990000,3000000),(3000000,1,74350,3000000,3020000),(3139999,11,2770,3120000,3140000),

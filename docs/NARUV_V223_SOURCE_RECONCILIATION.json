@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "646dd70b8d2c21a8a0889db034d92d444f4274a1",
+      "sha": "198efd403abf7fa8ffe9085ad57b5c19ff34cdb7",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8510,11 +8510,11 @@
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
-      "sha": "2fbbbbf387c7370515291e619a5c9a1abdaf4861",
+      "sha": "74526848743a8f5cbce6fa849571162bcd6b2864",
       "mode": "100644"
     },
     "tests/test_naruv_hosted_qa_admission.py": {
-      "sha": "48a9a90d00260c798a8ad872b6b90650292e334b",
+      "sha": "af195df5faa50d435a8536f3d7da3ac18645f6d6",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_boundary.py": {
@@ -8680,5 +8680,9 @@
   "consolidated_tax_archive_hosted_preflight": {
     "parent": "c4ba8dc14b007091f77eb2a121c8c3e0fee7c770",
     "reason": "Expand checked official table pages 13–16 (104 salary rows, 1144 cells, preserve old page14 proof), archive tamper refusal, read-only dedicated Render deployment metadata gate, no actual production key retirement, full table or cloud deployment."
+  },
+  "hosted_metadata_provider_shape": {
+    "parent": "292e920bde09c98207ee199f755391545ff1aaf1",
+    "reason": "Real Render list_deploys response from existing read-only service omits serviceId; bind query scope explicitly and reject inconsistent optional serviceId. Avoid duplicate inherited tax tests."
   }
 }

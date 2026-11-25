@@ -74,11 +74,11 @@ class HostedQAAdmission(unittest.TestCase):
     def test_dedicated_deployment_metadata(self):
         from app.naruv_hosted_qa_admission import verify_deployment_metadata
         service={"id":"srv-abcdefgh1234567890","name":"naruv-one-qa-20261126","branch":"review/naruv-hosted-qa-20261126","autoDeploy":"no","type":"web_service"}
-        deploy={"serviceId":service["id"],"status":"live","commit":{"id":"a"*40}}
-        args=dict(service=service,deploy=deploy,expected_sha="a"*40,expected_branch=service["branch"],expected_name=service["name"])
+        deploy={"status":"live","commit":{"id":"a"*40}}
+        args=dict(service=service,deploy=deploy,queried_service_id=service["id"],expected_sha="a"*40,expected_branch=service["branch"],expected_name=service["name"])
         self.assertEqual(verify_deployment_metadata(**args)["status"],"METADATA_MATCH_ONLY")
         for changes in ({"service":dict(service,autoDeploy="yes")},{"service":dict(service,name="jw-existing")},
                         {"service":dict(service,branch="main")},{"deploy":dict(deploy,status="build_in_progress")},
                         {"deploy":dict(deploy,commit={"id":"b"*40})},{"deploy":dict(deploy,serviceId="srv-other")},
-                        {"expected_branch":"main"}):
+                        {"queried_service_id":"srv-other"},{"expected_branch":"main"}):
             with self.assertRaises(AdmissionBlocked):verify_deployment_metadata(**dict(args,**changes))
