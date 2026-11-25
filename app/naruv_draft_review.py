@@ -139,7 +139,7 @@ def create_router():
             if type(fmt) is not str or fmt not in ("pdf","xlsx") or type(encoded) is not str or len(encoded)>699052 or type(obs) is not list:raise ValueError("shape")
             raw=base64.b64decode(encoded,validate=True)
             if not 5<=len(raw)<=524288 or base64.b64encode(raw).decode("ascii")!=encoded:raise ValueError("bytes")
-            if not raw.startswith(b"%PDF-" if fmt=="pdf" else b"PK\\x03\\x04"):raise ValueError("signature")
+            if not raw.startswith(bytes.fromhex("255044462d" if fmt=="pdf" else "504b0304")):raise ValueError("signature")
             if len(json.dumps(obs,ensure_ascii=True,separators=(",",":")))>30000:raise ValueError("observations")
         except (ValueError,UnicodeError,RecursionError,binascii.Error):
             raise HTTPException(422,"DOC_INPUT") from None

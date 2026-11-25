@@ -69,6 +69,8 @@ on:
       - app/naruv_document_review.py
       - app/naruv_payroll_draft.py
       - tests/test_naruv_document_payroll.py
+      - app/naruv_kr_payroll_review.py
+      - tests/test_naruv_kr_payroll_review.py
       - app/naruv_draft_review.py
       - db/review/naruv_draft_ci.sql
       - scripts/naruv_draft_ci.py
@@ -123,6 +125,18 @@ jobs:
           PY
           done
 
+      - name: Restricted Korean wage arithmetic review in five fresh processes
+        run: |
+          set -euo pipefail
+          python -m py_compile app/naruv_kr_payroll_review.py tests/test_naruv_kr_payroll_review.py
+          for seed in 17 101 617 2027 65537; do
+            PYTHONHASHSEED="$seed" python - <<'PY'
+          import unittest
+          r=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromName("tests.test_naruv_kr_payroll_review"))
+          if not r.wasSuccessful() or r.testsRun != 9 or r.skipped or r.expectedFailures or r.unexpectedSuccesses:
+              raise SystemExit(1)
+          PY
+          done
       - name: Separate scoped metadata binding tests in five fresh processes
         run: |
           set -euo pipefail

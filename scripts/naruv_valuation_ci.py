@@ -968,8 +968,16 @@ finally:c.close()
             import base64,json
             path="/drafts/documents/revision-doc"
             obs=[{"field":"subtotal","value":100,"page":1},{"field":"vat","value":10,"page":1},{"field":"gross_amount","value":110,"page":1}]
-            original=b"PK"+bytes((3,4))+b"synthetic opaque fixture"
-            initial=self.check(self.call(path+"/register/rev-original",{"format":"xlsx","original_base64":base64.b64encode(original).decode(),"observations":obs}),200)
+            import io
+            from openpyxl import Workbook
+            wb=Workbook();wb.active.append(["synthetic",100]);stream=io.BytesIO();wb.save(stream);wb.close()
+            original=stream.getvalue()
+            self.assertEqual(original[:4],bytes.fromhex("504b0304"))
+            payload={"format":"xlsx","original_base64":base64.b64encode(original).decode(),"observations":obs}
+            escaped=b"PK"+bytes((92,))+b"x03"+bytes((92,))+b"x04fake"
+            self.check(self.call(path+"/register/bad-signature",dict(payload,original_base64=base64.b64encode(escaped).decode())),422)
+            self.check(self.call(path+"/register/wrong-format",dict(payload,format="pdf")),422)
+            initial=self.check(self.call(path+"/register/rev-original",payload),200)
             before=self.check(self.call(path),200)
             changed=[dict(x,value=120) if x["field"]=="gross_amount" else x for x in obs]
             data={"previous_revision":before["revision"],"source_sha256":initial["source_sha256"],"observations":changed}
