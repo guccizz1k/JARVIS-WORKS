@@ -70,6 +70,12 @@ def verify_catalog(cur,*,purpose,config):
       current_setting('transaction_read_only'),
       (SELECT ssl AND version IN ('TLSv1.2','TLSv1.3') FROM pg_stat_ssl WHERE pid=pg_backend_pid())""")
     need(cur.fetchone()==(config.database,user,user,17,"on",True),"HOSTED_QA_DB_TLS")
+    _verify_role_catalog(cur,purpose=purpose,config=config)
+
+def _verify_role_catalog(cur,*,purpose,config):
+    # Catalog checks are factored for actual isolated PG tests. Only the
+    # public verify_catalog path includes the mandatory connection/TLS gate.
+    _,user,role=PURPOSES[purpose]
     cur.execute("""SELECT rolcanlogin,rolsuper,rolbypassrls,rolcreaterole,rolcreatedb,
       rolreplication,rolinherit FROM pg_roles WHERE rolname=session_user""")
     need(cur.fetchone()==(True,False,False,False,False,False,False),"HOSTED_QA_LOGIN_ROLE")
@@ -84,11 +90,16 @@ def verify_catalog(cur,*,purpose,config):
     # Check effective access as both login and delegated role; no direct
     # table-level or column-level grants on the selected sensitive relations.
     for relation in PROTECTED:
-        cur.execute("SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid=to_regclass(%s)",(relation,))
+        schema,table=relation.split(".")
+        # Catalog OIDs avoid requiring schema USAGE merely to prove its absence.
+        cur.execute("""SELECT c.relrowsecurity,c.relforcerowsecurity FROM pg_class c
+          JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s AND c.relname=%s AND c.relkind='r'""",(schema,table))
         need(cur.fetchone()==(True,True),"HOSTED_QA_RLS")
         for principal in (user,role):
-            cur.execute("""SELECT has_table_privilege(%s,%s,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),
-              has_any_column_privilege(%s,%s,'SELECT,INSERT,UPDATE,REFERENCES')""",(principal,relation,principal,relation))
+            cur.execute("""SELECT has_table_privilege(%s,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'),
+              has_any_column_privilege(%s,c.oid,'SELECT,INSERT,UPDATE,REFERENCES')
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname=%s AND c.relname=%s AND c.relkind='r'""",(principal,principal,schema,table))
             need(cur.fetchone()==(False,False),"HOSTED_QA_DIRECT_GRANT")
     # Marker must be owner-provisioned on the dedicated DB, not writable by
     # any runtime role. Its existence is NOT a proof of safe schema migration.

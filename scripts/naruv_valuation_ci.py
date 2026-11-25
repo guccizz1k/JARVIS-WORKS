@@ -763,6 +763,82 @@ def run_valuation(base):
                 print(f"NARUV_ISOLATED_READ_METRICS n={len(samples)} concurrency=4 p95_ms={p95:.2f} p99_ms={p99:.2f} max_ms={samples[-1]:.2f} rps={len(samples)/elapsed:.2f}",flush=True)
                 self.assertEqual(self.audit_ledger(),baseline)
                 self.assertEqual(self.check(self.call("/valuation/overview"),200),overview)
+        def test_cost_hosted_admission_real_catalog(self):
+            import secrets
+            from psycopg import sql
+            from psycopg.conninfo import make_conninfo,conninfo_to_dict
+            from app.naruv_hosted_qa_admission import (Config,PURPOSES,AdmissionBlocked,
+                verify_catalog,_verify_role_catalog)
+            opts=conninfo_to_dict(fixture.root_dsn)
+            self.assertEqual((os.environ.get("GITHUB_ACTIONS"),os.environ.get("JW_PG_CI_ALLOW"),opts.get("host"),opts.get("dbname")),
+                ("true","ONLY_EPHEMERAL_LOCAL_DATABASE","127.0.0.1","postgres"))
+            users=[user for _,user,_ in PURPOSES.values()]
+            owner="naruv_qa_boundary_owner"
+            passwords={u:secrets.token_urlsafe(36) for u in users}
+            marker=secrets.token_hex(32);source="a"*40
+            dsns={p:make_conninfo(fixture.root_dsn,user=u,password=passwords[u],sslmode="disable")
+                  for p,(_,u,_) in PURPOSES.items()}
+            cfg=Config("127.0.0.1","postgres",source,marker,dsns)
+            with psycopg.connect(fixture.root_dsn) as root:
+                self.assertEqual(root.execute("SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s)",(users+[owner],)).fetchone()[0],0)
+                self.assertIsNone(root.execute("SELECT to_regnamespace('naruv_hosted_qa')").fetchone()[0])
+                root.execute(sql.SQL("CREATE ROLE {} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB").format(sql.Identifier(owner)))
+                root.execute(sql.SQL("CREATE SCHEMA naruv_hosted_qa AUTHORIZATION {}").format(sql.Identifier(owner)))
+                root.execute("REVOKE ALL ON SCHEMA naruv_hosted_qa FROM PUBLIC")
+                root.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(owner)))
+                root.execute("CREATE TABLE naruv_hosted_qa.boundary(marker text PRIMARY KEY,source_sha text NOT NULL)")
+                root.execute("INSERT INTO naruv_hosted_qa.boundary VALUES(%s,%s)",(marker,source))
+                root.execute("REVOKE ALL ON naruv_hosted_qa.boundary FROM PUBLIC")
+                root.execute("RESET ROLE")
+                for _,u,r in PURPOSES.values():
+                    root.execute(sql.SQL("CREATE ROLE {} LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION PASSWORD {}").format(sql.Identifier(u),sql.Literal(passwords[u])))
+                    root.execute(sql.SQL("GRANT {} TO {} WITH INHERIT FALSE, SET TRUE").format(sql.Identifier(r),sql.Identifier(u)))
+                    root.execute(sql.SQL("GRANT USAGE ON SCHEMA naruv_hosted_qa TO {}").format(sql.Identifier(u)))
+                    root.execute(sql.SQL("GRANT SELECT ON naruv_hosted_qa.boundary TO {}").format(sql.Identifier(u)))
+            def check(purpose,expected=None):
+                with psycopg.connect(dsns[purpose]) as db:
+                    with db.transaction(),db.cursor() as cur:
+                        cur.execute("SET TRANSACTION READ ONLY")
+                        if expected is None:
+                            _verify_role_catalog(cur,purpose=purpose,config=cfg)
+                            # No TLS here: prove the actual hosted entry rejects
+                            # this deliberately non-TLS connection.
+                            with self.assertRaisesRegex(AdmissionBlocked,"HOSTED_QA_DB_TLS"):
+                                verify_catalog(cur,purpose=purpose,config=cfg)
+                        else:
+                            with self.assertRaisesRegex(AdmissionBlocked,expected):
+                                _verify_role_catalog(cur,purpose=purpose,config=cfg)
+            try:
+                for p in PURPOSES:check(p)
+                with psycopg.connect(fixture.root_dsn) as root:
+                    root.execute("GRANT SELECT(worker_id) ON naruv_draft.staff TO naruv_qa_business")
+                try:check("business","HOSTED_QA_DIRECT_GRANT")
+                finally:
+                    with psycopg.connect(fixture.root_dsn) as root:
+                        root.execute("REVOKE SELECT(worker_id) ON naruv_draft.staff FROM naruv_qa_business")
+                with psycopg.connect(fixture.root_dsn) as root:
+                    root.execute("GRANT UPDATE ON naruv_hosted_qa.boundary TO naruv_qa_auth")
+                try:check("auth","HOSTED_QA_BOUNDARY_WRITABLE")
+                finally:
+                    with psycopg.connect(fixture.root_dsn) as root:
+                        root.execute("REVOKE UPDATE ON naruv_hosted_qa.boundary FROM naruv_qa_auth")
+                with psycopg.connect(fixture.root_dsn) as root:
+                    root.execute("UPDATE naruv_hosted_qa.boundary SET source_sha=%s",("b"*40,))
+                try:check("ingest","HOSTED_QA_BOUNDARY_MISMATCH")
+                finally:
+                    with psycopg.connect(fixture.root_dsn) as root:
+                        root.execute("UPDATE naruv_hosted_qa.boundary SET source_sha=%s",(source,))
+                for p in PURPOSES:check(p)
+                print("NARUV_HOSTED_REAL_PG_CATALOG_PASS three restricted roles, 3 non-TLS denials, column grant, marker grant and drift refusals",flush=True)
+            finally:
+                # Only fixture-owned resources created in this test.
+                with psycopg.connect(fixture.root_dsn) as root:
+                    root.execute("DROP SCHEMA naruv_hosted_qa CASCADE")
+                    for u in users:
+                        root.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(u)))
+                        root.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(u)))
+                    root.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(owner)))
+                    self.assertEqual(root.execute("SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s)",(users+[owner],)).fetchone()[0],0)
         def test_cost_hr_period_snapshot_confirm_and_retry(self):
             path="/hr/workers/worker-1/periods/2026-09"
             self.hr_admit("hr-sep-1",day="2026-09-01",period="2026-09",a=60,b=0)
@@ -1204,7 +1280,7 @@ finally:c.close()
                 self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.document_revisions WHERE org_id='ci-a' AND document_id='revision-doc'").fetchone()[0],2)
                 self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.document_revisions','UPDATE')").fetchone()[0])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=72:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=73:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=72 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 72 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=73 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 73 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
