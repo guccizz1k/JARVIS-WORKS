@@ -1,4 +1,4 @@
-"""Default-off synthetic attendance admission, no payroll confirmation or payment."""
+"""Default-off synthetic attendance and period review; no payroll payment."""
 import os
 import re
 from datetime import date

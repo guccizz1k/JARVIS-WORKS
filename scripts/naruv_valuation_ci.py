@@ -26,7 +26,7 @@ def run_valuation(base):
                 c.execute((ROOT/"db/review/naruv_valuation_ci.sql").read_text())
             if not valuation.register_valuation(cls.app):raise RuntimeError("COST_DISABLED")
             from app import naruv_draft_review as drafts
-            from scripts.naruv_draft_ci import seed
+            from scripts.naruv_draft_ci import seed,seed_confirmation_proofs
             with psycopg.connect(fixture.root_dsn) as c:
                 c.execute("SELECT set_config('naruv.draft_ci','DISPOSABLE_ONLY',true)")
                 c.execute((ROOT/"db/review/naruv_draft_ci.sql").read_text())
@@ -37,6 +37,7 @@ def run_valuation(base):
             with psycopg.connect(fixture.root_dsn) as c:
                 c.execute("SELECT set_config('naruv.hr_ci','DISPOSABLE_ONLY',true)")
                 c.execute((ROOT/"db/review/naruv_hr_ci.sql").read_text())
+                seed_confirmation_proofs(c)
             os.environ[hr.FLAG]="ISOLATED_SYNTHETIC_ONLY"
             if not hr.register_hr(cls.app):raise RuntimeError("HR_DISABLED")
         def setUp(self):
@@ -703,6 +704,7 @@ def run_valuation(base):
             self.hr_admit("hr-sep-1",day="2026-09-01",period="2026-09",a=60,b=0)
             first=self.check(self.call(path+"/review"),200)
             self.assertFalse(first["confirmed"])
+            self.assertEqual((first["days"],first["hourly_krw"],first["additional_bps"],first["policy_revision"]),([["2026-09-01",60,0]],12000,15000,"policy-1"))
             self.hr_admit("hr-sep-2",day="2026-09-02",period="2026-09",a=60,b=0)
             self.check(self.call(path+"/confirm/confirm-sep",{"review_sha256":first["review_sha256"]}),409)
             current=self.check(self.call(path+"/review"),200)
@@ -732,8 +734,29 @@ def run_valuation(base):
                 for role in ("jw_app_dev","naruv_native_stage"):
                     self.assertFalse(c.execute("SELECT has_table_privilege(%s,'naruv_draft.period_confirmations','INSERT')",(role,)).fetchone()[0])
                 self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.review_period(text,text,text,text,boolean,text)','EXECUTE')").fetchone()[0])
+        def test_cost_hr_confirmed_snapshot_drift_blocks_payroll(self):
+            path="/drafts/payroll/worker-1/2026-11"
+            before=self.check(self.call(path),200)
+            b=self.check(self.call(path,who="B"),200)
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("UPDATE naruv_draft.pay_periods SET hourly_krw=hourly_krw+1 WHERE org_id='ci-a' AND worker_id='worker-1' AND period='2026-11'").rowcount,1)
+            try:
+                self.check(self.call(path),409)
+                self.check(self.call("/hr/workers/worker-1/periods/2026-11/review"),409)
+                self.assertEqual(self.check(self.call(path,who="B"),200),b)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    self.assertEqual(c.execute("UPDATE naruv_draft.pay_periods SET hourly_krw=hourly_krw-1 WHERE org_id='ci-a' AND worker_id='worker-1' AND period='2026-11'").rowcount,1)
+            self.assertEqual(self.check(self.call(path),200),before)
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("UPDATE naruv_draft.attendance SET regular=regular+1 WHERE org_id='ci-a' AND worker_id='worker-1' AND period='2026-11' AND work_day='2026-11-25'").rowcount,1)
+            try:self.check(self.call(path),409)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    self.assertEqual(c.execute("UPDATE naruv_draft.attendance SET regular=regular-1 WHERE org_id='ci-a' AND worker_id='worker-1' AND period='2026-11' AND work_day='2026-11-25'").rowcount,1)
+            self.assertEqual(self.check(self.call(path),200),before)
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=60:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=61:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=60 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 60 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=61 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 61 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
