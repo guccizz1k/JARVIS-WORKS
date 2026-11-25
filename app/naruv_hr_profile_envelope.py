@@ -183,3 +183,17 @@ def verify_retirement_attestations(*,review,inventory_sha256,inventory_public_ke
         Ed25519PublicKey.from_public_bytes(recovery_public_key).verify(recovery_signature,b"recovery:"+msg)
     except (InvalidSignature,ValueError):raise ProfileBlocked("HR_PROFILE_INVALID") from None
     return {"status":"SIGNED_EVIDENCE_REVIEW_ONLY","key_retirement_authorized":False,"production_authorized":False}
+
+
+def consume_retirement_attestation_ci(cur,**args):
+    """Disposable QA ledger only; caller owns transaction and trusted scope.
+    A valid dual signature is necessary, never sufficient for actual retirement.
+    """
+    verify_retirement_attestations(**args)
+    cur.execute("""UPDATE naruv_retirement_ci.challenge
+        SET consumed_at=%s
+        WHERE challenge=%s AND inventory_sha256=%s AND review_sha256=%s
+          AND issued_at=%s AND consumed_at IS NULL""",
+        (args["as_of"],args["challenge"],args["inventory_sha256"],args["review"]["review_sha256"],args["issued_at"]))
+    _require(cur.rowcount==1)
+    return {"status":"SINGLE_USE_EVIDENCE_REVIEW_ONLY","key_retirement_authorized":False,"production_authorized":False}

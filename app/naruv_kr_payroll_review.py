@@ -915,10 +915,10 @@ def withholding_table_review_2026(*,tenant,worker,withholding_date,taxable_month
     except ValueError:raise PayrollBlocked("KR_TABLE_DATE") from None
     require(d>=date(2026,3,1),"KR_TABLE_DATE")
     require(_whole(taxable_monthly_krw,KR_TABLE_REVIEW_LOW,KR_TABLE_REVIEW_HIGH-1),"KR_TABLE_BAND_UNSUPPORTED")
-    require(_whole(eligible_family_count,1,11) and _whole(eligible_children_8_20,0,eligible_family_count-1),"KR_TABLE_FAMILY_SCOPE")
+    require(_whole(eligible_family_count,1,128) and _whole(eligible_children_8_20,0,eligible_family_count-1),"KR_TABLE_FAMILY_SCOPE")
     require(scope=="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF","KR_TABLE_SCOPE")
     row,low,high,version=_checked_table_row(taxable_monthly_krw)
-    amount=row[eligible_family_count-1]
+    amount=max(0,row[min(eligible_family_count,11)-1]-(row[-2]-row[-1])*max(0,eligible_family_count-11))
     children=eligible_children_8_20
     relief=0 if children==0 else (20830 if children==1 else 45830+33330*(children-2))
     adjusted=max(0,amount-relief)
@@ -948,12 +948,12 @@ def withholding_high_reference_2026(*,tenant,worker,withholding_date,taxable_mon
     except ValueError:raise PayrollBlocked("KR_TABLE_DATE") from None
     require(d>=date(2026,3,1),"KR_TABLE_DATE")
     require(_whole(taxable_monthly_krw,10000000,10**9),"KR_HIGH_WAGE")
-    require(_whole(eligible_family_count,1,11) and _whole(eligible_children_8_20,0,eligible_family_count-1),"KR_TABLE_FAMILY_SCOPE")
+    require(_whole(eligible_family_count,1,128) and _whole(eligible_children_8_20,0,eligible_family_count-1),"KR_TABLE_FAMILY_SCOPE")
     require(type(selection_percent) is int and selection_percent in (80,100,120)
             and type(assessment_sha256) is str and HEX.fullmatch(assessment_sha256)
             and scope=="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF","KR_TAX_SCOPE")
     wage=taxable_monthly_krw
-    base=KR_TABLE_TEN_MILLION[eligible_family_count-1]
+    base=KR_TABLE_TEN_MILLION[min(eligible_family_count,11)-1]-(KR_TABLE_TEN_MILLION[-2]-KR_TABLE_TEN_MILLION[-1])*max(0,eligible_family_count-11)
     extra=Fraction()
     if wage>10000000:
         for upper,lower,offset,rate in (
@@ -971,7 +971,7 @@ def withholding_high_reference_2026(*,tenant,worker,withholding_date,taxable_mon
     amount=max(Fraction(),base+extra-relief)
     national=amount*selection_percent/100
     local=national/10
-    return {"status":"RESTRICTED_HIGH_WAGE_REFERENCE_ONLY","table_exact":_money(base+extra),
+    return {"status":"RESTRICTED_HIGH_WAGE_REFERENCE_ONLY","table_exact":_money(max(Fraction(),base+extra)),
             "national_exact":_money(national),"local_exact":_money(local),
             "review_sha256":hash_input({"v":"KR_TABLE_2026_PAGE27_HIGH_V1","source":KR_TABLE_SOURCE,
                 "tenant":tenant,"worker":worker,"date":withholding_date,"wage":wage,
@@ -1006,3 +1006,42 @@ def national_collection_review_2026(*,tenant,worker,withholding_date,taxable_mon
             "review_sha256":hash_input({"v":"KR_NATIONAL_COLLECTION_2026_V1","source":r["review_sha256"],
                 "national_collection":collected}),"requires_human_review":True,
             "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def ordinary_monthly_deduction_review_2026(*,tenant,worker,period,base_hourly,ordinary_hourly,
+        classification_sha256,days,expected_wage_sha256,withholding_date,taxable_monthly_krw,
+        eligible_family_count,eligible_children_8_20,selection_percent,tax_assessment_sha256,
+        pension_base_krw,pension_assessment_sha256,health_base_krw,employment_base_krw,
+        insurance_assessment_sha256,assessed_deductions):
+    """Server-side restricted reconciliation: all references recomputed from
+    the same tenant/worker and wage snapshot. Agency assessments are required;
+    differences including rounding remain review items, not automatic payments.
+    """
+    wage=wage_review(tenant=tenant,worker=worker,period=period,base_hourly=base_hourly,
+        ordinary_hourly=ordinary_hourly,classification_sha256=classification_sha256,
+        days=days,scope="ADULT_HOURLY_5PLUS_MANUALLY_CLASSIFIED")
+    require(wage["review_sha256"]==expected_wage_sha256,"KR_WAGE_SOURCE_CHANGED")
+    require(type(withholding_date) is str and withholding_date[:7]==period
+            and _whole(taxable_monthly_krw,0,wage["gross_estimate_krw"]),"KR_DEDUCTION_PERIOD_OR_GROSS")
+    tax=national_collection_review_2026(tenant=tenant,worker=worker,withholding_date=withholding_date,
+        taxable_monthly_krw=taxable_monthly_krw,eligible_family_count=eligible_family_count,
+        eligible_children_8_20=eligible_children_8_20,selection_percent=selection_percent,
+        assessment_sha256=tax_assessment_sha256,scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF")
+    pension=pension_reference_2026(tenant=tenant,worker=worker,period=period,
+        assessed_base_krw=pension_base_krw,assessment_sha256=pension_assessment_sha256)
+    insurance=insurance_reference_2026(tenant=tenant,worker=worker,period=period,
+        health_base_krw=health_base_krw,employment_base_krw=employment_base_krw,
+        assessment_sha256=insurance_assessment_sha256,scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES")
+    manual=deduction_reconciliation(wage_result=wage,deductions=assessed_deductions)
+    require(all(row["assessment"]=="ASSESSED" for row in assessed_deductions.values()),"KR_DEDUCTION_SCOPE")
+    refs={"income_tax":_money(Fraction(tax["national_collection_krw"])),
+          "local_income_tax":tax["local_reference_from_collection"],
+          "pension":pension["employee_exact"],**insurance["employee_exact"]}
+    mismatches=sorted(k for k,v in refs.items() if Fraction(**v)!=assessed_deductions[k]["amount_krw"])
+    return {"status":"ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED" if mismatches else "REFERENCE_MATCH_ONLY",
+        "mismatches":mismatches,"reference_deductions":refs,"manual_reconciliation":manual,
+        "review_sha256":hash_input({"v":"KR_ORDINARY_DEDUCTION_REVIEW_2026_V1",
+            "wage":wage["review_sha256"],"tax":tax["review_sha256"],
+            "pension":pension["reference_sha256"],"insurance":insurance["reference_sha256"],
+            "manual":manual["reconciliation_sha256"]}),"requires_human_review":True,
+        "statutory_validated":False,"payment_authorized":False,"production_authorized":False}

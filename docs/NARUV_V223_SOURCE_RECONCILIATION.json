@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "86a8c31c2b57b7a0fa80a4fa5528f8ce2cda6977",
+      "sha": "569c84b4901a7c872b05d2c09f79c34f469d4039",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "84916a684589c2b65e72d1621e0a0df6d33e5f00",
+      "sha": "9db58b6d033dbb59f627c211474eebe892e046ea",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,7 +8502,7 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "e317136e70cff9b799f330cb157e31842f996d8f",
+      "sha": "1587d14edee6f875931e32068794855d2fc5d1f6",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
@@ -8542,7 +8542,7 @@
       "mode": "100644"
     },
     "scripts/naruv_hr_archive_ci.py": {
-      "sha": "c2f82ffa2dd4a6cf46f0ba3a7b409c299db637de",
+      "sha": "42306bca1578053d33a9f651f7a5c763abc2045b",
       "mode": "100644"
     }
   },
@@ -8704,5 +8704,9 @@
   "final_printed_table_and_high_formula": {
     "parent": "aaec1f649fe3e057a4a8d2536f1370d49ce469a0",
     "reason": "Official PDF pp21–27: final 161 ordinary bands, 10m row, six exact high wage formulas and restricted national collection. No complete legal payroll or production approval."
+  },
+  "integrated_deduction_and_single_use_ci": {
+    "parent": "6a7c6ae96de54bfcda1981ca32b26778c03e7f11",
+    "reason": "Scoped same-snapshot payroll references and assessed reconciliation; family >11 formula bounded to 128; actual disposable quarantine PG atomic dual attestation consumption race, no production key retirement."
   }
 }

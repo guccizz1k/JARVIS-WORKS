@@ -178,7 +178,7 @@ class OfficialTablePage14(unittest.TestCase):
         self.assertEqual(self.ref(taxable_monthly_krw=3500000,eligible_family_count=4,eligible_children_8_20=3)["child_adjusted_krw"],0)
         for kw in ({"taxable_monthly_krw":769999},{"taxable_monthly_krw":10000000},
                    {"withholding_date":"2026-02-28"},{"withholding_date":"2026-11-31"},
-                   {"eligible_family_count":12},{"eligible_children_8_20":1},{"selection_percent":90},
+                   {"eligible_family_count":129},{"eligible_children_8_20":1},{"selection_percent":90},
                    {"assessment_sha256":"bad"}):
             with self.assertRaises(PayrollBlocked):self.ref(**kw)
     def test_proof_binds_exact_input(self):
@@ -272,7 +272,7 @@ class HighWageAndNationalCollection(unittest.TestCase):
         r=withholding_high_reference_2026(**self.args(eligible_family_count=2,eligible_children_8_20=1,selection_percent=80))
         self.assertEqual(Fraction(**r["national_exact"]),Fraction((1431570-20830)*80,100))
         for changes in (dict(taxable_monthly_krw=9999999),dict(taxable_monthly_krw=10**9+1),
-                        dict(eligible_family_count=12),dict(withholding_date="2026-02-28")):
+                        dict(eligible_family_count=129),dict(withholding_date="2026-02-28")):
             with self.assertRaises(PayrollBlocked):withholding_high_reference_2026(**self.args(**changes))
     def test_collection_small_amount_and_ten_won(self):
         from app.naruv_kr_payroll_review import national_collection_review_2026
@@ -282,3 +282,35 @@ class HighWageAndNationalCollection(unittest.TestCase):
             self.assertEqual(r["national_collection_krw"],expected)
             self.assertFalse(r["statutory_validated"])
             self.assertFalse(r["payment_authorized"])
+
+    def test_family_above_eleven(self):
+        from app.naruv_kr_payroll_review import withholding_high_reference_2026,withholding_table_review_2026
+        self.assertEqual(withholding_table_review_2026(**self.args(taxable_monthly_krw=9900000,eligible_family_count=12))["table_amount_krw"],911180)
+        self.assertEqual(withholding_high_reference_2026(**self.args(eligible_family_count=12))["national_exact"],{"numerator":930840,"denominator":1})
+        self.assertEqual(withholding_table_review_2026(**self.args(taxable_monthly_krw=1060000,eligible_family_count=128))["table_amount_krw"],0)
+
+    def test_same_snapshot_integrated_deduction_review(self):
+        from app.naruv_kr_payroll_review import ordinary_monthly_deduction_review_2026,wage_review
+        days=[dict(date=f"2026-11-{i:02d}",regular=480,overtime=0,holiday_first8=0,holiday_after8=0,night=0) for i in range(1,26)]
+        wage_args=dict(tenant="a",worker="w",period="2026-11",base_hourly=15000,ordinary_hourly=15000,
+            classification_sha256="b"*64,days=days)
+        gross=wage_review(**wage_args,scope="ADULT_HOURLY_5PLUS_MANUALLY_CLASSIFIED")
+        self.assertEqual(gross["gross_estimate_krw"],3000000)
+        amounts={"income_tax":74350,"local_income_tax":7435,"pension":142500,"health":107850,
+                 "long_term_care":14172,"employment_insurance":27000}
+        deductions={k:dict(amount_krw=v,assessment="ASSESSED",evidence_sha256="c"*64) for k,v in amounts.items()}
+        args=dict(wage_args,expected_wage_sha256=gross["review_sha256"],withholding_date="2026-11-26",
+            taxable_monthly_krw=3000000,eligible_family_count=1,eligible_children_8_20=0,selection_percent=100,
+            tax_assessment_sha256="d"*64,pension_base_krw=3000000,pension_assessment_sha256="e"*64,
+            health_base_krw=3000000,employment_base_krw=3000000,insurance_assessment_sha256="f"*64,
+            assessed_deductions=deductions)
+        r=ordinary_monthly_deduction_review_2026(**args)
+        self.assertEqual(r["status"],"REFERENCE_MATCH_ONLY")
+        self.assertEqual(r["manual_reconciliation"]["net_estimate_krw"],2626693)
+        self.assertFalse(r["payment_authorized"])
+        changed=dict(deductions,pension=dict(deductions["pension"],amount_krw=142490))
+        out=ordinary_monthly_deduction_review_2026(**dict(args,assessed_deductions=changed))
+        self.assertEqual((out["status"],out["mismatches"]),("ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED",["pension"]))
+        for change in (dict(expected_wage_sha256="0"*64),dict(tenant="b"),dict(withholding_date="2026-12-01"),
+                       dict(taxable_monthly_krw=3000001),dict(assessed_deductions={})):
+            with self.assertRaises(PayrollBlocked):ordinary_monthly_deduction_review_2026(**dict(args,**change))

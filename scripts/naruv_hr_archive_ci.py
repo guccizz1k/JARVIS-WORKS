@@ -113,7 +113,57 @@ def verify_after_purge(source,captured,new_key,old_key,expected_profile):
                 b.execute("INSERT INTO naruv_draft.profile_retention VALUES(%s,%s,%s,%s,%s,%s)",tombstones[0])
                 n=b.execute("DELETE FROM naruv_draft.profile_envelopes x USING naruv_draft.profile_retention r WHERE (x.org_id,x.worker_id)=(r.org_id,r.worker_id) AND r.purged_at IS NOT NULL").rowcount
                 need(n==1 and snapshot(b)==after,"PROFILE_RESTORE_RECONCILIATION_MISMATCH")
+            verify_single_use_attestations(dsn,digest)
             need(hashlib.sha256(archive).hexdigest()==digest,"PROFILE_RESTORE_ARCHIVE_CHANGED")
         finally:
             if created:admin.execute("DROP DATABASE naruv_profile_quarantine_ci")
     print("NARUV_HR_ARCHIVE_QUARANTINE_PASS independent PG17 data-only restore, new-key recovery, old-key/tenant denial, current purge reconciliation; no release",flush=True)
+
+
+def verify_single_use_attestations(dsn,archive_digest):
+    from datetime import datetime,timezone
+    from concurrent.futures import ThreadPoolExecutor
+    import secrets
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
+    from app.naruv_hr_profile_envelope import (_canonical,key_retirement_review,
+        retirement_inventory_digest,consume_retirement_attestation_ci)
+    opts=conninfo_to_dict(dsn)
+    need(opts.get("host")=="127.0.0.1" and opts.get("port")=="5433" and opts.get("dbname")==DB,
+        "RETIREMENT_LEDGER_SCOPE")
+    scope=dict(tenant="ci-a",old_key_id="ci-profile-key",new_key_id="ci-profile-key-2",
+               expected_assets=["verified-quarantine-archive"])
+    inventory=retirement_inventory_digest(**scope)
+    review=key_retirement_review(**scope,inventory_sha256=inventory,observations=[
+        dict(asset="verified-quarantine-archive",tenant="ci-a",key_id="ci-profile-key-2",
+             restore_sha256=archive_digest,old_key_denied=True)])
+    now=datetime.now(timezone.utc);challenge=secrets.token_hex(32)
+    a,b=Ed25519PrivateKey.generate(),Ed25519PrivateKey.generate()
+    msg=_canonical(["NARUV_RETIREMENT_ATTESTATION_V1",inventory,review["review_sha256"],challenge,now.isoformat()])
+    args=dict(review=review,inventory_sha256=inventory,challenge=challenge,issued_at=now,as_of=now,
+        inventory_public_key=a.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw),
+        recovery_public_key=b.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw),
+        inventory_signature=a.sign(b"inventory:"+msg),recovery_signature=b.sign(b"recovery:"+msg))
+    with psycopg.connect(dsn) as db:
+        db.execute("""CREATE SCHEMA naruv_retirement_ci;
+          REVOKE ALL ON SCHEMA naruv_retirement_ci FROM PUBLIC;
+          CREATE TABLE naruv_retirement_ci.challenge(
+          challenge text PRIMARY KEY,inventory_sha256 text NOT NULL,review_sha256 text NOT NULL,
+          issued_at timestamptz NOT NULL,consumed_at timestamptz);
+          REVOKE ALL ON ALL TABLES IN SCHEMA naruv_retirement_ci FROM PUBLIC""")
+        db.execute("INSERT INTO naruv_retirement_ci.challenge VALUES(%s,%s,%s,%s,NULL)",
+            (challenge,inventory,review["review_sha256"],now))
+    def attempt():
+        with psycopg.connect(dsn) as db:
+            with db.cursor() as cur:
+                try:r=consume_retirement_attestation_ci(cur,**args)
+                except ProfileBlocked:return False
+                need(r["key_retirement_authorized"] is False,"RETIREMENT_UNEXPECTED_AUTHORIZATION")
+                return True
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(lambda _:attempt(),range(2)))
+    need(sorted(results)==[False,True] and not attempt(),"RETIREMENT_REPLAY_ACCEPTED")
+    with psycopg.connect(dsn) as db:
+        need(db.execute("SELECT count(*) FROM naruv_retirement_ci.challenge WHERE consumed_at IS NOT NULL").fetchone()==(1,),
+             "RETIREMENT_LEDGER_INCOMPLETE")
+    print("NARUV_RETIREMENT_SINGLE_USE_CI_PASS independent signed verified archive evidence, atomic replay refusal, no retirement",flush=True)
