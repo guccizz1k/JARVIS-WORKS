@@ -40,6 +40,12 @@ class Document(unittest.TestCase):
             doc(observations=OBS+[dict(field="execute",value="approve",page=1)])
     def test_arithmetic(self):
         self.assertIn("AMOUNT_MISMATCH",doc(observations=[dict(x,value=111) if x["field"]=="gross_amount" else x for x in OBS])["issues"])
+    def test_page_value_association_binding(self):
+        base=[x for x in OBS if x["field"]!="subtotal"]
+        a=base+[dict(field="subtotal",value=100,page=1),dict(field="subtotal",value=200,page=2)]
+        b=base+[dict(field="subtotal",value=200,page=1),dict(field="subtotal",value=100,page=2)]
+        self.assertEqual(doc(observations=a)["issues"],doc(observations=b)["issues"])
+        self.assertNotEqual(doc(observations=a)["review_sha256"],doc(observations=b)["review_sha256"])
     def test_scope_binding(self):
         self.assertNotEqual(doc(tenant="b")["review_sha256"],doc()["review_sha256"])
     def test_type_bounds(self):

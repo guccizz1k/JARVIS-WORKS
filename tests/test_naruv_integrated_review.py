@@ -117,3 +117,27 @@ class IntegratedReview(unittest.TestCase):
         self.assertNotIn(mod.PREFIX+"/valuation/overview",app.openapi()["paths"])
         self.assertTrue(mod.register_integrated_review(app))
         self.assertIn(mod.PREFIX+"/valuation/overview",app.openapi()["paths"])
+    def test_full_manifest_and_runtime_fence(self):
+        with patch.dict(os.environ,{mod.drafts.FLAG:mod.ACK}):
+            app=FastAPI()
+            self.assertTrue(mod.register_integrated_review(app,include_drafts=True))
+            paths=app.openapi()["paths"]
+            actual={p for p in paths if p.startswith(mod.PREFIX+"/")}
+            self.assertEqual(len(actual),31)
+            self.assertIn(mod.PREFIX+"/drafts/documents/{key}",actual)
+            self.assertIn(mod.PREFIX+"/drafts/payroll/{worker}/{period}",actual)
+            with TestClient(app,base_url="https://testserver") as c:
+                with patch.dict(os.environ,{mod.drafts.FLAG:""}):
+                    for path in sorted(actual):
+                        path=re.sub(r"\{[^}]+\}","probe",path)
+                        # Valid period to avoid path-specific validation as a false positive.
+                        if "/drafts/payroll/" in path:path=path.rsplit("/",1)[0]+"/2026-11"
+                        r=c.post(path)
+                        self.assertEqual((r.status_code,r.json().get("detail")),(404,"NARUV_INTEGRATION_DISABLED"),path)
+    def test_full_mode_requires_explicit_draft_gate_without_partial_mount(self):
+        app=FastAPI();before=tuple(app.routes)
+        self.assertFalse(mod.register_integrated_review(app,include_drafts=True))
+        self.assertEqual(tuple(app.routes),before)
+        with patch.dict(os.environ,{mod.drafts.FLAG:mod.ACK}):
+            self.assertTrue(mod.register_integrated_review(app))
+            self.assertNotIn(mod.PREFIX+"/drafts/documents/{key}",app.openapi()["paths"])

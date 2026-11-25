@@ -598,8 +598,42 @@ def run_valuation(base):
             with patch.dict(os.environ,{drafts.FLAG:""}):
                 self.check(self.call("/drafts/documents/shared"),404)
             self.check(self.call("/drafts/documents/shared"),200)
+        def test_cost_full_router_erp_and_drafts_same_tenant(self):
+            from app import naruv_integrated_review as integrated
+            from unittest.mock import patch
+            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK}):
+                self.app=FastAPI()
+                self.assertTrue(integrated.register_integrated_review(self.app,include_drafts=True))
+                self.billed_purchase()
+                before=self.check(self.call("/valuation/overview"),200)
+                self.assertEqual(self.check(self.call("/drafts/payroll/worker-1/2026-11"),200)["gross_krw"],114000)
+                self.assertEqual(self.check(self.call("/drafts/payroll/worker-1/2026-11",who="B"),200)["gross_krw"],171000)
+                self.assertFalse(self.check(self.call("/drafts/documents/shared"),200)["posting_authorized"])
+                self.assertEqual(self.check(self.call("/valuation/overview"),200),before)
+                with patch.dict(os.environ,{integrated.FLAG:""}):
+                    self.check(self.call("/drafts/documents/shared"),404)
+                    self.check(self.call("/drafts/payroll/worker-1/2026-11"),404)
+                self.assertEqual(self.check(self.call("/valuation/overview"),200),before)
+        def test_cost_full_router_draft_gate_and_direct_sql_boundary(self):
+            from app import naruv_integrated_review as integrated
+            from unittest.mock import patch
+            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK}):
+                self.app=FastAPI()
+                self.assertTrue(integrated.register_integrated_review(self.app,include_drafts=True))
+                with patch.dict(os.environ,{integrated.drafts.FLAG:""}):
+                    self.check(self.call("/valuation/overview"),404)
+                    self.check(self.call("/drafts/documents/shared"),404)
+                self.check(self.call("/drafts/documents/shared"),200)
+                self.check(self.call("/drafts/payroll/worker-1/2026-11",extra={"origin":"https://evil.test"}),403)
+                with psycopg.connect(fixture.root_dsn) as c:
+                    for role in ("naruv_native_stage","public"):
+                        for fn in ("naruv_draft.document_source(text,text)","naruv_draft.pay_source(text,text,text)"):
+                            if role=="public":
+                                self.assertFalse(c.execute("SELECT EXISTS(SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a WHERE p.oid=%s::regprocedure AND a.grantee=0 AND a.privilege_type='EXECUTE')",(fn,)).fetchone()[0])
+                            else:
+                                self.assertFalse(c.execute("SELECT has_function_privilege(%s,%s,'EXECUTE')",(role,fn)).fetchone()[0])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=50:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=52:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=50 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 50 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=52 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 52 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
