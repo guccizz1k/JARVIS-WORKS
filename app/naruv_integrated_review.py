@@ -83,6 +83,10 @@ def register_integrated_review(app,*,include_drafts=False,include_hr=False):
         if re.search(r"\{[^{}:]+:path\}",path):
             # An earlier catch-all could shadow the whole API.
             raise RuntimeError("NARUV_INTEGRATION_CATCH_ALL")
+        if "{" in path:
+            static=path.split("{",1)[0].rstrip("/")
+            if not static or PREFIX==static or PREFIX.startswith(static+"/") or static.startswith(PREFIX+"/"):
+                raise RuntimeError("NARUV_INTEGRATION_DYNAMIC_SHADOW")
     app.include_router(combined)
     app.state.naruv_integrated_review_registered=True
     app.openapi_schema=None

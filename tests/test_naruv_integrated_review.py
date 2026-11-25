@@ -146,9 +146,9 @@ class IntegratedReview(unittest.TestCase):
             app=FastAPI()
             self.assertTrue(mod.register_integrated_review(app,include_drafts=True,include_hr=True))
             paths={p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")}
-            self.assertEqual(len(paths),39)
+            self.assertEqual(len(paths),40)
             self.assertIn(mod.PREFIX+"/hr/workers/{worker}/periods/{period}/attendance/{rid}",paths)
-            for suffix in ("/register/{rid}","/periods/{period}/create/{rid}","/inspect","/archive/{rid}"):
+            for suffix in ("/register/{rid}","/periods/{period}/create/{rid}","/inspect","/archive/{rid}","/periods/{period}/amend/{rid}"):
                 self.assertIn(mod.PREFIX+"/hr/workers/{worker}"+suffix,paths)
             self.assertIn(mod.PREFIX+"/hr/workers/list",paths)
             with TestClient(app,base_url="https://testserver") as c:
@@ -169,3 +169,10 @@ class IntegratedReview(unittest.TestCase):
             self.assertEqual(tuple(app.routes),before)
             self.assertTrue(mod.register_integrated_review(app,include_drafts=True))
             self.assertEqual(len([p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")]),31)
+    def test_dynamic_namespace_shadow_refused(self):
+        app=FastAPI()
+        @app.post("/api/{module}/{version}/workers/list")
+        def shadow(module:str,version:str):return {}
+        before=tuple(app.routes)
+        with self.assertRaisesRegex(RuntimeError,"DYNAMIC_SHADOW"):mod.register_integrated_review(app)
+        self.assertEqual(tuple(app.routes),before)

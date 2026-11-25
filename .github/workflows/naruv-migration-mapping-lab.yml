@@ -65,6 +65,7 @@ on:
       - tests/test_naruv_workflow_context.py
       - app/naruv_integrated_review.py
       - tests/test_naruv_integrated_review.py
+      - app/naruv_works_stage_entry.py
       - app/naruv_document_review.py
       - app/naruv_payroll_draft.py
       - tests/test_naruv_document_payroll.py

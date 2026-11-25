@@ -116,6 +116,28 @@ def _lifecycle(token,csrf,prior,worker=None,rid=None,after=None,limit=None):
         if reason in ("HR_CONFLICT","HR_UNSETTLED_PERIOD"):raise HTTPException(409,reason) from None
         raise write._db_error(exc) from None
 
+def _amend(token,csrf,prior,worker,period,rid,data):
+    import psycopg
+    import json
+    if not enabled():raise HTTPException(404,"HR_DISABLED")
+    try:
+        with v90._pg_validated_cursor(token) as (cur,identity):
+            if preview._verify_identity(identity,csrf)!=prior:raise HTTPException(409,"SESSION_SCOPE_CHANGED")
+            cur.execute("SET LOCAL statement_timeout='8s'")
+            cur.execute("SET LOCAL lock_timeout='4s'")
+            cur.execute("SELECT naruv_draft.amend_period(%s,%s,%s,%s,%s,%s::jsonb,true,%s)",
+                        (worker,period,rid,data["review_sha256"],data["kind"],json.dumps(data["values"]),csrf))
+            row=cur.fetchone()
+            if not row or type(row[0]) is not dict or any(row[0].get(k) is not False for k in ("payment_authorized","production_authorized","statutory_validated")):
+                raise HTTPException(503,"HR_UNAVAILABLE")
+            return row[0]
+    except psycopg.Error as exc:
+        reason=getattr(getattr(exc,"diag",None),"message_primary","")
+        if reason=="HR_NOT_FOUND":raise HTTPException(404,reason) from None
+        if reason=="HR_INPUT":raise HTTPException(422,reason) from None
+        if reason in ("HR_CONFLICT","HR_PERIOD_CONFIRMED"):raise HTTPException(409,reason) from None
+        raise write._db_error(exc) from None
+
 def create_router():
     router=APIRouter(prefix=PREFIX,tags=["NARUV isolated attendance"])
     @router.post("/workers/{worker}/periods/{period}/attendance/{rid}")
@@ -210,6 +232,29 @@ def create_router():
         prior=await run_in_threadpool(write._auth,token,csrf)
         await write._empty_body(request)
         result=await run_in_threadpool(_lifecycle,token,csrf,prior,worker,rid)
+        response.headers["Cache-Control"]="no-store"
+        return result
+    @router.post("/workers/{worker}/periods/{period}/amend/{rid}")
+    async def amend(worker:str,period:str,rid:str,request:Request,response:Response):
+        if not enabled():raise HTTPException(404,"HR_DISABLED")
+        token,csrf,_=write._request(request,worker,rid,needs_digest=False)
+        if preview._one_header(request,"x-naruv-confirm","")!="yes":raise HTTPException(422,"HR_CONFIRM_REQUIRED")
+        if preview._one_header(request,"content-type","")!="application/json":raise HTTPException(415,"HR_CONTENT_TYPE")
+        prior=await run_in_threadpool(write._auth,token,csrf)
+        data=await finance._body(request)
+        if (set(data)!={"review_sha256","kind","values"} or type(data["review_sha256"]) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}",data["review_sha256"]) or type(data["values"]) is not dict):
+            raise HTTPException(422,"HR_INPUT")
+        values=data["values"]
+        if data["kind"]=="attendance":_validate(period,values)
+        elif data["kind"]=="policy":
+            if (set(values)!={"revision","hourly_krw","additional_bps"} or type(values["revision"]) is not str
+                or not preview.IDENT.fullmatch(values["revision"]) or type(values["hourly_krw"]) is not int
+                or not 1<=values["hourly_krw"]<=100000000 or type(values["additional_bps"]) is not int
+                or not 1<=values["additional_bps"]<=50000):
+                raise HTTPException(422,"HR_INPUT")
+        else:raise HTTPException(422,"HR_INPUT")
+        result=await run_in_threadpool(_amend,token,csrf,prior,worker,period,rid,data)
         response.headers["Cache-Control"]="no-store"
         return result
     return router

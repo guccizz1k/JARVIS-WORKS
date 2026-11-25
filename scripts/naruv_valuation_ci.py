@@ -861,8 +861,67 @@ def run_valuation(base):
                 with psycopg.connect(fixture.root_dsn) as c:
                     self.assertEqual(c.execute("UPDATE naruv_draft.pay_periods SET hourly_krw=12000 WHERE org_id='ci-a' AND worker_id='archive-drift' AND period='2026-05'").rowcount,1)
             self.check(self.call(path+"/archive/drift-archive"),200)
+        def test_cost_hr_amendment_and_confirmed_lock(self):
+            path="/hr/workers/amend-worker";pp=path+"/periods/2026-04"
+            self.check(self.call(path+"/register/amend-register"),200)
+            self.check(self.call(pp+"/create/amend-period",{"revision":"r1","hourly_krw":12000,"additional_bps":15000}),200)
+            self.hr_admit("amend-att",worker="amend-worker",period="2026-04",day="2026-04-01",a=60,b=0)
+            first=self.check(self.call(pp+"/review"),200)
+            body={"review_sha256":first["review_sha256"],"kind":"attendance","values":{"date":"2026-04-01","regular":120,"additional":0}}
+            self.check(self.call(pp+"/amend/amend-a",body,who="B"),404)
+            a=self.check(self.call(pp+"/amend/amend-a",body),200)
+            self.assertEqual(a,self.check(self.call(pp+"/amend/amend-a",body),200))
+            self.check(self.call(pp+"/amend/other-a",body),409)
+            p={"review_sha256":a["review_sha256"],"kind":"policy","values":{"revision":"r2","hourly_krw":15000,"additional_bps":15000}}
+            b=self.check(self.call(pp+"/amend/amend-p",p),200)
+            self.check(self.call(pp+"/confirm/stale-confirm",{"review_sha256":first["review_sha256"]}),409)
+            self.check(self.call(pp+"/confirm/amend-confirm",{"review_sha256":b["review_sha256"]}),200)
+            self.assertEqual(self.check(self.call("/drafts/payroll/amend-worker/2026-04"),200)["gross_krw"],30000)
+            body["review_sha256"]=b["review_sha256"]
+            self.check(self.call(pp+"/amend/closed-amend",body),409)
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.period_amendments WHERE org_id='ci-a' AND worker_id='amend-worker'").fetchone()[0],2)
+                self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.period_amendments','UPDATE')").fetchone()[0])
+        def test_cost_works_real_stage_composition(self):
+            # Fresh process avoids mutating the legacy singleton used by any other test.
+            import subprocess,sys,tempfile
+            from tests.test_naruv_integrated_review import FLAGS
+            with tempfile.TemporaryDirectory() as tmp:
+                env=dict(os.environ,**FLAGS,NARUV_DRAFT_REVIEW="ISOLATED_SYNTHETIC_ONLY",NARUV_HR_REVIEW="ISOLATED_SYNTHETIC_ONLY",
+                         NARUV_WORKS_STAGE="ISOLATED_SYNTHETIC_ONLY",JW_PG_QUOTE_V92="ISOLATED_DEV_QUOTE_V92",
+                         JARVIS_DB_PATH=str(Path(tmp)/"isolated.db"),DEMO_SEED="0",
+                         NARUV_TEST_TOKEN=fixture.TOKENS["A"],NARUV_TEST_CSRF=fixture.CSRF["A"])
+                env.pop("JW_V112_PG_NOTIFY_ACK",None)
+                script="""
+import os
+from fastapi.testclient import TestClient
+from app import main
+from app.naruv_works_stage_entry import app
+assert app is main.app
+c=TestClient(app,base_url='https://testserver')
+try:
+    paths=app.openapi()['paths']
+    assert len([x for x in paths if x.startswith('/api/naruv-review/v1/')])==40
+    assert '/api/pg-stage/v92/quotes' in paths and '/api/pg-stage/v85/login' in paths
+    assert c.get('/api/health').status_code==200
+    home=c.get('/')
+    assert home.status_code==200 and home.headers.get('x-frame-options')=='DENY'
+    c.cookies.set('__Host-jw_session',os.environ['NARUV_TEST_TOKEN'])
+    h={'origin':'https://testserver','x-csrf-token':os.environ['NARUV_TEST_CSRF']}
+    r=c.post('/api/naruv-review/v1/drafts/payroll/worker-1/2026-11',headers=h)
+    assert r.status_code==200 and r.json()['gross_krw']==114000
+    assert r.headers.get('cache-control')=='no-store' and r.headers.get('strict-transport-security')
+    assert c.get('/api/pg-stage/v90/me').status_code==200
+    assert c.post('/api/naruv-review/v1/drafts/payroll/worker-1/2026-11',headers=dict(h,origin='https://evil.test')).status_code==403
+    os.environ['NARUV_INTEGRATED_REVIEW']=''
+    assert c.post('/api/naruv-review/v1/drafts/payroll/worker-1/2026-11',headers=h).status_code==404
+    assert c.get('/api/health').status_code==200
+finally:c.close()
+"""
+                done=subprocess.run([sys.executable,"-c",script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=60)
+                self.assertEqual(done.returncode,0,"WORKS_STAGE_COMPOSITION_FAILED "+done.stderr[-1500:])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=67:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=69:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=67 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 67 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=69 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 69 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

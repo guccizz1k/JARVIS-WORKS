@@ -354,4 +354,85 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION naruv_draft.archive_worker(text,text,boolean,text),naruv_draft.list_workers(text,int,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_draft.archive_worker(text,text,boolean,text),naruv_draft.list_workers(text,int,text) TO jw_app_dev;
+-- Open-period amendments require the exact reviewed snapshot and an immutable before/after record.
+CREATE TABLE naruv_draft.period_amendments(
+ org_id text NOT NULL,request_id text NOT NULL,actor_id text NOT NULL,worker_id text NOT NULL,period text NOT NULL,
+ kind text NOT NULL CHECK(kind IN ('attendance','policy')),expected_sha256 text NOT NULL CHECK(expected_sha256 ~ '^[0-9a-f]{64}$'),
+ input jsonb NOT NULL,before_values jsonb NOT NULL,after_values jsonb NOT NULL,receipt jsonb NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(org_id,request_id),
+ FOREIGN KEY(org_id,worker_id,period) REFERENCES naruv_draft.pay_periods);
+ALTER TABLE naruv_draft.period_amendments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_draft.period_amendments FORCE ROW LEVEL SECURITY;
+CREATE POLICY amendment_scope ON naruv_draft.period_amendments TO naruv_native_owner
+ USING(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'))
+ WITH CHECK(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'));
+REVOKE ALL ON naruv_draft.period_amendments FROM PUBLIC,jw_app_dev,naruv_native_stage;
+CREATE TRIGGER period_amendment_immutable BEFORE UPDATE OR DELETE ON naruv_draft.period_amendments
+ FOR EACH ROW EXECUTE FUNCTION naruv_native_review.immutable();
+CREATE FUNCTION naruv_draft.amend_period(p_worker text,p_period text,p_request text,p_expected text,p_kind text,p_data jsonb,p_confirm boolean,p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; a2 record; r naruv_draft.period_amendments; old_review jsonb; new_review jsonb; result jsonb;
+ d date; reg int; extra int; rate bigint; bps int; rev text;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF p_worker IS NULL OR p_worker !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_period IS NULL OR p_period !~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
+ OR p_request IS NULL OR p_request !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_expected IS NULL OR p_expected !~ '^[0-9a-f]{64}$' OR p_confirm IS DISTINCT FROM true
+ OR p_kind IS NULL OR p_kind NOT IN ('attendance','policy') OR jsonb_typeof(p_data) IS DISTINCT FROM 'object'
+ OR octet_length(p_data::text)>4096 THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
+ IF p_kind='attendance' THEN
+  IF NOT p_data ?& ARRAY['date','regular','additional'] OR p_data-ARRAY['date','regular','additional']<>'{}'::jsonb
+  OR jsonb_typeof(p_data->'date') IS DISTINCT FROM 'string' OR (p_data->>'date') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+  OR left(p_data->>'date',7)<>p_period OR jsonb_typeof(p_data->'regular') IS DISTINCT FROM 'number'
+  OR jsonb_typeof(p_data->'additional') IS DISTINCT FROM 'number'
+  OR (p_data->>'regular') !~ '^[0-9]{1,4}$' OR (p_data->>'additional') !~ '^[0-9]{1,4}$' THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
+  BEGIN d:=(p_data->>'date')::date; EXCEPTION WHEN datetime_field_overflow OR invalid_datetime_format THEN RAISE EXCEPTION 'HR_INPUT'; END;
+  reg:=(p_data->>'regular')::int;extra:=(p_data->>'additional')::int;
+  IF reg+extra>1440 OR to_char(d,'YYYY-MM-DD')<>p_data->>'date' THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
+ ELSE
+  IF NOT p_data ?& ARRAY['revision','hourly_krw','additional_bps'] OR p_data-ARRAY['revision','hourly_krw','additional_bps']<>'{}'::jsonb
+  OR jsonb_typeof(p_data->'revision') IS DISTINCT FROM 'string' OR (p_data->>'revision') !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+  OR jsonb_typeof(p_data->'hourly_krw') IS DISTINCT FROM 'number' OR (p_data->>'hourly_krw') !~ '^[0-9]{1,9}$'
+  OR jsonb_typeof(p_data->'additional_bps') IS DISTINCT FROM 'number' OR (p_data->>'additional_bps') !~ '^[0-9]{1,5}$'
+  THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
+  rev:=p_data->>'revision';rate:=(p_data->>'hourly_krw')::bigint;bps:=(p_data->>'additional_bps')::int;
+  IF rate NOT BETWEEN 1 AND 100000000 OR bps NOT BETWEEN 1 AND 50000 THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-attendance-v1:'||a.org_id,0));
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ SELECT * INTO r FROM naruv_draft.period_amendments x WHERE x.org_id=a.org_id AND x.request_id=p_request;
+ IF FOUND THEN
+  IF (r.actor_id,r.worker_id,r.period,r.kind,r.expected_sha256,r.input) IS DISTINCT FROM (a.actor_id,p_worker,p_period,p_kind,p_expected,p_data)
+  THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+  RETURN r.receipt;
+ END IF;
+ old_review:=naruv_draft.review_period(p_worker,p_period,NULL,NULL,false,p_csrf);
+ IF (old_review->>'confirmed')::boolean THEN RAISE EXCEPTION 'HR_PERIOD_CONFIRMED'; END IF;
+ IF old_review->>'review_sha256' IS DISTINCT FROM p_expected THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+ IF p_kind='attendance' THEN
+  UPDATE naruv_draft.attendance x SET regular=reg,additional=extra WHERE
+   (x.org_id,x.worker_id,x.period,x.work_day)=(a.org_id,p_worker,p_period,d)
+   AND (x.regular,x.additional) IS DISTINCT FROM (reg,extra);
+  IF NOT FOUND THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+ ELSE
+  IF old_review->>'policy_revision'=rev THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+  UPDATE naruv_draft.pay_periods x SET revision=rev,hourly_krw=rate,additional_bps=bps WHERE
+   (x.org_id,x.worker_id,x.period)=(a.org_id,p_worker,p_period) AND NOT x.confirmed;
+  IF NOT FOUND THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+ END IF;
+ new_review:=naruv_draft.review_period(p_worker,p_period,NULL,NULL,false,p_csrf);
+ IF new_review->>'review_sha256'=p_expected THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+ result:=jsonb_build_object('status','PERIOD_AMENDED','kind',p_kind,'request_id',p_request,
+ 'worker_id',p_worker,'period',p_period,'review_sha256',new_review->>'review_sha256',
+ 'payment_authorized',false,'production_authorized',false,'statutory_validated',false);
+ INSERT INTO naruv_draft.period_amendments(org_id,request_id,actor_id,worker_id,period,kind,expected_sha256,input,before_values,after_values,receipt)
+ VALUES(a.org_id,p_request,a.actor_id,p_worker,p_period,p_kind,p_expected,p_data,old_review,new_review,result);
+ RETURN result;
+END $$;
+REVOKE ALL ON FUNCTION naruv_draft.amend_period(text,text,text,text,text,jsonb,boolean,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
+GRANT EXECUTE ON FUNCTION naruv_draft.amend_period(text,text,text,text,text,jsonb,boolean,text) TO jw_app_dev;
 RESET ROLE;
