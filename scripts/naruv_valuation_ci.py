@@ -493,8 +493,31 @@ def run_valuation(base):
                     c.execute("UPDATE naruv_accounting.lines SET account='PURCHASE_COST_VARIANCE' WHERE event_id='r' AND line_no=5")
                     c.execute("ALTER TABLE naruv_accounting.lines ENABLE TRIGGER lines_immutable")
             self.assertEqual(self.audit_ledger()["status"],"RECONCILED")
+        def test_cost_overview_actual_tenant_totals(self):
+            self.billed_purchase()
+            self.fin("pay","paid",{"amount":100,"reference":"paid-ref"},bill="bill")
+            self.partial_return("partial",1)
+            a=self.check(self.call("/valuation/overview"),200)
+            self.assertEqual((a["inventory_krw"],a["payable_krw"],a["purchase_paid_krw"]),("202","122","100"))
+            self.assertEqual((a["sales_bill_count"],a["purchase_bill_count"],a["item_count"]),(0,1,3))
+            self.seed_cost("B");self.receive("other","0001",2,25,"B")
+            b=self.check(self.call("/valuation/overview",who="B"),200)
+            self.assertEqual((b["inventory_krw"],b["payable_krw"],b["purchase_bill_count"]),("50","0",0))
+            self.assertEqual(self.check(self.call("/valuation/overview"),200),a)
+        def test_cost_overview_default_off_and_fail_closed(self):
+            self.billed_purchase()
+            self.check(self.call("/valuation/overview",extra={"origin":"https://evil.test"}),403)
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("UPDATE naruv_valuation.balances SET value_krw=value_krw+1 WHERE org_id='ci-a'")
+            try:self.check(self.call("/valuation/overview"),503)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("UPDATE naruv_valuation.balances SET value_krw=value_krw-1 WHERE org_id='ci-a'")
+            self.check(self.call("/valuation/overview"),200)
+            os.environ.pop("NARUV_VALUATION_REVIEW",None)
+            self.check(self.call("/valuation/overview"),404)
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=42:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=44:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=42 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 42 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=44 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 44 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

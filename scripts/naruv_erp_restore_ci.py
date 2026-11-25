@@ -91,7 +91,14 @@ def prove_restore(source_dsn):
     with psycopg.connect(source_dsn) as a,psycopg.connect(DEST_DSN) as b:
         need(identity(a)!=identity(b),"ERP_RESTORE_SAME_CLUSTER")
         need(snapshot(a)==before,"ERP_RESTORE_SOURCE_CHANGED")
-        need(snapshot(b)==before,"ERP_RESTORE_SCHEMA_DATA_MISMATCH")
+        after=snapshot(b)
+        for name,expected,actual in zip(("TABLES","ROWS","POLICIES","CONSTRAINTS","FUNCTIONS","TRIGGERS","INDEXES"),before,after,strict=True):
+            need(expected==actual,"ERP_RESTORE_MISMATCH_"+name)
+        # Verify the restored role boundary even without enabling login.
+        with b.cursor() as cur:
+            for role in ("jw_app_dev","naruv_native_stage"):
+                cur.execute("SELECT has_table_privilege(%s,'naruv_valuation.entries','SELECT'),has_table_privilege(%s,'naruv_finance.events','INSERT')",(role,role))
+                need(cur.fetchone()==(False,False),"ERP_RESTORE_DIRECT_ACCESS")
         need(b.execute("SELECT count(*) FROM pg_authid WHERE rolname<>'postgres' AND rolname NOT LIKE 'pg_%' AND (rolcanlogin OR rolpassword IS NOT NULL OR rolsuper OR rolbypassrls)").fetchone()[0]==0,"ERP_RESTORE_LOGIN_EXPOSURE")
     print("NARUV_ERP_INDEPENDENT_RESTORE_PASS", "tables="+str(len(before[0])), "archive_sha256="+digest, "login_disabled=true")
     return {"tables":len(before[0]),"distinct_clusters":True}

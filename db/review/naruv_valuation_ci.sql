@@ -455,6 +455,28 @@ BEGIN
  RETURN jsonb_build_object('inventory_krw',stock_value::text,'journal_inventory_krw',journal_value::text,
  'wip_krw',wip::text,'bill_count',n,'status','RECONCILED','production_authorized',false,'statutory_posted',false);
 END $$;
+-- Read-only dashboard contract. Strict tenant identity; no client filters or writes.
+CREATE FUNCTION naruv_valuation.overview(p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; proof jsonb; due_sale numeric; due_purchase numeric; paid_sale numeric; paid_purchase numeric; n_sale bigint; n_purchase bigint; n_open bigint; n_products bigint; n_wh bigint;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
+ proof:=naruv_valuation.audit_ledger(p_csrf);
+ SELECT count(*) FILTER(WHERE b.kind='sale'),count(*) FILTER(WHERE b.kind='purchase'),
+ coalesce(sum(b.total-naruv_finance.paid(b.org_id,b.bill_id)-naruv_finance.credit_sum(b.org_id,b.bill_id)) FILTER(WHERE b.kind='sale'),0),
+ coalesce(sum(b.total-naruv_finance.paid(b.org_id,b.bill_id)-naruv_finance.credit_sum(b.org_id,b.bill_id)) FILTER(WHERE b.kind='purchase'),0),
+ coalesce(sum(naruv_finance.paid(b.org_id,b.bill_id)) FILTER(WHERE b.kind='sale'),0),
+ coalesce(sum(naruv_finance.paid(b.org_id,b.bill_id)) FILTER(WHERE b.kind='purchase'),0)
+ INTO n_sale,n_purchase,due_sale,due_purchase,paid_sale,paid_purchase
+ FROM naruv_finance.bills b WHERE b.org_id=a.org_id;
+ SELECT count(*) INTO n_open FROM naruv_trade.documents d WHERE d.org_id=a.org_id AND d.state IN ('OPEN','PARTIAL');
+ SELECT count(*) INTO n_products FROM naruv_inventory.items i WHERE i.org_id=a.org_id;
+ SELECT count(*) INTO n_wh FROM naruv_inventory.warehouses w WHERE w.org_id=a.org_id AND w.active;
+ RETURN proof||jsonb_build_object('sales_bill_count',n_sale,'purchase_bill_count',n_purchase,
+ 'receivable_krw',due_sale::text,'payable_krw',due_purchase::text,'sale_paid_krw',paid_sale::text,'purchase_paid_krw',paid_purchase::text,
+ 'open_trade_count',n_open,'item_count',n_products,'active_warehouse_count',n_wh,'scope','ISOLATED_SYNTHETIC_ONLY');
+END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_valuation FROM PUBLIC,jw_app_dev,naruv_native_stage;
-GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text),naruv_valuation.return_bill(text,text,boolean,text),naruv_valuation.return_quantity(text,text,bigint,boolean,text),naruv_valuation.return_adjusted(text,text,bigint,boolean,text,boolean,text),naruv_valuation.audit_ledger(text) TO jw_app_dev;
+GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text),naruv_valuation.return_bill(text,text,boolean,text),naruv_valuation.return_quantity(text,text,bigint,boolean,text),naruv_valuation.return_adjusted(text,text,bigint,boolean,text,boolean,text),naruv_valuation.audit_ledger(text),naruv_valuation.overview(text) TO jw_app_dev;
 RESET ROLE;

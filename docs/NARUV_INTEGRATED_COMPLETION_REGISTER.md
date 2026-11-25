@@ -23,3 +23,8 @@ Baseline bb23f16486a3bdb2035461b562891e3a258a2a20, draft PR #164. CI 45573568059
 | Release | all required conditions PASS, no unresolved P0/P1, independent review; separate user authorization for merge/deploy/production changes |
 
 P0 security/data loss and P1 blocking dependency errors are resolved before dependent work; independent tracks may proceed while P2-P4 defects are recorded. No PARTIAL counts as PASS. Do not confuse feature tests with full-project completion. Independent tool evidence, official docs, and CI logs must be identified separately from model review. No changes to main, production DB, UI, Render, backups/recovery keys, CORE or TOOLKIT from this wave.
+
+## 2026-11-25 integration wave
+Verified baseline 1e02db3f90f9626a957070a0038d5bd04907ae73: required CI 45591043321 and isolated CI 45591043240 success. Candidate b2fe26259a258eb318bb956055b4fdf5d6f4a52b: required CI 45592794855 success; isolated workflow not returned. Confirmed defect against official Actions context availability: job.services cannot be evaluated at jobs.<id>.env, must be passed at step env. Moved both service IDs; added path filter and regression guard. All new refund, variance and restore evidence pending actual successful CI. Production source/HR/payroll/document AI/UI still not accepted. 
+
+New default-off overview API reads actual tenant-scoped audited inventory, AR/AP, cash and document counts; does not fabricate values or mount production UI. Two added cases for tenant totals and fail-closed corrupt balance, origin and default-off. UI integration and production authorization remain separate. 
