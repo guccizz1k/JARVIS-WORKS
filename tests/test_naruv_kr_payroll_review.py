@@ -148,3 +148,41 @@ class WithholdingReference2026(unittest.TestCase):
             with self.assertRaises(PayrollBlocked):self.ref(**kw)
         for kw in ({"tenant":"b"},{"worker":"other"},{"period":"2026-12"},{"assessment_sha256":"b"*64},{"selection_percent":80}):
             self.assertNotEqual(self.ref()["reference_sha256"],self.ref(**kw)["reference_sha256"])
+
+
+class OfficialTablePage14(unittest.TestCase):
+    def ref(self,**kw):
+        from app.naruv_kr_payroll_review import withholding_table_review_2026
+        return withholding_table_review_2026(**dict(dict(tenant="a",worker="w",withholding_date="2026-11-26",
+            taxable_monthly_krw=3140000,eligible_family_count=1,eligible_children_8_20=0,
+            selection_percent=100,assessment_sha256="a"*64,scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF"),**kw))
+    def test_official_source_anchors(self):
+        for wage,family,expected in ((3140000,1,86330),(3159999,11,3200),
+            (3160000,1,88040),(3280000,3,45070),(3500000,2,102220),(3659999,11,13450)):
+            with self.subTest(wage=wage,family=family):
+                r=self.ref(taxable_monthly_krw=wage,eligible_family_count=family)
+                self.assertEqual(r["table_amount_krw"],expected)
+                self.assertFalse(r["statutory_validated"]);self.assertFalse(r["payment_authorized"])
+    def test_every_cell_and_both_band_edges(self):
+        from app.naruv_kr_payroll_review import KR_TABLE_ROWS
+        self.assertEqual(len(KR_TABLE_ROWS),26)
+        for i,row in enumerate(KR_TABLE_ROWS):
+            self.assertEqual(len(row),11)
+            for j,expected in enumerate(row):
+                for wage in (3140000+i*20000,3159999+i*20000):
+                    with self.subTest(row=i,family=j,wage=wage):
+                        self.assertEqual(self.ref(taxable_monthly_krw=wage,eligible_family_count=j+1)["table_amount_krw"],expected)
+    def test_child_adjustment_and_scope(self):
+        self.assertEqual(self.ref(eligible_family_count=2,eligible_children_8_20=1)["child_adjusted_krw"],48000)
+        self.assertEqual(self.ref(eligible_family_count=3,eligible_children_8_20=2)["child_adjusted_krw"],0)
+        self.assertEqual(self.ref(taxable_monthly_krw=3500000,eligible_family_count=4,eligible_children_8_20=3)["child_adjusted_krw"],0)
+        for kw in ({"taxable_monthly_krw":3139999},{"taxable_monthly_krw":3660000},
+                   {"withholding_date":"2026-02-28"},{"withholding_date":"2026-11-31"},
+                   {"eligible_family_count":12},{"eligible_children_8_20":1},{"selection_percent":90},
+                   {"assessment_sha256":"bad"}):
+            with self.assertRaises(PayrollBlocked):self.ref(**kw)
+    def test_proof_binds_exact_input(self):
+        a=self.ref()["review_sha256"]
+        for kw in ({"tenant":"b"},{"worker":"other"},{"withholding_date":"2026-11-27"},
+                   {"taxable_monthly_krw":3140001},{"selection_percent":80},{"assessment_sha256":"b"*64}):
+            self.assertNotEqual(a,self.ref(**kw)["review_sha256"])

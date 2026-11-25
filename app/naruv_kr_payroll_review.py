@@ -200,3 +200,77 @@ def withholding_reference_2026(*,tenant,worker,period,table_amount_krw,selection
             "assessment":assessment_sha256,"scope":scope}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
         "unresolved":["OFFICIAL_TABLE_LOOKUP","ELIGIBILITY_AND_RELIEF","BONUS","STATUTORY_ROUNDING","YEAR_END_SETTLEMENT"]}
+
+
+# Official decree Appendix 2, amended 2026-02-27, PDF page 14.
+# Matched against both text and rendered page. Scope deliberately limited;
+# unsupported bands must fail closed. No guessed/interpolated table values.
+KR_TABLE_SOURCE="https://law.go.kr/flDownload.do?bylClsCd=110201&flSeq=163623339&gubun="
+KR_TABLE_EFFECTIVE="2026-03-01"
+KR_TABLE_LOW=3140000
+KR_TABLE_HIGH=3660000
+KR_TABLE_STEP=20000
+KR_TABLE_ROWS=(
+    (86330,68830,36560,31310,26060,20810,16700,13320,9950,6570,3200),
+    (88040,70540,37220,31970,26720,21470,17120,13750,10370,7000,3620),
+    (89750,72250,37880,32630,27380,22130,17540,14170,10790,7420,4040),
+    (91460,73960,38540,33290,28040,22790,17970,14590,11220,7840,4470),
+    (93170,75670,40120,33950,28700,23450,18390,15020,11640,8270,4890),
+    (95430,77380,41770,34610,29360,24110,18860,15440,12070,8690,5320),
+    (97880,79100,43420,35270,30020,24770,19520,15870,12490,9120,5740),
+    (100320,80810,45070,35920,30670,25420,20170,16290,12910,9540,6160),
+    (102770,82520,46720,36580,31330,26080,20830,16710,13340,9960,6590),
+    (105210,84230,48370,37240,31990,26740,21490,17140,13760,10390,7010),
+    (107660,85940,49940,37870,32620,27370,22120,17540,14170,10790,7420),
+    (110100,87650,51510,38500,33250,28000,22750,17950,14570,11200,7820),
+    (112550,89370,53070,39950,33880,28630,23380,18350,14970,11600,8220),
+    (114990,91080,54640,41510,34500,29250,24000,18750,15370,12000,8620),
+    (117440,92790,56200,43080,35130,29880,24630,19380,15780,12400,9030),
+    (119880,94880,57770,44640,35750,30500,25250,20000,16180,12800,9430),
+    (122330,97330,59330,46210,36380,31130,25880,20630,16580,13210,9830),
+    (124770,99770,60900,47770,37010,31760,26510,21260,16980,13610,10230),
+    (127220,102220,62460,49340,37630,32380,27130,21880,17390,14010,10640),
+    (129660,104660,64030,50900,38260,33010,27760,22510,17790,14410,11040),
+    (132110,107110,65590,52460,39340,33630,28380,23130,18190,14820,11440),
+    (134550,109550,67150,54030,40900,34260,29010,23760,18590,15220,11840),
+    (137000,112000,68720,55590,42470,34880,29630,24380,19130,15620,12250),
+    (139440,114440,70280,57160,44030,35510,30260,25010,19760,16020,12650),
+    (141890,116890,71850,58720,45600,36140,30890,25640,20390,16420,13050),
+    (144330,119330,73410,60290,47160,36760,31510,26260,21010,16830,13450),
+)
+
+def withholding_table_review_2026(*,tenant,worker,withholding_date,taxable_monthly_krw,
+                                  eligible_family_count,eligible_children_8_20,
+                                  selection_percent,assessment_sha256,scope):
+    """Actual table lookup for one independently checked official page.
+
+    Family/child eligibility and taxable monthly wage are assessed upstream.
+    No statutory rounding, collection threshold, bonus, relief or filing.
+    Applies only to withholding dates March–December 2026, pending change
+    control; not a calculation for unsupported pay bands or years.
+    """
+    require(type(withholding_date) is str and re.fullmatch(r"2026-[0-9]{2}-[0-9]{2}",withholding_date),"KR_TABLE_DATE")
+    from datetime import date
+    try:d=date.fromisoformat(withholding_date)
+    except ValueError:raise PayrollBlocked("KR_TABLE_DATE") from None
+    require(d>=date(2026,3,1),"KR_TABLE_DATE")
+    require(_whole(taxable_monthly_krw,KR_TABLE_LOW,KR_TABLE_HIGH-1),"KR_TABLE_BAND_UNSUPPORTED")
+    require(_whole(eligible_family_count,1,11) and _whole(eligible_children_8_20,0,eligible_family_count-1),"KR_TABLE_FAMILY_SCOPE")
+    require(scope=="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF","KR_TABLE_SCOPE")
+    idx=(taxable_monthly_krw-KR_TABLE_LOW)//KR_TABLE_STEP
+    row=KR_TABLE_ROWS[idx]
+    amount=row[eligible_family_count-1]
+    children=eligible_children_8_20
+    relief=0 if children==0 else (20830 if children==1 else 45830+33330*(children-2))
+    adjusted=max(0,amount-relief)
+    review=withholding_reference_2026(tenant=tenant,worker=worker,period=withholding_date[:7],
+        table_amount_krw=adjusted,selection_percent=selection_percent,assessment_sha256=assessment_sha256,scope=scope)
+    proof=hash_input({"v":"KR_TABLE_2026_PAGE14_V1","source":KR_TABLE_SOURCE,"effective":KR_TABLE_EFFECTIVE,
+        "date":withholding_date,"tenant":tenant,"worker":worker,"taxable":taxable_monthly_krw,
+        "family":eligible_family_count,"children":children,"row":row,"selection":selection_percent,
+        "assessment":assessment_sha256,"reference":review["reference_sha256"]})
+    return {"status":"RESTRICTED_OFFICIAL_TABLE_REFERENCE_ONLY","table_amount_krw":amount,
+        "child_adjusted_krw":adjusted,"table_low_krw":KR_TABLE_LOW+idx*KR_TABLE_STEP,
+        "table_high_exclusive_krw":KR_TABLE_LOW+(idx+1)*KR_TABLE_STEP,"reference":review,
+        "table_source":KR_TABLE_SOURCE,"review_sha256":proof,"statutory_validated":False,
+        "payment_authorized":False,"production_authorized":False}

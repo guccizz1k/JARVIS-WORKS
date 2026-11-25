@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "473a22b4c81c882ec57b8040a3cc72c117d0904e",
+      "sha": "eaaf610e99e704efd8d0d67c1fddfc29ab4b50c4",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "0bdeea309e21b3fac232b248003f57d9eb644e0a",
+      "sha": "69242c50b5f741f5e7b0d6599de1d996a322dc05",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8663,5 +8663,10 @@
   "profile_retention_rotation_ci_candidate": {
     "parent": "c9599cab38d4aca14f55027fa49b9dcc7de934bd",
     "reason": "Synthetic custodian-controlled retention closure and logical purge; revision-bound confirmed key rotation, actual PG acceptance additions; no production physical erasure, key retirement or hosted changes."
+  },
+  "official_table_page14": {
+    "parent": "aa22a464ea5d3c91b41991efa404ad62857dfe79",
+    "source": "https://law.go.kr/flDownload.do?bylClsCd=110201&flSeq=163623339&gubun=",
+    "reason": "2026-02-27 amended decree Appendix2 PDF page14: 26 rows, 286 amounts, 572 boundary lookups and independent anchor assertions; child adjustment, withholding date and exact source binding. No full table or statutory payroll claims."
   }
 }
