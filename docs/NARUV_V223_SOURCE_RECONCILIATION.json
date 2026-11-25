@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "1ee373c7ae98eaebfde4038cf88ad57da7644ea6",
+      "sha": "1f38f45526f7ca481e516e2d351cf1315a2df906",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "e747e07f7b7f4460be29c2434a8d039caedf01ab",
+      "sha": "287218b02c0fdbbe0a39d5cfee0ec5aaa938959a",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "55ce15faf702664a5997c656e1d91e61b6dd86e9",
+      "sha": "e317136e70cff9b799f330cb157e31842f996d8f",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "2ed60be80aa72a6109a74cc840b23c35ff81ee73",
+      "sha": "9b3cea9c9dfc10f9183e9d98f3c54cdfb53f4bf5",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8696,5 +8696,9 @@
   "lower_table_and_inventory_digest": {
     "parent": "7aa4a4733743860cf942bfeb01ba9d61bb69b1db",
     "reason": "Official PDF pages 11-12 manually read 52 bands/572 cells; bind trusted inventory digest to exact tenant/key/asset IDs, reject subset substitution. No live key operations."
+  },
+  "lowest_table_and_dual_attestation": {
+    "parent": "b635201ac16558a62dfd2b6374253a171505de70",
+    "reason": "PDF pages 2–10 read directly, 225 bands/2475 cells; independent Ed25519 scoped signatures and ten-minute freshness offline; no actual trusted keys, challenge store or retirement authorization."
   }
 }

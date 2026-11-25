@@ -176,7 +176,7 @@ class OfficialTablePage14(unittest.TestCase):
         self.assertEqual(self.ref(eligible_family_count=2,eligible_children_8_20=1)["child_adjusted_krw"],48000)
         self.assertEqual(self.ref(eligible_family_count=3,eligible_children_8_20=2)["child_adjusted_krw"],0)
         self.assertEqual(self.ref(taxable_monthly_krw=3500000,eligible_family_count=4,eligible_children_8_20=3)["child_adjusted_krw"],0)
-        for kw in ({"taxable_monthly_krw":2289999},{"taxable_monthly_krw":6780000},
+        for kw in ({"taxable_monthly_krw":769999},{"taxable_monthly_krw":6780000},
                    {"withholding_date":"2026-02-28"},{"withholding_date":"2026-11-31"},
                    {"eligible_family_count":12},{"eligible_children_8_20":1},{"selection_percent":90},
                    {"assessment_sha256":"bad"}):
@@ -204,8 +204,8 @@ class OfficialTableExtendedPages(unittest.TestCase):
             r=self.ref(taxable_monthly_krw=wage,eligible_family_count=family)
             self.assertEqual((r["table_amount_krw"],r["table_low_krw"],r["table_high_exclusive_krw"]),(amount,lo,hi))
     def test_extended_all_cells(self):
-        from app.naruv_kr_payroll_review import KR_TABLE_LOWER,KR_TABLE_BEFORE,KR_TABLE_AFTER
-        for rows,low,steps in ((KR_TABLE_LOWER,2290000,[10000]*52),(KR_TABLE_BEFORE,2810000,[10000]*19+[20000]*7),(KR_TABLE_AFTER,3660000,[20000]*156)):
+        from app.naruv_kr_payroll_review import KR_TABLE_LOWEST,KR_TABLE_LOWER,KR_TABLE_BEFORE,KR_TABLE_AFTER
+        for rows,low,steps in ((KR_TABLE_LOWEST,770000,[5000]*146+[10000]*79),(KR_TABLE_LOWER,2290000,[10000]*52),(KR_TABLE_BEFORE,2810000,[10000]*19+[20000]*7),(KR_TABLE_AFTER,3660000,[20000]*156)):
             self.assertEqual(len(rows),len(steps))
             for row,step in zip(rows,steps,strict=True):
                 for j,amount in enumerate(row):
@@ -224,6 +224,18 @@ class OfficialTableExtendedPages(unittest.TestCase):
             (2570000,8,1130,2570000,2580000),
             (2730000,9,1150,2730000,2740000),
             (2809999,9,2630,2800000,2810000)):
+            with self.subTest(wage=wage,family=family):
+                r=self.ref(taxable_monthly_krw=wage,eligible_family_count=family)
+                self.assertEqual((r["table_amount_krw"],r["table_low_krw"],r["table_high_exclusive_krw"]),(amount,lo,hi))
+
+    def test_lowest_official_anchors(self):
+        for wage,family,amount,lo,hi in (
+          (770000,1,0,770000,775000),(1059999,1,0,1055000,1060000),
+          (1060000,1,1040,1060000,1065000),(1340000,2,1060,1340000,1345000),
+          (1499999,2,4260,1495000,1500000),(1500000,2,4420,1500000,1510000),
+          (1720000,3,1040,1720000,1730000),(1770000,3,2030,1770000,1780000),
+          (1890000,4,1040,1890000,1900000),(2060000,5,1040,2060000,2070000),
+          (2230000,6,1040,2230000,2240000),(2289999,6,2030,2280000,2290000)):
             with self.subTest(wage=wage,family=family):
                 r=self.ref(taxable_monthly_krw=wage,eligible_family_count=family)
                 self.assertEqual((r["table_amount_krw"],r["table_low_krw"],r["table_high_exclusive_krw"]),(amount,lo,hi))

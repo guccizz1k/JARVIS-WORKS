@@ -104,3 +104,26 @@ class HRProfileEnvelope(unittest.TestCase):
         self.assertEqual(r,key_retirement_review(**dict(args,expected_assets=["archive","live"])))
         changed=key_retirement_review(**dict(args,observations=[row,dict(archive,restore_sha256="c"*64)]))
         self.assertNotEqual(r["review_sha256"],changed["review_sha256"])
+
+    def test_independent_retirement_attestations(self):
+        from datetime import datetime,timezone,timedelta
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
+        from app.naruv_hr_profile_envelope import key_retirement_review,retirement_inventory_digest,verify_retirement_attestations,_canonical
+        scope=dict(tenant="ci-a",old_key_id="old",new_key_id="new",expected_assets=["live"])
+        digest=retirement_inventory_digest(**scope)
+        review=key_retirement_review(**scope,inventory_sha256=digest,observations=[dict(asset="live",tenant="ci-a",key_id="new",restore_sha256="a"*64,old_key_denied=True)])
+        now=datetime(2026,11,26,tzinfo=timezone.utc); challenge="c"*64
+        a,b=Ed25519PrivateKey.generate(),Ed25519PrivateKey.generate()
+        msg=_canonical(["NARUV_RETIREMENT_ATTESTATION_V1",digest,review["review_sha256"],challenge,now.isoformat()])
+        args=dict(review=review,inventory_sha256=digest,challenge=challenge,issued_at=now,as_of=now,
+            inventory_public_key=a.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw),
+            recovery_public_key=b.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw),
+            inventory_signature=a.sign(b"inventory:"+msg),recovery_signature=b.sign(b"recovery:"+msg))
+        self.assertEqual(verify_retirement_attestations(**args)["status"],"SIGNED_EVIDENCE_REVIEW_ONLY")
+        self.assertFalse(verify_retirement_attestations(**args)["key_retirement_authorized"])
+        for change in (dict(challenge="d"*64),dict(inventory_sha256="e"*64),dict(as_of=now+timedelta(minutes=10,microseconds=1)),
+                       dict(as_of=now-timedelta(seconds=1)),dict(recovery_signature=args["inventory_signature"]),
+                       dict(recovery_public_key=args["inventory_public_key"]),dict(review=dict(review,status="BLOCKED")),
+                       dict(review=dict(review,review_sha256="f"*64))):
+            with self.subTest(change=list(change)),self.assertRaises(ProfileBlocked):verify_retirement_attestations(**dict(args,**change))

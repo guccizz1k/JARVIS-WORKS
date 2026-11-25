@@ -136,20 +136,50 @@ def key_retirement_review(*,tenant,old_key_id,new_key_id,inventory_sha256,
     _require(secrets.compare_digest(inventory_sha256,retirement_inventory_digest(
         tenant=tenant,old_key_id=old_key_id,new_key_id=new_key_id,expected_assets=expected_assets)))
     _require(type(observations) in (list,tuple) and len(observations)<=10000)
+    expected_set=set(expected_assets)
     seen=set();blocked=[];normalized=[]
     for row in observations:
         _require(type(row) is dict and set(row)=={"asset","tenant","key_id","restore_sha256","old_key_denied"})
         asset=row["asset"]
-        _require(type(asset) is str and asset in expected_assets and asset not in seen
+        _require(type(asset) is str and asset in expected_set and asset not in seen
                  and row["tenant"]==tenant and type(row["key_id"]) is str
                  and ID.fullmatch(row["key_id"]) and digest(row["restore_sha256"])
                  and type(row["old_key_denied"]) is bool)
         seen.add(asset);normalized.append(dict(row))
         if row["key_id"]!=new_key_id or not row["old_key_denied"]:blocked.append(asset)
-    missing=sorted(set(expected_assets)-seen)
+    missing=sorted(expected_set-seen)
     normalized.sort(key=lambda x:x["asset"])
     proof=hashlib.sha256(_canonical(["NARUV_KEY_RETIREMENT_REVIEW_V1",tenant,old_key_id,new_key_id,
         inventory_sha256,sorted(expected_assets),normalized])).hexdigest()
     return {"status":"BLOCKED" if missing or blocked else "EVIDENCE_REVIEW_ONLY",
             "missing_assets":missing,"blocked_assets":sorted(blocked),"review_sha256":proof,
             "key_retirement_authorized":False,"production_authorized":False}
+
+
+def verify_retirement_attestations(*,review,inventory_sha256,inventory_public_key,recovery_public_key,
+                                   inventory_signature,recovery_signature,challenge,issued_at,as_of):
+    """Offline two-signer authenticity screen. Trusted keys and fresh challenge
+    must be supplied by the server/custodian, never by a client. No key action.
+    """
+    from datetime import datetime,timedelta
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from cryptography.exceptions import InvalidSignature
+    _require(type(review) is dict and review.get("status")=="EVIDENCE_REVIEW_ONLY"
+             and review.get("key_retirement_authorized") is False and review.get("production_authorized") is False
+             and review.get("missing_assets")==[] and review.get("blocked_assets")==[])
+    _require(all(type(x) is str and re.fullmatch(r"[0-9a-f]{64}",x) for x in
+                 (inventory_sha256,review.get("review_sha256"),challenge)))
+    _require(type(issued_at) is datetime and type(as_of) is datetime
+             and issued_at.utcoffset()==timedelta(0) and as_of.utcoffset()==timedelta(0)
+             and timedelta(0)<=as_of-issued_at<=timedelta(minutes=10))
+    _require(type(inventory_public_key) is bytes and type(recovery_public_key) is bytes
+             and len(inventory_public_key)==len(recovery_public_key)==32
+             and inventory_public_key!=recovery_public_key)
+    _require(type(inventory_signature) is bytes and type(recovery_signature) is bytes
+             and len(inventory_signature)==len(recovery_signature)==64)
+    msg=_canonical(["NARUV_RETIREMENT_ATTESTATION_V1",inventory_sha256,review["review_sha256"],challenge,issued_at.isoformat()])
+    try:
+        Ed25519PublicKey.from_public_bytes(inventory_public_key).verify(inventory_signature,b"inventory:"+msg)
+        Ed25519PublicKey.from_public_bytes(recovery_public_key).verify(recovery_signature,b"recovery:"+msg)
+    except (InvalidSignature,ValueError):raise ProfileBlocked("HR_PROFILE_INVALID") from None
+    return {"status":"SIGNED_EVIDENCE_REVIEW_ONLY","key_retirement_authorized":False,"production_authorized":False}
