@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "c4749022a357d8762c18f17dedbd2a66497ef50d",
+      "sha": "988e74981fc26b8a1939fae6c61bb4e84761a6bb",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8547,5 +8547,9 @@
   "kr_source_bound_manual_review": {
     "parent": "b45b87c6bc95b92da7c119a9a220cc40a8a85cbd",
     "reason": "Recompute gross from trusted confirmed source, bind snapshot, reconcile every classified day and manual deduction digest; no automatic statutory validation or payment."
+  },
+  "combined_erp_acceptance_extension": {
+    "parent": "e066c1f39e10da8500484b0ba70e0e6b06fb611f",
+    "reason": "Actual disposable PG17 combined production, sale, payment, confirmed attendance, source-bound manual payroll, document and parallel reads with tenant denial and invariant ledger. Not real operations or load benchmark."
   }
 }

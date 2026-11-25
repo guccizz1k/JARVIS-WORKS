@@ -699,6 +699,51 @@ def run_valuation(base):
                     self.hr_admit("hr-blocked",day="2026-10-04",code=404)
                     self.check(self.call("/valuation/overview"),404)
                 self.assertEqual(self.check(self.call("/valuation/overview"),200),before)
+        def test_cost_integrated_production_trade_hr_and_manual_payroll_source(self):
+            from app import naruv_integrated_review as integrated
+            from app.naruv_kr_payroll_review import source_bound_review,DEDUCTIONS
+            from unittest.mock import patch
+            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK,integrated.hr.FLAG:integrated.ACK}):
+                self.app=FastAPI()
+                self.assertTrue(integrated.register_integrated_review(self.app,include_drafts=True,include_hr=True))
+                self.ready_cost_prod();self.complete(3)
+                q=self.quote(names=("Assembly",),qty=2)
+                self.trade("open","combined-sale-o",{"kind":"sale","quote_id":q["quote_id"],"source_id":"source-a","item_id":"0003","warehouse_id":"W1"},doc="combined-sale")
+                self.trade("fulfill","combined-sale-f",{"quantity":2},doc="combined-sale")
+                self.fin("bill","combined-bill",{"doc_id":"combined-sale","fulfillment_id":"combined-sale-f"},bill="combined-bill")
+                self.fin("pay","combined-pay",{"amount":100,"reference":"combined-ref"},bill="combined-bill")
+                self.assertEqual(self.reconcile("combined-bill")["outstanding_krw"],"131")
+                self.assertEqual(self.value("0003"),(1,253))
+                baseline=self.audit_ledger();self.assertEqual(baseline["status"],"RECONCILED")
+                overview=self.check(self.call("/valuation/overview"),200)
+                worker="/hr/workers/combined-worker";period=worker+"/periods/2026-07"
+                self.check(self.call(worker+"/register/combined-reg"),200)
+                self.check(self.call(period+"/create/combined-policy",{"revision":"combined-v1","hourly_krw":12000,"additional_bps":15000}),200)
+                self.hr_admit("combined-att",day="2026-07-01",period="2026-07",worker="combined-worker",a=480,b=60)
+                reviewed=self.check(self.call(period+"/review"),200)
+                self.check(self.call(period+"/confirm/combined-confirm",{"review_sha256":reviewed["review_sha256"]}),200)
+                pay=self.check(self.call("/drafts/payroll/combined-worker/2026-07"),200)
+                self.assertEqual(pay["gross_krw"],114000)
+                confirmed=self.check(self.call(period+"/review"),200)
+                self.assertTrue(confirmed["confirmed"])
+                result=source_bound_review(tenant="ci-a",worker="combined-worker",period="2026-07",
+                    policy_revision=confirmed["policy_revision"],hourly_krw=confirmed["hourly_krw"],
+                    minutes_by_day=[{"date":d,"regular":a,"additional":b} for d,a,b in confirmed["days"]],
+                    additional_bps=confirmed["additional_bps"],expected_draft_sha256=pay["draft_sha256"],
+                    ordinary_hourly=12000,classification_sha256="a"*64,
+                    classified_days=[{"date":"2026-07-01","regular":480,"overtime":60,"holiday_first8":0,"holiday_after8":0,"night":60}],
+                    deductions={k:{"amount_krw":1000,"evidence_sha256":"b"*64,"assessment":"ASSESSED"} for k in DEDUCTIONS})
+                self.assertEqual(result["deductions"]["net_estimate_krw"],114000)
+                self.assertFalse(result["payment_authorized"]);self.assertFalse(result["statutory_validated"])
+                self.check(self.call("/drafts/payroll/combined-worker/2026-07",who="B"),404)
+                self.assertFalse(self.check(self.call("/drafts/documents/shared"),200)["posting_authorized"])
+                # Parallel, independently authenticated reads across modules.
+                paths=["/valuation/overview", "/valuation/audit", "/drafts/payroll/combined-worker/2026-07", "/drafts/documents/shared"]*2
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                    results=list(pool.map(lambda p:self.call(p),paths))
+                self.assertTrue(all(r.status_code==200 for r in results))
+                self.assertEqual(self.audit_ledger(),baseline)
+                self.assertEqual(self.check(self.call("/valuation/overview"),200),overview)
         def test_cost_hr_period_snapshot_confirm_and_retry(self):
             path="/hr/workers/worker-1/periods/2026-09"
             self.hr_admit("hr-sep-1",day="2026-09-01",period="2026-09",a=60,b=0)
@@ -1134,7 +1179,7 @@ finally:c.close()
                 self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.document_revisions WHERE org_id='ci-a' AND document_id='revision-doc'").fetchone()[0],2)
                 self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.document_revisions','UPDATE')").fetchone()[0])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=71:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=72:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=71 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 71 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=72 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 72 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
