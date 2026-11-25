@@ -159,3 +159,4 @@ def run_bundle(base):
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Bundle(n) for n in names))
     if not result.wasSuccessful() or result.testsRun!=10 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
     print("NARUV_BUNDLE_PASS: 10 isolated PG17 atomic batch cases; no production writes.")
+    return Bundle
