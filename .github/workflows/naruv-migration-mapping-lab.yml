@@ -5,6 +5,8 @@ on:
     paths:
       - app/erp_migration_mapping.py
       - tests/test_erp_migration_mapping.py
+      - app/erp_migration_review.py
+      - tests/test_erp_migration_review.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -39,3 +41,19 @@ jobs:
           PY
           done
           echo 'NARUV_MAPPING_LAB_PASS 5 rounds; no row import or ERP connection'
+
+      - name: Separate scoped metadata binding tests in five fresh processes
+        run: |
+          set -euo pipefail
+          python -m py_compile app/erp_migration_review.py tests/test_erp_migration_review.py
+          for seed in 17 101 617 2027 65537; do
+            NARUV_TEST_SEED="$seed" PYTHONHASHSEED="$seed" python - <<'PY'
+          import os, unittest
+          suite=unittest.defaultTestLoader.loadTestsFromName("tests.test_erp_migration_review")
+          result=unittest.TextTestRunner(verbosity=1).run(suite)
+          if not result.wasSuccessful() or result.testsRun != 8 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
+              raise SystemExit(1)
+          print("NARUV_REVIEW_ROUND_PASS", os.environ["NARUV_TEST_SEED"], "8 cases; 100 varied reviews; 200 scope/order negative controls")
+          PY
+          done
+          echo 'NARUV_REVIEW_LAB_PASS 5 rounds; metadata only; no import authority'
