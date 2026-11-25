@@ -458,10 +458,13 @@ END $$;
 -- Read-only dashboard contract. Strict tenant identity; no client filters or writes.
 CREATE FUNCTION naruv_valuation.overview(p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE a record; proof jsonb; due_sale numeric; due_purchase numeric; paid_sale numeric; paid_purchase numeric; n_sale bigint; n_purchase bigint; n_open bigint; n_products bigint; n_wh bigint;
+DECLARE a record; a2 record; proof jsonb; due_sale numeric; due_purchase numeric; paid_sale numeric; paid_purchase numeric; n_sale bigint; n_purchase bigint; n_open bigint; n_products bigint; n_wh bigint;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256) IS DISTINCT FROM
+ (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
  proof:=naruv_valuation.audit_ledger(p_csrf);
  SELECT count(*) FILTER(WHERE b.kind='sale'),count(*) FILTER(WHERE b.kind='purchase'),
  coalesce(sum(b.total-naruv_finance.paid(b.org_id,b.bill_id)-naruv_finance.credit_sum(b.org_id,b.bill_id)) FILTER(WHERE b.kind='sale'),0),
