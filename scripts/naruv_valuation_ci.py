@@ -839,6 +839,21 @@ def run_valuation(base):
                     with psycopg.connect(fixture.root_dsn) as root:
                         root.execute("UPDATE naruv_hosted_qa.boundary SET source_sha=%s",(source,))
                 for p in PURPOSES:check(p)
+                from scripts.naruv_pg_tls_admission_ci import verified_pg_tls
+                with verified_pg_tls(fixture.root_dsn) as (cert,untrusted):
+                    for p in PURPOSES:
+                        tls_dsn=make_conninfo(dsns[p],sslmode="verify-full",sslrootcert=str(cert),
+                            gssencmode="disable",connect_timeout=3)
+                        with psycopg.connect(tls_dsn) as db:
+                            with db.transaction(),db.cursor() as cur:
+                                cur.execute("SET TRANSACTION READ ONLY")
+                                verify_catalog(cur,purpose=p,config=cfg)
+                        for kwargs in ({"sslrootcert":str(untrusted)},
+                            {"host":"wrong.example.invalid","hostaddr":"127.0.0.1"}):
+                            bad_dsn=make_conninfo(tls_dsn,**kwargs)
+                            with self.assertRaises(psycopg.OperationalError):
+                                with psycopg.connect(bad_dsn):pass
+                    print("NARUV_PG_TLS_ADMISSION_PASS three actual verified TLS roles, six wrong-root/hostname denials",flush=True)
                 print("NARUV_HOSTED_REAL_PG_CATALOG_PASS three restricted roles, 3 non-TLS denials, column grant, marker grant and drift refusals",flush=True)
             finally:
                 # Only fixture-owned resources created in this test.

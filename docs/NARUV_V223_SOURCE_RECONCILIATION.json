@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "7b5fd2090781c28b9454d52197a4c770f836a456",
+      "sha": "2b6bd33636e5b559e9caf4e14ef5b76a769957ed",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8520,6 +8520,10 @@
     "app/naruv_hosted_qa_boundary.py": {
       "sha": "4d59023cf67d322ffd9b74da451907dfcdc91295",
       "mode": "100644"
+    },
+    "scripts/naruv_pg_tls_admission_ci.py": {
+      "sha": "ccaadda19ba64919356f1781b20d7579ea44b83c",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8603,5 +8607,9 @@
   "hosted_boundary_initializer": {
     "parent": "283d10615a6fc636b7b0b5a32ca8a68bda7d849d",
     "reason": "Extract boundary schema initialization into explicit CI-only transactional primitive, assert prerequisite roles and FORCE RLS, refuse overwrite, enforce singleton marker, verify rollback and duplicate refusal in existing actual PG catalog test. No remote provisioning."
+  },
+  "hosted_pg_tls_acceptance": {
+    "parent": "fe8b2165bfcf15225f3c9409706c7bd5aa0ba662",
+    "reason": "Actual verify-full PG17 TLS connection for three separated roles, wrong trust root and hostname refusal, exact disposable Docker cluster identity, temporary settings and cert cleanup. No hosted endpoint or system root store changes."
   }
 }
