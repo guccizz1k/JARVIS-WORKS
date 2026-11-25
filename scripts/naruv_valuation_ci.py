@@ -584,16 +584,18 @@ def run_valuation(base):
                 with psycopg.connect(fixture.root_dsn) as c:c.execute("UPDATE jw_dev.users SET role='admin' WHERE id='ci-ua'")
         def test_cost_draft_changed_source_and_unconfirmed_pay(self):
             with psycopg.connect(fixture.root_dsn) as c:
-                c.execute("UPDATE naruv_draft.documents SET original_sha256=repeat('0',64) WHERE org_id='ci-a'")
-                c.execute("UPDATE naruv_draft.pay_periods SET confirmed=false WHERE org_id='ci-a'")
+                before=c.execute("SELECT org_id,worker_id,period,confirmed FROM naruv_draft.pay_periods ORDER BY 1,2,3").fetchall()
+                self.assertEqual(c.execute("UPDATE naruv_draft.documents SET original_sha256=repeat('0',64) WHERE org_id='ci-a' AND document_id='shared'").rowcount,1)
+                self.assertEqual(c.execute("UPDATE naruv_draft.pay_periods SET confirmed=false WHERE org_id='ci-a' AND worker_id='worker-1' AND period='2026-11' AND confirmed").rowcount,1)
             try:
                 self.check(self.call("/drafts/documents/shared"),409)
                 self.check(self.call("/drafts/payroll/worker-1/2026-11"),404)
                 self.check(self.call("/drafts/documents/shared",who="B"),200)
             finally:
                 with psycopg.connect(fixture.root_dsn) as c:
-                    c.execute("UPDATE naruv_draft.documents SET original_sha256=encode(sha256(original_bytes),'hex') WHERE org_id='ci-a'")
-                    c.execute("UPDATE naruv_draft.pay_periods SET confirmed=true WHERE org_id='ci-a'")
+                    self.assertEqual(c.execute("UPDATE naruv_draft.documents SET original_sha256=encode(sha256(original_bytes),'hex') WHERE org_id='ci-a' AND document_id='shared'").rowcount,1)
+                    self.assertEqual(c.execute("UPDATE naruv_draft.pay_periods SET confirmed=true WHERE org_id='ci-a' AND worker_id='worker-1' AND period='2026-11' AND NOT confirmed").rowcount,1)
+                    self.assertEqual(c.execute("SELECT org_id,worker_id,period,confirmed FROM naruv_draft.pay_periods ORDER BY 1,2,3").fetchall(),before)
         def test_cost_draft_direct_access_and_disable(self):
             from unittest.mock import patch
             from app import naruv_draft_review as drafts
@@ -641,6 +643,9 @@ def run_valuation(base):
         def hr_admit(self,rid,day="2026-10-01",who="A",code=200,period="2026-10",worker="worker-1",a=480,b=60,extra=None):
             return self.check(self.call(f"/hr/workers/{worker}/periods/{period}/attendance/{rid}",{"date":day,"regular":a,"additional":b},who,extra),code)
         def test_cost_hr_attendance_exact_retry_and_tenant(self):
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("SELECT org_id,period,confirmed FROM naruv_draft.pay_periods WHERE worker_id='worker-1' ORDER BY 1,2").fetchall(),
+                    [("ci-a","2026-10",False),("ci-a","2026-11",True),("ci-b","2026-10",False),("ci-b","2026-11",True)])
             first=self.hr_admit("hr-1")
             self.assertEqual(first,self.hr_admit("hr-1"))
             self.assertFalse(first["payment_authorized"])
