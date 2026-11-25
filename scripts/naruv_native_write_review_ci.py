@@ -70,6 +70,8 @@ class NativeWrite(unittest.TestCase):
                 tables+=",naruv_bundle.events,naruv_bundle.lines,naruv_bundle.headers"
             if getattr(self,"quote_bundle_active",False):
                 tables+=",naruv_quote_bundle.conversions"
+            if getattr(self,"production_active",False):
+                tables+=",naruv_production.events,naruv_production.orders,naruv_production.components,naruv_production.boms"
             c.execute("TRUNCATE "+tables)
             c.execute("DELETE FROM jw_dev.staff_disabled")
             c.execute("DELETE FROM jw_dev.sessions WHERE id='A2'")
@@ -458,4 +460,6 @@ if __name__=="__main__":
     from scripts.naruv_bundle_ci import run_bundle
     bundle_suite=run_bundle(accounting_suite)
     from scripts.naruv_quote_bundle_ci import run_quote_bundle
-    run_quote_bundle(bundle_suite)
+    quote_suite=run_quote_bundle(bundle_suite)
+    from scripts.naruv_production_ci import run_production
+    run_production(quote_suite)

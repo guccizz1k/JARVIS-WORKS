@@ -136,3 +136,4 @@ def run_quote_bundle(base):
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(QuoteBundle(n) for n in names))
     if not result.wasSuccessful() or result.testsRun!=10 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
     print("NARUV_QUOTE_BUNDLE_PASS: 10 isolated PG17 multi-line quote conversion cases; no production writes.")
+    return QuoteBundle

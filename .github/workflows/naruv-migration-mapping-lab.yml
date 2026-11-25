@@ -55,6 +55,9 @@ on:
       - db/review/naruv_quote_bundle_ci.sql
       - app/naruv_quote_bundle_review.py
       - scripts/naruv_quote_bundle_ci.py
+      - db/review/naruv_production_ci.sql
+      - app/naruv_production_review.py
+      - scripts/naruv_production_ci.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -501,5 +504,5 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py
+          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py app/naruv_production_review.py scripts/naruv_production_ci.py
           python -m scripts.naruv_native_write_review_ci
