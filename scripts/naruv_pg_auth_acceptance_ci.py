@@ -112,6 +112,23 @@ def verify(cert,dsns):
                     assert root.execute("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='naruv_draft.profile_envelopes'::regclass").fetchone()==(True,)
                     assert root.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.profile_envelopes','SELECT')").fetchone()==(False,)
                 print("NARUV_HR_PROFILE_PG_PASS authenticated encrypted storage, duplicate, tenant and CSRF denial",flush=True)
+                replacement={"revision":"r2","expected_revision":"r1","profile":dict(value["profile"],display_name="Synthetic Revised")}
+                assert b.post(profile+"/replace",json=replacement,headers=dict(bh,**{"x-naruv-confirm":"yes"})).status_code==404
+                profile_status("replace",422,headers=ah,json=replacement)
+                profile_status("replace",409,headers=create,json=dict(replacement,expected_revision="stale"))
+                profile_status("replace",200,headers=create,json=replacement)
+                profile_status("replace",409,headers=create,json=replacement)
+                profile_status("replace",409,headers=create,json=dict(value,expected_revision="r2"))
+                assert profile_status("read",200,headers=ah).json()["profile"]==replacement["profile"]
+                with psycopg.connect(fixture.root_dsn) as root:
+                    assert root.execute("SELECT revision,previous_revision FROM naruv_draft.profile_revision_history ORDER BY revision").fetchall()==[("r1",None),("r2","r1")]
+                    assert root.execute("SELECT revision FROM naruv_draft.profile_envelopes").fetchone()==("r2",)
+                    assert root.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.profile_revision_history','SELECT,INSERT,UPDATE,DELETE')").fetchone()==(False,)
+                    assert root.execute("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='naruv_draft.profile_revision_history'::regclass").fetchone()==(True,)
+                with patch.dict(os.environ,{profiles.KEY:secrets.token_hex(32)}):
+                    profile_status("read",409,headers=ah)
+                assert profile_status("read",200,headers=ah).json()["profile"]==replacement["profile"]
+                print("NARUV_HR_PROFILE_REVISION_PASS stale, reuse, tenant and wrong-key denials; immutable metadata",flush=True)
                 assert a.post(logout,headers=dict(origin,**{"x-csrf-token":"x"*32})).status_code==403
                 assert a.post(logout,headers=ah).status_code==200
                 assert a.cookies.get(auth.COOKIE) is None
@@ -143,6 +160,7 @@ def verify(cert,dsns):
             for uid,pw in before:root.execute("UPDATE jw_dev.users SET password_hash=%s WHERE id=%s",(pw,uid))
             for signature in ("v85_auth_candidate(text)","v85_auth_failed(text)","v85_auth_issue_session(text,text,text,bigint,text)","v85_auth_revoke_session(text)","v85_auth_check_csrf(text,text)"):
                 root.execute("DROP FUNCTION IF EXISTS jw_dev."+signature)
-            root.execute("DROP FUNCTION IF EXISTS naruv_draft.profile_envelope(text,text,jsonb,text)")
+            root.execute("DROP FUNCTION IF EXISTS naruv_draft.profile_envelope(text,text,jsonb,text,text)")
+            root.execute("DROP TABLE IF EXISTS naruv_draft.profile_revision_history")
             root.execute("DROP TABLE IF EXISTS naruv_draft.profile_envelopes")
             for name in names:root.execute("DROP TABLE jw_dev."+name)

@@ -1,6 +1,6 @@
 """CI-only authenticated synthetic profile storage; no real PII admitted.
 
-Create-once demo, no production lifecycle, retention or key custody claims.
+Revision-checked demo; no production retention or key custody claims.
 Existing ERP guards are required and SQL never receives plaintext.
 """
 import os
@@ -25,7 +25,7 @@ def key():
     raw=os.getenv(KEY,"")
     if not re.fullmatch(r"[a-f0-9]{64}",raw):raise HTTPException(503,"PROFILE_KEY_UNAVAILABLE")
     return bytes.fromhex(raw)
-async def profile_body(request):
+async def profile_body(request,*,replace=False):
     # The finance decoder is deliberately flat; profiles have a nested object.
     limit=8192
     length=preview._one_header(request,"content-length")
@@ -43,10 +43,12 @@ async def profile_body(request):
     if length is not None and len(buf)!=int(length):raise HTTPException(400,"PROFILE_LENGTH")
     try:
         data=json.loads(buf.decode("utf-8"),object_pairs_hook=inventory._pairs,parse_constant=inventory._reject_constant)
-        if (type(data) is not dict or set(data)!={"revision","profile"} or type(data["revision"]) is not str
+        fields={"revision","profile","expected_revision"} if replace else {"revision","profile"}
+        if (type(data) is not dict or set(data)!=fields or type(data["revision"]) is not str
             or not preview.IDENT.fullmatch(data["revision"]) or type(data["profile"]) is not dict
             or set(data["profile"])!={"display_name","work_email","employment_start"}
             or any(type(v) is not str for v in data["profile"].values())):raise ValueError("shape")
+        if replace and (type(data["expected_revision"]) is not str or not preview.IDENT.fullmatch(data["expected_revision"]) or data["expected_revision"]==data["revision"]):raise ValueError("revision")
         return data
     except (ValueError,UnicodeError,RecursionError):raise HTTPException(422,"PROFILE_INPUT") from None
 
@@ -59,17 +61,17 @@ def operate(token,csrf,prior,worker,body):
             cur.execute("SET LOCAL statement_timeout='8s'")
             cur.execute("SET LOCAL lock_timeout='4s'")
             if body is not None:
-                if set(body)!={"revision","profile"} or type(body["revision"]) is not str or not preview.IDENT.fullmatch(body["revision"]):
+                if set(body) not in ({"revision","profile"},{"revision","profile","expected_revision"}) or type(body["revision"]) is not str or not preview.IDENT.fullmatch(body["revision"]):
                     raise HTTPException(422,"PROFILE_INPUT")
                 p=body["profile"]
                 if type(p) is not dict or type(p.get("display_name")) is not str or not p["display_name"].startswith("Synthetic ") or type(p.get("work_email")) is not str or not p["work_email"].endswith("@example.invalid"):
                     raise HTTPException(422,"PROFILE_SYNTHETIC_ONLY")
                 envelope=seal_profile(tenant=org,worker=worker,revision=body["revision"],key_id="ci-profile-key",key=key(),profile=p)
-                cur.execute("SELECT naruv_draft.profile_envelope(%s,%s,%s::jsonb,%s)",(worker,body["revision"],json.dumps(envelope),csrf))
+                cur.execute("SELECT naruv_draft.profile_envelope(%s,%s,%s::jsonb,%s,%s)",(worker,body["revision"],json.dumps(envelope),body.get("expected_revision"),csrf))
                 row=cur.fetchone()
                 if not row or row[0]!={"status":"SEALED","revision":body["revision"]}:raise HTTPException(503,"PROFILE_UNAVAILABLE")
                 return dict(row[0],production_authorized=False)
-            cur.execute("SELECT naruv_draft.profile_envelope(%s,NULL,NULL,%s)",(worker,csrf))
+            cur.execute("SELECT naruv_draft.profile_envelope(%s,NULL,NULL,NULL,%s)",(worker,csrf))
             row=cur.fetchone()
             if not row or type(row[0]) is not dict or set(row[0])!={"revision","envelope"}:raise HTTPException(503,"PROFILE_UNAVAILABLE")
             result=open_profile(tenant=org,worker=worker,revision=row[0]["revision"],key_id="ci-profile-key",key=key(),envelope=row[0]["envelope"])
@@ -78,14 +80,14 @@ def operate(token,csrf,prior,worker,body):
     except psycopg.Error as exc:
         reason=getattr(getattr(exc,"diag",None),"message_primary","")
         if reason=="PROFILE_NOT_FOUND":raise HTTPException(404,reason) from None
-        if reason=="PROFILE_EXISTS":raise HTTPException(409,reason) from None
+        if reason in ("PROFILE_EXISTS","PROFILE_STALE","PROFILE_REVISION_REUSED"):raise HTTPException(409,reason) from None
         if reason=="PROFILE_INPUT":raise HTTPException(422,reason) from None
         raise write._db_error(exc) from None
 
 def register(app):
     if not enabled():return False
     router=APIRouter(prefix=PREFIX)
-    async def handle(worker,request,response,create):
+    async def handle(worker,request,response,create,replace=False):
         auth.check(request)
         if not enabled():raise HTTPException(404,"PROFILE_DISABLED")
         if worker!="worker-1":raise HTTPException(422,"PROFILE_SYNTHETIC_ONLY")
@@ -94,7 +96,7 @@ def register(app):
         if create:
             if request.headers.getlist("x-naruv-confirm")!=["yes"]:raise HTTPException(422,"PROFILE_CONFIRM_REQUIRED")
             if request.headers.getlist("content-type")!=["application/json"]:raise HTTPException(415,"PROFILE_CONTENT_TYPE")
-            body=await profile_body(request)
+            body=await profile_body(request,replace=replace)
         else:
             await write._empty_body(request)
             body=None
@@ -103,6 +105,8 @@ def register(app):
         return result
     @router.post("/workers/{worker}/create")
     async def create(worker:str,request:Request,response:Response):return await handle(worker,request,response,True)
+    @router.post("/workers/{worker}/replace")
+    async def replace(worker:str,request:Request,response:Response):return await handle(worker,request,response,True,True)
     @router.post("/workers/{worker}/read")
     async def read(worker:str,request:Request,response:Response):return await handle(worker,request,response,False)
     app.include_router(router)

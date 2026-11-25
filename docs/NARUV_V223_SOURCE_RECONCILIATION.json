@@ -8530,15 +8530,15 @@
       "mode": "100644"
     },
     "scripts/naruv_pg_auth_acceptance_ci.py": {
-      "sha": "84fb261b74b58fafe76409463fb0d81ea0a4e6e5",
+      "sha": "b8077207895597cc012e8ebf6cd267eb820640e4",
       "mode": "100644"
     },
     "app/naruv_hr_profile_review.py": {
-      "sha": "3eb0f528a9692bcb2f0f513b9c43827f0207b2cd",
+      "sha": "c44036dbfd1aacf782cbfd778494bdb188f400d9",
       "mode": "100644"
     },
     "db/review/naruv_hr_profile_ci.sql": {
-      "sha": "c504c49969bbd562674bd27d7cfd729fc8466876",
+      "sha": "b02008c5a0c825840219e263d5b1750903644246",
       "mode": "100644"
     }
   },
@@ -8643,5 +8643,9 @@
   "profile_nested_parser_fix": {
     "parent": "7cbb7c02df457801dfdde194536ee5ba76fce37b",
     "reason": "Failure round5 profile create before DB; finance._body rejects all nested objects by design. Dedicated strict bounded profile JSON parser, actual route negatives, safe status diagnostics. Preserve finance parser and auth guards."
+  },
+  "profile_revision_candidate": {
+    "parent": "09f2c0ec26567115e56cc2ca4d34832dc8b72888",
+    "reason": "Revision compare-and-swap, immutable metadata, explicit confirmation, no old ciphertext in history, stale/reuse/tenant/wrong-key negatives; CI only, no retention or production."
   }
 }
