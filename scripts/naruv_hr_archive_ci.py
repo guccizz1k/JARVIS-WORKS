@@ -196,4 +196,6 @@ def verify_single_use_attestations(dsn,archive_digest):
     with psycopg.connect(dsn) as db:
         need(db.execute("SELECT count(*) FROM naruv_retirement_ci.challenge WHERE consumed_at IS NOT NULL").fetchone()==(1,),
              "RETIREMENT_LEDGER_INCOMPLETE")
+        need(db.execute("SELECT consumed_at>=issued_at AND consumed_at<=clock_timestamp() FROM naruv_retirement_ci.challenge WHERE challenge=%s",(challenge,)).fetchone()==(True,),
+             "RETIREMENT_LEDGER_CLOCK_MISMATCH")
     print("NARUV_RETIREMENT_SINGLE_USE_CI_PASS independent signed verified archive evidence, atomic replay refusal, no retirement",flush=True)

@@ -308,6 +308,17 @@ class HighWageAndNationalCollection(unittest.TestCase):
         self.assertEqual(r["status"],"REFERENCE_MATCH_ONLY")
         self.assertEqual(r["manual_reconciliation"]["net_estimate_krw"],2626693)
         self.assertFalse(r["payment_authorized"])
+        rounded=dict(deductions,local_income_tax=dict(deductions["local_income_tax"],amount_krw=7430))
+        v2=ordinary_monthly_deduction_review_2026(**dict(args,assessed_deductions=rounded,collection_policy="ASSESSED_LOCAL_COLLECTION_V2"))
+        self.assertEqual(v2["status"],"REFERENCE_MATCH_ONLY")
+        self.assertEqual(v2["manual_reconciliation"]["net_estimate_krw"],2626698)
+        self.assertEqual(v2["insurance_rounding_status"],"AGENCY_ASSESSMENT_REQUIRED")
+        self.assertNotEqual(v2["review_sha256"],r["review_sha256"])
+        changed_national=dict(rounded,income_tax=dict(rounded["income_tax"],amount_krw=70000),
+            local_income_tax=dict(rounded["local_income_tax"],amount_krw=7000))
+        out2=ordinary_monthly_deduction_review_2026(**dict(args,assessed_deductions=changed_national,collection_policy="ASSESSED_LOCAL_COLLECTION_V2"))
+        self.assertEqual(out2["mismatches"],["income_tax"])
+        with self.assertRaises(PayrollBlocked):ordinary_monthly_deduction_review_2026(**dict(args,collection_policy="UNKNOWN"))
         changed=dict(deductions,pension=dict(deductions["pension"],amount_krw=142490))
         out=ordinary_monthly_deduction_review_2026(**dict(args,assessed_deductions=changed))
         self.assertEqual((out["status"],out["mismatches"]),("ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED",["pension"]))
@@ -380,3 +391,11 @@ class LocalCollectionReference(unittest.TestCase):
         for change in (dict(scope="INSTALLMENT"),dict(assessment_sha256="bad"),dict(period="2027-01")):
             with self.assertRaises(PayrollBlocked):
                 local_collection_review_2026(**dict(args,**change),assessed_national_collection_krw=1000)
+
+
+class SourceEditionPin(unittest.TestCase):
+    def test_changed_pdf_fails_closed(self):
+        from scripts.naruv_tax_source_audit import verify_source_digest,OFFICIAL_PDF_SHA256
+        self.assertRegex(OFFICIAL_PDF_SHA256,r"^[0-9a-f]{64}$")
+        for raw in (b"%PDF-modified",b"",None):
+            with self.assertRaisesRegex(ValueError,"SOURCE_EDITION_DIGEST_CHANGED"):verify_source_digest(raw)

@@ -13,6 +13,10 @@ import subprocess
 ROW = re.compile(r"^\s*([0-9][0-9,]*)\s+([0-9][0-9,]*)\s+(.+?)\s*$")
 TEN = re.compile(r"^\s*10,?000\s*천원\s+(.+?)\s*$")
 CELL = re.compile(r"(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+|[-–—−])\Z")
+OFFICIAL_PDF_SHA256 = "5307b1d45c8f946ca2d54f10b1731b2ec8cfd1a26efb653673c13d660ae3b698"
+def verify_source_digest(raw):
+    need(type(raw) is bytes and hashlib.sha256(raw).hexdigest()==OFFICIAL_PDF_SHA256,"SOURCE_EDITION_DIGEST_CHANGED")
+
 NAMES = ("KR_TABLE_LOWEST","KR_TABLE_LOWER","KR_TABLE_BEFORE","KR_TABLE_ROWS","KR_TABLE_AFTER")
 
 def need(ok, code):
@@ -91,6 +95,7 @@ def main():
     a=p.parse_args()
     need(a.pdf.is_file() and 1<=a.pdf.stat().st_size<=10_000_000,"SOURCE_PDF_SIZE")
     raw=a.pdf.read_bytes();need(raw.startswith(b"%PDF-"),"SOURCE_NOT_PDF")
+    verify_source_digest(raw)
     proc=subprocess.run(["pdftotext","-layout",str(a.pdf),"-"],capture_output=True,timeout=30,check=True)
     extracted=extract(proc.stdout.decode("utf-8"))
     mismatch=compare(extracted,expected_rows(a.candidate.read_text("utf-8")))

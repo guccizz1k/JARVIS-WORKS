@@ -1012,11 +1012,12 @@ def ordinary_monthly_deduction_review_2026(*,tenant,worker,period,base_hourly,or
         classification_sha256,days,expected_wage_sha256,withholding_date,taxable_monthly_krw,
         eligible_family_count,eligible_children_8_20,selection_percent,tax_assessment_sha256,
         pension_base_krw,pension_assessment_sha256,health_base_krw,employment_base_krw,
-        insurance_assessment_sha256,assessed_deductions):
+        insurance_assessment_sha256,assessed_deductions,collection_policy="LEGACY_EXACT_REFERENCE_V1"):
     """Server-side restricted reconciliation: all references recomputed from
     the same tenant/worker and wage snapshot. Agency assessments are required;
     differences including rounding remain review items, not automatic payments.
     """
+    require(type(collection_policy) is str and collection_policy in ("LEGACY_EXACT_REFERENCE_V1","ASSESSED_LOCAL_COLLECTION_V2"),"KR_COLLECTION_POLICY")
     wage=wage_review(tenant=tenant,worker=worker,period=period,base_hourly=base_hourly,
         ordinary_hourly=ordinary_hourly,classification_sha256=classification_sha256,
         days=days,scope="ADULT_HOURLY_5PLUS_MANUALLY_CLASSIFIED")
@@ -1037,13 +1038,23 @@ def ordinary_monthly_deduction_review_2026(*,tenant,worker,period,base_hourly,or
     refs={"income_tax":_money(Fraction(tax["national_collection_krw"])),
           "local_income_tax":tax["local_reference_from_collection"],
           "pension":pension["employee_exact"],**insurance["employee_exact"]}
+    proof={"v":"KR_ORDINARY_DEDUCTION_REVIEW_2026_V1","wage":wage["review_sha256"],
+           "tax":tax["review_sha256"],"pension":pension["reference_sha256"],
+           "insurance":insurance["reference_sha256"],"manual":manual["reconciliation_sha256"]}
+    details={}
+    if collection_policy=="ASSESSED_LOCAL_COLLECTION_V2":
+        local=local_collection_review_2026(tenant=tenant,worker=worker,period=period,
+            assessed_national_collection_krw=assessed_deductions["income_tax"]["amount_krw"],
+            assessment_sha256=assessed_deductions["income_tax"]["evidence_sha256"],
+            scope="ASSESSED_ORDINARY_MONTHLY_WITHHOLDING_NO_EXCEPTIONS")
+        refs["local_income_tax"]=_money(Fraction(local["local_collection_krw"]))
+        proof.update(v="KR_ORDINARY_DEDUCTION_REVIEW_2026_V2",local=local["review_sha256"])
+        details={"collection_policy":collection_policy,"local_collection_review":local,
+                 "insurance_rounding_status":"AGENCY_ASSESSMENT_REQUIRED"}
     mismatches=sorted(k for k,v in refs.items() if Fraction(**v)!=assessed_deductions[k]["amount_krw"])
     return {"status":"ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED" if mismatches else "REFERENCE_MATCH_ONLY",
-        "mismatches":mismatches,"reference_deductions":refs,"manual_reconciliation":manual,
-        "review_sha256":hash_input({"v":"KR_ORDINARY_DEDUCTION_REVIEW_2026_V1",
-            "wage":wage["review_sha256"],"tax":tax["review_sha256"],
-            "pension":pension["reference_sha256"],"insurance":insurance["reference_sha256"],
-            "manual":manual["reconciliation_sha256"]}),"requires_human_review":True,
+        "mismatches":mismatches,"reference_deductions":refs,"manual_reconciliation":manual,**details,
+        "review_sha256":hash_input(proof),"requires_human_review":True,
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
 
 

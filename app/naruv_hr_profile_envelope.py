@@ -197,11 +197,11 @@ def consume_retirement_attestation_ci(cur,**args):
     _require(cur.fetchone()==("naruv_profile_quarantine_ci",17,"postgres"))
     verify_retirement_attestations(**args)
     cur.execute("""UPDATE naruv_retirement_ci.challenge
-        SET consumed_at=%s
+        SET consumed_at=clock_timestamp()
         WHERE challenge=%s AND inventory_sha256=%s AND review_sha256=%s
           AND issued_at=%s AND consumed_at IS NULL
           AND issued_at<=clock_timestamp()
           AND issued_at>=clock_timestamp()-interval '10 minutes'""",
-        (args["as_of"],args["challenge"],args["inventory_sha256"],args["review"]["review_sha256"],args["issued_at"]))
+        (args["challenge"],args["inventory_sha256"],args["review"]["review_sha256"],args["issued_at"]))
     _require(cur.rowcount==1)
     return {"status":"SINGLE_USE_EVIDENCE_REVIEW_ONLY","key_retirement_authorized":False,"production_authorized":False}
