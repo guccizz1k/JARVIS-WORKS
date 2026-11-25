@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "06fda9dd53e9c1f3597e8408d78e48669b79ee46",
+      "sha": "c4749022a357d8762c18f17dedbd2a66497ef50d",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8539,5 +8539,9 @@
   "hr_isolated_ui_extension": {
     "parent": "3180e5108f2914a8918a6b068a7c969e086f4762",
     "reason": "Separate CI-only HR pilot screen, explicit per-write confirmation, fixed synthetic identifiers, real HTTPS browser full lifecycle proof; original read-only workspace and UI untouched."
+  },
+  "hr_archive_contract_correction": {
+    "parent": "ff93b936b4e016c827a5a7781d99af82f248e62e",
+    "reason": "Five PG17 failures at child line 138: archived worker setup returns HR_NOT_FOUND/404 by existing API contract, not 409. Assert exact error, inactive state and unchanged period set. No business guard relaxation."
   }
 }

@@ -1027,7 +1027,11 @@ try:
                 archived=dual.post(worker+'/archive/pilot-archive',headers=wh)
                 assert archived.status_code==200
                 assert dual.post(worker+'/archive/pilot-archive',headers=wh).json()==archived.json()
-                assert dual.post(worker+'/periods/2026-05/create/pilot-after-archive',headers=wh,json=policy).status_code==409
+                refused=dual.post(worker+'/periods/2026-05/create/pilot-after-archive',headers=wh,json=policy)
+                assert refused.status_code==404 and refused.json().get('detail')=='HR_NOT_FOUND', "ARCHIVED_WORKER_CONTRACT"
+                after=dual.post(worker+'/inspect',headers=dh)
+                assert after.status_code==200 and after.json()['active'] is False
+                assert [p['period'] for p in after.json()['periods']]==['2026-03','2026-04']
                 assert dual.post('/api/naruv-review/v1/drafts/payroll/pilot-bridge/2026-04',headers=dh).json()==pay2.json()
                 if os.environ.get('NARUV_WORKSPACE_BROWSER')=='EPHEMERAL_ONLY':
                     from scripts.naruv_workspace_browser_ci import verify_browser
