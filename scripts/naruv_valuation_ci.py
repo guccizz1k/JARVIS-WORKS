@@ -33,6 +33,12 @@ def run_valuation(base):
                 seed(c)
             os.environ[drafts.FLAG]="ISOLATED_SYNTHETIC_ONLY"
             if not drafts.register_drafts(cls.app):raise RuntimeError("DRAFT_DISABLED")
+            from app import naruv_hr_review as hr
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("SELECT set_config('naruv.hr_ci','DISPOSABLE_ONLY',true)")
+                c.execute((ROOT/"db/review/naruv_hr_ci.sql").read_text())
+            os.environ[hr.FLAG]="ISOLATED_SYNTHETIC_ONLY"
+            if not hr.register_hr(cls.app):raise RuntimeError("HR_DISABLED")
         def setUp(self):
             super().setUp()
             os.environ["NARUV_VALUATION_REVIEW"]="ISOLATED_SYNTHETIC_ONLY"
@@ -632,8 +638,46 @@ def run_valuation(base):
                                 self.assertFalse(c.execute("SELECT EXISTS(SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a WHERE p.oid=%s::regprocedure AND a.grantee=0 AND a.privilege_type='EXECUTE')",(fn,)).fetchone()[0])
                             else:
                                 self.assertFalse(c.execute("SELECT has_function_privilege(%s,%s,'EXECUTE')",(role,fn)).fetchone()[0])
+        def hr_admit(self,rid,day="2026-10-01",who="A",code=200,period="2026-10",worker="worker-1",a=480,b=60,extra=None):
+            return self.check(self.call(f"/hr/workers/{worker}/periods/{period}/attendance/{rid}",{"date":day,"regular":a,"additional":b},who,extra),code)
+        def test_cost_hr_attendance_exact_retry_and_tenant(self):
+            first=self.hr_admit("hr-1")
+            self.assertEqual(first,self.hr_admit("hr-1"))
+            self.assertFalse(first["payment_authorized"])
+            self.hr_admit("hr-1",a=481,code=409)
+            self.hr_admit("hr-duplicate",code=409)
+            self.assertEqual(self.hr_admit("hr-1",who="B",a=300)["regular"],300)
+            self.check(self.call("/drafts/payroll/worker-1/2026-10"),404)
+            self.assertEqual(self.check(self.call("/drafts/payroll/worker-1/2026-11"),200)["gross_krw"],114000)
+        def test_cost_hr_confirmed_and_invalid(self):
+            self.hr_admit("hr-closed",day="2026-11-26",period="2026-11",code=409)
+            self.hr_admit("hr-bad-date",day="2026-10-32",code=422)
+            self.hr_admit("hr-bad-minutes",a=1440,b=1,code=422)
+            self.hr_admit("hr-no-worker",worker="missing",code=404)
+            self.hr_admit("hr-no-confirm",extra={"x-naruv-confirm":"no"},code=422)
+            self.hr_admit("hr-origin",extra={"origin":"https://evil.test"},code=403)
+        def test_cost_hr_concurrent_idempotency(self):
+            import concurrent.futures
+            barrier=threading.Barrier(3)
+            def submit(_):
+                barrier.wait(timeout=10)
+                return self.hr_admit("hr-parallel",day="2026-10-02")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+                results=list(pool.map(submit,range(3)))
+            self.assertTrue(all(r==results[0] for r in results))
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.attendance_receipts WHERE org_id='ci-a' AND request_id='hr-parallel'").fetchone()[0],1)
+        def test_cost_hr_direct_privilege_and_gate(self):
+            from app import naruv_hr_review as hr
+            from unittest.mock import patch
+            with psycopg.connect(fixture.root_dsn) as c:
+                for role in ("jw_app_dev","naruv_native_stage"):
+                    self.assertFalse(c.execute("SELECT has_table_privilege(%s,'naruv_draft.attendance_receipts','INSERT')",(role,)).fetchone()[0])
+                self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.admit_attendance(text,text,text,text,int,int,boolean,text)','EXECUTE')").fetchone()[0])
+            with patch.dict(os.environ,{hr.FLAG:""}):
+                self.hr_admit("hr-disabled",code=404)
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=52:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=56:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=52 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 52 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=56 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 56 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
