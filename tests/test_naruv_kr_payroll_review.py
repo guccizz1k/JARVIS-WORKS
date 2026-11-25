@@ -337,3 +337,27 @@ class IndependentSourceAudit(unittest.TestCase):
         from scripts.naruv_tax_source_audit import extract
         for bad in ("2026. 2. 27.", "2026. 2. 27.\f"+"empty\f"*26):
             with self.assertRaises(ValueError):extract(bad)
+
+
+    def test_final_page_threshold_is_not_duplicate_numeric_row(self):
+        from scripts.naruv_tax_source_audit import extract
+        # Synthetic layout fixture tests parsing, not independent legal data.
+        pages=["2026. 2. 27."]
+        low=770
+        for count in [17]+[26]*24+[5]:
+            lines=[]
+            for _ in range(count):
+                step=5 if low<1500 else (10 if low<3000 else 20)
+                lines.append(f"{low:,} {low+step:,} "+" ".join(["-"]*11))
+                low+=step
+            pages.append("\n".join(lines))
+        self.assertEqual(low,10000)
+        last="\n10,000천원 "+" ".join(["1,000"]*11)
+        formula="\n10,000천원 초과 (10,000천원인 경우의 해당 세액)\n14,000천원 이하"
+        pages[-1]+=last+formula
+        rows,ten=extract("\f".join(pages)+"\f")
+        self.assertEqual(len(rows),646)
+        self.assertEqual(ten,(1000,)*11)
+        pages[-1]+=last
+        with self.assertRaisesRegex(ValueError,"SOURCE_DUPLICATE_10M"):
+            extract("\f".join(pages)+"\f")

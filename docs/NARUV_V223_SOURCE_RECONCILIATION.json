@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "43c19ccefb7d3bce5e89edce1fc67cf33b6ab3be",
+      "sha": "7a437531be3fb9f303cf84889c28de119717b223",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,7 +8502,7 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "c60720a2f14f9fd807fec0d35fa467a0436fd58c",
+      "sha": "ab4c07b8187b30997f9ef632603893ef2f1914db",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
@@ -8542,11 +8542,11 @@
       "mode": "100644"
     },
     "scripts/naruv_hr_archive_ci.py": {
-      "sha": "9637b47c3d327c2a98b33a27b9ad104bdc77c83a",
+      "sha": "2628225034957e00f286c0fd81aa6deaadef677e",
       "mode": "100644"
     },
     "scripts/naruv_tax_source_audit.py": {
-      "sha": "683b048b25b33b65701ed9f16aa0a8b2e8bd09ff",
+      "sha": "752e2db42b848a15a670f1763c541d7d2df8bcdc",
       "mode": "100644"
     }
   },
@@ -8716,5 +8716,9 @@
   "independent_official_source_and_ledger_rollback": {
     "parent": "b4b56c84ef68a2db68494a8a39219899fef33f3f",
     "reason": "Independent PDF layout parser and full 7117 cell comparison, external input must be official; source audit separately enforced by review CI, no assertion of successful full comparison yet. CI-only ledger scope plus invalid signature and rollback mutation refusal."
+  },
+  "source_parser_threshold_and_db_clock": {
+    "parent": "756f8c0c1400ed7b8a461be368c81b47d5dcc481",
+    "reason": "Disambiguate last-page formula heading, preserve duplicate numeric rejection, report affected official rows; DB clock independently rejects expired signed challenges. Full source comparison remains pending."
   }
 }

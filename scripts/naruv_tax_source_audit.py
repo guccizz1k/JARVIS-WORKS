@@ -34,6 +34,10 @@ def extract(text):
         for line in page.splitlines():
             m=TEN.fullmatch(line)
             if m:
+                # The final page repeats the 10m label in the formula's
+                # threshold description. Only a complete numeric row is data.
+                if re.match(r"^(초과|이하)(?:\s|$)",m[1]):
+                    continue
                 need(ten is None,"SOURCE_DUPLICATE_10M")
                 ten=cells(m[1]);continue
             m=ROW.fullmatch(line)
@@ -88,7 +92,14 @@ def main():
     need(a.pdf.is_file() and 1<=a.pdf.stat().st_size<=10_000_000,"SOURCE_PDF_SIZE")
     raw=a.pdf.read_bytes();need(raw.startswith(b"%PDF-"),"SOURCE_NOT_PDF")
     proc=subprocess.run(["pdftotext","-layout",str(a.pdf),"-"],capture_output=True,timeout=30,check=True)
-    mismatch=compare(extract(proc.stdout.decode("utf-8")),expected_rows(a.candidate.read_text("utf-8")))
+    extracted=extract(proc.stdout.decode("utf-8"))
+    mismatch=compare(extracted,expected_rows(a.candidate.read_text("utf-8")))
+    # Emit complete affected rows, not only the first 100 cells; the review
+    # candidate is never auto-mutated by network input.
+    affected=sorted({low for low,_,_,_ in mismatch})
+    for low in affected:
+        high,row=extracted[0][low] if low!=10000000 else (None,extracted[1])
+        print("NARUV_OFFICIAL_MISMATCH_ROW "+json.dumps([low,high,*row],separators=(",",":")),flush=True)
     print(json.dumps({"source_sha256":hashlib.sha256(raw).hexdigest(),"bands":646,"cells":7117,
         "mismatch_count":len(mismatch),"first_mismatches":mismatch[:100]},ensure_ascii=True),flush=True)
     need(not mismatch,"SOURCE_TABLE_MISMATCH")

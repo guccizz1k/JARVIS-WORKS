@@ -173,6 +173,23 @@ def verify_single_use_attestations(dsn,archive_digest):
         db.rollback()
         need(db.execute("SELECT consumed_at IS NULL FROM naruv_retirement_ci.challenge").fetchone()==(True,),
              "RETIREMENT_ROLLBACK_LOST_CHALLENGE")
+    # An expired signed challenge cannot be accepted by supplying an old
+    # application-side as_of time; the database independently checks its clock.
+    from datetime import timedelta
+    expired=now-timedelta(minutes=11)
+    expired_challenge=secrets.token_hex(32)
+    expired_msg=_canonical(["NARUV_RETIREMENT_ATTESTATION_V1",inventory,review["review_sha256"],expired_challenge,expired.isoformat()])
+    expired_args=dict(args,challenge=expired_challenge,issued_at=expired,as_of=expired,
+        inventory_signature=a.sign(b"inventory:"+expired_msg),recovery_signature=b.sign(b"recovery:"+expired_msg))
+    with psycopg.connect(dsn) as db:
+        db.execute("INSERT INTO naruv_retirement_ci.challenge VALUES(%s,%s,%s,%s,NULL)",
+                   (expired_challenge,inventory,review["review_sha256"],expired))
+        with db.cursor() as cur:
+            try:consume_retirement_attestation_ci(cur,**expired_args)
+            except ProfileBlocked:pass
+            else:raise RuntimeError("RETIREMENT_EXPIRED_REPLAY_ACCEPTED")
+        need(db.execute("SELECT consumed_at IS NULL FROM naruv_retirement_ci.challenge WHERE challenge=%s",
+                       (expired_challenge,)).fetchone()==(True,),"RETIREMENT_EXPIRED_MUTATED")
     with ThreadPoolExecutor(max_workers=2) as pool:
         results=list(pool.map(lambda _:attempt(),range(2)))
     need(sorted(results)==[False,True] and not attempt(),"RETIREMENT_REPLAY_ACCEPTED")
