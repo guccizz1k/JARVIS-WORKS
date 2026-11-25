@@ -1142,3 +1142,22 @@ def source_bound_agency_deduction_review_2026(*,tenant,worker,period,policy_revi
         "exception_items":exceptions,"source_bound_review":bound,"agency_snapshot_sha256":digest,
         "review_sha256":hash_input({"v":"KR_AGENCY_SOURCE_BOUND_2026_V1","source":bound["review_binding_sha256"],"agency":digest}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def pension_collection_reference_2026(*,tenant,worker,period,assessed_base_krw,
+        assessment_sha256,assessed_employee_krw,scope):
+    """Ordinary single-workplace contribution reference, 10-won truncation.
+    National Pension Act Art.117; no subsidies, allocation or enrollment inference.
+    Compare to assessed employee contribution; never authorize payment.
+    """
+    require(scope=="ORDINARY_SINGLE_WORKPLACE_NO_RELIEF","KR_NPS_COLLECTION_SCOPE")
+    require(_whole(assessed_employee_krw,0,10**9),"KR_NPS_COLLECTION_AMOUNT")
+    ref=pension_reference_2026(tenant=tenant,worker=worker,period=period,
+        assessed_base_krw=assessed_base_krw,assessment_sha256=assessment_sha256)
+    exact=Fraction(**ref["employee_exact"])
+    collected=(exact//10)*10
+    return {"status":"REFERENCE_MATCH_ONLY" if collected==assessed_employee_krw else "AGENCY_AMOUNT_DIFFERENCE_REVIEW_REQUIRED",
+        "employee_exact":ref["employee_exact"],"employee_collection_reference_krw":collected,
+        "assessed_employee_krw":assessed_employee_krw,"review_sha256":hash_input({"v":"KR_NPS_COLLECTION_2026_V1",
+            "ref":ref["reference_sha256"],"scope":scope,"assessed_employee":assessed_employee_krw,"collection":collected}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}

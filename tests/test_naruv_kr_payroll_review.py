@@ -443,3 +443,21 @@ class AgencyDeductionReview(unittest.TestCase):
                        dict(amount_krw=1001),dict(evidence_sha256="e"*64),dict(case="EXEMPTION")):
             bad=dict(cases,health=dict(cases["health"],**change))
             with self.assertRaises(PayrollBlocked):source_bound_agency_deduction_review_2026(**dict(args,agency_cases=bad,expected_agency_snapshot_sha256=digest(bad)))
+
+
+class PensionCollectionReference(unittest.TestCase):
+    def test_ordinary_rounding_and_mismatch(self):
+        from app.naruv_kr_payroll_review import pension_collection_reference_2026
+        args=dict(tenant="a",worker="w",period="2026-07",assessment_sha256="b"*64",
+                  scope="ORDINARY_SINGLE_WORKPLACE_NO_RELIEF")
+        for base,want in ((410000,19470),(411000,19520),(1000000,47500),(6590000,313020)):
+            with self.subTest(base=base):
+                r=pension_collection_reference_2026(**args,assessed_base_krw=base,assessed_employee_krw=want)
+                self.assertEqual(r["employee_collection_reference_krw"],want)
+                self.assertEqual(r["status"],"REFERENCE_MATCH_ONLY")
+                self.assertFalse(r["payment_authorized"])
+        r=pension_collection_reference_2026(**args,assessed_base_krw=411000,assessed_employee_krw=19522)
+        self.assertEqual(r["status"],"AGENCY_AMOUNT_DIFFERENCE_REVIEW_REQUIRED")
+        for change in (dict(scope="SUBSIDY"),dict(assessed_employee_krw=True),dict(assessed_base_krw=409000)):
+            with self.assertRaises(PayrollBlocked):
+                pension_collection_reference_2026(**(dict(args,assessed_base_krw=411000,assessed_employee_krw=19520)|change))

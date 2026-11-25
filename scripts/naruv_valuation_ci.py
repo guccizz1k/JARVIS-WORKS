@@ -703,7 +703,8 @@ def run_valuation(base):
             from app import naruv_integrated_review as integrated
             from app.naruv_kr_payroll_review import source_bound_review,DEDUCTIONS
             from unittest.mock import patch
-            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK,integrated.hr.FLAG:integrated.ACK}):
+            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK,integrated.hr.FLAG:integrated.ACK,
+                    integrated.drafts.KR_FLAG:"DISPOSABLE_FIXTURE_ONLY"}):
                 self.app=FastAPI()
                 self.assertTrue(integrated.register_integrated_review(self.app,include_drafts=True,include_hr=True))
                 # Register the original quote writer AFTER reserving the NARUV
@@ -742,6 +743,25 @@ def run_valuation(base):
                     deductions={k:{"amount_krw":1000,"evidence_sha256":"b"*64,"assessment":"ASSESSED"} for k in DEDUCTIONS})
                 self.assertEqual(result["deductions"]["net_estimate_krw"],114000)
                 self.assertFalse(result["payment_authorized"]);self.assertFalse(result["statutory_validated"])
+                krpath="/drafts/payroll/combined-worker/2026-07/kr-review"
+                manual=dict(expected_draft_sha256=pay["draft_sha256"],ordinary_hourly=12000,
+                    classification_sha256="a"*64,classified_days=[{"date":"2026-07-01","regular":480,
+                    "overtime":60,"holiday_first8":0,"holiday_after8":0,"night":60}],
+                    deductions={k:{"amount_krw":1000,"evidence_sha256":"b"*64,"assessment":"ASSESSED"} for k in DEDUCTIONS},
+                    pension_assessed_base_krw=410000)
+                response=self.check(self.call(krpath,manual),200)
+                self.assertEqual(response["review"],result)
+                self.assertEqual(response["pension_reference"]["employee_collection_reference_krw"],19470)
+                self.assertEqual(response["pension_reference"]["status"],"AGENCY_AMOUNT_DIFFERENCE_REVIEW_REQUIRED")
+                for k in ("evidence_authenticity_verified","persisted","payment_authorized","production_authorized","statutory_validated"):
+                    self.assertIs(response[k],False)
+                self.check(self.call(krpath,manual,who="B"),404)
+                self.check(self.call(krpath,dict(manual,expected_draft_sha256="0"*64)),409)
+                self.check(self.call(krpath,dict(manual,tenant="ci-b")),422)
+                self.check(self.call(krpath,dict(manual,classified_days=[])),409)
+                with patch.dict(os.environ,{integrated.drafts.KR_FLAG:""}):
+                    self.check(self.call(krpath,manual),404)
+                print("NARUV_KR_CONFIRMED_ATTENDANCE_API_PASS manual reference only, cross-tenant and stale source denial",flush=True)
                 self.check(self.call("/drafts/payroll/combined-worker/2026-07",who="B"),404)
                 self.assertFalse(self.check(self.call("/drafts/documents/shared"),200)["posting_authorized"])
                 # Bounded disposable benchmark; no production SLO claim.

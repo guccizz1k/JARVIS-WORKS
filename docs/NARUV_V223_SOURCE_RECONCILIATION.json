@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "3b886a81ba6da3459bde33ec3ac1c4cf2460d2d6",
+      "sha": "e35f25d683f5de6ba3d97274737e85edc37312fd",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "0e75be8fa79cf791aac4724b8389b895487940fe",
+      "sha": "b31b6f29fd851ab6df5b3a3acc62300311b8ce8d",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "ea56e1f12317b3a5ab12ab9c4d0f12df9e326515",
+      "sha": "1abcb8983d5556725536ab4d7e1874666d03b83a",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "eb4000786ab2fe4e5c9072c858219cb281025cf7",
+      "sha": "82d1f9286d76d798fa4ecfdd97b798fade791c6b",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8542,7 +8542,7 @@
       "mode": "100644"
     },
     "scripts/naruv_hr_archive_ci.py": {
-      "sha": "8d0d785020e78a1f928bb0a8ba0825fdeeb19f35",
+      "sha": "ce07d632703952514e8b688a6fbfbfbd17010d6c",
       "mode": "100644"
     },
     "scripts/naruv_tax_source_audit.py": {
@@ -8732,5 +8732,9 @@
   "agency_source_bound_archive_lifecycle": {
     "parent": "8aea77a89cd9b85a053450b5c2a04592951c33ea",
     "reason": "Declared NPS income base clamp from official sources; source-bound agency decision routing incl subsidy, leave, non-enrollment and exceptions; evidence snapshot drift denial, not legal entitlement or insurance rounding. Offline archive lifecycle review binds complete asset set and records retention, legal hold and old key dependencies; no deletion or key action."
+  },
+  "confirmed_attendance_kr_api_and_archive_fixture": {
+    "parent": "07b663e4bfd351fc0bb8bd4fc4904a8fb5c95c60",
+    "reason": "Optional disposable CI-only authenticated PG pay_source route; never trusts client tenant/rate/minutes, manual evidence explicitly unauthenticated. Pension ordinary collection reference Art117, synthetic archive lifecycle integration. No external agency or live hosting, payment, deletion or key change."
   }
 }

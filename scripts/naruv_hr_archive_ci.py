@@ -114,6 +114,7 @@ def verify_after_purge(source,captured,new_key,old_key,expected_profile):
                 n=b.execute("DELETE FROM naruv_draft.profile_envelopes x USING naruv_draft.profile_retention r WHERE (x.org_id,x.worker_id)=(r.org_id,r.worker_id) AND r.purged_at IS NOT NULL").rowcount
                 need(n==1 and snapshot(b)==after,"PROFILE_RESTORE_RECONCILIATION_MISMATCH")
             verify_single_use_attestations(dsn,digest)
+            verify_archive_lifecycle_fixture(digest)
             need(hashlib.sha256(archive).hexdigest()==digest,"PROFILE_RESTORE_ARCHIVE_CHANGED")
         finally:
             if created:admin.execute("DROP DATABASE naruv_profile_quarantine_ci")
@@ -199,3 +200,25 @@ def verify_single_use_attestations(dsn,archive_digest):
         need(db.execute("SELECT consumed_at>=issued_at AND consumed_at<=clock_timestamp() FROM naruv_retirement_ci.challenge WHERE challenge=%s",(challenge,)).fetchone()==(True,),
              "RETIREMENT_LEDGER_CLOCK_MISMATCH")
     print("NARUV_RETIREMENT_SINGLE_USE_CI_PASS independent signed verified archive evidence, atomic replay refusal, no retirement",flush=True)
+
+
+def verify_archive_lifecycle_fixture(archive_digest):
+    """Bind actual synthetic archive bytes' digest to lifecycle review.
+    Retention and old-key dependency of other copies are synthetic cases.
+    """
+    from datetime import datetime,timezone,timedelta
+    from app.naruv_hr_profile_envelope import archive_lifecycle_review,_canonical
+    now=datetime.now(timezone.utc)
+    assets=["prior-archive","restored-archive"]
+    previous=dict(asset=assets[0],tenant="ci-a",archive_sha256="a"*64,
+                  retain_until=now+timedelta(days=30),legal_hold=False,old_key_required=True)
+    restored=dict(asset=assets[1],tenant="ci-a",archive_sha256=archive_digest,
+                  retain_until=now,legal_hold=False,old_key_required=False)
+    rows=[previous,restored]
+    normalized=sorted([[r["asset"],r["archive_sha256"],r["retain_until"].isoformat(),r["legal_hold"],r["old_key_required"]] for r in rows])
+    proof=hashlib.sha256(_canonical(["NARUV_ARCHIVE_LIFECYCLE_V1","ci-a",sorted(assets),normalized])).hexdigest()
+    result=archive_lifecycle_review(tenant="ci-a",as_of=now,expected_assets=assets,inventory_sha256=proof,records=rows)
+    need(result["status"]=="BLOCKED" and result["retained_assets"]==[assets[0]] and result["old_key_assets"]==[assets[0]]
+         and result["key_retirement_authorized"] is False and result["deletion_authorized"] is False,
+         "ARCHIVE_LIFECYCLE_UNSAFE_RELEASE")
+    print("NARUV_ARCHIVE_LIFECYCLE_FIXTURE_PASS actual synthetic archive digest, simulated retained prior copy, no key or deletion authorization",flush=True)

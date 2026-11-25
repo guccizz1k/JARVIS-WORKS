@@ -11,6 +11,12 @@ from .naruv_payroll_draft import draft_gross,PayrollBlocked
 
 PREFIX=preview.PREFIX+"/drafts"
 FLAG="NARUV_DRAFT_REVIEW"
+KR_FLAG="NARUV_KR_PAYROLL_CI_REVIEW"
+
+def kr_enabled():
+    return (enabled() and os.getenv(KR_FLAG)=="DISPOSABLE_FIXTURE_ONLY"
+            and os.getenv("GITHUB_ACTIONS")=="true" and os.getenv("JW_PG_CI_ALLOW")=="ONLY_EPHEMERAL_LOCAL_DATABASE"
+            and os.getenv("JW_ENV","").lower() in ("dev","development","test"))
 def enabled():
     return valuation.enabled() and os.getenv(FLAG)=="ISOLATED_SYNTHETIC_ONLY"
 
@@ -46,6 +52,46 @@ def _read(token,csrf,prior,kind,key,period=None):
         raise HTTPException(409,"DRAFT_SOURCE_INVALID") from None
     except psycopg.Error as exc:
         if getattr(getattr(exc,"diag",None),"message_primary","") in ("HR_CONFLICT","DOC_CONFLICT"):
+            raise HTTPException(409,"DRAFT_SOURCE_CHANGED") from None
+        raise write._db_error(exc) from None
+
+def _kr_review(token,csrf,prior,worker,period,data):
+    """Read only confirmed attendance in the authenticated PG transaction.
+    Classification and assessments are manual submissions, not agency truth.
+    """
+    import psycopg
+    from .naruv_kr_payroll_review import source_bound_review,pension_collection_reference_2026
+    if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
+    try:
+        with v90._pg_validated_cursor(token) as (cur,identity):
+            actor,org=preview._verify_identity(identity,csrf)
+            if (actor,org)!=prior:raise HTTPException(409,"SESSION_SCOPE_CHANGED")
+            cur.execute("SET LOCAL statement_timeout='8s'")
+            cur.execute("SET LOCAL lock_timeout='4s'")
+            cur.execute("SELECT * FROM naruv_draft.pay_source(%s,%s,%s)",(worker,period,csrf))
+            row=cur.fetchone()
+            if row is None:raise HTTPException(404,"DRAFT_SOURCE_NOT_FOUND")
+            revision,rate,bps,days=row
+            review=source_bound_review(tenant=org,worker=worker,period=period,policy_revision=revision,
+                hourly_krw=rate,minutes_by_day=days,additional_bps=bps,
+                expected_draft_sha256=data["expected_draft_sha256"],ordinary_hourly=data["ordinary_hourly"],
+                classification_sha256=data["classification_sha256"],classified_days=data["classified_days"],
+                deductions=data["deductions"])
+            pension=data["pension_assessed_base_krw"]
+            item=data["deductions"]["pension"]
+            if item["assessment"]!="ASSESSED":raise PayrollBlocked("KR_NPS_ASSESSMENT_REQUIRED")
+            pension_ref=pension_collection_reference_2026(tenant=org,worker=worker,period=period,
+                assessed_base_krw=pension,assessment_sha256=item["evidence_sha256"],
+                assessed_employee_krw=item["amount_krw"],scope="ORDINARY_SINGLE_WORKPLACE_NO_RELIEF")
+            return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,
+                "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
+                "payment_authorized":False,"production_authorized":False,
+                "review_sha256":digest({"v":"KR_CI_MANUAL_API_V1","source":review["review_binding_sha256"],
+                    "pension":pension_ref["review_sha256"]})}
+    except PayrollBlocked:
+        raise HTTPException(409,"KR_REVIEW_INPUT_OR_SOURCE_CHANGED") from None
+    except psycopg.Error as exc:
+        if getattr(getattr(exc,"diag",None),"message_primary","")=="HR_CONFLICT":
             raise HTTPException(409,"DRAFT_SOURCE_CHANGED") from None
         raise write._db_error(exc) from None
 
@@ -122,6 +168,24 @@ def create_router():
         import re
         if not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])",period):raise HTTPException(422,"DRAFT_INPUT")
         return await read("pay",worker,period,request,response)
+    if kr_enabled():
+        @router.post("/payroll/{worker}/{period}/kr-review")
+        async def kr_review(worker:str,period:str,request:Request,response:Response):
+            import re
+            from . import naruv_finance_review as finance
+            if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
+            if not re.fullmatch(r"2026-(0[1-9]|1[0-2])",period):raise HTTPException(422,"KR_REVIEW_INPUT")
+            token,csrf,_=write._request(request,worker,period,needs_digest=False)
+            if preview._one_header(request,"content-type","")!="application/json":
+                raise HTTPException(415,"KR_REVIEW_CONTENT_TYPE")
+            prior=await run_in_threadpool(write._auth,token,csrf)
+            data=await finance._body(request)
+            if set(data)!={"expected_draft_sha256","ordinary_hourly","classification_sha256","classified_days",
+                           "deductions","pension_assessed_base_krw"}:
+                raise HTTPException(422,"KR_REVIEW_INPUT")
+            result=await run_in_threadpool(_kr_review,token,csrf,prior,worker,period,data)
+            response.headers["Cache-Control"]="no-store"
+            return result
     @router.post("/documents/{key}/register/{rid}")
     async def register_document(key:str,rid:str,request:Request,response:Response):
         import base64,binascii,json
