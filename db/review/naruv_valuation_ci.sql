@@ -153,7 +153,10 @@ BEGIN
  OR jsonb_typeof(p_payload->'warehouse_id') IS DISTINCT FROM 'string'
  OR jsonb_typeof(p_payload->'unit_cost') IS DISTINCT FROM 'number' OR (p_payload->>'unit_cost') !~ '^[0-9]{1,10}$'
  THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
- src:=p_payload->>'source_id';wh:=p_payload->>'warehouse_id';q:=naruv_production.qty(p_payload->'quantity',1000000000);
+ src:=p_payload->>'source_id';wh:=p_payload->>'warehouse_id';
+ IF jsonb_typeof(p_payload->'quantity') IS DISTINCT FROM 'number' OR (p_payload->>'quantity') !~ '^[0-9]{1,10}$' THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
+ q:=(p_payload->>'quantity')::bigint;
+ IF q NOT BETWEEN 1 AND 1000000000 THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
  price:=(p_payload->>'unit_cost')::numeric;
  IF NOT naruv_production.ident(src) OR NOT naruv_production.ident(wh) OR price>1000000000 THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
