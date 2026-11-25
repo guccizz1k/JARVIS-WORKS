@@ -176,3 +176,4 @@ def run_finance(base):
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Finance(n) for n in names))
     if not result.wasSuccessful() or result.testsRun!=10 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
     print("NARUV_FINANCE_PASS: 10 isolated PG17 internal billing and settlement cases; no actual payments.")
+    return Finance

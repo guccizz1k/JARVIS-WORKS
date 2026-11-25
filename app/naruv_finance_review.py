@@ -76,7 +76,7 @@ def _call(token,csrf,prior,doc,action,rid=None,payload=None):
             raise HTTPException(404,reason) from None
         if reason in ("FIN_INPUT",):
             raise HTTPException(422,reason) from None
-        if reason in ("FIN_CONFLICT","FIN_SEQUENCE","FIN_OVERPAY"):
+        if reason in ("FIN_CONFLICT","FIN_SEQUENCE","FIN_OVERPAY","ACCT_PERIOD_CLOSED"):
             raise HTTPException(409,reason) from None
         raise write._db_error(exc) from None
 
