@@ -45,7 +45,8 @@ def create_router():
     @router.post("/sources/{source}/items/{item}/stock/{warehouse}")
     async def inspect(source:str,item:str,warehouse:str,request:Request,response:Response):
         if not enabled():raise HTTPException(404,"COST_DISABLED")
-        token,csrf,_=write._request(request,source,item,warehouse,needs_digest=False)
+        if not preview.IDENT.fullmatch(warehouse):raise HTTPException(422,"INVALID_STAGE_SCOPE")
+        token,csrf,_=write._request(request,source,item,needs_digest=False)
         prior=await run_in_threadpool(write._auth,token,csrf)
         await write._empty_body(request)
         result=await run_in_threadpool(_call,token,csrf,prior,item,source=source,warehouse=warehouse)
