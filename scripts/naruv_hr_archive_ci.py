@@ -59,10 +59,14 @@ def capture(source):
     with psycopg.connect(source) as db:need(snapshot(db)==before,"PROFILE_RESTORE_SOURCE_DRIFT")
     return archive,hashlib.sha256(archive).hexdigest(),before
 
+def validate_archive(archive,digest):
+    need(type(archive) is bytes and 0<len(archive)<=1024*1024 and type(digest) is str
+        and len(digest)==64 and hashlib.sha256(archive).hexdigest()==digest,"PROFILE_RESTORE_ARCHIVE_CHANGED")
+
 def verify_after_purge(source,captured,new_key,old_key,expected_profile):
     _,dst=boundary(source)
     archive,digest,before=captured
-    need(hashlib.sha256(archive).hexdigest()==digest,"PROFILE_RESTORE_ARCHIVE_CHANGED")
+    validate_archive(archive,digest)
     # The current source is the independent authority, not the old archive.
     with psycopg.connect(source) as a:
         after=snapshot(a)

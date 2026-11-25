@@ -116,6 +116,23 @@ def _verify_role_catalog(cur,*,purpose,config):
     cur.execute("SELECT marker,source_sha FROM naruv_hosted_qa.boundary LIMIT 2")
     need(cur.fetchall()==[(config.marker,config.source_sha)],"HOSTED_QA_BOUNDARY_MISMATCH")
 
+def verify_deployment_metadata(*,service,deploy,expected_sha,expected_branch,expected_name):
+    """Pure preflight on provider-returned metadata, not a deployment action.
+
+    Callers must use fresh trusted Render API responses; do not accept browser
+    submissions as evidence. No secrets or deployment approval are returned.
+    """
+    need(type(expected_sha) is str and re.fullmatch(r"[0-9a-f]{40}",expected_sha),"HOSTED_QA_DEPLOY_SHA")
+    need(type(expected_branch) is str and re.fullmatch(r"review/naruv-hosted-qa-[a-z0-9-]{8,64}",expected_branch),"HOSTED_QA_DEPLOY_BRANCH")
+    need(type(expected_name) is str and re.fullmatch(r"naruv-one-qa-[a-z0-9-]{8,64}",expected_name),"HOSTED_QA_DEPLOY_NAME")
+    need(type(service) is dict and type(deploy) is dict,"HOSTED_QA_DEPLOY_METADATA")
+    need(service.get("name")==expected_name and service.get("branch")==expected_branch
+        and service.get("autoDeploy")=="no" and service.get("type")=="web_service","HOSTED_QA_DEPLOY_SCOPE")
+    need(type(service.get("id")) is str and re.fullmatch(r"srv-[a-z0-9]{16,40}",service["id"]),"HOSTED_QA_DEPLOY_SERVICE")
+    need(deploy.get("serviceId")==service["id"] and deploy.get("status")=="live"
+        and type(deploy.get("commit")) is dict and deploy["commit"].get("id")==expected_sha,"HOSTED_QA_DEPLOY_MISMATCH")
+    return {"status":"METADATA_MATCH_ONLY","source_sha":expected_sha,"production_authorized":False,"deployment_authorized":False}
+
 def run(env=None):
     # Actual connection must use the same process environment that was checked.
     need(env is None,"HOSTED_QA_ENV_OVERRIDE")

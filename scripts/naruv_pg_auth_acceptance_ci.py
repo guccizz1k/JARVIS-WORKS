@@ -144,6 +144,11 @@ def verify(cert,dsns):
                 print("NARUV_HR_PROFILE_ROTATION_PASS verified replacement and old-key-unavailable read",flush=True)
                 from scripts.naruv_hr_archive_ci import capture,verify_after_purge
                 archived=capture(fixture.root_dsn)
+                from scripts.naruv_hr_archive_ci import validate_archive
+                for data,digest in ((archived[0]+b"tamper",archived[1]),(archived[0],"0"*64),(b"",archived[1])):
+                    try:validate_archive(data,digest)
+                    except RuntimeError as exc:assert str(exc)=="PROFILE_RESTORE_ARCHIVE_CHANGED"
+                    else:raise AssertionError("PROFILE_RESTORE_TAMPER_ACCEPTED")
                 approval=secrets.token_hex(32);purge={"expected_revision":"r3","approval_sha256":approval}
                 profile_status("purge",409,headers=create,json=purge)
                 with psycopg.connect(fixture.root_dsn) as root:

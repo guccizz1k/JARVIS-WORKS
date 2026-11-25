@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "eaaf610e99e704efd8d0d67c1fddfc29ab4b50c4",
+      "sha": "536d393f7e6a6010f283c3f4615e0f8806437fa3",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "69242c50b5f741f5e7b0d6599de1d996a322dc05",
+      "sha": "646dd70b8d2c21a8a0889db034d92d444f4274a1",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8510,11 +8510,11 @@
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
-      "sha": "9e1369a1e6d6a4fa0cf03cb1096a211f9c36fac3",
+      "sha": "2fbbbbf387c7370515291e619a5c9a1abdaf4861",
       "mode": "100644"
     },
     "tests/test_naruv_hosted_qa_admission.py": {
-      "sha": "1e65e1262e18b7462984363bdc6cbf9248edd337",
+      "sha": "48a9a90d00260c798a8ad872b6b90650292e334b",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_boundary.py": {
@@ -8530,7 +8530,7 @@
       "mode": "100644"
     },
     "scripts/naruv_pg_auth_acceptance_ci.py": {
-      "sha": "8166a8098b879c208e909eb6c4a66ae9b72297f7",
+      "sha": "3a3a231844872e01ad616ddd4967bfd7be86fd1b",
       "mode": "100644"
     },
     "app/naruv_hr_profile_review.py": {
@@ -8542,7 +8542,7 @@
       "mode": "100644"
     },
     "scripts/naruv_hr_archive_ci.py": {
-      "sha": "1d17513ba17411ac8f966d751347be5fb189b8e5",
+      "sha": "c2f82ffa2dd4a6cf46f0ba3a7b409c299db637de",
       "mode": "100644"
     }
   },
@@ -8676,5 +8676,9 @@
   "hr_archive_quarantine": {
     "parent": "eaa39fc6907174bac64b2720a2bc1426b54dc44b",
     "reason": "Separate disposable PG17 data-only archive before synthetic purge; independent quarantine database restore, row hashes, current key decryption, old-key and cross-tenant denial; reconcile newer authoritative purge tombstone and require exact post-purge snapshot; no runtime release or original archive deletion."
+  },
+  "consolidated_tax_archive_hosted_preflight": {
+    "parent": "c4ba8dc14b007091f77eb2a121c8c3e0fee7c770",
+    "reason": "Expand checked official table pages 13–16 (104 salary rows, 1144 cells, preserve old page14 proof), archive tamper refusal, read-only dedicated Render deployment metadata gate, no actual production key retirement, full table or cloud deployment."
   }
 }

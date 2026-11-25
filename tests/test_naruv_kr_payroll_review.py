@@ -176,7 +176,7 @@ class OfficialTablePage14(unittest.TestCase):
         self.assertEqual(self.ref(eligible_family_count=2,eligible_children_8_20=1)["child_adjusted_krw"],48000)
         self.assertEqual(self.ref(eligible_family_count=3,eligible_children_8_20=2)["child_adjusted_krw"],0)
         self.assertEqual(self.ref(taxable_monthly_krw=3500000,eligible_family_count=4,eligible_children_8_20=3)["child_adjusted_krw"],0)
-        for kw in ({"taxable_monthly_krw":3139999},{"taxable_monthly_krw":3660000},
+        for kw in ({"taxable_monthly_krw":2809999},{"taxable_monthly_krw":4700000},
                    {"withholding_date":"2026-02-28"},{"withholding_date":"2026-11-31"},
                    {"eligible_family_count":12},{"eligible_children_8_20":1},{"selection_percent":90},
                    {"assessment_sha256":"bad"}):
@@ -186,3 +186,23 @@ class OfficialTablePage14(unittest.TestCase):
         for kw in ({"tenant":"b"},{"worker":"other"},{"withholding_date":"2026-11-27"},
                    {"taxable_monthly_krw":3140001},{"selection_percent":80},{"assessment_sha256":"b"*64}):
             self.assertNotEqual(a,self.ref(**kw)["review_sha256"])
+
+
+class OfficialTableExtendedPages(OfficialTablePage14):
+    def test_extended_anchors(self):
+        for wage,family,amount,lo,hi in ((2810000,1,57660,2810000,2820000),(2899999,10,1170,2890000,2900000),
+              (2999999,11,0,2990000,3000000),(3000000,1,74350,3000000,3020000),(3139999,11,2770,3120000,3140000),
+              (3660000,1,146780,3660000,3680000),(4179999,11,28540,4160000,4180000),
+              (4180000,1,219990,4180000,4200000),(4699999,11,58930,4680000,4700000)):
+            r=self.ref(taxable_monthly_krw=wage,eligible_family_count=family)
+            self.assertEqual((r["table_amount_krw"],r["table_low_krw"],r["table_high_exclusive_krw"]),(amount,lo,hi))
+    def test_extended_all_cells(self):
+        from app.naruv_kr_payroll_review import KR_TABLE_BEFORE,KR_TABLE_AFTER
+        for rows,low,steps in ((KR_TABLE_BEFORE,2810000,[10000]*19+[20000]*7),(KR_TABLE_AFTER,3660000,[20000]*52)):
+            self.assertEqual(len(rows),len(steps))
+            for row,step in zip(rows,steps,strict=True):
+                for j,amount in enumerate(row):
+                    for wage in (low,low+step-1):
+                        with self.subTest(wage=wage,family=j+1):
+                            self.assertEqual(self.ref(taxable_monthly_krw=wage,eligible_family_count=j+1)["table_amount_krw"],amount)
+                low+=step
