@@ -31,11 +31,24 @@ def identity(c):
     need((db,user)==("postgres","postgres") and 170000<=ver<180000,"ERP_RESTORE_DB_ID")
     return system
 
+def acl_preflight(c):
+    # unnest emits no rows for NULL/empty arrays, never passes a zero-dimensional
+    # array to aclexplode. Exercise the exact expression on actual PG17.
+    rows=c.execute("""SELECT tag,ARRAY(SELECT x.privilege_type
+      FROM unnest(v) AS item(acl) CROSS JOIN LATERAL aclexplode(ARRAY[item.acl]) x ORDER BY 1)
+      FROM (VALUES ('null',NULL::aclitem[]),('empty','{}'::aclitem[]),
+      ('grant',ARRAY['postgres=r/postgres'::aclitem]),('grant_option',ARRAY['postgres=r*/postgres'::aclitem])) q(tag,v)
+      ORDER BY tag""").fetchall()
+    need(rows==[('empty',[]),('grant',['SELECT']),('grant_option',['SELECT']),('null',[])],"ERP_RESTORE_ACL_PREFLIGHT")
+    proof=c.execute("""SELECT x.is_grantable FROM unnest(ARRAY['postgres=r*/postgres'::aclitem]) AS item(acl)
+      CROSS JOIN LATERAL aclexplode(ARRAY[item.acl]) x""").fetchall()
+    need(proof==[(True,)],"ERP_RESTORE_ACL_GRANT_OPTION")
+
 def snapshot(c):
     # All application tables, row multisets, schema owners, ACLs, RLS policies,
     # constraints, and function definitions. No data or credentials in logs.
     tables=c.execute("""SELECT n.nspname,t.relname,t.relrowsecurity,t.relforcerowsecurity,
-      pg_get_userbyid(t.relowner),ARRAY(SELECT jsonb_build_array(pg_get_userbyid(x.grantor),CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,x.privilege_type,x.is_grantable)::text FROM aclexplode(coalesce(t.relacl,acldefault('r',t.relowner))) x ORDER BY 1)
+      pg_get_userbyid(t.relowner),ARRAY(SELECT jsonb_build_array(pg_get_userbyid(x.grantor),CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,x.privilege_type,x.is_grantable)::text FROM unnest(coalesce(t.relacl,acldefault('r',t.relowner))) AS item(acl) CROSS JOIN LATERAL aclexplode(ARRAY[item.acl]) x ORDER BY 1)
       FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace
       WHERE t.relkind IN ('r','p') AND (n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%')
       ORDER BY 1,2""").fetchall()
@@ -52,7 +65,7 @@ def snapshot(c):
       FROM pg_constraint k JOIN pg_class t ON t.oid=k.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace
       WHERE n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%' ORDER BY 1,2,3""").fetchall()
     functions=c.execute("""SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_functiondef(p.oid),
-      pg_get_userbyid(p.proowner),ARRAY(SELECT jsonb_build_array(pg_get_userbyid(x.grantor),CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,x.privilege_type,x.is_grantable)::text FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) x ORDER BY 1)
+      pg_get_userbyid(p.proowner),ARRAY(SELECT jsonb_build_array(pg_get_userbyid(x.grantor),CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,x.privilege_type,x.is_grantable)::text FROM unnest(coalesce(p.proacl,acldefault('f',p.proowner))) AS item(acl) CROSS JOIN LATERAL aclexplode(ARRAY[item.acl]) x ORDER BY 1)
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE p.prokind IN ('f','p') AND (n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%') ORDER BY 1,2,3""").fetchall()
     triggers=c.execute("""SELECT n.nspname,t.relname,g.tgname,g.tgenabled,pg_get_triggerdef(g.oid)
@@ -63,12 +76,12 @@ def snapshot(c):
     columns=c.execute("""SELECT n.nspname,t.relname,a.attnum,a.attname,format_type(a.atttypid,a.atttypmod),
       a.attnotnull,a.attidentity,a.attgenerated,coalesce(pg_get_expr(d.adbin,d.adrelid),''),
       ARRAY(SELECT jsonb_build_array(pg_get_userbyid(x.grantor),CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,x.privilege_type,x.is_grantable)::text
-       FROM aclexplode(coalesce(a.attacl,'{}'::aclitem[])) x ORDER BY 1)
+       FROM unnest(coalesce(a.attacl,'{}'::aclitem[])) AS item(acl) CROSS JOIN LATERAL aclexplode(ARRAY[item.acl]) x ORDER BY 1)
       FROM pg_attribute a JOIN pg_class t ON t.oid=a.attrelid JOIN pg_namespace n ON n.oid=t.relnamespace
       LEFT JOIN pg_attrdef d ON (d.adrelid,d.adnum)=(a.attrelid,a.attnum)
       WHERE a.attnum>0 AND NOT a.attisdropped AND t.relkind IN ('r','p') AND (n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%')
       ORDER BY 1,2,3""").fetchall()
-    schemas=c.execute("""SELECT n.nspname,pg_get_userbyid(n.nspowner),ARRAY(SELECT jsonb_build_array(pg_get_userbyid(x.grantor),CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,x.privilege_type,x.is_grantable)::text FROM aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) x ORDER BY 1)
+    schemas=c.execute("""SELECT n.nspname,pg_get_userbyid(n.nspowner),ARRAY(SELECT jsonb_build_array(pg_get_userbyid(x.grantor),CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(x.grantee) END,x.privilege_type,x.is_grantable)::text FROM unnest(coalesce(n.nspacl,acldefault('n',n.nspowner))) AS item(acl) CROSS JOIN LATERAL aclexplode(ARRAY[item.acl]) x ORDER BY 1)
       FROM pg_namespace n WHERE n.nspname='jw_dev' OR n.nspname LIKE 'naruv_%' ORDER BY 1""").fetchall()
     return (tables,rows,policies,constraints,functions,triggers,indexes,columns,schemas)
 
@@ -101,6 +114,7 @@ def prove_restore(source_dsn):
             need(re.fullmatch(r"(jw_[a-z0-9_]+|naruv_[a-z0-9_]+|anon|authenticated|service_role)",name) is not None and not any(flags),"ERP_RESTORE_UNEXPECTED_ROLE")
             b.execute(sql.SQL("CREATE ROLE {} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE").format(sql.Identifier(name)))
         b.commit()
+        acl_preflight(a);acl_preflight(b)
         before=snapshot(a);need(len(before[0])>10,"ERP_RESTORE_EMPTY")
         a.rollback()
     archive=subprocess.run(["docker","exec",src,"pg_dump","-U","postgres","-d","postgres","-Fc","--no-password"],capture_output=True,timeout=45)
@@ -111,7 +125,7 @@ def prove_restore(source_dsn):
     need(hashlib.sha256(archive.stdout).hexdigest()==digest,"ERP_RESTORE_ARCHIVE_CHANGED")
     with psycopg.connect(source_dsn) as a,psycopg.connect(DEST_DSN) as b:
         need(identity(a)!=identity(b),"ERP_RESTORE_SAME_CLUSTER")
-        need(snapshot(a)==before,"ERP_RESTORE_SOURCE_CHANGED")
+        compare_snapshots(before,snapshot(a))
         after=snapshot(b)
         compare_snapshots(before,after)
         # Negative proof: a newly granted privilege must invalidate the exact snapshot.
@@ -124,6 +138,16 @@ def prove_restore(source_dsn):
                 need(str(exc).startswith("ERP_RESTORE_MISMATCH_TABLES"),"ERP_RESTORE_ACL_NEGATIVE_WRONG_REASON")
             else:raise RuntimeError("ERP_RESTORE_ACL_NEGATIVE_ACCEPTED")
             b.execute("ROLLBACK TO SAVEPOINT acl_negative")
+            compare_snapshots(before,snapshot(b))
+            # A column-only grant must be detected separately from table grants.
+            b.execute("SAVEPOINT column_negative")
+            b.execute("GRANT SELECT (movement_id) ON naruv_valuation.entries TO jw_app_dev")
+            try:
+                compare_snapshots(before,snapshot(b))
+            except RuntimeError as exc:
+                need(str(exc).startswith("ERP_RESTORE_MISMATCH_COLUMNS"),"ERP_RESTORE_COLUMN_NEGATIVE_WRONG_REASON")
+            else:raise RuntimeError("ERP_RESTORE_COLUMN_NEGATIVE_ACCEPTED")
+            b.execute("ROLLBACK TO SAVEPOINT column_negative")
             compare_snapshots(before,snapshot(b))
         # Verify the restored role boundary even without enabling login.
         with b.cursor() as cur:
