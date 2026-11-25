@@ -146,7 +146,7 @@ class IntegratedReview(unittest.TestCase):
             app=FastAPI()
             self.assertTrue(mod.register_integrated_review(app,include_drafts=True,include_hr=True))
             paths={p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")}
-            self.assertEqual(len(paths),32)
+            self.assertEqual(len(paths),34)
             self.assertIn(mod.PREFIX+"/hr/workers/{worker}/periods/{period}/attendance/{rid}",paths)
             with TestClient(app,base_url="https://testserver") as c:
                 for key in (mod.FLAG,mod.drafts.FLAG,mod.hr.FLAG):

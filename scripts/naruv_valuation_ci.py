@@ -644,7 +644,7 @@ def run_valuation(base):
             return self.check(self.call(f"/hr/workers/{worker}/periods/{period}/attendance/{rid}",{"date":day,"regular":a,"additional":b},who,extra),code)
         def test_cost_hr_attendance_exact_retry_and_tenant(self):
             with psycopg.connect(fixture.root_dsn) as c:
-                self.assertEqual(c.execute("SELECT org_id,period,confirmed FROM naruv_draft.pay_periods WHERE worker_id='worker-1' ORDER BY 1,2").fetchall(),
+                self.assertEqual(c.execute("SELECT org_id,period,confirmed FROM naruv_draft.pay_periods WHERE worker_id='worker-1' AND period IN ('2026-10','2026-11') ORDER BY 1,2").fetchall(),
                     [("ci-a","2026-10",False),("ci-a","2026-11",True),("ci-b","2026-10",False),("ci-b","2026-11",True)])
             first=self.hr_admit("hr-1")
             self.assertEqual(first,self.hr_admit("hr-1"))
@@ -698,8 +698,42 @@ def run_valuation(base):
                     self.hr_admit("hr-blocked",day="2026-10-04",code=404)
                     self.check(self.call("/valuation/overview"),404)
                 self.assertEqual(self.check(self.call("/valuation/overview"),200),before)
+        def test_cost_hr_period_snapshot_confirm_and_retry(self):
+            path="/hr/workers/worker-1/periods/2026-09"
+            self.hr_admit("hr-sep-1",day="2026-09-01",period="2026-09",a=60,b=0)
+            first=self.check(self.call(path+"/review"),200)
+            self.assertFalse(first["confirmed"])
+            self.hr_admit("hr-sep-2",day="2026-09-02",period="2026-09",a=60,b=0)
+            self.check(self.call(path+"/confirm/confirm-sep",{"review_sha256":first["review_sha256"]}),409)
+            current=self.check(self.call(path+"/review"),200)
+            self.assertNotEqual(current["review_sha256"],first["review_sha256"])
+            body={"review_sha256":current["review_sha256"]}
+            result=self.check(self.call(path+"/confirm/confirm-sep",body),200)
+            self.assertTrue(result["confirmed"]);self.assertFalse(result["payment_authorized"])
+            self.assertEqual(result,self.check(self.call(path+"/confirm/confirm-sep",body),200))
+            self.check(self.call(path+"/confirm/other",body),409)
+            self.hr_admit("hr-sep-closed",day="2026-09-03",period="2026-09",code=409)
+            self.assertEqual(self.check(self.call("/drafts/payroll/worker-1/2026-09"),200)["gross_krw"],24000)
+            self.check(self.call("/drafts/payroll/worker-1/2026-09",who="B"),404)
+        def test_cost_hr_period_empty_and_cross_tenant(self):
+            path="/hr/workers/worker-1/periods/2026-08"
+            self.check(self.call(path+"/review"),422)
+            self.hr_admit("hr-aug-a",day="2026-08-01",period="2026-08",a=60,b=0)
+            self.hr_admit("hr-aug-b",day="2026-08-01",period="2026-08",who="B",a=60,b=0)
+            a=self.check(self.call(path+"/review"),200);b=self.check(self.call(path+"/review",who="B"),200)
+            self.assertNotEqual(a["review_sha256"],b["review_sha256"])
+            body={"review_sha256":a["review_sha256"]}
+            self.check(self.call(path+"/confirm/cross",body,who="B"),409)
+            self.check(self.call(path+"/confirm/no-confirm",body,extra={"x-naruv-confirm":"no"}),422)
+            self.check(self.call(path+"/confirm/wrong-origin",body,extra={"origin":"https://evil.test"}),403)
+            self.assertFalse(self.check(self.call(path+"/review"),200)["confirmed"])
+        def test_cost_hr_period_confirmation_privileges(self):
+            with psycopg.connect(fixture.root_dsn) as c:
+                for role in ("jw_app_dev","naruv_native_stage"):
+                    self.assertFalse(c.execute("SELECT has_table_privilege(%s,'naruv_draft.period_confirmations','INSERT')",(role,)).fetchone()[0])
+                self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.review_period(text,text,text,text,boolean,text)','EXECUTE')").fetchone()[0])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=57:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=60:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=57 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 57 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=60 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 60 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

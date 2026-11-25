@@ -17,3 +17,5 @@ def seed(c):
         c.execute("INSERT INTO naruv_draft.pay_periods VALUES(%s,'worker-1','2026-11','policy-1',%s,15000,true)",(org,rate))
         c.execute("INSERT INTO naruv_draft.attendance VALUES(%s,'worker-1','2026-11','2026-11-25',480,60)",(org,))
         c.execute("INSERT INTO naruv_draft.pay_periods VALUES(%s,'worker-1','2026-10','policy-1',%s,15000,false)",(org,rate))
+        for period in ("2026-08","2026-09"):
+            c.execute("INSERT INTO naruv_draft.pay_periods VALUES(%s,'worker-1',%s,'policy-1',%s,15000,false)",(org,period,rate))
