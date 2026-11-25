@@ -176,7 +176,7 @@ class OfficialTablePage14(unittest.TestCase):
         self.assertEqual(self.ref(eligible_family_count=2,eligible_children_8_20=1)["child_adjusted_krw"],48000)
         self.assertEqual(self.ref(eligible_family_count=3,eligible_children_8_20=2)["child_adjusted_krw"],0)
         self.assertEqual(self.ref(taxable_monthly_krw=3500000,eligible_family_count=4,eligible_children_8_20=3)["child_adjusted_krw"],0)
-        for kw in ({"taxable_monthly_krw":769999},{"taxable_monthly_krw":6780000},
+        for kw in ({"taxable_monthly_krw":769999},{"taxable_monthly_krw":10000000},
                    {"withholding_date":"2026-02-28"},{"withholding_date":"2026-11-31"},
                    {"eligible_family_count":12},{"eligible_children_8_20":1},{"selection_percent":90},
                    {"assessment_sha256":"bad"}):
@@ -205,7 +205,7 @@ class OfficialTableExtendedPages(unittest.TestCase):
             self.assertEqual((r["table_amount_krw"],r["table_low_krw"],r["table_high_exclusive_krw"]),(amount,lo,hi))
     def test_extended_all_cells(self):
         from app.naruv_kr_payroll_review import KR_TABLE_LOWEST,KR_TABLE_LOWER,KR_TABLE_BEFORE,KR_TABLE_AFTER
-        for rows,low,steps in ((KR_TABLE_LOWEST,770000,[5000]*146+[10000]*79),(KR_TABLE_LOWER,2290000,[10000]*52),(KR_TABLE_BEFORE,2810000,[10000]*19+[20000]*7),(KR_TABLE_AFTER,3660000,[20000]*156)):
+        for rows,low,steps in ((KR_TABLE_LOWEST,770000,[5000]*146+[10000]*79),(KR_TABLE_LOWER,2290000,[10000]*52),(KR_TABLE_BEFORE,2810000,[10000]*19+[20000]*7),(KR_TABLE_AFTER,3660000,[20000]*317)):
             self.assertEqual(len(rows),len(steps))
             for row,step in zip(rows,steps,strict=True):
                 for j,amount in enumerate(row):
@@ -239,3 +239,46 @@ class OfficialTableExtendedPages(unittest.TestCase):
             with self.subTest(wage=wage,family=family):
                 r=self.ref(taxable_monthly_krw=wage,eligible_family_count=family)
                 self.assertEqual((r["table_amount_krw"],r["table_low_krw"],r["table_high_exclusive_krw"]),(amount,lo,hi))
+
+    def test_final_printed_bands(self):
+        for wage,family,amount in ((6780000,1,682810),(7299999,11,414680),
+          (7300000,1,800740),(7819999,11,486310),(7820000,3,730530),
+          (8339999,11,596130),(8340000,1,1036740),(8859999,11,709680),
+          (8860000,3,954040),(9379999,11,823240),(9380000,1,1299240),
+          (9899999,11,936810),(9900000,1,1476690),(9999999,11,958650)):
+            with self.subTest(wage=wage,family=family):
+                self.assertEqual(self.ref(taxable_monthly_krw=wage,eligible_family_count=family)["table_amount_krw"],amount)
+
+
+class HighWageAndNationalCollection(unittest.TestCase):
+    def args(self,**changes):
+        return dict(dict(tenant="a",worker="w",withholding_date="2026-11-26",
+            taxable_monthly_krw=10000000,eligible_family_count=1,eligible_children_8_20=0,
+            selection_percent=100,assessment_sha256="a"*64,
+            scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF"),**changes)
+    def test_exact_formula_boundaries(self):
+        from app.naruv_kr_payroll_review import withholding_high_reference_2026
+        from fractions import Fraction
+        base=1507400
+        for wage,extra in ((10000000,0),(10000001,Fraction(25000343,1000)),
+            (14000000,1397000),(14000001,1397000+Fraction(3724,10000)),
+            (28000000,6610600),(28000001,6610600+Fraction(392,1000)),
+            (30000000,7394600),(30000001,7394600+Fraction(2,5)),
+            (45000000,13394600),(45000001,13394600+Fraction(42,100)),
+            (87000000,31034600),(87000001,31034600+Fraction(45,100))):
+            r=withholding_high_reference_2026(**self.args(taxable_monthly_krw=wage))
+            self.assertEqual(Fraction(**r["national_exact"]),base+extra)
+            self.assertFalse(r["payment_authorized"])
+        r=withholding_high_reference_2026(**self.args(eligible_family_count=2,eligible_children_8_20=1,selection_percent=80))
+        self.assertEqual(Fraction(**r["national_exact"]),Fraction((1431570-20830)*80,100))
+        for changes in (dict(taxable_monthly_krw=9999999),dict(taxable_monthly_krw=10**9+1),
+                        dict(eligible_family_count=12),dict(withholding_date="2026-02-28")):
+            with self.assertRaises(PayrollBlocked):withholding_high_reference_2026(**self.args(**changes))
+    def test_collection_small_amount_and_ten_won(self):
+        from app.naruv_kr_payroll_review import national_collection_review_2026
+        for wage,percent,expected in ((1060000,80,0),(1060000,100,1040),
+              (1065000,120,1330),(10000001,100,1532400),(14000000,100,2904400)):
+            r=national_collection_review_2026(**self.args(taxable_monthly_krw=wage,selection_percent=percent))
+            self.assertEqual(r["national_collection_krw"],expected)
+            self.assertFalse(r["statutory_validated"])
+            self.assertFalse(r["payment_authorized"])

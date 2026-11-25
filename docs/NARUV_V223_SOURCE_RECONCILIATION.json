@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "1f38f45526f7ca481e516e2d351cf1315a2df906",
+      "sha": "86a8c31c2b57b7a0fa80a4fa5528f8ce2cda6977",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "287218b02c0fdbbe0a39d5cfee0ec5aaa938959a",
+      "sha": "84916a684589c2b65e72d1621e0a0df6d33e5f00",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8700,5 +8700,9 @@
   "lowest_table_and_dual_attestation": {
     "parent": "b635201ac16558a62dfd2b6374253a171505de70",
     "reason": "PDF pages 2–10 read directly, 225 bands/2475 cells; independent Ed25519 scoped signatures and ten-minute freshness offline; no actual trusted keys, challenge store or retirement authorization."
+  },
+  "final_printed_table_and_high_formula": {
+    "parent": "aaec1f649fe3e057a4a8d2536f1370d49ce469a0",
+    "reason": "Official PDF pp21–27: final 161 ordinary bands, 10m row, six exact high wage formulas and restricted national collection. No complete legal payroll or production approval."
   }
 }
