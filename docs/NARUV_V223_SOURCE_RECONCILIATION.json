@@ -8538,7 +8538,7 @@
       "mode": "100644"
     },
     "db/review/naruv_hr_profile_ci.sql": {
-      "sha": "b02008c5a0c825840219e263d5b1750903644246",
+      "sha": "f68a739d4d828f1f9e93dbbbd386ebd0f7f1e82d",
       "mode": "100644"
     }
   },
@@ -8647,5 +8647,9 @@
   "profile_revision_candidate": {
     "parent": "09f2c0ec26567115e56cc2ca4d34832dc8b72888",
     "reason": "Revision compare-and-swap, immutable metadata, explicit confirmation, no old ciphertext in history, stale/reuse/tenant/wrong-key negatives; CI only, no retention or production."
+  },
+  "profile_revision_sql_fix": {
+    "parent": "be5916be7d50f51e6ef47653a52707e46700cb96",
+    "reason": "Repair literal JS replacement expansion of dollar-apostrophe in SQL regex, which duplicated function tail. CI 45707221186 all PG rounds syntax error. Use slicing/literal callback replacements and verify single tail."
   }
 }

@@ -65,18 +65,7 @@ BEGIN
   IF p_expected IS NULL THEN
    IF current_revision IS NOT NULL THEN RAISE EXCEPTION 'PROFILE_EXISTS'; END IF;
   ELSE
-   IF p_expected !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}
-  RETURN jsonb_build_object('status','SEALED','revision',p_revision);
- END IF;
- SELECT jsonb_build_object('revision',x.revision,'envelope',x.envelope) INTO saved
- FROM naruv_draft.profile_envelopes x WHERE x.org_id=a.org_id AND x.worker_id=p_worker;
- IF NOT FOUND THEN RAISE EXCEPTION 'PROFILE_NOT_FOUND'; END IF;
- RETURN saved;
-END $$;
-REVOKE ALL ON FUNCTION naruv_draft.profile_envelope(text,text,jsonb,text,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
-GRANT EXECUTE ON FUNCTION naruv_draft.profile_envelope(text,text,jsonb,text,text) TO jw_app_dev;
-RESET ROLE;
- OR p_expected=p_revision THEN RAISE EXCEPTION 'PROFILE_INPUT'; END IF;
+   IF p_expected !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' OR p_expected=p_revision THEN RAISE EXCEPTION 'PROFILE_INPUT'; END IF;
    IF current_revision IS NULL THEN RAISE EXCEPTION 'PROFILE_NOT_FOUND'; END IF;
    IF current_revision IS DISTINCT FROM p_expected THEN RAISE EXCEPTION 'PROFILE_STALE'; END IF;
   END IF;
