@@ -8530,11 +8530,11 @@
       "mode": "100644"
     },
     "scripts/naruv_pg_auth_acceptance_ci.py": {
-      "sha": "fc0e8383add1f62bfc1e285d878541f94bd9cfae",
+      "sha": "84fb261b74b58fafe76409463fb0d81ea0a4e6e5",
       "mode": "100644"
     },
     "app/naruv_hr_profile_review.py": {
-      "sha": "4014b435b9f17bec4f72d32a2d5a14b50a75c8ea",
+      "sha": "3eb0f528a9692bcb2f0f513b9c43827f0207b2cd",
       "mode": "100644"
     },
     "db/review/naruv_hr_profile_ci.sql": {
@@ -8639,5 +8639,9 @@
   "auth_profile_candidate": {
     "parent": "6bbc7047bf44d69ddc9ed286e69575e1a1bef35d",
     "reason": "Correct missing explicit integrated gate evidenced by run 45705759620 round2. Add separate CI-only encrypted synthetic profile create/read using actual auth, RLS, guarded RPC and AES-GCM, duplicate and tenant denial. No real PII, hosted storage or payment."
+  },
+  "profile_nested_parser_fix": {
+    "parent": "7cbb7c02df457801dfdde194536ee5ba76fce37b",
+    "reason": "Failure round5 profile create before DB; finance._body rejects all nested objects by design. Dedicated strict bounded profile JSON parser, actual route negatives, safe status diagnostics. Preserve finance parser and auth guards."
   }
 }

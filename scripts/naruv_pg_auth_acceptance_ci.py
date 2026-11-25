@@ -89,9 +89,21 @@ def verify(cert,dsns):
                 value={"revision":"r1","profile":{"display_name":"Synthetic Worker","work_email":"worker@example.invalid","employment_start":"2026-01-01"}}
                 assert a.post(profile+"/create",json=value,headers=ah).status_code==422
                 create=dict(ah,**{"x-naruv-confirm":"yes"})
-                assert a.post(profile+"/create",json=value,headers=create).status_code==200
-                assert a.post(profile+"/create",json=value,headers=create).status_code==409
-                assert a.post(profile+"/read",headers=ah).json()["profile"]==value["profile"]
+                def profile_status(action,code,**kwargs):
+                    r=a.post(profile+"/"+action,**kwargs)
+                    # Never echo body, cookie, credential or personal data.
+                    detail=r.json().get("detail") if r.headers.get("content-type","").startswith("application/json") else None
+                    safe=detail if isinstance(detail,str) and detail.isascii() and detail.replace("_","").isalnum() and len(detail)<80 else "REDACTED"
+                    assert r.status_code==code,("PROFILE_STATUS",action,r.status_code,code,safe)
+                    return r
+                raw_headers=dict(create,**{"content-type":"application/json"})
+                profile_status("create",422,headers=raw_headers,content=b'{"revision":"r1","profile":{"display_name":"Synthetic Worker","display_name":"Synthetic Other","work_email":"worker@example.invalid","employment_start":"2026-01-01"}}')
+                profile_status("create",422,headers=create,json={"revision":"r1","profile":True})
+                profile_status("create",422,headers=create,json={"revision":"r1","profile":dict(value["profile"],employment_start=123)})
+                profile_status("create",413,headers=raw_headers,content=b"x"*8193)
+                profile_status("create",200,headers=create,json=value)
+                profile_status("create",409,headers=create,json=value)
+                assert profile_status("read",200,headers=ah).json()["profile"]==value["profile"]
                 assert b.post(profile+"/read",headers=bh).status_code==404
                 assert b.post(profile+"/read",headers=ah).status_code==403
                 with psycopg.connect(fixture.root_dsn) as root:

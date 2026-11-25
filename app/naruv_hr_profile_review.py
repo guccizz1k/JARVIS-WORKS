@@ -4,6 +4,7 @@ Create-once demo, no production lifecycle, retention or key custody claims.
 Existing ERP guards are required and SQL never receives plaintext.
 """
 import os
+import asyncio
 import json
 import re
 import psycopg
@@ -11,7 +12,8 @@ from fastapi import APIRouter,HTTPException,Request,Response
 from starlette.concurrency import run_in_threadpool
 from . import naruv_pg_auth_review as auth, naruv_native_write_review as write
 from . import naruv_native_file_preview as preview,pg_v90_integrated_entry as v90
-from . import naruv_finance_review as finance
+from starlette.requests import ClientDisconnect
+from . import naruv_inventory_review as inventory
 from .naruv_hr_profile_envelope import seal_profile,open_profile,ProfileBlocked
 
 FLAG="NARUV_HR_PROFILE_CI"
@@ -23,6 +25,31 @@ def key():
     raw=os.getenv(KEY,"")
     if not re.fullmatch(r"[a-f0-9]{64}",raw):raise HTTPException(503,"PROFILE_KEY_UNAVAILABLE")
     return bytes.fromhex(raw)
+async def profile_body(request):
+    # The finance decoder is deliberately flat; profiles have a nested object.
+    limit=8192
+    length=preview._one_header(request,"content-length")
+    if length is not None:
+        if not re.fullmatch(r"[0-9]{1,5}",length):raise HTTPException(400,"PROFILE_LENGTH")
+        if int(length)>limit:raise HTTPException(413,"PROFILE_BODY_LIMIT")
+    buf=bytearray()
+    try:
+        async with asyncio.timeout(5):
+            async for chunk in request.stream():
+                if len(chunk)>limit-len(buf):raise HTTPException(413,"PROFILE_BODY_LIMIT")
+                buf.extend(chunk)
+    except TimeoutError:raise HTTPException(408,"PROFILE_TIMEOUT") from None
+    except ClientDisconnect:raise HTTPException(400,"PROFILE_INCOMPLETE") from None
+    if length is not None and len(buf)!=int(length):raise HTTPException(400,"PROFILE_LENGTH")
+    try:
+        data=json.loads(buf.decode("utf-8"),object_pairs_hook=inventory._pairs,parse_constant=inventory._reject_constant)
+        if (type(data) is not dict or set(data)!={"revision","profile"} or type(data["revision"]) is not str
+            or not preview.IDENT.fullmatch(data["revision"]) or type(data["profile"]) is not dict
+            or set(data["profile"])!={"display_name","work_email","employment_start"}
+            or any(type(v) is not str for v in data["profile"].values())):raise ValueError("shape")
+        return data
+    except (ValueError,UnicodeError,RecursionError):raise HTTPException(422,"PROFILE_INPUT") from None
+
 def operate(token,csrf,prior,worker,body):
     if not enabled():raise HTTPException(404,"PROFILE_DISABLED")
     try:
@@ -67,7 +94,7 @@ def register(app):
         if create:
             if request.headers.getlist("x-naruv-confirm")!=["yes"]:raise HTTPException(422,"PROFILE_CONFIRM_REQUIRED")
             if request.headers.getlist("content-type")!=["application/json"]:raise HTTPException(415,"PROFILE_CONTENT_TYPE")
-            body=await finance._body(request)
+            body=await profile_body(request)
         else:
             await write._empty_body(request)
             body=None
