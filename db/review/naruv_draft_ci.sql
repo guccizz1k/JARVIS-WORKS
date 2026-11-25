@@ -138,4 +138,28 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION naruv_draft.admit_document(text,text,text,bytea,jsonb,boolean,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_draft.admit_document(text,text,text,bytea,jsonb,boolean,text) TO jw_app_dev;
+-- All document reads require the exact admitted source and observation proof.
+CREATE OR REPLACE FUNCTION naruv_draft.document_source(p_id text,p_csrf text)
+ RETURNS TABLE(revision text,original_bytes bytea,original_sha256 text,observations jsonb)
+ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; a2 record; d naruv_draft.documents;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF p_id IS NULL OR p_id !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' THEN RAISE EXCEPTION 'DRAFT_INPUT'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-document-v1:'||a.org_id,0));
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ SELECT * INTO d FROM naruv_draft.documents x WHERE (x.org_id,x.document_id)=(a.org_id,p_id) AND x.active FOR SHARE;
+ IF NOT FOUND THEN RETURN; END IF;
+ PERFORM 1 FROM naruv_draft.document_admissions x
+ WHERE (x.org_id,x.document_id)=(a.org_id,p_id) AND x.request_id=d.revision
+ AND x.source_sha256=d.original_sha256 AND x.source_sha256=encode(sha256(d.original_bytes),'hex')
+ AND x.observation_sha256=encode(sha256(convert_to(d.observations::text,'UTF8')),'hex');
+ IF NOT FOUND THEN RAISE EXCEPTION 'DOC_CONFLICT'; END IF;
+ RETURN QUERY SELECT d.revision,d.original_bytes,d.original_sha256,d.observations;
+END $$;
+REVOKE ALL ON FUNCTION naruv_draft.document_source(text,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
+GRANT EXECUTE ON FUNCTION naruv_draft.document_source(text,text) TO jw_app_dev;
 RESET ROLE;

@@ -13,6 +13,10 @@ def seed(c):
             ("subtotal",100),("vat",10),("gross_amount",110))]
         c.execute("INSERT INTO naruv_draft.documents VALUES(%s,'shared','rev-1',%s,%s,%s::jsonb,true)",
                   (org,raw,hashlib.sha256(raw).hexdigest(),json.dumps(obs)))
+        n=c.execute("""INSERT INTO naruv_draft.document_admissions(org_id,document_id,request_id,actor_id,format,source_sha256,observation_sha256)
+          SELECT org_id,document_id,revision,'fixture-seed','pdf',original_sha256,encode(sha256(convert_to(observations::text,'UTF8')),'hex')
+          FROM naruv_draft.documents WHERE org_id=%s AND document_id='shared'""",(org,)).rowcount
+        if n!=1:raise RuntimeError("DOC_FIXTURE_PROOF_COUNT")
         c.execute("INSERT INTO naruv_draft.staff VALUES(%s,'worker-1',true)",(org,))
         c.execute("INSERT INTO naruv_draft.pay_periods VALUES(%s,'worker-1','2026-11','policy-1',%s,15000,true)",(org,rate))
         c.execute("INSERT INTO naruv_draft.attendance VALUES(%s,'worker-1','2026-11','2026-11-25',480,60)",(org,))

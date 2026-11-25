@@ -44,7 +44,7 @@ def _read(token,csrf,prior,kind,key,period=None):
     except (ReviewBlocked,PayrollBlocked):
         raise HTTPException(409,"DRAFT_SOURCE_INVALID") from None
     except psycopg.Error as exc:
-        if getattr(getattr(exc,"diag",None),"message_primary","")=="HR_CONFLICT":
+        if getattr(getattr(exc,"diag",None),"message_primary","") in ("HR_CONFLICT","DOC_CONFLICT"):
             raise HTTPException(409,"DRAFT_SOURCE_CHANGED") from None
         raise write._db_error(exc) from None
 

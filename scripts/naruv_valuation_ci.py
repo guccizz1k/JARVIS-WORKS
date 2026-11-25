@@ -890,14 +890,26 @@ def run_valuation(base):
                 env=dict(os.environ,**FLAGS,NARUV_DRAFT_REVIEW="ISOLATED_SYNTHETIC_ONLY",NARUV_HR_REVIEW="ISOLATED_SYNTHETIC_ONLY",
                          NARUV_WORKS_STAGE="ISOLATED_SYNTHETIC_ONLY",JW_PG_QUOTE_V92="ISOLATED_DEV_QUOTE_V92",
                          JARVIS_DB_PATH=str(Path(tmp)/"isolated.db"),DEMO_SEED="0",
-                         NARUV_TEST_TOKEN=fixture.TOKENS["A"],NARUV_TEST_CSRF=fixture.CSRF["A"])
+                         NARUV_TEST_TOKEN=fixture.TOKENS["A"],NARUV_TEST_CSRF=fixture.CSRF["A"],
+                         NARUV_TEST_TRADE_DSN=fixture.TRADE_DSN)
                 env.pop("JW_V112_PG_NOTIFY_ACK",None)
                 script="""
 import os
+import psycopg
+from psycopg.conninfo import conninfo_to_dict
 from fastapi.testclient import TestClient
-from app import main
+from app import main,pg_api_v84 as stage
 from app.naruv_works_stage_entry import app
 assert app is main.app
+# The parent fixture replaces _connect with a real disposable nonprivileged PG17
+# connection; explicitly reproduce ONLY that test seam in the fresh process.
+# Real TLS remains a separate gate; production connection code is untouched.
+assert os.environ.get('GITHUB_ACTIONS')=='true'
+assert os.environ.get('JW_PG_CI_ALLOW')=='ONLY_EPHEMERAL_LOCAL_DATABASE'
+dsn=os.environ.pop('NARUV_TEST_TRADE_DSN')
+opts=conninfo_to_dict(dsn)
+assert (opts.get('host'),opts.get('dbname'),opts.get('user'))==('127.0.0.1','postgres','jw_ci_trade')
+stage._connect=lambda:psycopg.connect(dsn,connect_timeout=5)
 c=TestClient(app,base_url='https://testserver')
 try:
     paths=app.openapi()['paths']
@@ -919,7 +931,9 @@ try:
 finally:c.close()
 """
                 done=subprocess.run([sys.executable,"-c",script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=60)
-                self.assertEqual(done.returncode,0,"WORKS_STAGE_COMPOSITION_FAILED "+done.stderr[-1500:])
+                # Never print child environment or arbitrary DB exceptions which may contain connection data.
+                safe=done.stderr.replace(fixture.TRADE_DSN,"[CI_DSN]").replace(fixture.TOKENS["A"],"[CI_TOKEN]").replace(fixture.CSRF["A"],"[CI_CSRF]")
+                self.assertEqual(done.returncode,0,"WORKS_STAGE_COMPOSITION_FAILED "+safe[-1500:])
         def test_cost_document_manual_registration_and_isolation(self):
             import base64,json
             path="/drafts/documents/manual-doc";raw=b"%PDF-1.7 synthetic opaque fixture"
@@ -936,6 +950,17 @@ finally:c.close()
             self.assertEqual(self.check(self.call(path,who="B"),200)["source_sha256"],r["source_sha256"])
             self.assertNotEqual(self.check(self.call(path,who="B"),200)["review_sha256"],self.check(self.call(path),200)["review_sha256"])
             self.check(self.call(path+"/register/invalid",raw=json.dumps(dict(payload,original_base64="not base64")).encode()),422)
+            with psycopg.connect(fixture.root_dsn) as c:
+                saved=c.execute("SELECT observations FROM naruv_draft.documents WHERE org_id='ci-a' AND document_id='manual-doc'").fetchone()[0]
+                self.assertEqual(c.execute("UPDATE naruv_draft.documents SET observations='[]'::jsonb WHERE org_id='ci-a' AND document_id='manual-doc'").rowcount,1)
+            try:
+                self.check(self.call(path),409)
+                self.check(self.call(path,who="B"),200)
+                submit(code=409)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    self.assertEqual(c.execute("UPDATE naruv_draft.documents SET observations=%s::jsonb WHERE org_id='ci-a' AND document_id='manual-doc'",(json.dumps(saved),)).rowcount,1)
+            self.check(self.call(path),200)
             with psycopg.connect(fixture.root_dsn) as c:
                 self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.document_admissions','INSERT')").fetchone()[0])
                 self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.admit_document(text,text,text,bytea,jsonb,boolean,text)','EXECUTE')").fetchone()[0])
