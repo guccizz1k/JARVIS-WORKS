@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "30fcc7b1d71433d7fb9028449a58ac781311674e",
+      "sha": "c9e497d4a0f9aaa1ab42acaa8c701cd01d4126bb",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8470,11 +8470,11 @@
       "mode": "100644"
     },
     "app/naruv_v223_read_bridge.py": {
-      "sha": "356d07c2859ee937e289656cd898c4b5bc8ead16",
+      "sha": "c8f03c9f45eee2be61b5345af5165f3e7e6340f9",
       "mode": "100644"
     },
     "tests/test_naruv_v223_read_bridge.py": {
-      "sha": "9f49b7e15aad1c3da9a4f7886a80c97cf6ffe1d2",
+      "sha": "87ae4d5c35a79811698242d453ea02cf3439159f",
       "mode": "100644"
     },
     "app/naruv_workspace/index.html": {
@@ -8523,5 +8523,9 @@
   "hr_pilot_stream_fence": {
     "parent": "e46544955002cd7b6ce4fa65e04e568ba8dc44a2",
     "reason": "Bound CI-only HR request body before final dual identity recheck; test streaming revocation, size, timeout, disconnect and replay. Not atomic cross-store revocation."
+  },
+  "hr_local_serialization_extension": {
+    "parent": "c5594da45be7fcb01e6394ee65fb894112dd2630",
+    "reason": "Mandatory disposable SQLite writer fence through PG HR commit, bounded contention, independent connection tests, separately gated amend/archive, no production factory pilot or statutory claim."
   }
 }

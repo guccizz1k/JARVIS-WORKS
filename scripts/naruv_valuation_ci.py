@@ -949,7 +949,21 @@ try:
     erp=FastAPI()
     assert bridge.integrated.register_integrated_review(erp,include_drafts=True,include_hr=True)
     front=cut.CutoverFront(main.app,main.app,legacy_identity,pg_identity,lambda:frozenset(("ci-a",)))
-    with TestClient(bridge.ReadBridge(front,erp),base_url='https://testserver') as dual:
+    import sqlite3
+    fence_probes=[]
+    @erp.middleware("http")
+    async def verify_legacy_fence(request,call_next):
+        if bridge.is_pilot_path(request.url.path) and bridge.pilot_enabled():
+            # Independent connection simulates a concurrent session revocation.
+            with sqlite3.connect(main.DB_PATH,timeout=0) as other:
+                try:
+                    other.execute("DELETE FROM sessions WHERE id='bridge-legacy'")
+                except sqlite3.OperationalError as exc:
+                    assert "locked" in str(exc).lower()
+                    fence_probes.append(request.url.path)
+                else:raise AssertionError("LEGACY_REVOCATION_FENCE_MISSING")
+        return await call_next(request)
+    with TestClient(bridge.ReadBridge(front,erp,pilot_db=main.DB_PATH),base_url='https://testserver') as dual:
         dual.cookies.set(cut.LEGACY_COOKIE,legacy_token)
         dual.cookies.set(cut.PG_COOKIE,os.environ['NARUV_TEST_TOKEN'])
         dh={'origin':'https://testserver','x-jw-pg-csrf':os.environ['NARUV_TEST_CSRF']}
@@ -996,7 +1010,32 @@ try:
             assert result.json()['statutory_validated'] is False
             assert dual.post(period+'/attendance/pilot-late',headers=wh,json={'date':'2026-03-02','regular':60,'additional':0}).status_code==409
             assert dual.post(worker+'/archive/pilot-archive',headers=wh).status_code==403
+            # Explicit second fixture gate extends the existing narrow pilot,
+            # not the default read-only workspace or real staff administration.
+            os.environ[bridge.HR_LIFECYCLE_FLAG]=bridge.HR_PILOT_ACK
+            try:
+                second=worker+'/periods/2026-04'
+                assert dual.post(second+'/create/pilot-second',headers=wh,json=policy).status_code==200
+                assert dual.post(second+'/attendance/pilot-second-att',headers=wh,json={'date':'2026-04-01','regular':60,'additional':0}).status_code==200
+                assert dual.post(worker+'/archive/pilot-open-archive',headers=wh).status_code==409
+                before=dual.post(second+'/review',headers=dh).json()['review_sha256']
+                amendment={'review_sha256':before,'kind':'attendance','date':'2026-04-01','regular':120,'additional':0}
+                amended=dual.post(second+'/amend/pilot-amend',headers=wh,json=amendment)
+                assert amended.status_code==200
+                assert dual.post(second+'/amend/pilot-amend',headers=wh,json=amendment).json()==amended.json()
+                assert dual.post(second+'/confirm/pilot-stale',headers=wh,json={'review_sha256':before}).status_code==409
+                assert dual.post(second+'/confirm/pilot-second-confirm',headers=wh,json={'review_sha256':amended.json()['review_sha256']}).status_code==200
+                pay2=dual.post('/api/naruv-review/v1/drafts/payroll/pilot-bridge/2026-04',headers=dh)
+                assert pay2.status_code==200 and pay2.json()['gross_krw']==24000
+                archived=dual.post(worker+'/archive/pilot-archive',headers=wh)
+                assert archived.status_code==200
+                assert dual.post(worker+'/archive/pilot-archive',headers=wh).json()==archived.json()
+                assert dual.post(worker+'/periods/2026-05/create/pilot-after-archive',headers=wh,json=policy).status_code==409
+                assert dual.post('/api/naruv-review/v1/drafts/payroll/pilot-bridge/2026-04',headers=dh).json()==pay2.json()
+            finally:os.environ.pop(bridge.HR_LIFECYCLE_FLAG,None)
             assert dual.post(overview,headers=dh).json()==baseline
+            assert reg in fence_probes and second+'/amend/pilot-amend' in fence_probes and worker+'/archive/pilot-archive' in fence_probes
+            print("NARUV_HR_SQLITE_PG_FENCE_PASS",len(fence_probes),"actual independent SQLite write refusals")
         finally:os.environ.pop(bridge.HR_PILOT_FLAG,None)
         assert dual.post(worker+'/register/pilot-other',headers=wh).status_code==403
         with main.conn() as db:
@@ -1013,6 +1052,8 @@ finally:c.close()
                 # Never print child environment or arbitrary DB exceptions which may contain connection data.
                 safe=done.stderr.replace(fixture.TRADE_DSN,"[CI_DSN]").replace(fixture.TOKENS["A"],"[CI_TOKEN]").replace(fixture.CSRF["A"],"[CI_CSRF]")
                 self.assertEqual(done.returncode,0,"WORKS_STAGE_COMPOSITION_FAILED "+safe[-1500:])
+                self.assertEqual(sum(line.startswith("NARUV_HR_SQLITE_PG_FENCE_PASS ") for line in done.stdout.splitlines()),1)
+                print(next(line for line in done.stdout.splitlines() if line.startswith("NARUV_HR_SQLITE_PG_FENCE_PASS ")),flush=True)
                 if browser_requested:
                     marker="NARUV_WORKSPACE_REAL_HTTPS_BROWSER_PASS desktop, mobile restriction, real PG reads, expired session, no JS errors"
                     self.assertEqual(done.stdout.splitlines().count(marker),1)

@@ -13,7 +13,7 @@ L="L"*40;P="P"*40;CSRF="C"*40
 PATH=bridge.PREFIX+"/valuation/overview"
 ENV={**FLAGS,bridge.FLAG:bridge.ACK,"NARUV_DRAFT_REVIEW":"ISOLATED_SYNTHETIC_ONLY","NARUV_HR_REVIEW":"ISOLATED_SYNTHETIC_ONLY"}
 
-def front(pg=A,legacy=A,orgs=frozenset(("org-A",))):
+def front(pg=A,legacy=A,orgs=frozenset(("org-A",)),pilot_db=None):
     legacy_app=FastAPI();pg_app=FastAPI();erp=FastAPI()
     calls=[]
     @legacy_app.get("/")
@@ -26,7 +26,7 @@ def front(pg=A,legacy=A,orgs=frozenset(("org-A",))):
             raise HTTPException(403)
         return {"review":True}
     wrapped=cut.CutoverFront(legacy_app,pg_app,lambda req:legacy,lambda req:pg,lambda:orgs)
-    return bridge.ReadBridge(wrapped,erp),calls
+    return bridge.ReadBridge(wrapped,erp,pilot_db=pilot_db),calls
 
 async def request(app,path=PATH,method="POST",headers=None,scheme="https"):
     default={"cookie":cut.LEGACY_COOKIE+"="+L+"; "+cut.PG_COOKIE+"="+P,
@@ -128,17 +128,23 @@ async def test_workspace_gate_and_original_ui_custody():
         assert not calls
 
 @pytest.mark.asyncio
-async def test_hr_pilot_scope_and_confirmation():
+async def test_hr_pilot_scope_and_confirmation(tmp_path):
+    db=tmp_path/"isolated.db";db.touch()
     path=bridge.PREFIX+"/hr/workers/pilot-test/register/pilot-rid"
     ci=cut.Identity("ci-a","actor-A","admin")
     env={**ENV,bridge.HR_PILOT_FLAG:bridge.HR_PILOT_ACK,"GITHUB_ACTIONS":"true",
-         "JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev"}
+         "JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev","JARVIS_DB_PATH":str(db)}
     with patch.dict(os.environ,env,clear=True):
-        app,calls=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)))
+        app,calls=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)),pilot_db=db)
         # No fixture endpoint in this stub; 404 demonstrates the approved
         # request reached the backend, while disallowed requests stop at 403.
         assert (await request(app,path)).status_code==422
         assert (await request(app,path,headers={"x-naruv-confirm":"yes"})).status_code==404
+        nofence,_=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)))
+        assert (await request(nofence,path,headers={"x-naruv-confirm":"yes"})).status_code==403
+        archive=path.replace("/register/","/archive/")
+        with patch.dict(os.environ,{bridge.HR_LIFECYCLE_FLAG:bridge.HR_PILOT_ACK}):
+            assert (await request(app,archive,headers={"x-naruv-confirm":"yes"})).status_code==404
         for bad in (path.replace("pilot-test","worker-1"),path.replace("pilot-rid","another"),
                     bridge.PREFIX+"/hr/workers/pilot-test/archive/pilot-rid",
                     bridge.PREFIX+"/hr/workers/pilot-test/periods/2026-11/amend/pilot-rid",
@@ -152,14 +158,15 @@ async def test_hr_pilot_scope_and_confirmation():
 
 
 @pytest.mark.asyncio
-async def test_pilot_stream_revocation_and_body_bounds():
+async def test_pilot_stream_revocation_and_body_bounds(tmp_path):
+    db=tmp_path/"isolated.db";db.touch()
     from fastapi import HTTPException
     path=bridge.PREFIX+"/hr/workers/pilot-test/register/pilot-rid"
     ci=cut.Identity("ci-a","actor-A","admin")
     env={**ENV,bridge.HR_PILOT_FLAG:bridge.HR_PILOT_ACK,"GITHUB_ACTIONS":"true",
-         "JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev"}
+         "JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev","JARVIS_DB_PATH":str(db)}
     with patch.dict(os.environ,env,clear=True):
-        app,_=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)))
+        app,_=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)),pilot_db=db)
         live={"legacy":True,"pg":True}
         calls=[]
         def resolve(which):
@@ -205,3 +212,38 @@ async def test_pilot_disconnected_body_never_replayed():
     with pytest.raises(cut.CutoverRefused) as err:
         await bridge._pilot_body(receive)
     assert err.value.status==400
+
+
+@pytest.mark.asyncio
+async def test_legacy_fence_real_sqlite_contention_and_release(tmp_path):
+    import sqlite3
+    db=tmp_path/"isolated.db"
+    with sqlite3.connect(db) as c:
+        c.execute("CREATE TABLE sessions(id TEXT PRIMARY KEY)")
+        c.execute("INSERT INTO sessions VALUES ('active')")
+    env={**ENV,bridge.HR_PILOT_FLAG:bridge.HR_PILOT_ACK,"GITHUB_ACTIONS":"true",
+         "JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev",
+         "JARVIS_DB_PATH":str(db)}
+    with patch.dict(os.environ,env,clear=True):
+        for failure in (False,True):
+            try:
+                async with bridge._legacy_fence(db):
+                    with sqlite3.connect(db,timeout=0) as other:
+                        assert other.execute("SELECT count(*) FROM sessions").fetchone()==(1,)
+                        with pytest.raises(sqlite3.OperationalError,match="locked"):
+                            other.execute("DELETE FROM sessions")
+                    if failure:raise ValueError("simulated backend failure")
+            except ValueError:
+                assert failure
+            with sqlite3.connect(db,timeout=0) as other:
+                other.execute("DELETE FROM sessions")
+                other.execute("INSERT INTO sessions VALUES ('active')")
+        wrong=tmp_path/"wrong.db";wrong.touch()
+        with pytest.raises(cut.CutoverRefused) as err:
+            async with bridge._legacy_fence(wrong):pass
+        assert err.value.status==403
+        with sqlite3.connect(db,timeout=0,isolation_level=None) as other:
+            other.execute("BEGIN IMMEDIATE")
+            with pytest.raises(cut.CutoverRefused) as err:
+                async with bridge._legacy_fence(db):pass
+            assert err.value.status==503

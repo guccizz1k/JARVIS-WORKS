@@ -7,6 +7,10 @@ production write or ledger migration. Original cutover and PG guards unchanged.
 import asyncio
 import os
 import re
+import sqlite3
+import tempfile
+from contextlib import asynccontextmanager
+import anyio
 from fastapi import FastAPI
 from starlette.requests import Request
 from starlette.responses import JSONResponse,Response
@@ -18,6 +22,7 @@ FLAG="NARUV_V223_READ_BRIDGE"
 ACK="ISOLATED_SYNTHETIC_READ_ONLY"
 HR_PILOT_FLAG="NARUV_V223_HR_CI_PILOT"
 HR_PILOT_ACK="DISPOSABLE_FIXTURE_ONLY"
+HR_LIFECYCLE_FLAG="NARUV_V223_HR_CI_LIFECYCLE"
 PILOT_ORGS=frozenset(("ci-a","ci-b"))
 PREFIX=integrated.PREFIX
 WORKSPACE='/naruv-workspace'
@@ -81,6 +86,54 @@ async def _pilot_body(receive):
         return await receive()
     return replay
 
+LIFECYCLE_PATHS=tuple(re.compile(PILOT_ROOT+suffix,re.ASCII) for suffix in (
+    "/archive/"+PILOT_REQUEST,
+    "/periods/"+PERIOD+"/amend/"+PILOT_REQUEST,
+))
+
+def lifecycle_enabled():
+    return pilot_enabled() and os.getenv(HR_LIFECYCLE_FLAG)==HR_PILOT_ACK
+
+@asynccontextmanager
+async def _legacy_fence(path):
+    """Serialize SQLite revocations against a disposable PG write only.
+
+    A RESERVED SQLite writer lock excludes other connections' writes, including
+    session deletion, staff disable and role changes. It does not create a
+    distributed transaction, prevent time-based expiry, or authorize production.
+    """
+    if not pilot_enabled() or path is None:
+        raise cut.CutoverRefused("naruv_pilot_fence_required",403)
+    p=Path(path)
+    try:
+        resolved=p.resolve(strict=True)
+        root=Path(tempfile.gettempdir()).resolve(strict=True)
+        configured=Path(os.environ["JARVIS_DB_PATH"]).resolve(strict=True)
+        if (p.is_symlink() or not resolved.is_relative_to(root) or resolved.parent==root
+            or resolved.name!="isolated.db" or resolved!=configured or not resolved.is_file()):
+            raise ValueError("not disposable")
+    except (OSError,KeyError,ValueError) as exc:
+        raise cut.CutoverRefused("naruv_pilot_fence_required",403) from exc
+    def acquire():
+        db=None
+        try:
+            db=sqlite3.connect(resolved.as_uri()+"?mode=rw",uri=True,timeout=1.0,
+                               isolation_level=None,check_same_thread=False)
+            db.execute("BEGIN IMMEDIATE")
+            return db
+        except sqlite3.Error as exc:
+            if db is not None:db.close()
+            raise cut.CutoverRefused("naruv_pilot_fence_busy",503) from exc
+    def release(db):
+        try:db.rollback()
+        finally:db.close()
+    # Keep the lock until the ASGI backend and its PG transaction have exited.
+    # Shield cleanup against cancellation. No lock held while receiving a body.
+    with anyio.CancelScope(shield=True):
+        db=await anyio.to_thread.run_sync(acquire)
+        try:yield
+        finally:await anyio.to_thread.run_sync(release,db)
+
 def pilot_enabled():
     return (enabled() and os.getenv(HR_PILOT_FLAG)==HR_PILOT_ACK
             and os.getenv("GITHUB_ACTIONS")=="true"
@@ -88,7 +141,7 @@ def pilot_enabled():
             and os.getenv("JW_ENV","").lower() in ("dev","development","test"))
 
 def is_pilot_path(path):
-    return any(p.fullmatch(path) for p in PILOT_PATHS)
+    return any(p.fullmatch(path) for p in PILOT_PATHS) or (lifecycle_enabled() and any(p.fullmatch(path) for p in LIFECYCLE_PATHS))
 
 def enabled():
     return os.getenv(FLAG)==ACK and integrated._available(True,True)
@@ -97,10 +150,11 @@ def is_read_path(path):
     return any(p.fullmatch(path) for p in READ_PATHS)
 
 class ReadBridge:
-    def __init__(self,front,erp):
+    def __init__(self,front,erp,*,pilot_db=None):
         if not isinstance(front,cut.CutoverFront):raise TypeError("V223_FRONT_REQUIRED")
         self.front=front
         self.erp=erp
+        self.pilot_db=pilot_db
 
     async def __call__(self,scope,receive,send):
         path=scope.get("path","")
@@ -150,20 +204,20 @@ class ReadBridge:
                 # Finish bounded client input before the final identity checks.
                 # A slow upload must not widen the authorization race window.
                 receive=await _pilot_body(receive)
-                # Recheck both identities immediately before forwarding. The
-                # PG transaction independently fences its actor and auth epoch.
-                # This is NOT an atomic cross-store revocation fence and must
-                # never be used for production writes.
-                legacy_now=await self.front._identity(scope,cut.LEGACY_COOKIE,self.front.legacy_identity)
-                pg_now=await self.front._identity(scope,cut.PG_COOKIE,self.front.pg_identity)
-                if legacy_now!=legacy or pg_now!=pg:
-                    raise cut.CutoverRefused("identity_mismatch",403)
+                async with _legacy_fence(self.pilot_db):
+                    # Recheck inside the SQLite writer fence, not before it.
+                    legacy_now=await self.front._identity(scope,cut.LEGACY_COOKIE,self.front.legacy_identity)
+                    pg_now=await self.front._identity(scope,cut.PG_COOKIE,self.front.pg_identity)
+                    if legacy_now!=legacy or pg_now!=pg:
+                        raise cut.CutoverRefused("identity_mismatch",403)
+                    if (not pilot_enabled() or not is_pilot_path(path)
+                        or pg.org_id not in self.front.enabled_orgs()):
+                        raise cut.CutoverRefused("naruv_pilot_denied",403)
+                    return await self.front._forward(self.erp,scope,receive,send,cut.PG_COOKIE)
             # Separate PG cookie and PG CSRF forwarded by the original boundary;
             # the real NARUV backend repeats authorization under PG RLS.
             if not enabled() or pg.org_id not in self.front.enabled_orgs():
                 raise cut.CutoverRefused("naruv_bridge_disabled",404)
-            if pilot and not pilot_enabled():
-                raise cut.CutoverRefused("naruv_pilot_denied",403)
             if workspace:
                 asset,kind={WORKSPACE:("index.html","text/html"),WORKSPACE+"/app.js":("app.js","application/javascript"),WORKSPACE+"/style.css":("style.css","text/css")}[path]
                 return await Response((ASSETS/asset).read_bytes(),media_type=kind,headers={
