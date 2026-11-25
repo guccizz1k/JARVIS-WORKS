@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "68fe00326b3d30cc0815af4357648ffa6531fb73",
+      "sha": "7a1f826059f8fb747449b5c71a6ed3bb3e7a4ae4",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "17e7f108566e95999d4ad8b04bb09566a50f843b",
+      "sha": "087e9c5a6215440abbe3240dde6591cc88cfa859",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8543,5 +8543,9 @@
   "hr_archive_contract_correction": {
     "parent": "ff93b936b4e016c827a5a7781d99af82f248e62e",
     "reason": "Five PG17 failures at child line 138: archived worker setup returns HR_NOT_FOUND/404 by existing API contract, not 409. Assert exact error, inactive state and unchanged period set. No business guard relaxation."
+  },
+  "kr_source_bound_manual_review": {
+    "parent": "b45b87c6bc95b92da7c119a9a220cc40a8a85cbd",
+    "reason": "Recompute gross from trusted confirmed source, bind snapshot, reconcile every classified day and manual deduction digest; no automatic statutory validation or payment."
   }
 }

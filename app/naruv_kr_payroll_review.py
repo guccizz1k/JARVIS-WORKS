@@ -6,7 +6,7 @@ minimum-wage inclusion, weekly-rest or holiday determination. Never posts or pay
 from datetime import date
 from fractions import Fraction
 import re
-from .naruv_payroll_draft import PayrollBlocked,require,hash_input,ID
+from .naruv_payroll_draft import PayrollBlocked,require,hash_input,ID,draft_gross
 
 POLICY="KR_2026_ART56_RESTRICTED_V1"
 SOURCES={
@@ -87,3 +87,35 @@ def deduction_reconciliation(*,wage_result,deductions):
         "deductions_krw":total,"net_estimate_krw":gross-total,
         "reconciliation_sha256":hash_input({"policy":POLICY,"wage_review":wage_result["review_sha256"],"gross":gross,"deductions":clean}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False}
+
+
+def source_bound_review(*,tenant,worker,period,policy_revision,hourly_krw,
+                        minutes_by_day,additional_bps,expected_draft_sha256,
+                        ordinary_hourly,classification_sha256,classified_days,
+                        deductions):
+    """Recompute from confirmed server-owned inputs, never client gross totals.
+
+    Caller must load source with the existing authenticated PG pay_source RPC.
+    Manual classification must account for every stored minute. This restricted
+    mapping rejects cases requiring different regular/additional categories;
+    it does NOT establish statutory eligibility, tax or insurance correctness.
+    """
+    source=draft_gross(tenant=tenant,worker=worker,period=period,
+        policy_revision=policy_revision,hourly_krw=hourly_krw,
+        minutes_by_day=minutes_by_day,multiplier_bps={"regular":10000,"additional":additional_bps})
+    require(type(expected_draft_sha256) is str and expected_draft_sha256==source["draft_sha256"],"KR_SOURCE_CHANGED")
+    review=wage_review(tenant=tenant,worker=worker,period=period,base_hourly=hourly_krw,
+        ordinary_hourly=ordinary_hourly,classification_sha256=classification_sha256,
+        days=classified_days,scope="ADULT_HOURLY_5PLUS_MANUALLY_CLASSIFIED")
+    # All shapes already validated independently by the existing pure functions.
+    actual={r["date"]:(r["regular"],r["additional"]) for r in minutes_by_day}
+    classified={r["date"]:(r["regular"],r["overtime"]+r["holiday_first8"]+r["holiday_after8"]) for r in classified_days}
+    require(actual==classified,"KR_ATTENDANCE_MISMATCH")
+    net=deduction_reconciliation(wage_result=review,deductions=deductions)
+    return {"status":"SOURCE_BOUND_MANUAL_REVIEW_ONLY",
+        "source_draft_sha256":source["draft_sha256"],"policy_revision":policy_revision,
+        "wage":review,"deductions":net,
+        "review_binding_sha256":hash_input({"v":1,"source":source["draft_sha256"],
+            "wage":review["review_sha256"],"deductions":net["reconciliation_sha256"]}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
+        "production_authorized":False}

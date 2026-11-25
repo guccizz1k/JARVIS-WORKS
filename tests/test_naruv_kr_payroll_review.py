@@ -1,5 +1,5 @@
 import unittest
-from app.naruv_kr_payroll_review import wage_review,deduction_reconciliation,DEDUCTIONS
+from app.naruv_kr_payroll_review import wage_review,deduction_reconciliation,DEDUCTIONS,source_bound_review
 from app.naruv_payroll_draft import PayrollBlocked
 
 def day(d="2026-11-02",r=480,o=0,h=0,x=0,n=0):
@@ -47,3 +47,35 @@ class KRReview(unittest.TestCase):
     def test_deduction_invalid(self):
         for bad in ({},dict(deductions(),health={"amount_krw":100000,"evidence_sha256":"b"*64,"assessment":"ASSESSED"}),dict(deductions(),health={"amount_krw":1,"evidence_sha256":"b"*64,"assessment":"NOT_APPLICABLE"})):
             with self.assertRaises(PayrollBlocked):deduction_reconciliation(wage_result=wage(),deductions=bad)
+
+
+class SourceBoundKRReview(unittest.TestCase):
+    def inputs(self):
+        from app.naruv_payroll_draft import draft_gross
+        src=dict(tenant="a",worker="w",period="2026-11",policy_revision="v1",hourly_krw=12000,
+                 minutes_by_day=[{"date":"2026-11-02","regular":480,"additional":60}])
+        expected=draft_gross(**src,multiplier_bps={"regular":10000,"additional":15000})["draft_sha256"]
+        return dict(src,additional_bps=15000,expected_draft_sha256=expected,
+                    ordinary_hourly=12000,classification_sha256="a"*64,
+                    classified_days=[day(o=60,n=60)],deductions=deductions())
+    def test_exact_source_and_manual_net(self):
+        r=source_bound_review(**self.inputs())
+        self.assertEqual(r["wage"]["gross_estimate_krw"],120000)
+        self.assertEqual(r["deductions"]["net_estimate_krw"],114000)
+        for k in ("statutory_validated","payment_authorized","production_authorized"):
+            self.assertIs(r[k],False)
+        self.assertTrue(r["requires_human_review"])
+    def test_stale_source_and_cross_tenant(self):
+        for changes in ({"tenant":"b"},{"worker":"other"},{"policy_revision":"v2"},
+                        {"hourly_krw":13000},{"additional_bps":20000},{"expected_draft_sha256":"0"*64}):
+            with self.subTest(changes=changes),self.assertRaisesRegex(PayrollBlocked,"KR_SOURCE_CHANGED"):
+                source_bound_review(**dict(self.inputs(),**changes))
+    def test_classification_cannot_invent_or_drop_minutes(self):
+        for rows in ([day(o=59)],[day(o=61)],[day(r=479,o=61)],
+                     [day(d="2026-11-03",o=60)],[day(o=60),day(d="2026-11-03",r=0)]):
+            with self.subTest(rows=rows),self.assertRaisesRegex(PayrollBlocked,"KR_ATTENDANCE_MISMATCH"):
+                source_bound_review(**dict(self.inputs(),classified_days=rows))
+    def test_manual_deduction_binding_changes(self):
+        kw=self.inputs();r=source_bound_review(**kw)
+        kw["deductions"]["health"]["evidence_sha256"]="c"*64
+        self.assertNotEqual(r["review_binding_sha256"],source_bound_review(**kw)["review_binding_sha256"])
