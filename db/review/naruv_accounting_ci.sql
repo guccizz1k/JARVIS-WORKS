@@ -121,53 +121,7 @@ CREATE FUNCTION naruv_accounting.close_period(p_month text,p_confirm boolean,p_c
 DECLARE a record; a2 record; p naruv_accounting.periods; m date;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
- IF p_confirm IS DISTINCT FROM true OR p_month IS NULL OR p_month !~ '^[0-9]{4}-(0[1-9]|1[0-2])-01
- THEN RAISE EXCEPTION 'ACCT_INPUT'; END IF;
- m:=p_month::date;
- PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
- SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
- IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
- THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
- SELECT * INTO p FROM naruv_accounting.periods x WHERE x.org_id=a.org_id AND x.period_start=m FOR UPDATE;
- IF NOT FOUND THEN RAISE EXCEPTION 'ACCT_NOT_FOUND'; END IF;
- IF p.closed_at IS NULL THEN
-  UPDATE naruv_accounting.periods x SET closed_at=clock_timestamp(),closed_by=a.actor_id
-   WHERE x.org_id=a.org_id AND x.period_start=m RETURNING * INTO p;
- END IF;
- RETURN jsonb_build_object('period_start',p.period_start,'state','CLOSED','closed_at',p.closed_at,'production_authorized',false);
-END $$;
-CREATE FUNCTION naruv_accounting.inspect_bill(p_bill text,p_csrf text) RETURNS jsonb
- LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE a record; b naruv_finance.bills; paid_amt bigint; ar numeric; ap numeric; dr numeric; cr numeric; entries jsonb; n bigint; jn bigint;
-BEGIN
- SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
- PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
- SELECT * INTO b FROM naruv_finance.bills x WHERE x.org_id=a.org_id AND x.bill_id=p_bill;
- IF NOT FOUND THEN RAISE EXCEPTION 'ACCT_NOT_FOUND'; END IF;
- paid_amt:=naruv_finance.paid(a.org_id,p_bill);
- SELECT count(*) INTO n FROM naruv_finance.events x WHERE x.org_id=a.org_id AND x.bill_id=p_bill;
- SELECT count(*) INTO jn FROM naruv_accounting.journals x WHERE x.org_id=a.org_id AND x.bill_id=p_bill;
- SELECT coalesce(sum(l.debit),0),coalesce(sum(l.credit),0),
- coalesce(sum(l.debit-l.credit) FILTER(WHERE l.account='AR'),0),
- coalesce(sum(l.credit-l.debit) FILTER(WHERE l.account='AP'),0)
- INTO dr,cr,ar,ap FROM naruv_accounting.lines l JOIN naruv_accounting.journals j USING(org_id,event_id)
- WHERE j.org_id=a.org_id AND j.bill_id=p_bill;
- IF n<>jn OR n=0 OR dr<>cr OR paid_amt<0 OR paid_amt>b.total
- OR ar<>(CASE WHEN b.kind='sale' THEN b.total-paid_amt ELSE 0 END)
- OR ap<>(CASE WHEN b.kind='purchase' THEN b.total-paid_amt ELSE 0 END) THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
- SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.account),'[]'::jsonb) INTO entries FROM (
-  SELECT l.account,sum(l.debit) AS debit,sum(l.credit) AS credit FROM naruv_accounting.lines l
-  JOIN naruv_accounting.journals j USING(org_id,event_id) WHERE j.org_id=a.org_id AND j.bill_id=p_bill GROUP BY l.account
- ) x;
- RETURN jsonb_build_object('bill_id',p_bill,'journal_count',jn,'debit',dr,'credit',cr,'ar',ar,'ap',ap,
- 'outstanding',b.total-paid_amt,'accounts',entries,'production_authorized',false);
-END $$;
-REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_accounting FROM PUBLIC,jw_app_dev,naruv_native_stage;
-GRANT EXECUTE ON FUNCTION naruv_accounting.close_period(text,boolean,text),naruv_accounting.inspect_bill(text,text) TO jw_app_dev;
-RESET ROLE;
-INSERT INTO naruv_accounting.periods(org_id,period_start) SELECT id,date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Seoul')::date
- FROM jw_dev.organizations WHERE id IN ('ci-a','ci-b');
- OR left(p_month,4)='0000'
+ IF p_confirm IS DISTINCT FROM true OR p_month IS NULL OR p_month !~ '^[0-9]{4}-(0[1-9]|1[0-2])-01$' OR left(p_month,4)='0000'
  THEN RAISE EXCEPTION 'ACCT_INPUT'; END IF;
  m:=p_month::date;
  PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
