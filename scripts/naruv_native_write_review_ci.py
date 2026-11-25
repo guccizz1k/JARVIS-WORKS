@@ -62,6 +62,8 @@ class NativeWrite(unittest.TestCase):
                 tables+=",naruv_inventory.movements,naruv_inventory.balances,naruv_inventory.items"
             if getattr(self,"trade_active",False):
                 tables+=",naruv_trade.events,naruv_trade.documents"
+            if getattr(self,"finance_active",False):
+                tables+=",naruv_finance.events,naruv_finance.bills"
             c.execute("TRUNCATE "+tables)
             c.execute("DELETE FROM jw_dev.staff_disabled")
             c.execute("DELETE FROM jw_dev.sessions WHERE id='A2'")
@@ -443,3 +445,5 @@ if __name__=="__main__":
     run_inventory(NativeWrite)
     from scripts.naruv_trade_ci import run_trade
     run_trade(NativeWrite)
+    from scripts.naruv_finance_ci import run_finance
+    run_finance(NativeWrite)
