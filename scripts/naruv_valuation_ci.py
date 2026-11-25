@@ -925,6 +925,42 @@ try:
     assert r.headers.get('cache-control')=='no-store' and r.headers.get('strict-transport-security')
     assert c.get('/api/pg-stage/v90/me').status_code==200
     assert c.post('/api/naruv-review/v1/drafts/payroll/worker-1/2026-11',headers=dict(h,origin='https://evil.test')).status_code==403
+    # Exercise original V22.3 cookie forwarding with the actual SQLite
+    # session resolver and PG17 session/role resolver, not fake identities.
+    import hashlib,secrets
+    from datetime import datetime,timedelta
+    from app import naruv_v223_read_bridge as bridge,pg_cinema_cutover_front_v223 as cut
+    from app import pg_v90_integrated_entry as v90
+    from fastapi import FastAPI
+    os.environ[bridge.FLAG]=bridge.ACK
+    main.init_db()
+    legacy_token=secrets.token_urlsafe(36)
+    with main.conn() as db:
+        db.execute("INSERT INTO organizations VALUES(?,?,?)",("ci-a","Synthetic A",main.now()))
+        db.execute("INSERT INTO users VALUES(?,?,?,?,?,?,?)",("ci-ua","ci-a","synthetic@example.invalid",main.hash_password(secrets.token_urlsafe(24)),"Synthetic","admin",main.now()))
+        db.execute("INSERT INTO sessions(token_hash,user_id,expires_at,csrf_token,id,created_at) VALUES(?,?,?,?,?,?)",
+          (hashlib.sha256(legacy_token.encode()).hexdigest(),"ci-ua",(datetime.now(main.KST)+timedelta(hours=1)).isoformat(),secrets.token_urlsafe(32),"bridge-legacy",main.now()))
+    def legacy_identity(request):
+        r=main.current_user(request)
+        return cut.Identity(r["org_id"],r["id"],r["role"])
+    def pg_identity(request):
+        with v90._pg_validated_cursor(v90._session_hash(request)) as (_,ident):
+            return cut.Identity(ident[2],ident[1],ident[3])
+    erp=FastAPI()
+    assert bridge.integrated.register_integrated_review(erp,include_drafts=True,include_hr=True)
+    front=cut.CutoverFront(main.app,FastAPI(),legacy_identity,pg_identity,lambda:frozenset(("ci-a",)))
+    with TestClient(bridge.ReadBridge(front,erp),base_url='https://testserver') as dual:
+        dual.cookies.set(cut.LEGACY_COOKIE,legacy_token)
+        dual.cookies.set(cut.PG_COOKIE,os.environ['NARUV_TEST_TOKEN'])
+        dh={'origin':'https://testserver','x-jw-pg-csrf':os.environ['NARUV_TEST_CSRF']}
+        pay='/api/naruv-review/v1/drafts/payroll/worker-1/2026-11'
+        r=dual.post(pay,headers=dh)
+        assert r.status_code==200 and r.json()['gross_krw']==114000
+        assert dual.post(pay,headers=dict(dh,origin='https://evil.test')).status_code==403
+        assert dual.post('/api/naruv-review/v1/hr/workers/bridge-spoof/register/bridge-rid',headers=dh).status_code==403
+        with main.conn() as db:
+            db.execute("DELETE FROM sessions WHERE id='bridge-legacy'")
+        assert dual.post(pay,headers=dh).status_code==401
     os.environ['NARUV_INTEGRATED_REVIEW']=''
     assert c.post('/api/naruv-review/v1/drafts/payroll/worker-1/2026-11',headers=h).status_code==404
     assert c.get('/api/health').status_code==200

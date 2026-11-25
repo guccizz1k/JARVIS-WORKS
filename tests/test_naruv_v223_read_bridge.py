@@ -78,6 +78,8 @@ async def test_gate_https_cookie_and_csrf_boundaries():
     with patch.dict(os.environ,ENV,clear=True):
         app,calls=front()
         assert (await request(app,scheme="http")).status_code==403
+        assert (await request(app,headers={"origin":"https://evil.test"})).status_code==403
+        assert (await request(app,headers={"x-jw-pg-csrf":""})).status_code==403
         assert (await request(app,headers={"cookie":cut.LEGACY_COOKIE+"="+L})).status_code==401
         assert (await request(app,headers={"cookie":cut.UPSTREAM_COOKIE+"="+L})).status_code==401
         assert not calls
@@ -90,3 +92,22 @@ async def test_gate_https_cookie_and_csrf_boundaries():
 def test_factory_refuses_without_explicit_gate():
     with patch.dict(os.environ,{},clear=True):
         with pytest.raises(RuntimeError,match="NARUV_V223_BRIDGE_DISABLED"):bridge.create_app()
+
+@pytest.mark.asyncio
+async def test_duplicate_headers_and_websocket_denied():
+    with patch.dict(os.environ,ENV,clear=True):
+        app,calls=front()
+        h=[("cookie",cut.LEGACY_COOKIE+"="+L+"; "+cut.PG_COOKIE+"="+P),
+           ("origin","https://testserver"),("x-jw-pg-csrf",CSRF)]
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="https://testserver") as c:
+            for extra,status in (([("origin","https://testserver")],403),
+                                 ([("x-jw-pg-csrf",CSRF)],403),
+                                 ([("cookie",cut.UPSTREAM_COOKIE+"="+L)],401),
+                                 ([("cookie",cut.PG_COOKIE+"="+P)],401)):
+                assert (await c.post(PATH,headers=h+extra)).status_code==status
+        sent=[]
+        async def send(message):sent.append(message)
+        async def receive():raise AssertionError("unexpected receive")
+        await app({"type":"websocket","path":PATH},receive,send)
+        assert sent==[{"type":"websocket.close","code":1008}]
+        assert not calls

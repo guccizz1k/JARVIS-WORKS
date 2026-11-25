@@ -44,8 +44,12 @@ class ReadBridge:
 
     async def __call__(self,scope,receive,send):
         path=scope.get("path","")
-        if scope.get("type")!="http" or not (path==PREFIX or path.startswith(PREFIX+"/")):
+        if not (path==PREFIX or path.startswith(PREFIX+"/")):
             return await self.front(scope,receive,send)
+        if scope.get("type")=="websocket":
+            return await send({"type":"websocket.close","code":1008})
+        if scope.get("type")!="http":
+            raise RuntimeError("NARUV_BRIDGE_UNSUPPORTED_SCOPE")
         try:
             if not enabled():raise cut.CutoverRefused("naruv_bridge_disabled",404)
             if scope.get("scheme")!="https":raise cut.CutoverRefused("https_required",403)
@@ -53,7 +57,17 @@ class ReadBridge:
                 raise cut.CutoverRefused("naruv_read_scope_only",403)
             if scope.get("query_string"):raise cut.CutoverRefused("naruv_read_scope_only",422)
             request=Request(scope)
-            if cut.UPSTREAM_COOKIE in request.cookies:
+            origins=request.headers.getlist("origin")
+            if len(origins)!=1 or origins[0] not in integrated.v90._origins():
+                raise cut.CutoverRefused("origin_denied",403)
+            csrf=request.headers.getlist("x-jw-pg-csrf")
+            if len(csrf)!=1 or not 16<=len(csrf[0])<=512 or not csrf[0].isascii():
+                raise cut.CutoverRefused("invalid_pg_csrf",403)
+            # Inspect every Cookie header, including a hidden old session in a
+            # second header that the framework's cookie parser may ignore.
+            if any(part.partition(b"=")[0].strip()==cut.UPSTREAM_COOKIE.encode("ascii")
+                   for key,value in scope.get("headers",()) if key.lower()==b"cookie"
+                   for part in value.split(b";")):
                 raise cut.CutoverRefused("old_session_relogin_required",401)
             # Never trust actor/org values from browser input or a single store.
             legacy=await self.front._identity(scope,cut.LEGACY_COOKIE,self.front.legacy_identity)
@@ -64,6 +78,8 @@ class ReadBridge:
                 raise cut.CutoverRefused("naruv_org_denied",403)
             # Separate PG cookie and PG CSRF forwarded by the original boundary;
             # the real NARUV backend repeats authorization under PG RLS.
+            if not enabled() or pg.org_id not in self.front.enabled_orgs():
+                raise cut.CutoverRefused("naruv_bridge_disabled",404)
             return await self.front._forward(self.erp,scope,receive,send,cut.PG_COOKIE)
         except cut.CutoverRefused as exc:
             return await JSONResponse({"code":exc.code},status_code=exc.status,headers={
@@ -86,5 +102,6 @@ def create_app():
         response.headers["X-Frame-Options"]="DENY"
         response.headers["Referrer-Policy"]="no-referrer"
         response.headers["Content-Security-Policy"]="default-src 'none'; frame-ancestors 'none'"
+        response.headers["Strict-Transport-Security"]="max-age=31536000"
         return response
     return ReadBridge(front,erp)

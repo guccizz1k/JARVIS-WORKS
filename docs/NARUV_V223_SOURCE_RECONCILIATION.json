@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "071689fc014b425bd17e4689280a0548727afe7d",
+      "sha": "96a4f203970d67e10792fcab433a7a191012e997",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8468,11 +8468,23 @@
     "previews/naruv-v223-source-custody/legacy-style.css": {
       "sha": "3e8b5e218375bbbf3c9656aba2eb09df934b3e47",
       "mode": "100644"
+    },
+    "app/naruv_v223_read_bridge.py": {
+      "sha": "e640a6279e1d5db82f21b86349065979a11da7da",
+      "mode": "100644"
+    },
+    "tests/test_naruv_v223_read_bridge.py": {
+      "sha": "a3c4e0b4e6f89400e7d807cb1989dc19b699617b",
+      "mode": "100644"
     }
   },
   "notes": [
     "Exact existing repository blobs, no source edits to approved V22.3 HTML or main; current active branch unaffected until separate publication.",
     "Do not run third-party skills automatically. No historical workflows enabled. Existing NARUV CI and prior immutable baseline guard remain unchanged.",
     "This is source reconciliation only: authentication/dual-store UI wiring, original UI browser acceptance, dependency compatibility, actual PG/TLS, statutory payroll/accounting and all release gates remain unresolved."
-  ]
+  ],
+  "review_extension": {
+    "parent": "d8768e538b5ba26a1ea2ed12d475ddbcba05bd22",
+    "reason": "Explicit read-only bridge and real dual-session integration regression; original protected blobs unchanged."
+  }
 }
