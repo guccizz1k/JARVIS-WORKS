@@ -21,7 +21,7 @@ CREATE TABLE naruv_finance.bills(
 );
 CREATE TABLE naruv_finance.events(
  org_id text NOT NULL,request_id text NOT NULL,bill_id text NOT NULL,actor_id text NOT NULL,
- action text NOT NULL CHECK(action IN ('bill','pay','reverse')),payload jsonb NOT NULL,
+ action text NOT NULL CHECK(action IN ('bill','pay','reverse','credit')),payload jsonb NOT NULL,
  amount bigint NOT NULL CHECK(amount BETWEEN 0 AND 110000000000000),
  payment_ref text,reversal_of text,receipt jsonb NOT NULL,created_at timestamptz NOT NULL,
  PRIMARY KEY(org_id,request_id),UNIQUE(org_id,payment_ref),UNIQUE(org_id,reversal_of),
@@ -29,8 +29,9 @@ CREATE TABLE naruv_finance.events(
  FOREIGN KEY(org_id,reversal_of) REFERENCES naruv_finance.events(org_id,request_id),
  CHECK((action='pay')=(payment_ref IS NOT NULL)),
  CHECK((action='reverse')=(reversal_of IS NOT NULL)),
- CHECK((action='bill' AND amount=0) OR (action IN ('pay','reverse') AND amount>0))
+ CHECK((action='bill' AND amount=0) OR (action IN ('pay','reverse') AND amount>0) OR action='credit')
 );
+CREATE UNIQUE INDEX finance_one_credit ON naruv_finance.events(org_id,bill_id) WHERE action='credit';
 CREATE INDEX finance_bill_doc ON naruv_finance.bills(org_id,doc_id);
 CREATE INDEX finance_event_bill ON naruv_finance.events(org_id,bill_id);
 DO $$ DECLARE t text; BEGIN
@@ -47,6 +48,10 @@ CREATE FUNCTION naruv_finance.paid(p_org text,p_bill text) RETURNS bigint
  LANGUAGE sql VOLATILE SET search_path=pg_catalog AS $$
  SELECT coalesce(sum(CASE WHEN action='pay' THEN amount WHEN action='reverse' THEN -amount ELSE 0 END),0)::bigint
  FROM naruv_finance.events WHERE org_id=p_org AND bill_id=p_bill
+$$;
+CREATE FUNCTION naruv_finance.credited(p_org text,p_bill text) RETURNS boolean
+ LANGUAGE sql VOLATILE SET search_path=pg_catalog AS $$
+ SELECT EXISTS(SELECT 1 FROM naruv_finance.events WHERE org_id=p_org AND bill_id=p_bill AND action='credit')
 $$;
 CREATE FUNCTION naruv_finance.snapshot(b naruv_finance.bills,p_paid bigint) RETURNS jsonb
  LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS $$
@@ -107,6 +112,7 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'FIN_NOT_FOUND'; END IF;
   paid_amt:=naruv_finance.paid(a.org_id,p_bill);
   IF paid_amt<0 OR paid_amt>b.total THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
+  IF naruv_finance.credited(a.org_id,p_bill) THEN RAISE EXCEPTION 'FIN_CONFLICT'; END IF;
   IF p_action='pay' THEN
    IF p_payload-'amount'-'reference'<>'{}'::jsonb
    OR jsonb_typeof(p_payload->'amount') IS DISTINCT FROM 'number' OR (p_payload->>'amount') !~ '^[0-9]{1,15}$'
@@ -144,6 +150,10 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'FIN_NOT_FOUND'; END IF;
  paid_amt:=naruv_finance.paid(a.org_id,p_bill);
  IF paid_amt<0 OR paid_amt>b.total THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
+ IF naruv_finance.credited(a.org_id,p_bill) THEN
+  IF paid_amt<>0 THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
+  RETURN naruv_finance.snapshot(b,0)||jsonb_build_object('credited',b.total,'outstanding',0,'state','CREDITED');
+ END IF;
  RETURN naruv_finance.snapshot(b,paid_amt);
 END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_finance FROM PUBLIC,jw_app_dev,naruv_native_stage;

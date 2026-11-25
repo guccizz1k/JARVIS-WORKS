@@ -18,7 +18,7 @@ CREATE TABLE naruv_accounting.periods(
 );
 CREATE TABLE naruv_accounting.journals(
  org_id text NOT NULL,event_id text NOT NULL,bill_id text NOT NULL,period_start date NOT NULL,
- actor_id text NOT NULL,action text NOT NULL CHECK(action IN ('bill','pay','reverse')),
+ actor_id text NOT NULL,action text NOT NULL CHECK(action IN ('bill','pay','reverse','credit')),
  posted_at timestamptz NOT NULL,reversal_of text,
  PRIMARY KEY(org_id,event_id),UNIQUE(org_id,reversal_of),
  FOREIGN KEY(org_id,event_id) REFERENCES naruv_finance.events(org_id,request_id),
@@ -106,6 +106,14 @@ BEGIN
   ELSE
    INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AP',NEW.amount,0),(NEW.org_id,NEW.request_id,2,'CASH_CLEARING',0,NEW.amount);
   END IF;
+ ELSIF NEW.action='credit' THEN
+  IF NEW.amount<>b.total OR naruv_finance.paid(NEW.org_id,NEW.bill_id)<>0 THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
+  IF NOT EXISTS(SELECT 1 FROM naruv_accounting.journals j WHERE j.org_id=NEW.org_id AND j.bill_id=NEW.bill_id AND j.action='bill')
+  THEN RAISE EXCEPTION 'ACCT_SOURCE_MISSING'; END IF;
+  INSERT INTO naruv_accounting.lines
+   SELECT NEW.org_id,NEW.request_id,l.line_no,l.account,l.credit,l.debit
+   FROM naruv_accounting.lines l JOIN naruv_accounting.journals j USING(org_id,event_id)
+   WHERE j.org_id=NEW.org_id AND j.bill_id=NEW.bill_id AND j.action='bill';
  ELSE
   IF NOT EXISTS(SELECT 1 FROM naruv_accounting.journals j WHERE j.org_id=NEW.org_id AND j.event_id=NEW.reversal_of AND j.bill_id=NEW.bill_id AND j.action='pay')
   THEN RAISE EXCEPTION 'ACCT_SOURCE_MISSING'; END IF;
@@ -138,7 +146,7 @@ BEGIN
 END $$;
 CREATE FUNCTION naruv_accounting.inspect_bill(p_bill text,p_csrf text) RETURNS jsonb
  LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
-DECLARE a record; b naruv_finance.bills; paid_amt bigint; ar numeric; ap numeric; dr numeric; cr numeric; entries jsonb; n bigint; jn bigint;
+DECLARE a record; b naruv_finance.bills; paid_amt bigint; ar numeric; ap numeric; dr numeric; cr numeric; entries jsonb; n bigint; jn bigint; due bigint;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
@@ -152,15 +160,16 @@ BEGIN
  coalesce(sum(l.credit-l.debit) FILTER(WHERE l.account='AP'),0)
  INTO dr,cr,ar,ap FROM naruv_accounting.lines l JOIN naruv_accounting.journals j USING(org_id,event_id)
  WHERE j.org_id=a.org_id AND j.bill_id=p_bill;
- IF n<>jn OR n=0 OR dr<>cr OR paid_amt<0 OR paid_amt>b.total
- OR ar<>(CASE WHEN b.kind='sale' THEN b.total-paid_amt ELSE 0 END)
- OR ap<>(CASE WHEN b.kind='purchase' THEN b.total-paid_amt ELSE 0 END) THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
+ due:=CASE WHEN naruv_finance.credited(a.org_id,p_bill) THEN 0 ELSE b.total-paid_amt END;
+ IF (naruv_finance.credited(a.org_id,p_bill) AND paid_amt<>0) OR n<>jn OR n=0 OR dr<>cr OR paid_amt<0 OR paid_amt>b.total
+ OR ar<>(CASE WHEN b.kind='sale' THEN due ELSE 0 END)
+ OR ap<>(CASE WHEN b.kind='purchase' THEN due ELSE 0 END) THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
  SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.account),'[]'::jsonb) INTO entries FROM (
   SELECT l.account,sum(l.debit) AS debit,sum(l.credit) AS credit FROM naruv_accounting.lines l
   JOIN naruv_accounting.journals j USING(org_id,event_id) WHERE j.org_id=a.org_id AND j.bill_id=p_bill GROUP BY l.account
  ) x;
  RETURN jsonb_build_object('bill_id',p_bill,'journal_count',jn,'debit',dr,'credit',cr,'ar',ar,'ap',ap,
- 'outstanding',b.total-paid_amt,'accounts',entries,'production_authorized',false);
+ 'outstanding',due,'accounts',entries,'production_authorized',false);
 END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_accounting FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_accounting.close_period(text,boolean,text),naruv_accounting.inspect_bill(text,text) TO jw_app_dev;

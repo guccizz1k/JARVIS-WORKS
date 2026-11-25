@@ -10,7 +10,7 @@ from . import pg_v90_integrated_entry as v90
 PREFIX=preview.PREFIX+"/valuation"
 def enabled():
     return production.enabled() and os.getenv("NARUV_VALUATION_REVIEW")=="ISOLATED_SYNTHETIC_ONLY"
-def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None,bill=None):
+def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None,bill=None,return_id=None):
     import psycopg
     if not enabled():raise HTTPException(404,"COST_DISABLED")
     try:
@@ -18,7 +18,8 @@ def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None
             if preview._verify_identity(identity,csrf)!=prior:raise HTTPException(409,"SESSION_SCOPE_CHANGED")
             cur.execute("SET LOCAL statement_timeout='8s'")
             cur.execute("SET LOCAL lock_timeout='4s'")
-            if bill is not None:cur.execute("SELECT naruv_valuation.reconcile_bill(%s,%s)",(bill,csrf))
+            if return_id is not None:cur.execute("SELECT naruv_valuation.return_bill(%s,%s,true,%s)",(bill,return_id,csrf))
+            elif bill is not None:cur.execute("SELECT naruv_valuation.reconcile_bill(%s,%s)",(bill,csrf))
             elif rid is None:cur.execute("SELECT naruv_valuation.inspect(%s,%s,%s,%s)",(source,item,warehouse,csrf))
             else:cur.execute("SELECT naruv_valuation.receive(%s,%s,%s::jsonb,true,%s)",(item,rid,json.dumps(payload,ensure_ascii=False,separators=(",",":")),csrf))
             row=cur.fetchone()
@@ -60,6 +61,16 @@ def create_router():
         prior=await run_in_threadpool(write._auth,token,csrf)
         await write._empty_body(request)
         result=await run_in_threadpool(_call,token,csrf,prior,None,bill=bill)
+        response.headers["Cache-Control"]="no-store"
+        return result
+    @router.post("/bills/{bill}/return/{rid}")
+    async def return_bill(bill:str,rid:str,request:Request,response:Response):
+        if not enabled():raise HTTPException(404,"COST_DISABLED")
+        token,csrf,_=write._request(request,bill,rid,needs_digest=False)
+        if preview._one_header(request,"x-naruv-confirm","")!="yes":raise HTTPException(422,"COST_CONFIRM_REQUIRED")
+        prior=await run_in_threadpool(write._auth,token,csrf)
+        await write._empty_body(request)
+        result=await run_in_threadpool(_call,token,csrf,prior,None,bill=bill,return_id=rid)
         response.headers["Cache-Control"]="no-store"
         return result
     return router

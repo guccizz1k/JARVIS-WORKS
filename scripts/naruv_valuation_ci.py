@@ -270,8 +270,73 @@ def run_valuation(base):
                 with self.assertRaisesRegex(psycopg.Error,"NARUV_IMMUTABLE"):
                     c.execute("UPDATE naruv_valuation.cost_journals SET amount_krw=1")
                 c.rollback()
+        def return_bill(self,bill="bill",rid="return",who="A",code=200,extra=None):
+            return self.check(self.call(f"/valuation/bills/{bill}/return/{rid}",who=who,extra=extra),code)
+        def billed_purchase(self):
+            self.seed_cost();self.buy("p1","r1","0001",3,101)
+            return self.fin("bill","bill-r",{"doc_id":"p1","fulfillment_id":"r1-f"},bill="bill")
+        def test_cost_return_purchase_credit_and_retry(self):
+            self.billed_purchase()
+            r=self.return_bill()
+            self.assertEqual((r["credited"],r["outstanding"],r["returned_cost_krw"]),(333,0,"303"))
+            self.assertEqual(self.return_bill(),r)
+            self.return_bill(rid="duplicate",code=409)
+            self.assertEqual(self.value(),(0,0))
+            self.assertEqual(self.reconcile("bill")["net_krw"],"0")
+            self.assertEqual(self.acct("bill")["ap"],0)
+            self.assertEqual(self.inspect("bill")["state"],"CREDITED")
+            self.fin("pay","later",{"amount":1,"reference":"ref"},bill="bill",code=409)
+        def test_cost_return_sale_restores_original_cost(self):
+            self.ready_cost_prod();self.complete(3)
+            q=self.quote(names=("Assembly",),qty=2)
+            self.trade("open","sale-o",{"kind":"sale","quote_id":q["quote_id"],"source_id":"source-a","item_id":"0003","warehouse_id":"W1"},doc="sale")
+            self.trade("fulfill","sale-f",{"quantity":2},doc="sale")
+            self.fin("bill","sale-b",{"doc_id":"sale","fulfillment_id":"sale-f"},bill="sale-b")
+            r=self.return_bill("sale-b")
+            self.assertEqual((r["credited"],r["returned_cost_krw"]),(231,"506"))
+            self.assertEqual(self.value("0003"),(3,759))
+            self.assertEqual(self.reconcile("sale-b")["sales_margin_krw"],"0")
+            self.assertEqual(self.acct("sale-b")["ar"],0)
+        def test_cost_return_paid_tenant_and_confirm(self):
+            self.billed_purchase()
+            self.return_bill(who="B",code=404)
+            self.return_bill(extra={"x-naruv-confirm":"no"},code=422)
+            self.fin("pay","pay",{"amount":1,"reference":"ref"},bill="bill")
+            self.return_bill(code=409)
+            self.assertEqual(self.value(),(3,303))
+        def test_cost_return_purchase_changed_average_rollback(self):
+            self.billed_purchase();self.receive("other","0001",3,201)
+            before=self.cost_counts()
+            self.return_bill(code=409)
+            self.assertEqual(self.value(),(6,906))
+            self.assertEqual(self.cost_counts(),before)
+            self.assertEqual(self.acct("bill")["ap"],333)
+        def test_cost_return_closed_and_race(self):
+            self.billed_purchase();bar=threading.Barrier(2)
+            def go(i):
+                bar.wait(timeout=10)
+                if i==0:return self.call(f"/accounting/periods/{self.month}/close")
+                return self.call("/valuation/bills/bill/return/return")
+            with concurrent.futures.ThreadPoolExecutor(2) as pool:rs=list(pool.map(go,range(2)))
+            self.assertEqual(rs[0].status_code,200);self.assertIn(rs[1].status_code,(200,409))
+            self.assertEqual(self.value(),(0,0) if rs[1].status_code==200 else (3,303))
+            self.return_bill(rid="late",code=409)
+        def test_cost_return_credit_failure_rollback(self):
+            self.billed_purchase()
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("""CREATE FUNCTION naruv_finance.fail_credit() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN IF NEW.action='credit' THEN RAISE EXCEPTION 'SYNTHETIC_CREDIT_FAILURE'; END IF; RETURN NEW; END $$""")
+                c.execute("CREATE TRIGGER fail_credit BEFORE INSERT ON naruv_finance.events FOR EACH ROW EXECUTE FUNCTION naruv_finance.fail_credit()")
+            try:
+                self.return_bill(code=503);self.assertEqual(self.value(),(3,303))
+                self.assertEqual(self.acct("bill")["ap"],333)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("DROP TRIGGER fail_credit ON naruv_finance.events")
+                    c.execute("DROP FUNCTION naruv_finance.fail_credit()")
+            self.return_bill()
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=21:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=27:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=21 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 21 isolated PG17 cost, quantity, reconciliation and posting cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=27 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 27 isolated PG17 cost, reconciliation, posting and return cases; no statutory posting.")
