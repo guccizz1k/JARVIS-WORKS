@@ -369,6 +369,21 @@ BEGIN
  WHERE e.org_id=a.org_id AND (j.debit_account,j.credit_account,j.amount_krw,j.period_start)
  IS DISTINCT FROM (x.dr,x.cr,x.amount,date_trunc('month',m.created_at AT TIME ZONE 'Asia/Seoul')::date))
  THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ -- Rebuild signed quantities and cost per warehouse from immutable movements.
+ IF EXISTS(
+  WITH signed AS (
+   SELECT m.source_id,m.normalized_id,m.from_warehouse AS wh,-m.quantity::numeric AS q,-e.amount_krw AS v
+    FROM naruv_inventory.movements m JOIN naruv_valuation.entries e ON (m.org_id,m.request_id)=(e.org_id,e.movement_id)
+    WHERE m.org_id=a.org_id AND m.from_warehouse IS NOT NULL
+   UNION ALL
+   SELECT m.source_id,m.normalized_id,m.to_warehouse,m.quantity::numeric,e.amount_krw
+    FROM naruv_inventory.movements m JOIN naruv_valuation.entries e ON (m.org_id,m.request_id)=(e.org_id,e.movement_id)
+    WHERE m.org_id=a.org_id AND m.to_warehouse IS NOT NULL
+  ), totals AS (SELECT source_id,normalized_id,wh,sum(q) AS q,sum(v) AS v FROM signed GROUP BY source_id,normalized_id,wh),
+  balances AS (SELECT source_id,item_id,warehouse_id,quantity,value_krw FROM naruv_valuation.balances WHERE org_id=a.org_id)
+  SELECT 1 FROM totals t FULL JOIN balances b ON (t.source_id,t.normalized_id,t.wh)=(b.source_id,b.item_id,b.warehouse_id)
+  WHERE t.wh IS NULL OR b.warehouse_id IS NULL OR (t.q,t.v) IS DISTINCT FROM (b.quantity::numeric,b.value_krw)
+ ) THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
  SELECT coalesce(sum(value_krw),0) INTO stock_value FROM naruv_valuation.balances WHERE org_id=a.org_id;
  SELECT coalesce(sum(CASE WHEN debit_account='INVENTORY' THEN amount_krw WHEN credit_account='INVENTORY' THEN -amount_krw ELSE 0 END),0),
  coalesce(sum(CASE WHEN debit_account='WIP' THEN amount_krw WHEN credit_account='WIP' THEN -amount_krw ELSE 0 END),0)

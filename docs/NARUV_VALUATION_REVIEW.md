@@ -14,3 +14,5 @@ Unpaid single original fulfillment only; exact original sale cost restoration an
 
 ## Current-state tenant audit candidate
 Reconciles stock quantity, cost entry/journal completeness, expected account pairs, total inventory value, zero material-only WIP and each billed fulfillment (including full credits). Read-only; maximum 1000 bills and existing statement/lock timeout, not a complete historical replay or statutory trial balance. Three added cases, including intentional value corruption detection. Integrated recovery and independent QA remain outstanding. 
+
+The audit also reconstructs signed quantities and amounts for each item/warehouse from immutable movements, detecting offsetting changes that a tenant-wide total would miss. Added return-versus-payment race, retry on fresh HTTP request, and offsetting warehouse corruption tests. This is not a physical backup or independent cluster restore. 

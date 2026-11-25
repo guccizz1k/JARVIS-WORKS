@@ -358,8 +358,31 @@ def run_valuation(base):
             self.ready_cost_prod();self.complete(3);self.manual("transfer","0003","W1","W2",1)
             a=self.audit_ledger()
             self.assertEqual((a["inventory_krw"],a["journal_inventory_krw"],a["wip_krw"]),("1520","1520","0"))
+        def test_cost_return_payment_race_and_reconnect(self):
+            self.billed_purchase();bar=threading.Barrier(2)
+            def go(i):
+                bar.wait(timeout=10)
+                if i==0:return self.call("/valuation/bills/bill/return/return")
+                return self.call("/finance/bills/bill/commands/pay/pay",{"amount":1,"reference":"race"})
+            with concurrent.futures.ThreadPoolExecutor(2) as pool:rs=list(pool.map(go,range(2)))
+            self.assertEqual(sorted(r.status_code for r in rs),[200,409])
+            if rs[0].status_code==200:
+                self.assertEqual(self.return_bill()["state"],"CREDITED");self.assertEqual(self.value(),(0,0))
+            else:
+                self.assertEqual(self.inspect("bill")["paid"],1);self.assertEqual(self.value(),(3,303))
+            self.assertEqual(self.audit_ledger()["status"],"RECONCILED")
+        def test_cost_audit_detects_cross_warehouse_value_shift(self):
+            self.seed_cost();self.receive("opening","0001",4,100)
+            self.manual("transfer","0001","W1","W2",2)
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("UPDATE naruv_valuation.balances SET value_krw=value_krw+CASE WHEN warehouse_id='W1' THEN 1 ELSE -1 END WHERE org_id='ci-a'")
+            try:self.audit_ledger(code=503)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("UPDATE naruv_valuation.balances SET value_krw=value_krw-CASE WHEN warehouse_id='W1' THEN 1 ELSE -1 END WHERE org_id='ci-a'")
+            self.assertEqual(self.audit_ledger()["inventory_krw"],"400")
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=30:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=32:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=30 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 30 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=32 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 32 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
