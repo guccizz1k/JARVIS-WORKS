@@ -867,12 +867,12 @@ def run_valuation(base):
             self.check(self.call(pp+"/create/amend-period",{"revision":"r1","hourly_krw":12000,"additional_bps":15000}),200)
             self.hr_admit("amend-att",worker="amend-worker",period="2026-04",day="2026-04-01",a=60,b=0)
             first=self.check(self.call(pp+"/review"),200)
-            body={"review_sha256":first["review_sha256"],"kind":"attendance","values":{"date":"2026-04-01","regular":120,"additional":0}}
+            body={"review_sha256":first["review_sha256"],"kind":"attendance","date":"2026-04-01","regular":120,"additional":0}
             self.check(self.call(pp+"/amend/amend-a",body,who="B"),404)
             a=self.check(self.call(pp+"/amend/amend-a",body),200)
             self.assertEqual(a,self.check(self.call(pp+"/amend/amend-a",body),200))
             self.check(self.call(pp+"/amend/other-a",body),409)
-            p={"review_sha256":a["review_sha256"],"kind":"policy","values":{"revision":"r2","hourly_krw":15000,"additional_bps":15000}}
+            p={"review_sha256":a["review_sha256"],"kind":"policy","revision":"r2","hourly_krw":15000,"additional_bps":15000}
             b=self.check(self.call(pp+"/amend/amend-p",p),200)
             self.check(self.call(pp+"/confirm/stale-confirm",{"review_sha256":first["review_sha256"]}),409)
             self.check(self.call(pp+"/confirm/amend-confirm",{"review_sha256":b["review_sha256"]}),200)
@@ -901,7 +901,7 @@ assert app is main.app
 c=TestClient(app,base_url='https://testserver')
 try:
     paths=app.openapi()['paths']
-    assert len([x for x in paths if x.startswith('/api/naruv-review/v1/')])==40
+    assert len([x for x in paths if x.startswith('/api/naruv-review/v1/')])==41
     assert '/api/pg-stage/v92/quotes' in paths and '/api/pg-stage/v85/login' in paths
     assert c.get('/api/health').status_code==200
     home=c.get('/')
@@ -920,8 +920,27 @@ finally:c.close()
 """
                 done=subprocess.run([sys.executable,"-c",script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=60)
                 self.assertEqual(done.returncode,0,"WORKS_STAGE_COMPOSITION_FAILED "+done.stderr[-1500:])
+        def test_cost_document_manual_registration_and_isolation(self):
+            import base64,json
+            path="/drafts/documents/manual-doc";raw=b"%PDF-1.7 synthetic opaque fixture"
+            obs=[{"field":"subtotal","value":100,"page":1},{"field":"vat","value":10,"page":1},{"field":"gross_amount","value":110,"page":1}]
+            payload={"format":"pdf","original_base64":base64.b64encode(raw).decode(),"observations":obs}
+            def submit(rid="doc-rid",who="A",data=None,code=200):
+                return self.check(self.call(path+"/register/"+rid,who=who,raw=json.dumps(payload if data is None else data).encode()),code)
+            r=submit();self.assertEqual(r,submit());self.assertFalse(r["content_verified"]);self.assertFalse(r["posting_authorized"])
+            self.check(self.call(path,who="B"),404)
+            self.assertEqual(self.check(self.call(path),200)["source_sha256"],r["source_sha256"])
+            submit(rid="another",code=409)
+            submit(data=dict(payload,original_base64=base64.b64encode(raw+b" changed").decode()),code=409)
+            submit(who="B")
+            self.assertEqual(self.check(self.call(path,who="B"),200)["source_sha256"],r["source_sha256"])
+            self.assertNotEqual(self.check(self.call(path,who="B"),200)["review_sha256"],self.check(self.call(path),200)["review_sha256"])
+            self.check(self.call(path+"/register/invalid",raw=json.dumps(dict(payload,original_base64="not base64")).encode()),422)
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.document_admissions','INSERT')").fetchone()[0])
+                self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.admit_document(text,text,text,bytea,jsonb,boolean,text)','EXECUTE')").fetchone()[0])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=69:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=70:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=69 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 69 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=70 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 70 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

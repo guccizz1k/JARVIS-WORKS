@@ -242,10 +242,10 @@ def create_router():
         if preview._one_header(request,"content-type","")!="application/json":raise HTTPException(415,"HR_CONTENT_TYPE")
         prior=await run_in_threadpool(write._auth,token,csrf)
         data=await finance._body(request)
-        if (set(data)!={"review_sha256","kind","values"} or type(data["review_sha256"]) is not str
-            or not re.fullmatch(r"[0-9a-f]{64}",data["review_sha256"]) or type(data["values"]) is not dict):
+        if (type(data.get("review_sha256")) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}",data["review_sha256"]) or type(data.get("kind")) is not str):
             raise HTTPException(422,"HR_INPUT")
-        values=data["values"]
+        values={k:v for k,v in data.items() if k not in ("review_sha256","kind")}
         if data["kind"]=="attendance":_validate(period,values)
         elif data["kind"]=="policy":
             if (set(values)!={"revision","hourly_krw","additional_bps"} or type(values["revision"]) is not str
@@ -254,7 +254,8 @@ def create_router():
                 or not 1<=values["additional_bps"]<=50000):
                 raise HTTPException(422,"HR_INPUT")
         else:raise HTTPException(422,"HR_INPUT")
-        result=await run_in_threadpool(_amend,token,csrf,prior,worker,period,rid,data)
+        normalized={"review_sha256":data["review_sha256"],"kind":data["kind"],"values":values}
+        result=await run_in_threadpool(_amend,token,csrf,prior,worker,period,rid,normalized)
         response.headers["Cache-Control"]="no-store"
         return result
     return router

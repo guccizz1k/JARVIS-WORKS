@@ -123,7 +123,7 @@ class IntegratedReview(unittest.TestCase):
             self.assertTrue(mod.register_integrated_review(app,include_drafts=True))
             paths=app.openapi()["paths"]
             actual={p for p in paths if p.startswith(mod.PREFIX+"/")}
-            self.assertEqual(len(actual),31)
+            self.assertEqual(len(actual),32)
             self.assertIn(mod.PREFIX+"/drafts/documents/{key}",actual)
             self.assertIn(mod.PREFIX+"/drafts/payroll/{worker}/{period}",actual)
             with TestClient(app,base_url="https://testserver") as c:
@@ -146,7 +146,7 @@ class IntegratedReview(unittest.TestCase):
             app=FastAPI()
             self.assertTrue(mod.register_integrated_review(app,include_drafts=True,include_hr=True))
             paths={p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")}
-            self.assertEqual(len(paths),40)
+            self.assertEqual(len(paths),41)
             self.assertIn(mod.PREFIX+"/hr/workers/{worker}/periods/{period}/attendance/{rid}",paths)
             for suffix in ("/register/{rid}","/periods/{period}/create/{rid}","/inspect","/archive/{rid}","/periods/{period}/amend/{rid}"):
                 self.assertIn(mod.PREFIX+"/hr/workers/{worker}"+suffix,paths)
@@ -168,7 +168,7 @@ class IntegratedReview(unittest.TestCase):
             self.assertFalse(mod.register_integrated_review(app,include_drafts=True,include_hr=True))
             self.assertEqual(tuple(app.routes),before)
             self.assertTrue(mod.register_integrated_review(app,include_drafts=True))
-            self.assertEqual(len([p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")]),31)
+            self.assertEqual(len([p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")]),32)
     def test_dynamic_namespace_shadow_refused(self):
         app=FastAPI()
         @app.post("/api/{module}/{version}/workers/list")
