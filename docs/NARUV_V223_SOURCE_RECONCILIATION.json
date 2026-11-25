@@ -8506,7 +8506,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "0999718079f1f339e91f755d5087370b6547df09",
+      "sha": "12bb057b0282bdd97ab839397e52ef4e33128863",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8651,5 +8651,9 @@
   "profile_revision_sql_fix": {
     "parent": "be5916be7d50f51e6ef47653a52707e46700cb96",
     "reason": "Repair literal JS replacement expansion of dollar-apostrophe in SQL regex, which duplicated function tail. CI 45707221186 all PG rounds syntax error. Use slicing/literal callback replacements and verify single tail."
+  },
+  "profile_sql_early_regression": {
+    "parent": "49143ec9b45de9612361983f8247ef5bd166abd2",
+    "reason": "Early source integrity regression for duplicated SQL tail and exact regex. Actual PG17 execution required."
   }
 }

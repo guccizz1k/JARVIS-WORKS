@@ -35,3 +35,15 @@ class HRProfileEnvelope(unittest.TestCase):
         b=seal_profile(**new,profile=open_profile(**self.scope,envelope=a))
         self.assertEqual(open_profile(**new,envelope=b),self.profile)
         with self.assertRaises(ProfileBlocked):open_profile(**self.scope,envelope=b)
+
+    def test_revision_sql_source_integrity(self):
+        # Early detection of accidental source duplication; PostgreSQL execution
+        # remains the authoritative syntax and behavior acceptance.
+        from pathlib import Path
+        sql=(Path(__file__).resolve().parents[1]/"db/review/naruv_hr_profile_ci.sql").read_text()
+        self.assertEqual(sql.count("CREATE FUNCTION naruv_draft.profile_envelope("),1)
+        self.assertEqual(sql.count("RETURN jsonb_build_object('status','SEALED'"),1)
+        self.assertEqual(sql.count("RESET ROLE;"),1)
+        self.assertEqual(sql.count("END $$;"),2)
+        self.assertIn("IF p_expected !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' OR p_expected=p_revision THEN",sql)
+        self.assertTrue(sql.rstrip().endswith("RESET ROLE;"))
