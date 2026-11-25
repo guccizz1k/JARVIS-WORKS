@@ -4,6 +4,7 @@ Read-only by default. A separately gated disposable CI-only HR workflow
 may exercise synthetic worker setup/attendance/confirmation. No trade, payment,
 production write or ledger migration. Original cutover and PG guards unchanged.
 """
+import asyncio
 import os
 import re
 from fastapi import FastAPI
@@ -47,6 +48,38 @@ PILOT_PATHS=tuple(re.compile(PILOT_ROOT+suffix,re.ASCII) for suffix in (
     "/periods/"+PERIOD+"/attendance/"+PILOT_REQUEST,
     "/periods/"+PERIOD+"/confirm/"+PILOT_REQUEST,
 ))
+
+# Pilot HR JSON is small. Bound both streaming bytes and total receive time.
+PILOT_BODY_LIMIT=65536
+PILOT_BODY_TIMEOUT=5.0
+
+async def _pilot_body(receive):
+    async def collect():
+        data=bytearray()
+        while True:
+            message=await receive()
+            if message.get("type")!="http.request":
+                raise cut.CutoverRefused("naruv_pilot_body_incomplete",400)
+            chunk=message.get("body",b"")
+            if len(chunk)>PILOT_BODY_LIMIT-len(data):
+                raise cut.CutoverRefused("naruv_pilot_body_too_large",413)
+            data.extend(chunk)
+            if not message.get("more_body",False):
+                return bytes(data)
+            # Yield even if a malformed transport supplies endless empty chunks.
+            await asyncio.sleep(0)
+    try:
+        body=await asyncio.wait_for(collect(),timeout=PILOT_BODY_TIMEOUT)
+    except asyncio.TimeoutError as exc:
+        raise cut.CutoverRefused("naruv_pilot_body_timeout",408) from exc
+    used=False
+    async def replay():
+        nonlocal used
+        if not used:
+            used=True
+            return {"type":"http.request","body":body,"more_body":False}
+        return await receive()
+    return replay
 
 def pilot_enabled():
     return (enabled() and os.getenv(HR_PILOT_FLAG)==HR_PILOT_ACK
@@ -114,6 +147,9 @@ class ReadBridge:
                     raise cut.CutoverRefused("naruv_pilot_denied",403)
                 if request.headers.getlist("x-naruv-confirm")!=["yes"]:
                     raise cut.CutoverRefused("naruv_pilot_confirmation_required",422)
+                # Finish bounded client input before the final identity checks.
+                # A slow upload must not widen the authorization race window.
+                receive=await _pilot_body(receive)
                 # Recheck both identities immediately before forwarding. The
                 # PG transaction independently fences its actor and auth epoch.
                 # This is NOT an atomic cross-store revocation fence and must

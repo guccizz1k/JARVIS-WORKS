@@ -149,3 +149,59 @@ async def test_hr_pilot_scope_and_confirmation():
                 assert (await request(app,path,headers={"x-naruv-confirm":"yes"})).status_code==403
         app,calls=front()
         assert (await request(app,path,headers={"x-naruv-confirm":"yes"})).status_code==403
+
+
+@pytest.mark.asyncio
+async def test_pilot_stream_revocation_and_body_bounds():
+    from fastapi import HTTPException
+    path=bridge.PREFIX+"/hr/workers/pilot-test/register/pilot-rid"
+    ci=cut.Identity("ci-a","actor-A","admin")
+    env={**ENV,bridge.HR_PILOT_FLAG:bridge.HR_PILOT_ACK,"GITHUB_ACTIONS":"true",
+         "JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev"}
+    with patch.dict(os.environ,env,clear=True):
+        app,_=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)))
+        live={"legacy":True,"pg":True}
+        calls=[]
+        def resolve(which):
+            def resolver(req):
+                if not live[which]:raise HTTPException(401)
+                return ci
+            return resolver
+        app.front.legacy_identity=resolve("legacy")
+        app.front.pg_identity=resolve("pg")
+        @app.erp.post(path)
+        async def write(request:Request):
+            calls.append(await request.body())
+            return {"ok":True}
+        headers={"cookie":cut.LEGACY_COOKIE+"="+L+"; "+cut.PG_COOKIE+"="+P,
+                 "origin":"https://testserver","x-jw-pg-csrf":CSRF,
+                 "x-naruv-confirm":"yes"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="https://testserver") as c:
+            async def stream(revoke=None):
+                yield b'{"worker":'
+                if revoke:live[revoke]=False
+                yield b'"pilot-test"}'
+            for which in ("legacy","pg"):
+                live.update(legacy=True,pg=True)
+                r=await c.post(path,headers=headers,content=stream(which))
+                assert r.status_code==401 and not calls
+            live.update(legacy=True,pg=True)
+            r=await c.post(path,headers=headers,content=b"x"*(bridge.PILOT_BODY_LIMIT+1))
+            assert r.status_code==413 and not calls
+            async def delayed():
+                import asyncio
+                await asyncio.sleep(1)
+                yield b"{}"
+            with patch.object(bridge,"PILOT_BODY_TIMEOUT",0.01):
+                r=await c.post(path,headers=headers,content=delayed())
+            assert r.status_code==408 and not calls
+            r=await c.post(path,headers=headers,content=stream())
+            assert r.status_code==200 and calls==[b'{"worker":"pilot-test"}']
+
+@pytest.mark.asyncio
+async def test_pilot_disconnected_body_never_replayed():
+    async def receive():
+        return {"type":"http.disconnect"}
+    with pytest.raises(cut.CutoverRefused) as err:
+        await bridge._pilot_body(receive)
+    assert err.value.status==400

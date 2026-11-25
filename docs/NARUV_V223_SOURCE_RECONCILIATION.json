@@ -8470,11 +8470,11 @@
       "mode": "100644"
     },
     "app/naruv_v223_read_bridge.py": {
-      "sha": "1ef3f2af019a88da6fba06cb19f786e5fc087ef1",
+      "sha": "356d07c2859ee937e289656cd898c4b5bc8ead16",
       "mode": "100644"
     },
     "tests/test_naruv_v223_read_bridge.py": {
-      "sha": "39422cd261540b36323b3272518f1eac540ff821",
+      "sha": "9f49b7e15aad1c3da9a4f7886a80c97cf6ffe1d2",
       "mode": "100644"
     },
     "app/naruv_workspace/index.html": {
@@ -8519,5 +8519,9 @@
   "hr_pilot_extension": {
     "parent": "aba29cdfef3068657de3cb57540a339ee36a9e8e",
     "reason": "Default-off synthetic CI-only dual-session HR writes, four explicit routes, immutable receipts and actual PG transaction tests. No production or UI write activation; cross-store revocation atomicity remains unresolved."
+  },
+  "hr_pilot_stream_fence": {
+    "parent": "e46544955002cd7b6ce4fa65e04e568ba8dc44a2",
+    "reason": "Bound CI-only HR request body before final dual identity recheck; test streaming revocation, size, timeout, disconnect and replay. Not atomic cross-store revocation."
   }
 }
