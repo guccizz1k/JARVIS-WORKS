@@ -185,6 +185,50 @@ BEGIN
  IF q<>coalesce(v.quantity,0) THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
  RETURN r||jsonb_build_object('value_krw',coalesce(v.value_krw,0)::text,'method','WAREHOUSE_MOVING_AVERAGE','statutory_posted',false);
 END $$;
+-- Read-only reconciliation: no GL posting, no client-supplied amounts.
+CREATE FUNCTION naruv_valuation.reconcile_bill(p_bill text,p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $
+DECLARE a record; a2 record; b naruv_finance.bills; f naruv_trade.events;
+ d naruv_trade.documents; m naruv_inventory.movements; e naruv_valuation.entries;
+ j jsonb; clearing numeric; sales numeric;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF NOT naruv_production.ident(p_bill) THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256) IS DISTINCT FROM
+ (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ SELECT * INTO b FROM naruv_finance.bills z WHERE z.org_id=a.org_id AND z.bill_id=p_bill;
+ IF NOT FOUND THEN RAISE EXCEPTION 'INV_NOT_FOUND'; END IF;
+ SELECT * INTO d FROM naruv_trade.documents z WHERE z.org_id=a.org_id AND z.doc_id=b.doc_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ SELECT * INTO f FROM naruv_trade.events z WHERE z.org_id=a.org_id AND z.request_id=b.fulfillment_id AND z.doc_id=b.doc_id AND z.action='fulfill';
+ IF NOT FOUND THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ SELECT * INTO m FROM naruv_inventory.movements z WHERE z.org_id=a.org_id AND z.request_id=f.movement_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ SELECT * INTO e FROM naruv_valuation.entries z WHERE z.org_id=a.org_id AND z.movement_id=m.request_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ IF (b.kind,b.quantity,b.subtotal,m.source_id,m.normalized_id,m.actor_id,e.kind,e.source_event_id)
+ IS DISTINCT FROM (d.kind,m.quantity,m.quantity*d.unit_price,d.source_id,d.item_id,f.actor_id,d.kind,f.request_id)
+ OR m.from_warehouse IS DISTINCT FROM (CASE WHEN d.kind='sale' THEN d.warehouse_id ELSE NULL END)
+ OR m.to_warehouse IS DISTINCT FROM (CASE WHEN d.kind='purchase' THEN d.warehouse_id ELSE NULL END)
+ OR (b.kind='purchase' AND e.amount_krw<>b.subtotal)
+ THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ j:=naruv_accounting.inspect_bill(p_bill,p_csrf);
+ SELECT coalesce(sum(l.debit::numeric-l.credit) FILTER(WHERE l.account='PURCHASE_CLEARING'),0),
+ coalesce(sum(l.credit::numeric-l.debit) FILTER(WHERE l.account='SALES'),0)
+ INTO clearing,sales FROM naruv_accounting.lines l JOIN naruv_accounting.journals h USING(org_id,event_id)
+ WHERE h.org_id=a.org_id AND h.bill_id=p_bill;
+ IF clearing<>(CASE WHEN b.kind='purchase' THEN b.subtotal ELSE 0 END)
+ OR sales<>(CASE WHEN b.kind='sale' THEN b.subtotal ELSE 0 END)
+ THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ RETURN jsonb_build_object('bill_id',p_bill,'fulfillment_id',b.fulfillment_id,'kind',b.kind,
+ 'net_krw',b.subtotal::text,'inventory_cost_krw',e.amount_krw::text,
+ 'purchase_clearing_difference_krw',CASE WHEN b.kind='purchase' THEN (clearing-e.amount_krw)::text ELSE NULL END,
+ 'sales_margin_krw',CASE WHEN b.kind='sale' THEN (sales-e.amount_krw)::text ELSE NULL END,
+ 'outstanding_krw',j->>'outstanding','statutory_posted',false,'production_authorized',false);
+END $;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_valuation FROM PUBLIC,jw_app_dev,naruv_native_stage;
-GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text) TO jw_app_dev;
+GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text) TO jw_app_dev;
 RESET ROLE;

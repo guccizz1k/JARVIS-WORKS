@@ -151,8 +151,55 @@ def run_valuation(base):
             self.assertEqual(self.value(),(1000000000,1000000000000000000))
             self.manual("huge-issue","0001","W1",None,999999999)
             self.assertEqual(self.value(),(1,1000000000))
+        def reconcile(self,bill,who="A",code=200):
+            return self.check(self.call(f"/valuation/bills/{bill}/reconcile",who=who),code)
+        def test_cost_reconcile_purchase_and_payment(self):
+            self.seed_cost();self.buy("p1","r1","0001",3,101)
+            self.fin("bill","bill-r",{"doc_id":"p1","fulfillment_id":"r1-f"},bill="bill")
+            before=self.cost_counts()
+            r=self.reconcile("bill")
+            self.assertEqual((r["net_krw"],r["inventory_cost_krw"],r["purchase_clearing_difference_krw"],r["sales_margin_krw"]),("303","303","0",None))
+            self.assertEqual(r["outstanding_krw"],"333")
+            self.fin("pay","pay-r",{"amount":100,"reference":"p-ref"},bill="bill")
+            self.assertEqual(self.reconcile("bill")["outstanding_krw"],"233")
+            self.fin("reverse","rev-r",{"payment_request_id":"pay-r"},bill="bill")
+            self.assertEqual(self.reconcile("bill"),r)
+            self.assertEqual(self.cost_counts(),before)
+        def test_cost_reconcile_sale_negative_margin(self):
+            self.ready_cost_prod();self.complete(3)
+            q=self.quote(names=("Assembly",),qty=2)
+            self.trade("open","sale-o",{"kind":"sale","quote_id":q["quote_id"],"source_id":"source-a","item_id":"0003","warehouse_id":"W1"},doc="sale")
+            self.trade("fulfill","sale-f",{"quantity":2},doc="sale")
+            self.fin("bill","sale-b",{"doc_id":"sale","fulfillment_id":"sale-f"},bill="sale-b")
+            r=self.reconcile("sale-b")
+            self.assertEqual((r["net_krw"],r["inventory_cost_krw"],r["sales_margin_krw"]),("210","506","-296"))
+            self.assertIsNone(r["purchase_clearing_difference_krw"])
+            self.assertFalse(r["statutory_posted"])
+        def test_cost_reconcile_tenant_and_default_off(self):
+            self.seed_cost();self.buy("p1","r1","0001",1,100)
+            self.fin("bill","bill-r",{"doc_id":"p1","fulfillment_id":"r1-f"},bill="bill")
+            self.reconcile("bill",who="B",code=404)
+            self.reconcile("missing",code=404)
+            self.reconcile("bill")
+            os.environ.pop("NARUV_VALUATION_REVIEW",None)
+            self.reconcile("bill",code=404)
+        def test_cost_reconcile_inconsistent_cost_fails_closed(self):
+            self.seed_cost();self.buy("p1","r1","0001",3,100)
+            self.fin("bill","bill-r",{"doc_id":"p1","fulfillment_id":"r1-f"},bill="bill")
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("ALTER TABLE naruv_valuation.entries DISABLE TRIGGER cost_entries_immutable")
+                c.execute("UPDATE naruv_valuation.entries SET amount_krw=299 WHERE kind='purchase'")
+                c.execute("ALTER TABLE naruv_valuation.entries ENABLE TRIGGER cost_entries_immutable")
+            try:
+                self.reconcile("bill",code=503)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("ALTER TABLE naruv_valuation.entries DISABLE TRIGGER cost_entries_immutable")
+                    c.execute("UPDATE naruv_valuation.entries SET amount_krw=300 WHERE kind='purchase'")
+                    c.execute("ALTER TABLE naruv_valuation.entries ENABLE TRIGGER cost_entries_immutable")
+            self.assertEqual(self.reconcile("bill")["purchase_clearing_difference_krw"],"0")
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=10:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=14:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=10 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 10 isolated PG17 cost and quantity cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=14 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 14 isolated PG17 cost, quantity and reconciliation cases; no statutory posting.")
