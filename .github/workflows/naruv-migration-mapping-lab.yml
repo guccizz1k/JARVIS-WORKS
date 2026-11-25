@@ -9,6 +9,8 @@ on:
       - tests/test_erp_migration_review.py
       - app/erp_migration_preflight.py
       - tests/test_erp_migration_preflight.py
+      - app/erp_migration_approval.py
+      - tests/test_erp_migration_approval.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -75,3 +77,19 @@ jobs:
           PY
           done
           echo 'NARUV_PREFLIGHT_LAB_PASS 5 rounds; no data writes or import authority'
+
+      - name: Isolated approval and reservation lifecycle adversarial tests
+        run: |
+          set -euo pipefail
+          python -m py_compile app/erp_migration_approval.py tests/test_erp_migration_approval.py
+          for seed in 17 101 617 2027 65537; do
+            NARUV_TEST_SEED="$seed" PYTHONHASHSEED="$seed" python - <<'PY'
+          import os, unittest
+          suite=unittest.defaultTestLoader.loadTestsFromName("tests.test_erp_migration_approval")
+          result=unittest.TextTestRunner(verbosity=1).run(suite)
+          if not result.wasSuccessful() or result.testsRun != 18 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
+              raise SystemExit(1)
+          print("NARUV_APPROVAL_ROUND_PASS", os.environ["NARUV_TEST_SEED"], "18 cases; 100 varied approvals; 300 negative controls; 16 concurrent claims; revoke/claim race")
+          PY
+          done
+          echo 'NARUV_APPROVAL_LAB_PASS 5 rounds; process-local reservation only; no import authority'
