@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: b2cf2218f03419e7e6bf2df00c61abedf22e7524
+      EXPECTED_SOURCE: efe705aeb308e290f4e586f5cab60f75bf0bf0fe
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: b2cf2218f03419e7e6bf2df00c61abedf22e7524
+          ref: efe705aeb308e290f4e586f5cab60f75bf0bf0fe
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -98,7 +98,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: b2cf2218f03419e7e6bf2df00c61abedf22e7524
+      EXPECTED_SOURCE: efe705aeb308e290f4e586f5cab60f75bf0bf0fe
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -106,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: b2cf2218f03419e7e6bf2df00c61abedf22e7524
+          ref: efe705aeb308e290f4e586f5cab60f75bf0bf0fe
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
