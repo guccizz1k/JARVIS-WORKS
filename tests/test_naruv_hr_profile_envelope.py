@@ -77,3 +77,25 @@ class HRProfileEnvelope(unittest.TestCase):
             self.assertFalse(r["deletion_authorized"]);self.assertFalse(r["production_authorized"])
         for change in ({"as_of":now.replace(tzinfo=None)},{"legal_hold":1},{"approval_sha256":"bad"}):
             with self.assertRaises(ProfileBlocked):retention_decision(**dict(args,**change))
+
+
+    def test_key_retirement_review_coverage_and_scope(self):
+        from app.naruv_hr_profile_envelope import key_retirement_review
+        row=dict(asset="live",tenant="ci-a",key_id="new",restore_sha256="a"*64,old_key_denied=True)
+        archive=dict(row,asset="archive")
+        args=dict(tenant="ci-a",old_key_id="old",new_key_id="new",inventory_sha256="b"*64,
+                  expected_assets=["live","archive"],observations=[row,archive])
+        r=key_retirement_review(**args)
+        self.assertEqual(r["status"],"EVIDENCE_REVIEW_ONLY")
+        self.assertIs(r["key_retirement_authorized"],False)
+        self.assertEqual(r,key_retirement_review(**dict(args,observations=[archive,row])))
+        for obs,missing,blocked in (([row],["archive"],[]),
+          ([row,dict(archive,key_id="old")],[],["archive"]),
+          ([row,dict(archive,old_key_denied=False)],[],["archive"])):
+            out=key_retirement_review(**dict(args,observations=obs))
+            self.assertEqual((out["status"],out["missing_assets"],out["blocked_assets"]),("BLOCKED",missing,blocked))
+        for change in (dict(observations=[row,row]),dict(observations=[row,dict(archive,tenant="ci-b")]),
+          dict(observations=[row,dict(archive,restore_sha256="bad")]),dict(expected_assets=[]),
+          dict(expected_assets=["live","live"]),dict(new_key_id="old")):
+            with self.assertRaises(ProfileBlocked):key_retirement_review(**dict(args,**change))
+        self.assertNotEqual(r["review_sha256"],key_retirement_review(**dict(args,inventory_sha256="c"*64))["review_sha256"])

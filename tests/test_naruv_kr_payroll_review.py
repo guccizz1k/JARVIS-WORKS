@@ -176,7 +176,7 @@ class OfficialTablePage14(unittest.TestCase):
         self.assertEqual(self.ref(eligible_family_count=2,eligible_children_8_20=1)["child_adjusted_krw"],48000)
         self.assertEqual(self.ref(eligible_family_count=3,eligible_children_8_20=2)["child_adjusted_krw"],0)
         self.assertEqual(self.ref(taxable_monthly_krw=3500000,eligible_family_count=4,eligible_children_8_20=3)["child_adjusted_krw"],0)
-        for kw in ({"taxable_monthly_krw":2809999},{"taxable_monthly_krw":5740000},
+        for kw in ({"taxable_monthly_krw":2809999},{"taxable_monthly_krw":6780000},
                    {"withholding_date":"2026-02-28"},{"withholding_date":"2026-11-31"},
                    {"eligible_family_count":12},{"eligible_children_8_20":1},{"selection_percent":90},
                    {"assessment_sha256":"bad"}):
@@ -197,12 +197,15 @@ class OfficialTableExtendedPages(unittest.TestCase):
               (4180000,1,219990,4180000,4200000),(4699999,11,58930,4680000,4700000),
               (4700000,1,293390,4700000,4720000),(5000000,4,219100,5000000,5020000),
               (5219999,11,113650,5200000,5220000),(5220000,1,366320,5220000,5240000),
-              (5600000,7,240250,5600000,5620000),(5739999,11,180730,5720000,5740000)):
+              (5600000,7,240250,5600000,5620000),(5739999,11,180730,5720000,5740000),
+              (5740000,1,439250,5740000,5760000),(5840000,4,353350,5840000,5860000),
+              (6259999,11,277400,6240000,6260000),(6260000,1,564870,6260000,6280000),
+              (6640000,3,481320,6640000,6660000),(6779999,11,346040,6760000,6780000)):
             r=self.ref(taxable_monthly_krw=wage,eligible_family_count=family)
             self.assertEqual((r["table_amount_krw"],r["table_low_krw"],r["table_high_exclusive_krw"]),(amount,lo,hi))
     def test_extended_all_cells(self):
         from app.naruv_kr_payroll_review import KR_TABLE_BEFORE,KR_TABLE_AFTER
-        for rows,low,steps in ((KR_TABLE_BEFORE,2810000,[10000]*19+[20000]*7),(KR_TABLE_AFTER,3660000,[20000]*104)):
+        for rows,low,steps in ((KR_TABLE_BEFORE,2810000,[10000]*19+[20000]*7),(KR_TABLE_AFTER,3660000,[20000]*156)):
             self.assertEqual(len(rows),len(steps))
             for row,step in zip(rows,steps,strict=True):
                 for j,amount in enumerate(row):

@@ -105,3 +105,39 @@ def retention_decision(*,tenant,worker,revision,as_of,purpose_closed,legal_revie
         "requires_separate_storage":status in ("LEGAL_HOLD_SEPARATE_STORAGE_REQUIRED","RETAIN_SEPARATELY"),
         "normal_use_allowed":status=="ACTIVE_PURPOSE","deletion_authorized":False,
         "production_authorized":False}
+
+
+def key_retirement_review(*,tenant,old_key_id,new_key_id,inventory_sha256,
+                          expected_assets,observations):
+    """Offline evidence completeness screen, never a key retirement action.
+
+    Expected assets and observations must originate from independent trusted
+    inventory/recovery systems. Hashes bind supplied evidence, not its truth.
+    Retained immutable old-key archives must block retirement.
+    """
+    import hashlib
+    _require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,old_key_id,new_key_id))
+             and old_key_id!=new_key_id)
+    def digest(x):return type(x) is str and re.fullmatch(r"[0-9a-f]{64}",x) is not None
+    _require(digest(inventory_sha256))
+    _require(type(expected_assets) in (list,tuple) and 1<=len(expected_assets)<=10000
+             and all(type(x) is str and ID.fullmatch(x) for x in expected_assets)
+             and len(set(expected_assets))==len(expected_assets))
+    _require(type(observations) in (list,tuple) and len(observations)<=10000)
+    seen=set();blocked=[];normalized=[]
+    for row in observations:
+        _require(type(row) is dict and set(row)=={"asset","tenant","key_id","restore_sha256","old_key_denied"})
+        asset=row["asset"]
+        _require(type(asset) is str and asset in expected_assets and asset not in seen
+                 and row["tenant"]==tenant and type(row["key_id"]) is str
+                 and ID.fullmatch(row["key_id"]) and digest(row["restore_sha256"])
+                 and type(row["old_key_denied"]) is bool)
+        seen.add(asset);normalized.append(dict(row))
+        if row["key_id"]!=new_key_id or not row["old_key_denied"]:blocked.append(asset)
+    missing=sorted(set(expected_assets)-seen)
+    normalized.sort(key=lambda x:x["asset"])
+    proof=hashlib.sha256(_canonical(["NARUV_KEY_RETIREMENT_REVIEW_V1",tenant,old_key_id,new_key_id,
+        inventory_sha256,sorted(expected_assets),normalized])).hexdigest()
+    return {"status":"BLOCKED" if missing or blocked else "EVIDENCE_REVIEW_ONLY",
+            "missing_assets":missing,"blocked_assets":sorted(blocked),"review_sha256":proof,
+            "key_retirement_authorized":False,"production_authorized":False}

@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "62f08302281d98bf63d7742d21ee9a9af4b29dfe",
+      "sha": "9698268d2e72e5117c0c36ea2dbc35494fcbbc3d",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "d0e0f512ba5eb309a72eb8495a551601e580d978",
+      "sha": "01f94e1aade856165e928537cd71fffb40ce43f8",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "58a05d8c346be15f6273d4d7423cb7c3933ea7c5",
+      "sha": "4ba3a88fbbe749426ea14b93666549b084cf850e",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "47f89e90d9042c725a73b808c253da9ef8041da0",
+      "sha": "5e9be1df5dd1b3b6c5e27468cf6638e52f67c28e",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8688,5 +8688,9 @@
   "expanded_table_and_provider_scope": {
     "parent": "f4d9d081cb2b253fc0d20db94ef11674b5a28844",
     "reason": "Append official PDF pages 17–18 (52 bands/572 cells, preserve prior lookup proofs), check workspace, repo, suspend and free plan against actual Render metadata shape; no hosted deployment or statutory certification."
+  },
+  "extended_table_and_key_retirement_review": {
+    "parent": "34e9cecd0d8242e192e729cb3d3aed12ecf18033",
+    "reason": "Official PDF pages 19-20 52 bands 572 cells; independent inventory coverage and old-key archive refusal screen, no actual key retirement."
   }
 }
