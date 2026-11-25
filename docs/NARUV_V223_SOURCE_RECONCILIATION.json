@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "cfb13d4fc0bf4004ae22c701ac5d7ed087df1afa",
+      "sha": "1a0fb8a515228921431b4e170dc568bd8f4849d5",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8490,7 +8490,7 @@
       "mode": "100644"
     },
     "scripts/naruv_workspace_browser_ci.py": {
-      "sha": "78a7e872d61239272c19299c0aebe4239a28c165",
+      "sha": "95d69a80f24189b49f4883b7e4f126238e967309",
       "mode": "100644"
     },
     "app/naruv_workspace/hr-pilot.html": {
@@ -8571,5 +8571,9 @@
   "combined_quote_composition_correction": {
     "parent": "b7d57c494b9a93ee6f0c715df603faea3b7b956c",
     "reason": "CI 45621356993 all five PG rounds failed same 404 on V92 quote create in freshly composed ERP-only app. Register existing guarded V92 writer after NARUV namespace reservation, assert route manifest; no bypass, no mocked quote or changed expected status. Both real HTTPS browser markers passed round 1."
+  },
+  "real_https_read_metrics": {
+    "parent": "b2cf2218f03419e7e6bf2df00c61abedf22e7524",
+    "reason": "Add 64 actual TCP HTTPS requests with trusted loopback CA, eight concurrency, five missing/cross-origin/CSRF negatives and four post-load exact equality reads; no production or DB TLS claim."
   }
 }

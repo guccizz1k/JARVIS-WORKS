@@ -1,12 +1,66 @@
 """Actual loopback HTTPS Chromium using both synthetic HttpOnly sessions and PG17.
 Never runs outside an ephemeral Actions runner. No ignored certificate errors.
 """
-import os,socket,tempfile,threading,time
+import os,socket,tempfile,threading,time,ssl,math
+from concurrent.futures import ThreadPoolExecutor
+import httpx
 from pathlib import Path
 import uvicorn
 from playwright.sync_api import sync_playwright, expect
 from app import pg_cinema_cutover_front_v223 as cut
 from scripts.ci_v93_https_pg_browser import _ssl_files
+
+def verify_network_reads(origin,cert,legacy_token,pg_token):
+    """Actual HTTPS socket, CA/SAN verification, synthetic read-only workload.
+
+    Existing disposable PG connection seam remains; this is not a hosted or
+    database-TLS benchmark. No session, raw responses, or secret values logged.
+    """
+    from urllib.parse import urlsplit
+    url=urlsplit(origin)
+    if (os.getenv("GITHUB_ACTIONS")!="true" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE"
+        or url.scheme!="https" or url.hostname!="127.0.0.1" or url.username is not None
+        or url.path or url.query or url.fragment or not url.port):
+        raise RuntimeError("NARUV_NETWORK_ISOLATION_REQUIRED")
+    context=ssl.create_default_context(cafile=str(cert))
+    root="/api/naruv-review/v1"
+    paths=[root+"/valuation/overview",root+"/valuation/audit",root+"/drafts/payroll/worker-1/2026-11",root+"/drafts/documents/shared"]
+    cookie={cut.LEGACY_COOKIE:legacy_token,cut.PG_COOKIE:pg_token}
+    with httpx.Client(base_url=origin,verify=context,trust_env=False,follow_redirects=False,timeout=12,
+                      limits=httpx.Limits(max_connections=8,max_keepalive_connections=8)) as client:
+        me=client.get("/api/pg-stage/v90/me",cookies=cookie)
+        assert me.status_code==200
+        csrf=me.json()["csrf_token"]
+        h={"Origin":origin,"X-JW-PG-CSRF":csrf}
+        expected={}
+        for path in paths:
+            r=client.post(path,headers=h,cookies=cookie)
+            assert r.status_code==200
+            expected[path]=r.json()
+        # No cookie, single cookie, hostile origin, malformed CSRF.
+        for supplied,headers,code in (
+            ({},h,401),({cut.PG_COOKIE:pg_token},h,401),({cut.LEGACY_COOKIE:legacy_token},h,401),
+            (cookie,dict(h,Origin="https://invalid.example"),403),
+            (cookie,dict(h,**{"X-JW-PG-CSRF":"invalid"}),403)):
+            assert client.post(paths[0],headers=headers,cookies=supplied).status_code==code
+        def measure(path):
+            start=time.perf_counter()
+            r=client.post(path,headers=h,cookies=cookie)
+            elapsed=(time.perf_counter()-start)*1000
+            assert r.status_code==200 and r.json()==expected[path],"NARUV_NETWORK_RESPONSE_DRIFT"
+            return elapsed
+        start=time.perf_counter()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            samples=sorted(pool.map(measure,paths*16))
+        elapsed=time.perf_counter()-start
+        assert len(samples)==64
+        for path in paths:
+            r=client.post(path,headers=h,cookies=cookie)
+            assert r.status_code==200 and r.json()==expected[path],"NARUV_NETWORK_POST_LOAD_DRIFT"
+        p95=samples[math.ceil(len(samples)*.95)-1]
+        p99=samples[math.ceil(len(samples)*.99)-1]
+        print(f"NARUV_REAL_HTTPS_READ_METRICS n=64 concurrency=8 p95_ms={p95:.2f} p99_ms={p99:.2f} max_ms={samples[-1]:.2f} rps={64/elapsed:.2f}",flush=True)
+        print("NARUV_REAL_HTTPS_READ_PASS 64 exact responses, 5 access denials, 4 unchanged post-load reads",flush=True)
 
 def verify_browser(app,legacy_token,pg_token,*,hr_pilot=False):
     if os.getenv("GITHUB_ACTIONS")!="true" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE" or os.getenv("NARUV_WORKSPACE_BROWSER")!="EPHEMERAL_ONLY":
@@ -25,6 +79,7 @@ def verify_browser(app,legacy_token,pg_token,*,hr_pilot=False):
                 if not thread.is_alive():raise RuntimeError("BROWSER_SERVER_STOPPED")
                 time.sleep(.1)
             else:raise RuntimeError("BROWSER_SERVER_TIMEOUT")
+            verify_network_reads(origin,cert,legacy_token,pg_token)
             with sync_playwright() as pw:
                 # Ubuntu 24.04 has a vendor Chrome AppArmor profile. Use the
                 # runner's installed stable browser; never relax kernel policy,

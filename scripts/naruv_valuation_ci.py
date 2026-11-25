@@ -1131,6 +1131,12 @@ finally:c.close()
                     hr_marker="NARUV_HR_PILOT_REAL_BROWSER_PASS confirmed writes, review, gross draft, archive, historical read"
                     self.assertEqual(done.stdout.splitlines().count(hr_marker),1)
                     print(hr_marker,flush=True)
+                    network_marker="NARUV_REAL_HTTPS_READ_PASS 64 exact responses, 5 access denials, 4 unchanged post-load reads"
+                    self.assertEqual(done.stdout.splitlines().count(network_marker),1)
+                    network_metrics=[line for line in done.stdout.splitlines() if line.startswith("NARUV_REAL_HTTPS_READ_METRICS ")]
+                    self.assertEqual(len(network_metrics),1)
+                    print(network_metrics[0],flush=True)
+                    print(network_marker,flush=True)
         def test_cost_document_manual_registration_and_isolation(self):
             import base64,json
             path="/drafts/documents/manual-doc";raw=b"%PDF-1.7 synthetic opaque fixture"
