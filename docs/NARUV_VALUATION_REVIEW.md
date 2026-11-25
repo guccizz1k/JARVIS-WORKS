@@ -11,3 +11,6 @@ Adds one immutable balanced debit/credit pair per nonzero cost entry, and a zero
 
 ## Whole billed fulfillment return candidate
 Unpaid single original fulfillment only; exact original sale cost restoration and purchase return only if current moving-average withdrawal equals original cost. Original warehouse, explicit confirmation, tenant lock, immutable original and credit event, original VAT reversal, no duplicate credit, no new payment after credit. Stock, cost journal, credit and finance journal share a transaction. Six additional PG17 cases. No partial returns, refund, damaged/serial stock, changed purchase cost variance, actual tax invoice, real ERP or production authorization. 
+
+## Current-state tenant audit candidate
+Reconciles stock quantity, cost entry/journal completeness, expected account pairs, total inventory value, zero material-only WIP and each billed fulfillment (including full credits). Read-only; maximum 1000 bills and existing statement/lock timeout, not a complete historical replay or statutory trial balance. Three added cases, including intentional value corruption detection. Integrated recovery and independent QA remain outstanding. 

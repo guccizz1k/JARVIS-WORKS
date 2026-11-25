@@ -335,8 +335,31 @@ def run_valuation(base):
                     c.execute("DROP TRIGGER fail_credit ON naruv_finance.events")
                     c.execute("DROP FUNCTION naruv_finance.fail_credit()")
             self.return_bill()
+        def audit_ledger(self,who="A",code=200):
+            return self.check(self.call("/valuation/audit",who=who),code)
+        def test_cost_audit_integrated_tenant_returns(self):
+            self.billed_purchase()
+            self.assertEqual(self.audit_ledger()["inventory_krw"],"303")
+            self.return_bill()
+            a=self.audit_ledger();self.assertEqual((a["inventory_krw"],a["journal_inventory_krw"],a["wip_krw"],a["bill_count"]),("0","0","0",1))
+            self.seed_cost("B");self.receive("other","0001",2,25,"B")
+            self.assertEqual(self.audit_ledger("B")["inventory_krw"],"50")
+            self.assertEqual(self.audit_ledger(),a)
+        def test_cost_audit_detects_balance_tampering(self):
+            self.billed_purchase()
+            with psycopg.connect(fixture.root_dsn) as c:
+                c.execute("UPDATE naruv_valuation.balances SET value_krw=value_krw+1 WHERE org_id='ci-a'")
+            try:self.audit_ledger(code=503)
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    c.execute("UPDATE naruv_valuation.balances SET value_krw=value_krw-1 WHERE org_id='ci-a'")
+            self.assertEqual(self.audit_ledger()["status"],"RECONCILED")
+        def test_cost_audit_production_transfer(self):
+            self.ready_cost_prod();self.complete(3);self.manual("transfer","0003","W1","W2",1)
+            a=self.audit_ledger()
+            self.assertEqual((a["inventory_krw"],a["journal_inventory_krw"],a["wip_krw"]),("1520","1520","0"))
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=27:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=30:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=27 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 27 isolated PG17 cost, reconciliation, posting and return cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=30 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 30 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

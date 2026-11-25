@@ -344,6 +344,42 @@ BEGIN
  PERFORM naruv_valuation.reconcile_bill(p_bill,p_csrf);
  RETURN r;
 END $$;
+-- Whole-tenant current-state audit. Bounded synchronous review, never a repair.
+CREATE FUNCTION naruv_valuation.audit_ledger(p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; a2 record; n bigint; bill record; stock_value numeric; journal_value numeric; wip numeric;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256) IS DISTINCT FROM
+ (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ SELECT count(*) INTO n FROM naruv_finance.bills b WHERE b.org_id=a.org_id;
+ IF n>1000 THEN RAISE EXCEPTION 'COST_CAPACITY'; END IF;
+ IF EXISTS(SELECT 1 FROM naruv_inventory.balances b LEFT JOIN naruv_valuation.balances v
+ ON (b.org_id,b.source_id,b.normalized_id,b.warehouse_id)=(v.org_id,v.source_id,v.item_id,v.warehouse_id)
+ WHERE b.org_id=a.org_id AND b.quantity<>coalesce(v.quantity,0))
+ OR EXISTS(SELECT 1 FROM naruv_inventory.movements m LEFT JOIN naruv_valuation.entries e
+ ON (m.org_id,m.request_id)=(e.org_id,e.movement_id)
+ LEFT JOIN naruv_valuation.cost_journals j ON (e.org_id,e.movement_id)=(j.org_id,j.movement_id)
+ WHERE m.org_id=a.org_id AND (e.movement_id IS NULL OR j.movement_id IS NULL))
+ OR EXISTS(SELECT 1 FROM naruv_valuation.entries e JOIN naruv_valuation.cost_journals j USING(org_id,movement_id)
+ JOIN naruv_inventory.movements m ON (m.org_id,m.request_id)=(e.org_id,e.movement_id)
+ CROSS JOIN LATERAL naruv_valuation.expected_posting(e.kind,e.amount_krw) x
+ WHERE e.org_id=a.org_id AND (j.debit_account,j.credit_account,j.amount_krw,j.period_start)
+ IS DISTINCT FROM (x.dr,x.cr,x.amount,date_trunc('month',m.created_at AT TIME ZONE 'Asia/Seoul')::date))
+ THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ SELECT coalesce(sum(value_krw),0) INTO stock_value FROM naruv_valuation.balances WHERE org_id=a.org_id;
+ SELECT coalesce(sum(CASE WHEN debit_account='INVENTORY' THEN amount_krw WHEN credit_account='INVENTORY' THEN -amount_krw ELSE 0 END),0),
+ coalesce(sum(CASE WHEN debit_account='WIP' THEN amount_krw WHEN credit_account='WIP' THEN -amount_krw ELSE 0 END),0)
+ INTO journal_value,wip FROM naruv_valuation.cost_journals WHERE org_id=a.org_id;
+ IF stock_value<>journal_value OR wip<>0 THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+ FOR bill IN SELECT bill_id FROM naruv_finance.bills WHERE org_id=a.org_id ORDER BY bill_id LOOP
+  PERFORM naruv_valuation.reconcile_bill(bill.bill_id,p_csrf);
+ END LOOP;
+ RETURN jsonb_build_object('inventory_krw',stock_value::text,'journal_inventory_krw',journal_value::text,
+ 'wip_krw',wip::text,'bill_count',n,'status','RECONCILED','production_authorized',false,'statutory_posted',false);
+END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_valuation FROM PUBLIC,jw_app_dev,naruv_native_stage;
-GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text),naruv_valuation.return_bill(text,text,boolean,text) TO jw_app_dev;
+GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text),naruv_valuation.return_bill(text,text,boolean,text),naruv_valuation.audit_ledger(text) TO jw_app_dev;
 RESET ROLE;
