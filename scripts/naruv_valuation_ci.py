@@ -755,8 +755,54 @@ def run_valuation(base):
                 with psycopg.connect(fixture.root_dsn) as c:
                     self.assertEqual(c.execute("UPDATE naruv_draft.attendance SET regular=regular-1 WHERE org_id='ci-a' AND worker_id='worker-1' AND period='2026-11' AND work_day='2026-11-25'").rowcount,1)
             self.assertEqual(self.check(self.call(path),200),before)
+        def test_cost_hr_setup_end_to_end_new_worker(self):
+            path="/hr/workers/new-worker"
+            first=self.check(self.call(path+"/register/setup-new"),200)
+            self.assertEqual(first,self.check(self.call(path+"/register/setup-new"),200))
+            self.check(self.call(path+"/register/another"),409)
+            self.check(self.call(path+"/inspect",who="B"),404)
+            policy={"revision":"new-policy","hourly_krw":15000,"additional_bps":15000}
+            pp=path+"/periods/2026-07"
+            self.check(self.call(pp+"/create/setup-period",policy,who="B"),404)
+            created=self.check(self.call(pp+"/create/setup-period",policy),200)
+            self.assertEqual(created,self.check(self.call(pp+"/create/setup-period",policy),200))
+            self.check(self.call(pp+"/create/setup-period",dict(policy,hourly_krw=15001)),409)
+            self.check(self.call(pp+"/create/other-period",policy),409)
+            self.assertEqual(self.check(self.call(path+"/inspect"),200)["periods"],[{"period":"2026-07","revision":"new-policy","confirmed":False}])
+            self.hr_admit("new-att",day="2026-07-01",period="2026-07",worker="new-worker",a=60,b=0)
+            review=self.check(self.call(pp+"/review"),200)
+            self.check(self.call(pp+"/confirm/new-confirm",{"review_sha256":review["review_sha256"]}),200)
+            self.assertEqual(self.check(self.call("/drafts/payroll/new-worker/2026-07"),200)["gross_krw"],15000)
+            self.check(self.call(pp+"/create/overwrite",dict(policy,hourly_krw=1)),409)
+            self.assertTrue(self.check(self.call(path+"/inspect"),200)["periods"][0]["confirmed"])
+        def test_cost_hr_setup_invalid_scope_and_concurrent_retry(self):
+            path="/hr/workers/setup-parallel"
+            self.check(self.call(path+"/register/no-confirm",extra={"x-naruv-confirm":"no"}),422)
+            self.check(self.call(path+"/register/bad-origin",extra={"origin":"https://evil.test"}),403)
+            self.check(self.call(path+"/inspect"),404)
+            barrier=threading.Barrier(3)
+            def submit(_):
+                barrier.wait(timeout=10)
+                return self.check(self.call(path+"/register/setup-same"),200)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+                results=list(pool.map(submit,range(3)))
+            self.assertTrue(all(r==results[0] for r in results))
+            self.check(self.call("/hr/workers/other-worker/register/setup-same"),409)
+            self.check(self.call(path+"/register/setup-same",who="B"),200)
+            for period,rate in (("2026-13",100),("0000-01",100),("2026-07",True),("2026-07",0)):
+                self.check(self.call(path+"/periods/"+period+"/create/bad-policy",{"revision":"r1","hourly_krw":rate,"additional_bps":15000}),422)
+            self.assertEqual(self.check(self.call(path+"/inspect"),200)["periods"],[])
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.setup_receipts WHERE org_id='ci-a' AND request_id='setup-same'").fetchone()[0],1)
+        def test_cost_hr_setup_direct_grants(self):
+            with psycopg.connect(fixture.root_dsn) as c:
+                for role in ("jw_app_dev","naruv_native_stage"):
+                    for table in ("staff","pay_periods","setup_receipts"):
+                        for privilege in ("INSERT","UPDATE","DELETE"):
+                            self.assertFalse(c.execute("SELECT has_table_privilege(%s,%s,%s)",(role,"naruv_draft."+table,privilege)).fetchone()[0])
+                self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.setup_worker(text,text,text,text,bigint,int,boolean,text)','EXECUTE')").fetchone()[0])
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=61:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=64:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=61 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 61 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=64 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 64 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
