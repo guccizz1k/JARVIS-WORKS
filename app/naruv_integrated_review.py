@@ -1,7 +1,8 @@
 """Explicit, atomic composition of the isolated ERP routes; no legacy app mount."""
 import os
 import re
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from starlette.routing import Mount
 from . import (
     naruv_native_file_preview as preview, naruv_native_write_review as write,
     naruv_inventory_review as inventory, naruv_trade_review as trade,
@@ -27,10 +28,13 @@ def route_key(route):
     methods=getattr(route,"methods",None) or {"WEBSOCKET"}
     return {(method,shape) for method in methods}
 
+def require_integrated_gate():
+    if not enabled():raise HTTPException(404,"NARUV_INTEGRATION_DISABLED")
+
 def create_integrated_router():
     if not enabled():raise RuntimeError("NARUV_INTEGRATION_DISABLED")
     v90._origins()
-    combined=APIRouter()
+    combined=APIRouter(dependencies=[Depends(require_integrated_gate)])
     seen=set()
     for module in MODULES:
         router=module.create_router()
@@ -54,7 +58,9 @@ def register_integrated_review(app):
         path=getattr(route,"path","")
         if path==PREFIX or path.startswith(PREFIX+"/"):
             raise RuntimeError("NARUV_INTEGRATION_NAMESPACE_OCCUPIED")
-        if "{path:path}" in path or "{full_path:path}" in path:
+        if isinstance(route,Mount) and (not path or PREFIX.startswith(path.rstrip("/")+"/")):
+            raise RuntimeError("NARUV_INTEGRATION_NAMESPACE_OCCUPIED")
+        if re.search(r"\{[^{}:]+:path\}",path):
             # An earlier catch-all could shadow the whole API.
             raise RuntimeError("NARUV_INTEGRATION_CATCH_ALL")
     app.include_router(combined)

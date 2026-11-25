@@ -3,6 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 from fastapi import FastAPI, APIRouter
+from fastapi.testclient import TestClient
 from app import naruv_integrated_review as mod
 
 FLAGS={
@@ -70,3 +71,22 @@ class IntegratedReview(unittest.TestCase):
         before=tuple(app.routes)
         with self.assertRaisesRegex(RuntimeError,"CATCH_ALL"):mod.register_integrated_review(app)
         self.assertEqual(tuple(app.routes),before)
+    def test_runtime_gate_shutdown_blocks_all_mounted_routes(self):
+        app=FastAPI();self.assertTrue(mod.register_integrated_review(app))
+        with TestClient(app,base_url="https://testserver") as c:
+            for key in (mod.FLAG,"NARUV_FINANCE_REVIEW"):
+                with patch.dict(os.environ,{key:""}):
+                    r=c.post(mod.PREFIX+"/valuation/overview")
+                    self.assertEqual((r.status_code,r.json()["detail"]),(404,"NARUV_INTEGRATION_DISABLED"))
+                    r=c.post(mod.PREFIX+"/sources/source-a/item/csv/preview")
+                    self.assertEqual((r.status_code,r.json()["detail"]),(404,"NARUV_INTEGRATION_DISABLED"))
+    def test_arbitrary_catchall_and_parent_mount_refused(self):
+        for mounted in (False,True):
+            app=FastAPI()
+            if mounted:app.mount("/api",FastAPI())
+            else:
+                @app.post("/{remaining:path}")
+                def fallback(remaining:str):return {}
+            before=tuple(app.routes)
+            with self.assertRaises(RuntimeError):mod.register_integrated_review(app)
+            self.assertEqual(tuple(app.routes),before)

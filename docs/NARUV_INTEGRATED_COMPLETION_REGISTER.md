@@ -37,3 +37,6 @@ CI 45593989469 failed all five rounds at snapshot column ACL expansion (InvalidP
 
 ## Next isolated route composition candidate
 Adds a default-off all-or-none router for existing 29 ERP endpoints, no live entrypoint edits. Requires every original isolated gate, HTTPS Origin, rejects production, namespace occupancy, route collisions and catch-all shadowing. Seven composition cases added; CI execution not yet proven. Does not integrate actual deployed UI, HR/payroll, external DB or bank. Candidate is intentionally separate from pending restore-fix branch to avoid cancelling active CI.
+
+## Verified recovery baseline and integrated router HTTP proof candidate
+28a478bd89a1c6b2fb9e0e66915c65e871bb33ae: required CI 45594573594 and isolated CI 45594573626 both success (21/21 jobs). Round 1 logs: 43 restored tables, archive digest, login disabled and 44/44 valuation cases. All five independent integrated restores succeeded. Preserve this baseline. New composition candidate adds global runtime gate and parent mount/catchall refusal, nine route construction tests and two actual PG17 HTTP scenarios using the newly composed app (purchase, paid return, variance, tenant overview, rollback on global disable). No legacy entrypoint mount; actual production deployment remains blocked.

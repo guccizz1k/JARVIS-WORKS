@@ -516,8 +516,40 @@ def run_valuation(base):
             self.check(self.call("/valuation/overview"),200)
             os.environ.pop("NARUV_VALUATION_REVIEW",None)
             self.check(self.call("/valuation/overview"),404)
+        def test_cost_integrated_router_purchase_refund_and_overview(self):
+            from app import naruv_integrated_review as integrated
+            from unittest.mock import patch
+            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK}):
+                self.app=FastAPI()
+                self.assertTrue(integrated.register_integrated_review(self.app))
+                self.billed_purchase();self.receive("other","0001",3,201)
+                self.fin("pay","paid",{"amount":333,"reference":"paid-ref"},bill="bill")
+                result=self.adjusted_return("r",3,"refund-ref")
+                self.assertEqual((result["refund_recorded_krw"],result["purchase_cost_variance_krw"]),("333","-150"))
+                self.assertEqual(self.adjusted_return("r",3,"refund-ref"),result)
+                a=self.check(self.call("/valuation/overview"),200)
+                self.assertEqual((a["inventory_krw"],a["payable_krw"],a["purchase_paid_krw"]),("453","0","0"))
+                self.seed_cost("B");self.receive("other","0001",2,25,"B")
+                b=self.check(self.call("/valuation/overview",who="B"),200)
+                self.assertEqual((b["inventory_krw"],b["purchase_bill_count"]),("50",0))
+                self.reconcile("bill",who="B",code=404)
+                self.assertEqual(self.check(self.call("/valuation/overview"),200),a)
+        def test_cost_integrated_router_runtime_shutdown(self):
+            from app import naruv_integrated_review as integrated
+            from unittest.mock import patch
+            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK}):
+                self.app=FastAPI()
+                self.assertTrue(integrated.register_integrated_review(self.app))
+                self.billed_purchase()
+                before=self.value()
+                with patch.dict(os.environ,{integrated.FLAG:""}):
+                    self.check(self.call("/valuation/overview"),404)
+                    self.adjusted_return("blocked",1,code=404)
+                self.assertEqual(self.value(),before)
+                self.check(self.call("/valuation/overview",extra={"origin":"https://evil.test"}),403)
+                self.check(self.call("/valuation/overview"),200)
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=44:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=46:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=44 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 44 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=46 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 46 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
