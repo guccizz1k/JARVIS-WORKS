@@ -10,5 +10,7 @@ This engineering-only record supplements AGENTS.md, approved J1–J6 and existin
 - Preserve main, live data, original UI, existing services, backup originals and recovery keys; respect explicit authorization for remote mutations, security changes and deployment. No secrets or personal data in public repository.
 - Final report: actual changes, root causes, evidence, 5-Gate results, limitations, next priorities, whether external AI is needed. If needed ask the owner first. No independent AI, deployment or runtime claims without proof.
 
+- Owner direction 2026-11-26: each next-development command means the complete latest highest-priority integrated list, all safely executable items in one batch, fix failures at root and preserve valid prior evidence. If one item is blocked, continue independent work. Always obtain explicit approval BEFORE any paid service, subscription, resource creation or charge; do not interpret ordinary development approval as spending approval. No changes to existing release, security or own-AI authorization boundaries.
+
 ## Resume
 Open draft PR #164 and read docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md. Determine actual detached source from .github/workflows/naruv-v223-detached-preflight.yml, verify inventory in docs/NARUV_V223_SOURCE_RECONCILIATION.json. Read latest workflow runs, jobs, logs; current state is deliberately not frozen here. Preserve existing governance, review branch and production protection.
