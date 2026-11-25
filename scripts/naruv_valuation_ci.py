@@ -681,8 +681,25 @@ def run_valuation(base):
                 self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.admit_attendance(text,text,text,text,int,int,boolean,text)','EXECUTE')").fetchone()[0])
             with patch.dict(os.environ,{hr.FLAG:""}):
                 self.hr_admit("hr-disabled",code=404)
+        def test_cost_hr_full_router_no_ledger_mutation(self):
+            from app import naruv_integrated_review as integrated
+            from unittest.mock import patch
+            with patch.dict(os.environ,{integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK,integrated.hr.FLAG:integrated.ACK}):
+                self.app=FastAPI()
+                self.assertTrue(integrated.register_integrated_review(self.app,include_drafts=True,include_hr=True))
+                self.billed_purchase()
+                before=self.check(self.call("/valuation/overview"),200)
+                first=self.hr_admit("hr-integrated",day="2026-10-03")
+                self.assertEqual(first,self.hr_admit("hr-integrated",day="2026-10-03"))
+                self.hr_admit("hr-integrated",day="2026-10-03",who="B",a=240)
+                self.assertEqual(self.check(self.call("/valuation/overview"),200),before)
+                self.check(self.call("/drafts/payroll/worker-1/2026-10"),404)
+                with patch.dict(os.environ,{integrated.hr.FLAG:""}):
+                    self.hr_admit("hr-blocked",day="2026-10-04",code=404)
+                    self.check(self.call("/valuation/overview"),404)
+                self.assertEqual(self.check(self.call("/valuation/overview"),200),before)
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=56:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=57:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=56 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 56 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=57 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 57 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

@@ -141,3 +141,28 @@ class IntegratedReview(unittest.TestCase):
         with patch.dict(os.environ,{mod.drafts.FLAG:mod.ACK}):
             self.assertTrue(mod.register_integrated_review(app))
             self.assertNotIn(mod.PREFIX+"/drafts/documents/{key}",app.openapi()["paths"])
+    def test_hr_full_manifest_and_gate(self):
+        with patch.dict(os.environ,{mod.drafts.FLAG:mod.ACK,mod.hr.FLAG:mod.ACK}):
+            app=FastAPI()
+            self.assertTrue(mod.register_integrated_review(app,include_drafts=True,include_hr=True))
+            paths={p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")}
+            self.assertEqual(len(paths),32)
+            self.assertIn(mod.PREFIX+"/hr/workers/{worker}/periods/{period}/attendance/{rid}",paths)
+            with TestClient(app,base_url="https://testserver") as c:
+                for key in (mod.FLAG,mod.drafts.FLAG,mod.hr.FLAG):
+                    with patch.dict(os.environ,{key:""}):
+                        for path in sorted(paths):
+                            concrete=re.sub(r"\{[^}]+\}","probe",path)
+                            if "/drafts/payroll/" in concrete:concrete=concrete.rsplit("/",1)[0]+"/2026-11"
+                            r=c.post(concrete)
+                            self.assertEqual((r.status_code,r.json().get("detail")),(404,"NARUV_INTEGRATION_DISABLED"),concrete)
+    def test_hr_requires_drafts_and_explicit_gate(self):
+        app=FastAPI();before=tuple(app.routes)
+        with patch.dict(os.environ,{mod.hr.FLAG:mod.ACK,mod.drafts.FLAG:mod.ACK}):
+            self.assertFalse(mod.register_integrated_review(app,include_hr=True))
+            self.assertEqual(tuple(app.routes),before)
+        with patch.dict(os.environ,{mod.drafts.FLAG:mod.ACK}):
+            self.assertFalse(mod.register_integrated_review(app,include_drafts=True,include_hr=True))
+            self.assertEqual(tuple(app.routes),before)
+            self.assertTrue(mod.register_integrated_review(app,include_drafts=True))
+            self.assertEqual(len([p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")]),31)
