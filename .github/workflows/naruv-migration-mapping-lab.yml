@@ -11,6 +11,8 @@ on:
       - tests/test_erp_migration_preflight.py
       - app/erp_migration_approval.py
       - tests/test_erp_migration_approval.py
+      - db/review/naruv_approval_pg17_lab.sql
+      - scripts/naruv_approval_pg17_lab.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -93,3 +95,37 @@ jobs:
           PY
           done
           echo 'NARUV_APPROVAL_LAB_PASS 5 rounds; process-local reservation only; no import authority'
+
+  approval-pg17-lab:
+    name: NARUV disposable PG17 approval transaction lab
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: naruv-ci-root-fixture
+          POSTGRES_DB: naruv_approval_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d naruv_approval_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 8
+    env:
+      NARUV_APPROVAL_PG_ALLOW: ONLY_DISPOSABLE_CI
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing pinned PG driver
+        run: python -m pip install -r requirements-pg-stage.txt
+      - name: Run isolated PostgreSQL17 approval tests
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python -m py_compile scripts/naruv_approval_pg17_lab.py
+          python -m scripts.naruv_approval_pg17_lab
