@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: 58886f05bd113355ca67bf9e0d9444a945d25b08
+      EXPECTED_SOURCE: b2cf2218f03419e7e6bf2df00c61abedf22e7524
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 58886f05bd113355ca67bf9e0d9444a945d25b08
+          ref: b2cf2218f03419e7e6bf2df00c61abedf22e7524
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -53,7 +53,7 @@ jobs:
             tests/test_v223_owner_approved_ui_pin.py tests/test_v223_owner_visual_server.py \
             tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_v223_cookie_boundary.py \
             tests/test_naruv_integrated_review.py tests/test_naruv_document_payroll.py \
-            tests/test_naruv_kr_payroll_review.py tests/test_naruv_v223_read_bridge.py
+            tests/test_naruv_kr_payroll_review.py tests/test_naruv_v223_read_bridge.py tests/test_naruv_hr_profile_envelope.py
           python - <<'PY'
           from pathlib import Path
           import os,xml.etree.ElementTree as ET
@@ -98,7 +98,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: 58886f05bd113355ca67bf9e0d9444a945d25b08
+      EXPECTED_SOURCE: b2cf2218f03419e7e6bf2df00c61abedf22e7524
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -106,7 +106,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 58886f05bd113355ca67bf9e0d9444a945d25b08
+          ref: b2cf2218f03419e7e6bf2df00c61abedf22e7524
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
