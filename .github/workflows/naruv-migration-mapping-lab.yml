@@ -20,6 +20,8 @@ on:
       - scripts/naruv_recovery_pg17_lab.py
       - scripts/naruv_backup_restore_pg17_lab.py
       - scripts/naruv_independent_restore_pg17_lab.py
+      - app/erp_migration_csv.py
+      - tests/test_erp_migration_csv.py
       - .github/workflows/naruv-migration-mapping-lab.yml
 permissions:
   contents: read
@@ -102,6 +104,22 @@ jobs:
           PY
           done
           echo 'NARUV_APPROVAL_LAB_PASS 5 rounds; process-local reservation only; no import authority'
+
+      - name: CSV byte input and existing preflight integration
+        run: |
+          set -euo pipefail
+          python -m py_compile app/erp_migration_csv.py tests/test_erp_migration_csv.py
+          for seed in 17 101 617 2027 65537; do
+            NARUV_TEST_SEED="$seed" PYTHONHASHSEED="$seed" python - <<'PY'
+          import os, unittest
+          suite=unittest.defaultTestLoader.loadTestsFromName("tests.test_erp_migration_csv")
+          result=unittest.TextTestRunner(verbosity=1).run(suite)
+          if not result.wasSuccessful() or result.testsRun != 14 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:
+              raise SystemExit(1)
+          print("NARUV_CSV_ROUND_PASS",os.environ["NARUV_TEST_SEED"],"14 cases; 100 varied CSV oracle comparisons; 300 negative controls")
+          PY
+          done
+          echo 'NARUV_CSV_LAB_PASS 5 rounds; existing preflight reused; no import authority'
 
   approval-pg17-lab:
     name: NARUV disposable PG17 approval transaction lab
