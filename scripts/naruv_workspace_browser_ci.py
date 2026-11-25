@@ -26,7 +26,13 @@ def verify_browser(app,legacy_token,pg_token):
                 time.sleep(.1)
             else:raise RuntimeError("BROWSER_SERVER_TIMEOUT")
             with sync_playwright() as pw:
-                browser=pw.chromium.launch(headless=True,chromium_sandbox=True)
+                # Ubuntu 24.04 has a vendor Chrome AppArmor profile. Use the
+                # runner's installed stable browser; never relax kernel policy,
+                # use --no-sandbox, or disable certificate validation.
+                chrome=Path("/opt/google/chrome/chrome")
+                if not chrome.is_file() or not os.access(chrome,os.X_OK):
+                    raise RuntimeError("SUPPORTED_SANDBOX_BROWSER_MISSING")
+                browser=pw.chromium.launch(executable_path=str(chrome),headless=True,chromium_sandbox=True)
                 try:
                     ctx=browser.new_context(viewport={"width":1440,"height":900},ignore_https_errors=False)
                     try:

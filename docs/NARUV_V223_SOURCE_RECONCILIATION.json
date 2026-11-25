@@ -8490,7 +8490,7 @@
       "mode": "100644"
     },
     "scripts/naruv_workspace_browser_ci.py": {
-      "sha": "a5e4831b85c3edf3adaa13f79eac13112842aa79",
+      "sha": "5afbf5a3b59c199424045cdba756698f437ea4e3",
       "mode": "100644"
     }
   },
@@ -8506,5 +8506,10 @@
   "workspace_extension": {
     "parent": "c88aa92698c1d2b5f3261454cf78771e2654107f",
     "reason": "Separate opt-in PC review workspace, real browser test on disposable dual-session fixture. Original UI untouched."
+  },
+  "browser_environment_correction": {
+    "parent": "07642339114582e1483627f23600970ad339d291",
+    "source": "https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md",
+    "reason": "Use installed stable Chrome supported by Ubuntu AppArmor; sandbox and TLS verification remain enabled."
   }
 }
