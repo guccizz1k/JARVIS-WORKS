@@ -47,3 +47,32 @@ class HRProfileEnvelope(unittest.TestCase):
         self.assertEqual(sql.count("END $$;"),2)
         self.assertIn("IF p_expected !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' OR p_expected=p_revision THEN",sql)
         self.assertTrue(sql.rstrip().endswith("RESET ROLE;"))
+
+
+    def test_rotation_helper_key_reuse_tamper_and_recovery(self):
+        from app.naruv_hr_profile_envelope import rotate_profile
+        a=seal_profile(**self.scope,profile=self.profile)
+        args=dict(tenant="ci-a",worker="pilot-worker",old_revision="r1",new_revision="r2",
+                  old_key_id="test-key",new_key_id="new-key",old_key=b"x"*32,new_key=b"z"*32,envelope=a)
+        b=rotate_profile(**args)
+        self.assertEqual(open_profile(**dict(self.scope,revision="r2",key_id="new-key",key=b"z"*32),envelope=b),self.profile)
+        self.assertEqual(open_profile(**self.scope,envelope=a),self.profile)
+        for change in ({"new_key":b"x"*32},{"new_key_id":"test-key"},{"new_revision":"r1"},
+                       {"old_key":b"y"*32},{"tenant":"ci-b"},{"envelope":dict(a,nonce="!"*16)}):
+            with self.subTest(change=change),self.assertRaises(ProfileBlocked):rotate_profile(**dict(args,**change))
+
+    def test_retention_decision_boundary_and_hold(self):
+        from app.naruv_hr_profile_envelope import retention_decision
+        from datetime import datetime,timezone,timedelta
+        now=datetime(2026,11,26,tzinfo=timezone.utc)
+        args=dict(tenant="ci-a",worker="pilot-worker",revision="r1",as_of=now,purpose_closed=True,
+                  legal_review_complete=True,legal_hold=False,retain_until=now,approval_sha256="a"*64)
+        for change,expected in (({},"PURGE_CANDIDATE_ONLY"),({"purpose_closed":False},"ACTIVE_PURPOSE"),
+                ({"legal_review_complete":False},"REVIEW_REQUIRED"),({"approval_sha256":None},"REVIEW_REQUIRED"),
+                ({"legal_hold":True},"LEGAL_HOLD_SEPARATE_STORAGE_REQUIRED"),
+                ({"retain_until":now+timedelta(microseconds=1)},"RETAIN_SEPARATELY")):
+            r=retention_decision(**dict(args,**change))
+            self.assertEqual(r["status"],expected)
+            self.assertFalse(r["deletion_authorized"]);self.assertFalse(r["production_authorized"])
+        for change in ({"as_of":now.replace(tzinfo=None)},{"legal_hold":1},{"approval_sha256":"bad"}):
+            with self.assertRaises(ProfileBlocked):retention_decision(**dict(args,**change))

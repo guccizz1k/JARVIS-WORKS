@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "9ca6d1a904ad457695529b5f875df263aef94f42",
+      "sha": "473a22b4c81c882ec57b8040a3cc72c117d0904e",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "711d964d01271c59e862badf11b582408f769eb8",
+      "sha": "0bdeea309e21b3fac232b248003f57d9eb644e0a",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "f979151f031e5dab1e8658cac45f5087f68b9181",
+      "sha": "58a05d8c346be15f6273d4d7423cb7c3933ea7c5",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "12bb057b0282bdd97ab839397e52ef4e33128863",
+      "sha": "879d8449577f23e113081b90085f1bfb3cf75afe",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8655,5 +8655,9 @@
   "profile_sql_early_regression": {
     "parent": "49143ec9b45de9612361983f8247ef5bd166abd2",
     "reason": "Early source integrity regression for duplicated SQL tail and exact regex. Actual PG17 execution required."
+  },
+  "retention_rotation_tax_review": {
+    "parent": "609f5d4a5ec7617caab2b9aae177103cfbc716f8",
+    "reason": "Add decision-only HR retention policy, verified-envelope rotation helper, restricted withholding reference and regression tests. No DB purge, runtime key activation, official table lookup or production authorization."
   }
 }

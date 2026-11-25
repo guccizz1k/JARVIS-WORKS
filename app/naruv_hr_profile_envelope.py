@@ -65,3 +65,43 @@ def open_profile(*,tenant,worker,revision,key_id,key,envelope):
         return _profile(json.loads(plaintext.decode("ascii")))
     except (InvalidTag,ValueError,UnicodeError,TypeError,binascii.Error,RecursionError):
         raise ProfileBlocked("HR_PROFILE_INVALID") from None
+
+
+def rotate_profile(*,tenant,worker,old_revision,new_revision,old_key_id,new_key_id,old_key,new_key,envelope):
+    """Re-encrypt a verified envelope; caller must use transactional CAS.
+
+    Never retire a key until inventory, recovery and backup checks succeed.
+    This helper does not change any DB or key store.
+    """
+    _require(old_revision!=new_revision and old_key_id!=new_key_id
+        and type(old_key) is bytes and type(new_key) is bytes
+        and len(old_key)==len(new_key)==32 and old_key!=new_key)
+    old=dict(tenant=tenant,worker=worker,revision=old_revision,key_id=old_key_id,key=old_key)
+    new=dict(tenant=tenant,worker=worker,revision=new_revision,key_id=new_key_id,key=new_key)
+    profile=open_profile(**old,envelope=envelope)
+    rotated=seal_profile(**new,profile=profile)
+    _require(open_profile(**new,envelope=rotated)==profile)
+    return rotated
+
+def retention_decision(*,tenant,worker,revision,as_of,purpose_closed,legal_review_complete,
+                       legal_hold,retain_until,approval_sha256):
+    """Decision-only policy, never a deletion authorization.
+
+    All timestamps are timezone-aware UTC datetimes from the trusted custodian.
+    A missing assessment fails closed. No default legal retention period.
+    """
+    from datetime import datetime,timedelta
+    _require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker,revision)))
+    _require(all(type(x) is bool for x in (purpose_closed,legal_review_complete,legal_hold)))
+    _require(type(as_of) is datetime and as_of.utcoffset()==timedelta(0))
+    _require(retain_until is None or (type(retain_until) is datetime and retain_until.utcoffset()==timedelta(0)))
+    _require(approval_sha256 is None or (type(approval_sha256) is str and re.fullmatch(r"[0-9a-f]{64}",approval_sha256)))
+    if not purpose_closed:status="ACTIVE_PURPOSE"
+    elif not legal_review_complete or approval_sha256 is None:status="REVIEW_REQUIRED"
+    elif legal_hold:status="LEGAL_HOLD_SEPARATE_STORAGE_REQUIRED"
+    elif retain_until is not None and as_of<retain_until:status="RETAIN_SEPARATELY"
+    else:status="PURGE_CANDIDATE_ONLY"
+    return {"status":status,"tenant":tenant,"worker":worker,"revision":revision,
+        "requires_separate_storage":status in ("LEGAL_HOLD_SEPARATE_STORAGE_REQUIRED","RETAIN_SEPARATELY"),
+        "normal_use_allowed":status=="ACTIVE_PURPOSE","deletion_authorized":False,
+        "production_authorized":False}

@@ -126,3 +126,25 @@ class InsuranceReference2026(unittest.TestCase):
         for kw in ({"tenant":"b"},{"worker":"other"},{"period":"2026-12"},
                    {"assessment_sha256":"b"*64},{"employment_base_krw":3000001}):
             self.assertNotEqual(self.ref()["reference_sha256"],self.ref(**kw)["reference_sha256"])
+
+
+class WithholdingReference2026(unittest.TestCase):
+    def ref(self,**kw):
+        from app.naruv_kr_payroll_review import withholding_reference_2026
+        return withholding_reference_2026(**dict(dict(tenant="a",worker="w",period="2026-11",
+            table_amount_krw=100000,selection_percent=100,assessment_sha256="a"*64,
+            scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF"),**kw))
+    def test_selection_and_local_share(self):
+        for choice,national in ((80,80000),(100,100000),(120,120000)):
+            r=self.ref(selection_percent=choice)
+            self.assertEqual(r["national_exact"],{"numerator":national,"denominator":1})
+            self.assertEqual(r["local_exact"],{"numerator":national//10,"denominator":1})
+            self.assertFalse(r["statutory_validated"]);self.assertFalse(r["payment_authorized"])
+        self.assertEqual(self.ref(table_amount_krw=1,selection_percent=80)["local_exact"],{"numerator":2,"denominator":25})
+        self.assertEqual(self.ref(table_amount_krw=0)["total_exact"],{"numerator":0,"denominator":1})
+    def test_scope_input_and_evidence(self):
+        for kw in ({"period":"2027-01"},{"selection_percent":90},{"selection_percent":True},
+                   {"table_amount_krw":-1},{"table_amount_krw":1.5},{"scope":"BONUS"},{"assessment_sha256":"bad"}):
+            with self.assertRaises(PayrollBlocked):self.ref(**kw)
+        for kw in ({"tenant":"b"},{"worker":"other"},{"period":"2026-12"},{"assessment_sha256":"b"*64},{"selection_percent":80}):
+            self.assertNotEqual(self.ref()["reference_sha256"],self.ref(**kw)["reference_sha256"])

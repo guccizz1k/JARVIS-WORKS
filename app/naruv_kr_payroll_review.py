@@ -175,3 +175,28 @@ def insurance_reference_2026(*,tenant,worker,period,health_base_krw,employment_b
             "assessment":assessment_sha256,"scope":scope}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
         "unresolved":["ELIGIBILITY","RELIEF_AND_CAPS","STATUTORY_ROUNDING","ASSESSMENT_RECONCILIATION","TAX"]}
+
+
+def withholding_reference_2026(*,tenant,worker,period,table_amount_krw,selection_percent,
+                               assessment_sha256,scope):
+    """Restricted unrounded reference from externally assessed table amount.
+
+    No official table lookup, family deductions, bonus, relief, settlement,
+    minimum collection or statutory truncation. Sources: NTS guidance,
+    Income Tax Act Enforcement Decree Art.194, Local Tax Act Art.103-13.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_TAX_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_TAX_PERIOD")
+    require(scope=="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF","KR_TAX_SCOPE")
+    require(_whole(table_amount_krw,0,10**9) and type(selection_percent) is int
+            and selection_percent in (80,100,120),"KR_TAX_AMOUNT")
+    require(type(assessment_sha256) is str and HEX.fullmatch(assessment_sha256),"KR_TAX_EVIDENCE")
+    national=Fraction(table_amount_krw*selection_percent,100)
+    local=national/10
+    return {"policy":"KR_WITHHOLDING_2026_REFERENCE_V1","status":"UNROUNDED_REFERENCE_ONLY",
+        "national_exact":_money(national),"local_exact":_money(local),"total_exact":_money(national+local),
+        "reference_sha256":hash_input({"policy":"KR_WITHHOLDING_2026_REFERENCE_V1","tenant":tenant,
+            "worker":worker,"period":period,"table_amount":table_amount_krw,"selection":selection_percent,
+            "assessment":assessment_sha256,"scope":scope}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,
+        "unresolved":["OFFICIAL_TABLE_LOOKUP","ELIGIBILITY_AND_RELIEF","BONUS","STATUTORY_ROUNDING","YEAR_END_SETTLEMENT"]}
