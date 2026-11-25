@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "c9e497d4a0f9aaa1ab42acaa8c701cd01d4126bb",
+      "sha": "06fda9dd53e9c1f3597e8408d78e48669b79ee46",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8470,11 +8470,11 @@
       "mode": "100644"
     },
     "app/naruv_v223_read_bridge.py": {
-      "sha": "c8f03c9f45eee2be61b5345af5165f3e7e6340f9",
+      "sha": "f9b9a5cad64aa8f4cabd9e35dc6785dd195feec7",
       "mode": "100644"
     },
     "tests/test_naruv_v223_read_bridge.py": {
-      "sha": "87ae4d5c35a79811698242d453ea02cf3439159f",
+      "sha": "c43135bf874c3a2cf29f73a2b8fcbd77200c29d2",
       "mode": "100644"
     },
     "app/naruv_workspace/index.html": {
@@ -8490,7 +8490,15 @@
       "mode": "100644"
     },
     "scripts/naruv_workspace_browser_ci.py": {
-      "sha": "6fa01cada437a87d7c16e603670c945244833486",
+      "sha": "1f1d90594461bc9bc1969fb6a968a7209d60d3ab",
+      "mode": "100644"
+    },
+    "app/naruv_workspace/hr-pilot.html": {
+      "sha": "2918301a267df98d805504a6e07c721ee1c1e633",
+      "mode": "100644"
+    },
+    "app/naruv_workspace/hr-pilot.js": {
+      "sha": "3c7f5d5d441c8a6139dcf9089a0b6b82f1af0e3b",
       "mode": "100644"
     }
   },
@@ -8527,5 +8535,9 @@
   "hr_local_serialization_extension": {
     "parent": "c5594da45be7fcb01e6394ee65fb894112dd2630",
     "reason": "Mandatory disposable SQLite writer fence through PG HR commit, bounded contention, independent connection tests, separately gated amend/archive, no production factory pilot or statutory claim."
+  },
+  "hr_isolated_ui_extension": {
+    "parent": "3180e5108f2914a8918a6b068a7c969e086f4762",
+    "reason": "Separate CI-only HR pilot screen, explicit per-write confirmation, fixed synthetic identifiers, real HTTPS browser full lifecycle proof; original read-only workspace and UI untouched."
   }
 }

@@ -247,3 +247,23 @@ async def test_legacy_fence_real_sqlite_contention_and_release(tmp_path):
             with pytest.raises(cut.CutoverRefused) as err:
                 async with bridge._legacy_fence(db):pass
             assert err.value.status==503
+
+
+@pytest.mark.asyncio
+async def test_hr_ui_separate_gate_and_scope(tmp_path):
+    db=tmp_path/"isolated.db";db.touch()
+    ci=cut.Identity("ci-a","actor-A","admin")
+    env={**ENV,bridge.HR_PILOT_FLAG:bridge.HR_PILOT_ACK,bridge.HR_LIFECYCLE_FLAG:bridge.HR_PILOT_ACK,
+         "GITHUB_ACTIONS":"true","JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev","JARVIS_DB_PATH":str(db)}
+    with patch.dict(os.environ,env,clear=True):
+        app,calls=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)),pilot_db=db)
+        assert (await request(app,bridge.HR_WORKSPACE,method="GET")).status_code==404
+        os.environ[bridge.HR_UI_FLAG]=bridge.HR_PILOT_ACK
+        r=await request(app,bridge.HR_WORKSPACE,method="GET")
+        assert r.status_code==200 and "가상 직원 pilot-ui" in r.text
+        assert "script-src 'self'" in r.headers["content-security-policy"]
+        assert (await request(app,bridge.HR_WORKSPACE+"/app.js",method="GET")).status_code==200
+        assert (await request(app,bridge.HR_WORKSPACE,method="POST")).status_code==403
+        assert (await request(app,bridge.HR_WORKSPACE,method="GET",headers={"cookie":cut.LEGACY_COOKIE+"="+L})).status_code==401
+        app,calls=front(pilot_db=db)
+        assert (await request(app,bridge.HR_WORKSPACE,method="GET")).status_code==404

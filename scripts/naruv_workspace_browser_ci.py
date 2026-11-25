@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright, expect
 from app import pg_cinema_cutover_front_v223 as cut
 from scripts.ci_v93_https_pg_browser import _ssl_files
 
-def verify_browser(app,legacy_token,pg_token):
+def verify_browser(app,legacy_token,pg_token,*,hr_pilot=False):
     if os.getenv("GITHUB_ACTIONS")!="true" or os.getenv("JW_PG_CI_ALLOW")!="ONLY_EPHEMERAL_LOCAL_DATABASE" or os.getenv("NARUV_WORKSPACE_BROWSER")!="EPHEMERAL_ONLY":
         raise RuntimeError("BROWSER_ISOLATION_REQUIRED")
     with tempfile.TemporaryDirectory(prefix="naruv-browser-") as tmp:
@@ -53,6 +53,21 @@ def verify_browser(app,legacy_token,pg_token):
                         page.locator("#doc").fill("shared");page.locator("#document").click()
                         page.locator("#status").get_by_text("조회 완료").wait_for(timeout=20000)
                         assert "원본 검토 필요" in page.locator("#result").inner_text()
+                        if hr_pilot:
+                            page.goto(origin+"/naruv-hr-pilot",wait_until="domcontentloaded")
+                            page.locator("#register").click()
+                            page.locator("#status").get_by_text("변경 확인을 선택하세요.").wait_for()
+                            for action in ("register","create","attendance","review","confirm","pay","archive","pay"):
+                                if action not in ("review","pay"):page.locator("#approve").check()
+                                page.locator("#"+action).click()
+                                page.locator("#status").get_by_text("처리 완료").wait_for(timeout=20000)
+                                if action=="pay":assert "30,000 원" in page.locator("#result").inner_text()
+                            page.set_viewport_size({"width":390,"height":844})
+                            assert not page.locator("#desk").is_visible()
+                            page.set_viewport_size({"width":1440,"height":900})
+                            expect(page.locator("#result > *")).to_have_count(0,timeout=5000)
+                            print("NARUV_HR_PILOT_REAL_BROWSER_PASS confirmed writes, review, gross draft, archive, historical read",flush=True)
+                            page.goto(origin+"/naruv-workspace",wait_until="domcontentloaded")
                         page.set_viewport_size({"width":390,"height":844})
                         page.locator("#mobile").wait_for(state="visible")
                         assert not page.locator("#desk").is_visible()

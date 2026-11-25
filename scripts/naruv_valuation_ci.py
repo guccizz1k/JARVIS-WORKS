@@ -974,9 +974,6 @@ try:
         assert page.status_code==200 and '기업 업무 검토' in page.text
         assert dual.get('/naruv-workspace/app.js').status_code==200
         assert dual.get('/api/pg-stage/v90/me').json()['csrf_token']==os.environ['NARUV_TEST_CSRF']
-        if os.environ.get('NARUV_WORKSPACE_BROWSER')=='EPHEMERAL_ONLY':
-            from scripts.naruv_workspace_browser_ci import verify_browser
-            verify_browser(bridge.ReadBridge(front,erp),legacy_token,os.environ['NARUV_TEST_TOKEN'])
         assert dual.post(pay,headers=dict(dh,origin='https://evil.test')).status_code==403
         assert dual.post('/api/naruv-review/v1/hr/workers/bridge-spoof/register/bridge-rid',headers=dh).status_code==403
         # Narrow CI-only write pilot: no changes to preexisting worker or ledger.
@@ -1032,6 +1029,11 @@ try:
                 assert dual.post(worker+'/archive/pilot-archive',headers=wh).json()==archived.json()
                 assert dual.post(worker+'/periods/2026-05/create/pilot-after-archive',headers=wh,json=policy).status_code==409
                 assert dual.post('/api/naruv-review/v1/drafts/payroll/pilot-bridge/2026-04',headers=dh).json()==pay2.json()
+                if os.environ.get('NARUV_WORKSPACE_BROWSER')=='EPHEMERAL_ONLY':
+                    from scripts.naruv_workspace_browser_ci import verify_browser
+                    os.environ[bridge.HR_UI_FLAG]=bridge.HR_PILOT_ACK
+                    try:verify_browser(bridge.ReadBridge(front,erp,pilot_db=main.DB_PATH),legacy_token,os.environ['NARUV_TEST_TOKEN'],hr_pilot=True)
+                    finally:os.environ.pop(bridge.HR_UI_FLAG,None)
             finally:os.environ.pop(bridge.HR_LIFECYCLE_FLAG,None)
             assert dual.post(overview,headers=dh).json()==baseline
             assert reg in fence_probes and second+'/amend/pilot-amend' in fence_probes and worker+'/archive/pilot-archive' in fence_probes
@@ -1058,6 +1060,9 @@ finally:c.close()
                     marker="NARUV_WORKSPACE_REAL_HTTPS_BROWSER_PASS desktop, mobile restriction, real PG reads, expired session, no JS errors"
                     self.assertEqual(done.stdout.splitlines().count(marker),1)
                     print(marker,flush=True)
+                    hr_marker="NARUV_HR_PILOT_REAL_BROWSER_PASS confirmed writes, review, gross draft, archive, historical read"
+                    self.assertEqual(done.stdout.splitlines().count(hr_marker),1)
+                    print(hr_marker,flush=True)
         def test_cost_document_manual_registration_and_isolation(self):
             import base64,json
             path="/drafts/documents/manual-doc";raw=b"%PDF-1.7 synthetic opaque fixture"

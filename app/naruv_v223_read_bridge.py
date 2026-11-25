@@ -23,9 +23,11 @@ ACK="ISOLATED_SYNTHETIC_READ_ONLY"
 HR_PILOT_FLAG="NARUV_V223_HR_CI_PILOT"
 HR_PILOT_ACK="DISPOSABLE_FIXTURE_ONLY"
 HR_LIFECYCLE_FLAG="NARUV_V223_HR_CI_LIFECYCLE"
+HR_UI_FLAG="NARUV_V223_HR_CI_UI"
 PILOT_ORGS=frozenset(("ci-a","ci-b"))
 PREFIX=integrated.PREFIX
 WORKSPACE='/naruv-workspace'
+HR_WORKSPACE='/naruv-hr-pilot'
 ASSETS=Path(__file__).resolve().parent/'naruv_workspace'
 IDENT=r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
 PERIOD=r"[0-9]{4}-(?:0[1-9]|1[0-2])"
@@ -158,7 +160,8 @@ class ReadBridge:
 
     async def __call__(self,scope,receive,send):
         path=scope.get("path","")
-        workspace=path==WORKSPACE or path.startswith(WORKSPACE+"/")
+        hr_workspace=path==HR_WORKSPACE or path.startswith(HR_WORKSPACE+"/")
+        workspace=hr_workspace or path==WORKSPACE or path.startswith(WORKSPACE+"/")
         if not workspace and not (path==PREFIX or path.startswith(PREFIX+"/")):
             return await self.front(scope,receive,send)
         if scope.get("type")=="websocket":
@@ -170,7 +173,9 @@ class ReadBridge:
             if not enabled():raise cut.CutoverRefused("naruv_bridge_disabled",404)
             if scope.get("scheme")!="https":raise cut.CutoverRefused("https_required",403)
             if workspace:
-                if scope.get("method")!="GET" or path not in (WORKSPACE,WORKSPACE+"/app.js",WORKSPACE+"/style.css"):
+                if hr_workspace and (self.pilot_db is None or not lifecycle_enabled() or os.getenv(HR_UI_FLAG)!=HR_PILOT_ACK):
+                    raise cut.CutoverRefused("naruv_pilot_ui_disabled",404)
+                if scope.get("method")!="GET" or path not in (WORKSPACE,WORKSPACE+"/app.js",WORKSPACE+"/style.css",HR_WORKSPACE,HR_WORKSPACE+"/app.js"):
                     raise cut.CutoverRefused("naruv_read_scope_only",403)
             elif scope.get("method")!="POST" or not (is_read_path(path) or pilot):
                 raise cut.CutoverRefused("naruv_read_scope_only",403)
@@ -219,7 +224,9 @@ class ReadBridge:
             if not enabled() or pg.org_id not in self.front.enabled_orgs():
                 raise cut.CutoverRefused("naruv_bridge_disabled",404)
             if workspace:
-                asset,kind={WORKSPACE:("index.html","text/html"),WORKSPACE+"/app.js":("app.js","application/javascript"),WORKSPACE+"/style.css":("style.css","text/css")}[path]
+                if hr_workspace and (pg.org_id not in PILOT_ORGS or not lifecycle_enabled() or os.getenv(HR_UI_FLAG)!=HR_PILOT_ACK):
+                    raise cut.CutoverRefused("naruv_pilot_ui_disabled",404)
+                asset,kind={WORKSPACE:("index.html","text/html"),WORKSPACE+"/app.js":("app.js","application/javascript"),WORKSPACE+"/style.css":("style.css","text/css"),HR_WORKSPACE:("hr-pilot.html","text/html"),HR_WORKSPACE+"/app.js":("hr-pilot.js","application/javascript")}[path]
                 return await Response((ASSETS/asset).read_bytes(),media_type=kind,headers={
                     "Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
                     "X-Frame-Options":"DENY","Referrer-Policy":"no-referrer",
