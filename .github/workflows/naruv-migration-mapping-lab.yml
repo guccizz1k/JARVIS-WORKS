@@ -383,7 +383,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install pinned test dependencies
-        run: python -m pip install -r requirements-pg-stage.txt openpyxl==3.1.5 pytest==8.3.5
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5 pytest==8.3.5
       - name: Validate isolated service and execute file transaction tests
         env:
           NARUV_FILE_TX_SERVICE_ID: ${{ job.services.postgres.id }}
