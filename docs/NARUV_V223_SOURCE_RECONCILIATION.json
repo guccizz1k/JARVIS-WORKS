@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "89e7e8f7cfbeab4106989e5199b069761174998f",
+      "sha": "30fcc7b1d71433d7fb9028449a58ac781311674e",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8470,11 +8470,11 @@
       "mode": "100644"
     },
     "app/naruv_v223_read_bridge.py": {
-      "sha": "7a1658e014908f759414a8c58db1b83c65fdffec",
+      "sha": "1ef3f2af019a88da6fba06cb19f786e5fc087ef1",
       "mode": "100644"
     },
     "tests/test_naruv_v223_read_bridge.py": {
-      "sha": "77f31477a46000614214bed6af9b794798678e24",
+      "sha": "39422cd261540b36323b3272518f1eac540ff821",
       "mode": "100644"
     },
     "app/naruv_workspace/index.html": {
@@ -8515,5 +8515,9 @@
   "browser_csp_test_correction": {
     "parent": "ff873f80e72a1b129ba9643f6f8ff9e3543c8919",
     "reason": "Use locator count assertion instead of string eval blocked by script-src self. Product CSP, sandbox, TLS and empty-result assertion unchanged."
+  },
+  "hr_pilot_extension": {
+    "parent": "aba29cdfef3068657de3cb57540a339ee36a9e8e",
+    "reason": "Default-off synthetic CI-only dual-session HR writes, four explicit routes, immutable receipts and actual PG transaction tests. No production or UI write activation; cross-store revocation atomicity remains unresolved."
   }
 }

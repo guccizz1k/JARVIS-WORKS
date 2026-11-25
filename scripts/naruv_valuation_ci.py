@@ -965,6 +965,40 @@ try:
             verify_browser(bridge.ReadBridge(front,erp),legacy_token,os.environ['NARUV_TEST_TOKEN'])
         assert dual.post(pay,headers=dict(dh,origin='https://evil.test')).status_code==403
         assert dual.post('/api/naruv-review/v1/hr/workers/bridge-spoof/register/bridge-rid',headers=dh).status_code==403
+        # Narrow CI-only write pilot: no changes to preexisting worker or ledger.
+        worker='/api/naruv-review/v1/hr/workers/pilot-bridge'
+        period=worker+'/periods/2026-03'
+        reg=worker+'/register/pilot-register'
+        wh=dict(dh,**{'x-naruv-confirm':'yes'})
+        overview='/api/naruv-review/v1/valuation/overview'
+        baseline=dual.post(overview,headers=dh).json()
+        assert dual.post(reg,headers=wh).status_code==403
+        os.environ[bridge.HR_PILOT_FLAG]=bridge.HR_PILOT_ACK
+        try:
+            assert dual.post(reg,headers=dh).status_code==422
+            created=dual.post(reg,headers=wh)
+            assert created.status_code==200
+            assert dual.post(reg,headers=wh).json()==created.json()
+            assert dual.post(reg.replace('pilot-bridge','worker-1'),headers=wh).status_code==403
+            policy={'revision':'pilot-policy','hourly_krw':12000,'additional_bps':15000}
+            assert dual.post(period+'/create/pilot-policy',headers=wh,json=policy).status_code==200
+            attendance={'date':'2026-03-01','regular':60,'additional':60}
+            assert dual.post(period+'/attendance/pilot-att',headers=wh,json=attendance).status_code==200
+            review=dual.post(period+'/review',headers=dh)
+            assert review.status_code==200
+            digest=review.json()['review_sha256']
+            assert dual.post(period+'/confirm/pilot-confirm',headers=wh,json={'review_sha256':'0'*64}).status_code==409
+            confirmation=dual.post(period+'/confirm/pilot-confirm',headers=wh,json={'review_sha256':digest})
+            assert confirmation.status_code==200 and confirmation.json()['payment_authorized'] is False
+            assert dual.post(period+'/confirm/pilot-confirm',headers=wh,json={'review_sha256':digest}).json()==confirmation.json()
+            result=dual.post('/api/naruv-review/v1/drafts/payroll/pilot-bridge/2026-03',headers=dh)
+            assert result.status_code==200 and result.json()['gross_krw']==30000
+            assert result.json()['statutory_validated'] is False
+            assert dual.post(period+'/attendance/pilot-late',headers=wh,json={'date':'2026-03-02','regular':60,'additional':0}).status_code==409
+            assert dual.post(worker+'/archive/pilot-archive',headers=wh).status_code==403
+            assert dual.post(overview,headers=dh).json()==baseline
+        finally:os.environ.pop(bridge.HR_PILOT_FLAG,None)
+        assert dual.post(worker+'/register/pilot-other',headers=wh).status_code==403
         with main.conn() as db:
             db.execute("DELETE FROM sessions WHERE id='bridge-legacy'")
         assert dual.post(pay,headers=dh).status_code==401

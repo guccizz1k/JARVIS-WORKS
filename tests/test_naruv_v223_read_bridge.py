@@ -126,3 +126,26 @@ async def test_workspace_gate_and_original_ui_custody():
         assert (await request(app,bridge.WORKSPACE,method="POST")).status_code==403
         assert (await request(app,bridge.WORKSPACE,method="GET",headers={"cookie":cut.LEGACY_COOKIE+"="+L})).status_code==401
         assert not calls
+
+@pytest.mark.asyncio
+async def test_hr_pilot_scope_and_confirmation():
+    path=bridge.PREFIX+"/hr/workers/pilot-test/register/pilot-rid"
+    ci=cut.Identity("ci-a","actor-A","admin")
+    env={**ENV,bridge.HR_PILOT_FLAG:bridge.HR_PILOT_ACK,"GITHUB_ACTIONS":"true",
+         "JW_PG_CI_ALLOW":"ONLY_EPHEMERAL_LOCAL_DATABASE","JW_ENV":"dev"}
+    with patch.dict(os.environ,env,clear=True):
+        app,calls=front(pg=ci,legacy=ci,orgs=frozenset(("ci-a",)))
+        # No fixture endpoint in this stub; 404 demonstrates the approved
+        # request reached the backend, while disallowed requests stop at 403.
+        assert (await request(app,path)).status_code==422
+        assert (await request(app,path,headers={"x-naruv-confirm":"yes"})).status_code==404
+        for bad in (path.replace("pilot-test","worker-1"),path.replace("pilot-rid","another"),
+                    bridge.PREFIX+"/hr/workers/pilot-test/archive/pilot-rid",
+                    bridge.PREFIX+"/hr/workers/pilot-test/periods/2026-11/amend/pilot-rid",
+                    bridge.PREFIX+"/finance/bills/pilot-bill/commands/pay/pilot-rid"):
+            assert (await request(app,bad,headers={"x-naruv-confirm":"yes"})).status_code==403
+        for key in (bridge.HR_PILOT_FLAG,"GITHUB_ACTIONS","JW_PG_CI_ALLOW"):
+            with patch.dict(os.environ,{key:""}):
+                assert (await request(app,path,headers={"x-naruv-confirm":"yes"})).status_code==403
+        app,calls=front()
+        assert (await request(app,path,headers={"x-naruv-confirm":"yes"})).status_code==403
