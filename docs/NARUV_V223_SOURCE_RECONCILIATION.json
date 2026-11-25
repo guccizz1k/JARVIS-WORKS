@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "9698268d2e72e5117c0c36ea2dbc35494fcbbc3d",
+      "sha": "1ee373c7ae98eaebfde4038cf88ad57da7644ea6",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "01f94e1aade856165e928537cd71fffb40ce43f8",
+      "sha": "e747e07f7b7f4460be29c2434a8d039caedf01ab",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "4ba3a88fbbe749426ea14b93666549b084cf850e",
+      "sha": "55ce15faf702664a5997c656e1d91e61b6dd86e9",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "5e9be1df5dd1b3b6c5e27468cf6638e52f67c28e",
+      "sha": "2ed60be80aa72a6109a74cc840b23c35ff81ee73",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8692,5 +8692,9 @@
   "extended_table_and_key_retirement_review": {
     "parent": "34e9cecd0d8242e192e729cb3d3aed12ecf18033",
     "reason": "Official PDF pages 19-20 52 bands 572 cells; independent inventory coverage and old-key archive refusal screen, no actual key retirement."
+  },
+  "lower_table_and_inventory_digest": {
+    "parent": "7aa4a4733743860cf942bfeb01ba9d61bb69b1db",
+    "reason": "Official PDF pages 11-12 manually read 52 bands/572 cells; bind trusted inventory digest to exact tenant/key/asset IDs, reject subset substitution. No live key operations."
   }
 }

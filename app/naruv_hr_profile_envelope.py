@@ -107,6 +107,16 @@ def retention_decision(*,tenant,worker,revision,as_of,purpose_closed,legal_revie
         "production_authorized":False}
 
 
+def retirement_inventory_digest(*,tenant,old_key_id,new_key_id,expected_assets):
+    """Canonical digest of a trusted snapshot's exact scoped asset IDs."""
+    import hashlib
+    _require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,old_key_id,new_key_id)) and old_key_id!=new_key_id)
+    _require(type(expected_assets) in (list,tuple) and 1<=len(expected_assets)<=10000
+             and all(type(x) is str and ID.fullmatch(x) for x in expected_assets)
+             and len(set(expected_assets))==len(expected_assets))
+    return hashlib.sha256(_canonical(["NARUV_KEY_INVENTORY_V1",tenant,old_key_id,new_key_id,sorted(expected_assets)])).hexdigest()
+
+
 def key_retirement_review(*,tenant,old_key_id,new_key_id,inventory_sha256,
                           expected_assets,observations):
     """Offline evidence completeness screen, never a key retirement action.
@@ -123,6 +133,8 @@ def key_retirement_review(*,tenant,old_key_id,new_key_id,inventory_sha256,
     _require(type(expected_assets) in (list,tuple) and 1<=len(expected_assets)<=10000
              and all(type(x) is str and ID.fullmatch(x) for x in expected_assets)
              and len(set(expected_assets))==len(expected_assets))
+    _require(secrets.compare_digest(inventory_sha256,retirement_inventory_digest(
+        tenant=tenant,old_key_id=old_key_id,new_key_id=new_key_id,expected_assets=expected_assets)))
     _require(type(observations) in (list,tuple) and len(observations)<=10000)
     seen=set();blocked=[];normalized=[]
     for row in observations:

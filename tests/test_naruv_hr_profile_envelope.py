@@ -80,11 +80,11 @@ class HRProfileEnvelope(unittest.TestCase):
 
 
     def test_key_retirement_review_coverage_and_scope(self):
-        from app.naruv_hr_profile_envelope import key_retirement_review
+        from app.naruv_hr_profile_envelope import key_retirement_review,retirement_inventory_digest
         row=dict(asset="live",tenant="ci-a",key_id="new",restore_sha256="a"*64,old_key_denied=True)
         archive=dict(row,asset="archive")
-        args=dict(tenant="ci-a",old_key_id="old",new_key_id="new",inventory_sha256="b"*64,
-                  expected_assets=["live","archive"],observations=[row,archive])
+        scope=dict(tenant="ci-a",old_key_id="old",new_key_id="new",expected_assets=["live","archive"])
+        args=dict(scope,inventory_sha256=retirement_inventory_digest(**scope),observations=[row,archive])
         r=key_retirement_review(**args)
         self.assertEqual(r["status"],"EVIDENCE_REVIEW_ONLY")
         self.assertIs(r["key_retirement_authorized"],False)
@@ -98,4 +98,9 @@ class HRProfileEnvelope(unittest.TestCase):
           dict(observations=[row,dict(archive,restore_sha256="bad")]),dict(expected_assets=[]),
           dict(expected_assets=["live","live"]),dict(new_key_id="old")):
             with self.assertRaises(ProfileBlocked):key_retirement_review(**dict(args,**change))
-        self.assertNotEqual(r["review_sha256"],key_retirement_review(**dict(args,inventory_sha256="c"*64))["review_sha256"])
+        for change in (dict(inventory_sha256="c"*64),dict(expected_assets=["live"],observations=[row]),
+                       dict(tenant="ci-b"),dict(new_key_id="another")):
+            with self.assertRaises(ProfileBlocked):key_retirement_review(**dict(args,**change))
+        self.assertEqual(r,key_retirement_review(**dict(args,expected_assets=["archive","live"])))
+        changed=key_retirement_review(**dict(args,observations=[row,dict(archive,restore_sha256="c"*64)]))
+        self.assertNotEqual(r["review_sha256"],changed["review_sha256"])
