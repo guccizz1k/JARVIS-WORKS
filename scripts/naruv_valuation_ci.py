@@ -801,8 +801,68 @@ def run_valuation(base):
                         for privilege in ("INSERT","UPDATE","DELETE"):
                             self.assertFalse(c.execute("SELECT has_table_privilege(%s,%s,%s)",(role,"naruv_draft."+table,privilege)).fetchone()[0])
                 self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.setup_worker(text,text,text,text,bigint,int,boolean,text)','EXECUTE')").fetchone()[0])
+        def test_cost_hr_lifecycle_archive_preserves_confirmed_pay(self):
+            path="/hr/workers/archive-case";pp=path+"/periods/2026-06"
+            self.check(self.call(path+"/register/archive-register"),200)
+            policy={"revision":"archive-policy","hourly_krw":12000,"additional_bps":15000}
+            self.check(self.call(pp+"/create/archive-period",policy),200)
+            self.check(self.call(path+"/archive/archive-rid"),409)
+            self.hr_admit("archive-att",day="2026-06-01",period="2026-06",worker="archive-case",a=60,b=0)
+            self.check(self.call(path+"/archive/archive-rid"),409)
+            review=self.check(self.call(pp+"/review"),200)
+            self.check(self.call(pp+"/confirm/archive-confirm",{"review_sha256":review["review_sha256"]}),200)
+            paypath="/drafts/payroll/archive-case/2026-06"
+            before=self.check(self.call(paypath),200)
+            self.check(self.call(path+"/archive/archive-rid",who="B"),404)
+            result=self.check(self.call(path+"/archive/archive-rid"),200)
+            self.assertFalse(result["active"])
+            self.assertEqual(result,self.check(self.call(path+"/archive/archive-rid"),200))
+            self.check(self.call(path+"/archive/different"),409)
+            self.assertEqual(self.check(self.call(paypath),200),before)
+            self.assertTrue(self.check(self.call(pp+"/review"),200)["confirmed"])
+            self.check(self.call(path+"/periods/2026-05/create/after-archive",policy),404)
+            self.hr_admit("after-archive",day="2026-06-02",period="2026-06",worker="archive-case",code=404)
+            self.assertFalse(self.check(self.call(path+"/inspect"),200)["active"])
+        def test_cost_hr_lifecycle_list_tenant_and_pagination(self):
+            path="/hr/workers/list"
+            for worker in ("list-a","list-z"):
+                self.check(self.call("/hr/workers/"+worker+"/register/"+worker),200)
+            self.check(self.call("/hr/workers/list-z/archive/list-retire"),200)
+            found=[];cursor=None
+            for _ in range(10):
+                data={"limit":1}
+                if cursor is not None:data["after"]=cursor
+                r=self.check(self.call(path,data),200)
+                found.extend(r["workers"]);cursor=r["next_after"]
+                if cursor is None:break
+            self.assertIsNone(cursor)
+            self.assertEqual(len({r["worker_id"] for r in found}),len(found))
+            self.assertIn({"worker_id":"list-a","active":True},found)
+            self.assertIn({"worker_id":"list-z","active":False},found)
+            b=self.check(self.call(path,{"limit":100},who="B"),200)
+            self.assertNotIn("list-z",[x["worker_id"] for x in b["workers"]])
+            for bad in ({"limit":0},{"limit":101},{"limit":True},{"after":123},{"tenant":"ci-b"}):
+                self.check(self.call(path,bad),422)
+        def test_cost_hr_lifecycle_direct_grants_and_drift(self):
+            path="/hr/workers/archive-drift";pp=path+"/periods/2026-05"
+            self.check(self.call(path+"/register/drift-register"),200)
+            self.check(self.call(pp+"/create/drift-period",{"revision":"r1","hourly_krw":12000,"additional_bps":15000}),200)
+            self.hr_admit("drift-att",day="2026-05-01",period="2026-05",worker="archive-drift",a=60,b=0)
+            r=self.check(self.call(pp+"/review"),200)
+            self.check(self.call(pp+"/confirm/drift-confirm",{"review_sha256":r["review_sha256"]}),200)
+            with psycopg.connect(fixture.root_dsn) as c:
+                self.assertFalse(c.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.staff_archivals','INSERT')").fetchone()[0])
+                self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.archive_worker(text,text,boolean,text)','EXECUTE')").fetchone()[0])
+                self.assertEqual(c.execute("UPDATE naruv_draft.pay_periods SET hourly_krw=12001 WHERE org_id='ci-a' AND worker_id='archive-drift' AND period='2026-05'").rowcount,1)
+            try:
+                self.check(self.call(path+"/archive/drift-archive"),409)
+                self.assertTrue(self.check(self.call(path+"/inspect"),200)["active"])
+            finally:
+                with psycopg.connect(fixture.root_dsn) as c:
+                    self.assertEqual(c.execute("UPDATE naruv_draft.pay_periods SET hourly_krw=12000 WHERE org_id='ci-a' AND worker_id='archive-drift' AND period='2026-05'").rowcount,1)
+            self.check(self.call(path+"/archive/drift-archive"),200)
     names=[n for n in unittest.defaultTestLoader.getTestCaseNames(Valuation) if n.startswith("test_cost_")]
-    if len(names)!=64:raise RuntimeError("COST_CASE_COUNT_CHANGED")
+    if len(names)!=67:raise RuntimeError("COST_CASE_COUNT_CHANGED")
     result=unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(Valuation(n) for n in names))
-    if not result.wasSuccessful() or result.testsRun!=64 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
-    print("NARUV_VALUATION_PASS: 64 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")
+    if not result.wasSuccessful() or result.testsRun!=67 or result.skipped or result.expectedFailures or result.unexpectedSuccesses:raise SystemExit(1)
+    print("NARUV_VALUATION_PASS: 67 isolated PG17 cost, reconciliation, posting, return and ledger audit cases; no statutory posting.")

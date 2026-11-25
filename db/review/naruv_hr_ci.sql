@@ -96,7 +96,7 @@ REVOKE ALL ON FUNCTION naruv_draft.period_digest(text,text,text,text,bigint,int,
 CREATE FUNCTION naruv_draft.review_period(p_worker text,p_period text,p_request text,p_expected text,p_confirm boolean,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; p naruv_draft.pay_periods; r naruv_draft.period_confirmations;
- rows jsonb; n bigint; digest text; receipt boolean:=false;
+ rows jsonb; n bigint; digest text; receipt boolean:=false; active_flag boolean;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  IF p_worker IS NULL OR p_worker !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
@@ -109,10 +109,10 @@ BEGIN
  IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
  IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
  THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
- PERFORM 1 FROM naruv_draft.staff s WHERE s.org_id=a.org_id AND s.worker_id=p_worker AND s.active FOR SHARE;
+ SELECT s.active INTO active_flag FROM naruv_draft.staff s WHERE (s.org_id,s.worker_id)=(a.org_id,p_worker) FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'HR_NOT_FOUND'; END IF;
  SELECT * INTO p FROM naruv_draft.pay_periods x WHERE (x.org_id,x.worker_id,x.period)=(a.org_id,p_worker,p_period) FOR UPDATE;
- IF NOT FOUND THEN RAISE EXCEPTION 'HR_NOT_FOUND'; END IF;
+ IF NOT FOUND OR (NOT active_flag AND NOT p.confirmed) THEN RAISE EXCEPTION 'HR_NOT_FOUND'; END IF;
  SELECT count(*),coalesce(jsonb_agg(jsonb_build_array(to_char(d.work_day,'YYYY-MM-DD'),d.regular,d.additional) ORDER BY d.work_day),'[]'::jsonb)
  INTO n,rows FROM naruv_draft.attendance d WHERE (d.org_id,d.worker_id,d.period)=(a.org_id,p_worker,p_period);
  IF n NOT BETWEEN 1 AND 31 THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
@@ -162,7 +162,8 @@ BEGIN
  IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
  IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
  THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
- PERFORM 1 FROM naruv_draft.staff s WHERE (s.org_id,s.worker_id)=(a.org_id,p_worker) AND s.active FOR SHARE;
+ -- Historical confirmed gross-pay drafts remain accessible after archival.
+ PERFORM 1 FROM naruv_draft.staff s WHERE (s.org_id,s.worker_id)=(a.org_id,p_worker) FOR SHARE;
  IF NOT FOUND THEN RETURN; END IF;
  SELECT * INTO p FROM naruv_draft.pay_periods x WHERE (x.org_id,x.worker_id,x.period)=(a.org_id,p_worker,p_period) AND x.confirmed FOR SHARE;
  IF NOT FOUND THEN RETURN; END IF;
@@ -274,4 +275,83 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION naruv_draft.setup_worker(text,text,text,text,bigint,int,boolean,text),naruv_draft.inspect_worker(text,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_draft.setup_worker(text,text,text,text,bigint,int,boolean,text),naruv_draft.inspect_worker(text,text) TO jw_app_dev;
+-- Archival is non-destructive; no rehire or account termination in this fixture.
+CREATE TABLE naruv_draft.staff_archivals(
+ org_id text NOT NULL,worker_id text NOT NULL,request_id text NOT NULL,actor_id text NOT NULL,
+ archived_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(org_id,worker_id),UNIQUE(org_id,request_id),
+ FOREIGN KEY(org_id,worker_id) REFERENCES naruv_draft.staff);
+ALTER TABLE naruv_draft.staff_archivals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_draft.staff_archivals FORCE ROW LEVEL SECURITY;
+CREATE POLICY archival_scope ON naruv_draft.staff_archivals TO naruv_native_owner
+ USING(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'))
+ WITH CHECK(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'));
+REVOKE ALL ON naruv_draft.staff_archivals FROM PUBLIC,jw_app_dev,naruv_native_stage;
+CREATE TRIGGER staff_archival_immutable BEFORE UPDATE OR DELETE ON naruv_draft.staff_archivals
+ FOR EACH ROW EXECUTE FUNCTION naruv_native_review.immutable();
+
+CREATE FUNCTION naruv_draft.archive_worker(p_worker text,p_request text,p_confirm boolean,p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; a2 record; r naruv_draft.staff_archivals; active_flag boolean;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF p_worker IS NULL OR p_worker !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_request IS NULL OR p_request !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_confirm IS DISTINCT FROM true THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-attendance-v1:'||a.org_id,0));
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ SELECT s.active INTO active_flag FROM naruv_draft.staff s WHERE (s.org_id,s.worker_id)=(a.org_id,p_worker) FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'HR_NOT_FOUND'; END IF;
+ SELECT * INTO r FROM naruv_draft.staff_archivals x WHERE x.org_id=a.org_id AND x.request_id=p_request;
+ IF FOUND THEN
+  IF (r.actor_id,r.worker_id) IS DISTINCT FROM (a.actor_id,p_worker) OR active_flag
+  THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+ ELSE
+  IF NOT active_flag THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+  IF EXISTS(SELECT 1 FROM naruv_draft.pay_periods p
+    WHERE (p.org_id,p.worker_id)=(a.org_id,p_worker) AND
+    (NOT p.confirmed OR NOT EXISTS(SELECT 1 FROM naruv_draft.period_confirmations c
+      WHERE (c.org_id,c.worker_id,c.period)=(p.org_id,p.worker_id,p.period)
+      AND c.review_sha256=naruv_draft.period_digest(p.org_id,p.worker_id,p.period,p.revision,p.hourly_krw,p.additional_bps,
+       (SELECT coalesce(jsonb_agg(jsonb_build_array(to_char(d.work_day,'YYYY-MM-DD'),d.regular,d.additional) ORDER BY d.work_day),'[]'::jsonb)
+        FROM naruv_draft.attendance d WHERE (d.org_id,d.worker_id,d.period)=(p.org_id,p.worker_id,p.period))))))
+   THEN RAISE EXCEPTION 'HR_UNSETTLED_PERIOD'; END IF;
+  UPDATE naruv_draft.staff s SET active=false WHERE (s.org_id,s.worker_id)=(a.org_id,p_worker) AND s.active;
+  IF NOT FOUND THEN RAISE EXCEPTION 'HR_CONFLICT'; END IF;
+  INSERT INTO naruv_draft.staff_archivals(org_id,worker_id,request_id,actor_id) VALUES(a.org_id,p_worker,p_request,a.actor_id);
+ END IF;
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ RETURN jsonb_build_object('status','STAFF_ARCHIVED','worker_id',p_worker,'request_id',p_request,'active',false,
+ 'payment_authorized',false,'production_authorized',false,'statutory_validated',false);
+END $$;
+CREATE FUNCTION naruv_draft.list_workers(p_after text,p_limit int,p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; a2 record; entries jsonb; next_id text;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 100
+ OR (p_after IS NOT NULL AND p_after !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$')
+ THEN RAISE EXCEPTION 'HR_INPUT'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-attendance-v1:'||a.org_id,0));
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ SELECT coalesce(jsonb_agg(jsonb_build_object('worker_id',q.worker_id,'active',q.active) ORDER BY q.worker_id COLLATE "C"),'[]'::jsonb)
+ INTO entries FROM (SELECT s.worker_id,s.active FROM naruv_draft.staff s WHERE s.org_id=a.org_id
+ AND (p_after IS NULL OR s.worker_id COLLATE "C">p_after COLLATE "C")
+ ORDER BY s.worker_id COLLATE "C" LIMIT p_limit+1) q;
+ IF jsonb_array_length(entries)>p_limit THEN
+  entries:=entries-p_limit;next_id:=entries->(p_limit-1)->>'worker_id';
+ END IF;
+ RETURN jsonb_build_object('workers',entries,'next_after',next_id,'payment_authorized',false,'production_authorized',false,'statutory_validated',false);
+END $$;
+REVOKE ALL ON FUNCTION naruv_draft.archive_worker(text,text,boolean,text),naruv_draft.list_workers(text,int,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
+GRANT EXECUTE ON FUNCTION naruv_draft.archive_worker(text,text,boolean,text),naruv_draft.list_workers(text,int,text) TO jw_app_dev;
 RESET ROLE;

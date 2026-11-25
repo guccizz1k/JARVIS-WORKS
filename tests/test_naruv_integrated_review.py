@@ -146,10 +146,11 @@ class IntegratedReview(unittest.TestCase):
             app=FastAPI()
             self.assertTrue(mod.register_integrated_review(app,include_drafts=True,include_hr=True))
             paths={p for p in app.openapi()["paths"] if p.startswith(mod.PREFIX+"/")}
-            self.assertEqual(len(paths),37)
+            self.assertEqual(len(paths),39)
             self.assertIn(mod.PREFIX+"/hr/workers/{worker}/periods/{period}/attendance/{rid}",paths)
-            for suffix in ("/register/{rid}","/periods/{period}/create/{rid}","/inspect"):
+            for suffix in ("/register/{rid}","/periods/{period}/create/{rid}","/inspect","/archive/{rid}"):
                 self.assertIn(mod.PREFIX+"/hr/workers/{worker}"+suffix,paths)
+            self.assertIn(mod.PREFIX+"/hr/workers/list",paths)
             with TestClient(app,base_url="https://testserver") as c:
                 for key in (mod.FLAG,mod.drafts.FLAG,mod.hr.FLAG):
                     with patch.dict(os.environ,{key:""}):

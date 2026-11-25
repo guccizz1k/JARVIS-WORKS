@@ -93,6 +93,29 @@ def _setup(token,csrf,prior,worker,period=None,rid=None,data=None):
         if reason in ("HR_CONFLICT","HR_CAPACITY"):raise HTTPException(409,reason) from None
         raise write._db_error(exc) from None
 
+def _lifecycle(token,csrf,prior,worker=None,rid=None,after=None,limit=None):
+    import psycopg
+    if not enabled():raise HTTPException(404,"HR_DISABLED")
+    try:
+        with v90._pg_validated_cursor(token) as (cur,identity):
+            if preview._verify_identity(identity,csrf)!=prior:raise HTTPException(409,"SESSION_SCOPE_CHANGED")
+            cur.execute("SET LOCAL statement_timeout='8s'")
+            cur.execute("SET LOCAL lock_timeout='4s'")
+            if worker is None:
+                cur.execute("SELECT naruv_draft.list_workers(%s,%s,%s)",(after,limit,csrf))
+            else:
+                cur.execute("SELECT naruv_draft.archive_worker(%s,%s,true,%s)",(worker,rid,csrf))
+            row=cur.fetchone()
+            if not row or type(row[0]) is not dict or any(row[0].get(k) is not False for k in ("payment_authorized","production_authorized","statutory_validated")):
+                raise HTTPException(503,"HR_UNAVAILABLE")
+            return row[0]
+    except psycopg.Error as exc:
+        reason=getattr(getattr(exc,"diag",None),"message_primary","")
+        if reason=="HR_NOT_FOUND":raise HTTPException(404,reason) from None
+        if reason=="HR_INPUT":raise HTTPException(422,reason) from None
+        if reason in ("HR_CONFLICT","HR_UNSETTLED_PERIOD"):raise HTTPException(409,reason) from None
+        raise write._db_error(exc) from None
+
 def create_router():
     router=APIRouter(prefix=PREFIX,tags=["NARUV isolated attendance"])
     @router.post("/workers/{worker}/periods/{period}/attendance/{rid}")
@@ -163,6 +186,30 @@ def create_router():
         prior=await run_in_threadpool(write._auth,token,csrf)
         await write._empty_body(request)
         result=await run_in_threadpool(_setup,token,csrf,prior,worker)
+        response.headers["Cache-Control"]="no-store"
+        return result
+    @router.post("/workers/list")
+    async def workers(request:Request,response:Response):
+        if not enabled():raise HTTPException(404,"HR_DISABLED")
+        token,csrf,_=write._request(request,"list",needs_digest=False)
+        if preview._one_header(request,"content-type","")!="application/json":raise HTTPException(415,"HR_CONTENT_TYPE")
+        prior=await run_in_threadpool(write._auth,token,csrf)
+        data=await finance._body(request)
+        if not set(data)<= {"after","limit"}:raise HTTPException(422,"HR_INPUT")
+        after=data.get("after");limit=data.get("limit",50)
+        if ("after" in data and (type(after) is not str or not preview.IDENT.fullmatch(after))) or type(limit) is not int or not 1<=limit<=100:
+            raise HTTPException(422,"HR_INPUT")
+        result=await run_in_threadpool(_lifecycle,token,csrf,prior,None,None,after,limit)
+        response.headers["Cache-Control"]="no-store"
+        return result
+    @router.post("/workers/{worker}/archive/{rid}")
+    async def archive(worker:str,rid:str,request:Request,response:Response):
+        if not enabled():raise HTTPException(404,"HR_DISABLED")
+        token,csrf,_=write._request(request,worker,rid,needs_digest=False)
+        if preview._one_header(request,"x-naruv-confirm","")!="yes":raise HTTPException(422,"HR_CONFIRM_REQUIRED")
+        prior=await run_in_threadpool(write._auth,token,csrf)
+        await write._empty_body(request)
+        result=await run_in_threadpool(_lifecycle,token,csrf,prior,worker,rid)
         response.headers["Cache-Control"]="no-store"
         return result
     return router
