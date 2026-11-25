@@ -974,10 +974,15 @@ try:
     assert c.get('/api/health').status_code==200
 finally:c.close()
 """
-                done=subprocess.run([sys.executable,"-c",script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=60)
+                browser_requested=env.get("NARUV_WORKSPACE_BROWSER")=="EPHEMERAL_ONLY"
+                done=subprocess.run([sys.executable,"-c",script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=180 if browser_requested else 60)
                 # Never print child environment or arbitrary DB exceptions which may contain connection data.
                 safe=done.stderr.replace(fixture.TRADE_DSN,"[CI_DSN]").replace(fixture.TOKENS["A"],"[CI_TOKEN]").replace(fixture.CSRF["A"],"[CI_CSRF]")
                 self.assertEqual(done.returncode,0,"WORKS_STAGE_COMPOSITION_FAILED "+safe[-1500:])
+                if browser_requested:
+                    marker="NARUV_WORKSPACE_REAL_HTTPS_BROWSER_PASS desktop, mobile restriction, real PG reads, expired session, no JS errors"
+                    self.assertEqual(done.stdout.splitlines().count(marker),1)
+                    print(marker,flush=True)
         def test_cost_document_manual_registration_and_isolation(self):
             import base64,json
             path="/drafts/documents/manual-doc";raw=b"%PDF-1.7 synthetic opaque fixture"

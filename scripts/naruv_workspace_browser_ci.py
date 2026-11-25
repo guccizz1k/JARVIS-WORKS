@@ -51,7 +51,7 @@ def verify_browser(app,legacy_token,pg_token):
                         page.locator("#mobile").wait_for(state="visible")
                         assert not page.locator("#desk").is_visible()
                         page.set_viewport_size({"width":1440,"height":900})
-                        assert page.locator("#result").inner_text()==""
+                        page.wait_for_function("document.querySelector('#result').childElementCount===0")
                         ctx.clear_cookies()
                         page.locator("#overview").click()
                         page.locator("#status").get_by_text("조회 실패",exact=False).wait_for(timeout=20000)

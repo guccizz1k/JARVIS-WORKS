@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "4f8fbdf5b77a31c883746077effb668322de7f12",
+      "sha": "89e7e8f7cfbeab4106989e5199b069761174998f",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8490,7 +8490,7 @@
       "mode": "100644"
     },
     "scripts/naruv_workspace_browser_ci.py": {
-      "sha": "8a864203402b6f978ba7e9e462a6345393a14496",
+      "sha": "a5e4831b85c3edf3adaa13f79eac13112842aa79",
       "mode": "100644"
     }
   },
