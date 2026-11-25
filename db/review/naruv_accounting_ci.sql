@@ -77,7 +77,7 @@ CREATE CONSTRAINT TRIGGER line_balance AFTER INSERT ON naruv_accounting.lines
  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION naruv_accounting.validate_journal();
 CREATE FUNCTION naruv_accounting.post_finance() RETURNS trigger
  LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog AS $$
-DECLARE b naruv_finance.bills; p naruv_accounting.periods; a record; month_start date;
+DECLARE b naruv_finance.bills; p naruv_accounting.periods; a record; month_start date; net bigint; tax bigint;
 BEGIN
  IF current_user<>'naruv_native_owner' THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
  SELECT i.actor_id,i.org_id,i.actor_role INTO a FROM jw_dev.stage_identity_v84() i;
@@ -107,13 +107,22 @@ BEGIN
    INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AP',NEW.amount,0),(NEW.org_id,NEW.request_id,2,'CASH_CLEARING',0,NEW.amount);
   END IF;
  ELSIF NEW.action='credit' THEN
-  IF NEW.amount<>b.total OR naruv_finance.paid(NEW.org_id,NEW.bill_id)<>0 THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
+  net:=(NEW.payload->>'net')::bigint;tax:=(NEW.payload->>'vat')::bigint;
+  IF net IS NULL OR tax IS NULL OR net<0 OR tax<0 OR NEW.amount<>net+tax
+   OR naruv_finance.paid(NEW.org_id,NEW.bill_id)+naruv_finance.credit_sum(NEW.org_id,NEW.bill_id)>b.total
+  THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
   IF NOT EXISTS(SELECT 1 FROM naruv_accounting.journals j WHERE j.org_id=NEW.org_id AND j.bill_id=NEW.bill_id AND j.action='bill')
   THEN RAISE EXCEPTION 'ACCT_SOURCE_MISSING'; END IF;
-  INSERT INTO naruv_accounting.lines
-   SELECT NEW.org_id,NEW.request_id,l.line_no,l.account,l.credit,l.debit
-   FROM naruv_accounting.lines l JOIN naruv_accounting.journals j USING(org_id,event_id)
-   WHERE j.org_id=NEW.org_id AND j.bill_id=NEW.bill_id AND j.action='bill';
+  IF NEW.amount=0 THEN RETURN NEW; END IF;
+  IF b.kind='sale' THEN
+   INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AR',0,NEW.amount);
+   IF net>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,2,'SALES',net,0); END IF;
+   IF tax>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,3,'VAT_OUTPUT',tax,0); END IF;
+  ELSE
+   INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,1,'AP',NEW.amount,0);
+   IF net>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,2,'PURCHASE_CLEARING',0,net); END IF;
+   IF tax>0 THEN INSERT INTO naruv_accounting.lines VALUES(NEW.org_id,NEW.request_id,3,'VAT_INPUT',0,tax); END IF;
+  END IF;
  ELSE
   IF NOT EXISTS(SELECT 1 FROM naruv_accounting.journals j WHERE j.org_id=NEW.org_id AND j.event_id=NEW.reversal_of AND j.bill_id=NEW.bill_id AND j.action='pay')
   THEN RAISE EXCEPTION 'ACCT_SOURCE_MISSING'; END IF;
@@ -160,8 +169,8 @@ BEGIN
  coalesce(sum(l.credit-l.debit) FILTER(WHERE l.account='AP'),0)
  INTO dr,cr,ar,ap FROM naruv_accounting.lines l JOIN naruv_accounting.journals j USING(org_id,event_id)
  WHERE j.org_id=a.org_id AND j.bill_id=p_bill;
- due:=CASE WHEN naruv_finance.credited(a.org_id,p_bill) THEN 0 ELSE b.total-paid_amt END;
- IF (naruv_finance.credited(a.org_id,p_bill) AND paid_amt<>0) OR n<>jn OR n=0 OR dr<>cr OR paid_amt<0 OR paid_amt>b.total
+ due:=b.total-paid_amt-naruv_finance.credit_sum(a.org_id,p_bill);
+ IF due<0 OR n<>jn OR n=0 OR dr<>cr OR paid_amt<0 OR paid_amt>b.total
  OR ar<>(CASE WHEN b.kind='sale' THEN due ELSE 0 END)
  OR ap<>(CASE WHEN b.kind='purchase' THEN due ELSE 0 END) THEN RAISE EXCEPTION 'ACCT_RECONCILIATION'; END IF;
  SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.account),'[]'::jsonb) INTO entries FROM (

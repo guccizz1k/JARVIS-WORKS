@@ -10,7 +10,7 @@ from . import pg_v90_integrated_entry as v90
 PREFIX=preview.PREFIX+"/valuation"
 def enabled():
     return production.enabled() and os.getenv("NARUV_VALUATION_REVIEW")=="ISOLATED_SYNTHETIC_ONLY"
-def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None,bill=None,return_id=None,audit=False):
+def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None,bill=None,return_id=None,audit=False,return_qty=None):
     import psycopg
     if not enabled():raise HTTPException(404,"COST_DISABLED")
     try:
@@ -19,6 +19,7 @@ def _call(token,csrf,prior,item,source=None,warehouse=None,rid=None,payload=None
             cur.execute("SET LOCAL statement_timeout='8s'")
             cur.execute("SET LOCAL lock_timeout='4s'")
             if audit:cur.execute("SELECT naruv_valuation.audit_ledger(%s)",(csrf,))
+            elif return_id is not None and return_qty is not None:cur.execute("SELECT naruv_valuation.return_quantity(%s,%s,%s,true,%s)",(bill,return_id,return_qty,csrf))
             elif return_id is not None:cur.execute("SELECT naruv_valuation.return_bill(%s,%s,true,%s)",(bill,return_id,csrf))
             elif bill is not None:cur.execute("SELECT naruv_valuation.reconcile_bill(%s,%s)",(bill,csrf))
             elif rid is None:cur.execute("SELECT naruv_valuation.inspect(%s,%s,%s,%s)",(source,item,warehouse,csrf))
@@ -72,6 +73,17 @@ def create_router():
         prior=await run_in_threadpool(write._auth,token,csrf)
         await write._empty_body(request)
         result=await run_in_threadpool(_call,token,csrf,prior,None,bill=bill,return_id=rid)
+        response.headers["Cache-Control"]="no-store"
+        return result
+    @router.post("/bills/{bill}/return/{rid}/quantity/{quantity}")
+    async def return_partial(bill:str,rid:str,quantity:str,request:Request,response:Response):
+        if not enabled():raise HTTPException(404,"COST_DISABLED")
+        token,csrf,_=write._request(request,bill,rid,needs_digest=False)
+        if not quantity.isascii() or not quantity.isdecimal() or len(quantity)>6 or not 1<=int(quantity)<=100000:raise HTTPException(422,"COST_INPUT")
+        if preview._one_header(request,"x-naruv-confirm","")!="yes":raise HTTPException(422,"COST_CONFIRM_REQUIRED")
+        prior=await run_in_threadpool(write._auth,token,csrf)
+        await write._empty_body(request)
+        result=await run_in_threadpool(_call,token,csrf,prior,None,bill=bill,return_id=rid,return_qty=int(quantity))
         response.headers["Cache-Control"]="no-store"
         return result
     @router.post("/audit")

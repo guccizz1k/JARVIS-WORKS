@@ -256,7 +256,7 @@ CREATE FUNCTION naruv_valuation.reconcile_bill(p_bill text,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; b naruv_finance.bills; f naruv_trade.events;
  d naruv_trade.documents; m naruv_inventory.movements; e naruv_valuation.entries;
- j jsonb; cj naruv_valuation.cost_journals; clearing numeric; sales numeric; credited boolean; ce naruv_finance.events; re naruv_valuation.entries;
+ j jsonb; cj naruv_valuation.cost_journals; clearing numeric; sales numeric; credited boolean; ce naruv_finance.events; re naruv_valuation.entries; rm naruv_inventory.movements; q bigint:=0; rq bigint; rn numeric:=0; rv numeric:=0; rc numeric:=0; en numeric; ev numeric; ec numeric;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
  IF NOT naruv_production.ident(p_bill) THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
@@ -292,30 +292,39 @@ BEGIN
  coalesce(sum(l.credit::numeric-l.debit) FILTER(WHERE l.account='SALES'),0)
  INTO clearing,sales FROM naruv_accounting.lines l JOIN naruv_accounting.journals h USING(org_id,event_id)
  WHERE h.org_id=a.org_id AND h.bill_id=p_bill;
- credited:=naruv_finance.credited(a.org_id,p_bill);
- IF credited THEN
-  SELECT * INTO STRICT ce FROM naruv_finance.events z WHERE z.org_id=a.org_id AND z.bill_id=p_bill AND z.action='credit';
+ FOR ce IN SELECT * FROM naruv_finance.events z WHERE z.org_id=a.org_id AND z.bill_id=p_bill AND z.action='credit'
+ ORDER BY (z.payload->>'prior_quantity')::bigint LOOP
+  rq:=(ce.payload->>'quantity')::bigint;
+  IF rq IS NULL OR rq<1 OR q+rq>b.quantity OR (ce.payload->>'prior_quantity')::bigint IS DISTINCT FROM q THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+  en:=naruv_finance.allocation(b.subtotal,b.quantity,q,rq);
+  ev:=naruv_finance.allocation(b.vat,b.quantity,q,rq);
+  ec:=naruv_finance.allocation(e.amount_krw,b.quantity,q,rq);
   SELECT * INTO re FROM naruv_valuation.entries z WHERE z.org_id=a.org_id AND z.movement_id=ce.payload->>'movement_id';
-  IF NOT FOUND OR (re.kind,re.source_event_id,re.amount_krw,ce.amount) IS DISTINCT FROM
-   (b.kind||'_return',ce.request_id,e.amount_krw,b.total) THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
- END IF;
- IF clearing<>(CASE WHEN b.kind='purchase' AND NOT credited THEN b.subtotal ELSE 0 END)
- OR sales<>(CASE WHEN b.kind='sale' AND NOT credited THEN b.subtotal ELSE 0 END)
+  IF NOT FOUND OR (re.kind,re.source_event_id,re.amount_krw,ce.amount,(ce.payload->>'net')::numeric,(ce.payload->>'vat')::numeric)
+   IS DISTINCT FROM (b.kind||'_return',ce.request_id,ec,(en+ev)::bigint,en,ev) THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+  SELECT * INTO rm FROM naruv_inventory.movements z WHERE z.org_id=a.org_id AND z.request_id=re.movement_id;
+  IF NOT FOUND OR (rm.source_id,rm.normalized_id,rm.from_warehouse,rm.to_warehouse,rm.quantity,rm.actor_id)
+   IS DISTINCT FROM (m.source_id,m.normalized_id,m.to_warehouse,m.from_warehouse,rq,ce.actor_id) THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
+  q:=q+rq;rn:=rn+en;rv:=rv+ev;rc:=rc+ec;
+ END LOOP;
+ credited:=q=b.quantity;
+ IF clearing<>(CASE WHEN b.kind='purchase' THEN b.subtotal-rn ELSE 0 END)
+ OR sales<>(CASE WHEN b.kind='sale' THEN b.subtotal-rn ELSE 0 END)
  THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
  RETURN jsonb_build_object('bill_id',p_bill,'fulfillment_id',b.fulfillment_id,'kind',b.kind,
- 'net_krw',(CASE WHEN credited THEN 0 ELSE b.subtotal END)::text,'inventory_cost_krw',(CASE WHEN credited THEN 0 ELSE e.amount_krw END)::text,
- 'purchase_clearing_difference_krw',CASE WHEN b.kind='purchase' THEN (CASE WHEN credited THEN 0 ELSE clearing-e.amount_krw END)::text ELSE NULL END,
- 'sales_margin_krw',CASE WHEN b.kind='sale' THEN (CASE WHEN credited THEN 0 ELSE sales-e.amount_krw END)::text ELSE NULL END,
- 'credited',credited,'outstanding_krw',j->>'outstanding','cost_journal_posted',true,'statutory_posted',false,'production_authorized',false);
+ 'net_krw',(b.subtotal-rn)::text,'inventory_cost_krw',(e.amount_krw-rc)::text,
+ 'purchase_clearing_difference_krw',CASE WHEN b.kind='purchase' THEN (clearing-e.amount_krw+rc)::text ELSE NULL END,
+ 'sales_margin_krw',CASE WHEN b.kind='sale' THEN (sales-e.amount_krw+rc)::text ELSE NULL END,
+ 'credited',credited,'returned_quantity',q,'credited_krw',(rn+rv)::text,'outstanding_krw',j->>'outstanding','cost_journal_posted',true,'statutory_posted',false,'production_authorized',false);
 END $$;
 -- Whole original billed fulfillment, unpaid only, same warehouse, no refund.
-CREATE FUNCTION naruv_valuation.return_bill(p_bill text,p_request text,p_confirm boolean,p_csrf text)
+CREATE FUNCTION naruv_valuation.return_quantity(p_bill text,p_request text,p_qty bigint,p_confirm boolean,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; b naruv_finance.bills; f naruv_trade.events; m naruv_inventory.movements;
- e naruv_valuation.entries; prior naruv_finance.events; mid text; amt numeric; r jsonb;
+ e naruv_valuation.entries; prior naruv_finance.events; mid text; amt numeric; r jsonb; q bigint; prev bigint; net bigint; tax bigint; cost numeric; paid bigint; credit bigint;
 BEGIN
  SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
- IF NOT naruv_production.ident(p_bill) OR NOT naruv_production.ident(p_request) OR p_confirm IS DISTINCT FROM true
+ IF NOT naruv_production.ident(p_bill) OR NOT naruv_production.ident(p_request) OR p_confirm IS DISTINCT FROM true OR (p_qty IS NOT NULL AND p_qty NOT BETWEEN 1 AND 100000)
  THEN RAISE EXCEPTION 'COST_INPUT'; END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended('naruv-inventory-v1:'||a.org_id,0));
  SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
@@ -323,27 +332,40 @@ BEGIN
  (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256) THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
  SELECT * INTO prior FROM naruv_finance.events z WHERE z.org_id=a.org_id AND z.request_id=p_request;
  IF FOUND THEN
-  IF (prior.action,prior.bill_id,prior.actor_id) IS DISTINCT FROM ('credit'::text,p_bill,a.actor_id)
+  IF (prior.action,prior.bill_id,prior.actor_id,(prior.payload->>'requested_quantity')::bigint) IS DISTINCT FROM ('credit'::text,p_bill,a.actor_id,p_qty)
   THEN RAISE EXCEPTION 'COST_CONFLICT'; END IF;
   RETURN prior.receipt;
  END IF;
  SELECT * INTO b FROM naruv_finance.bills z WHERE z.org_id=a.org_id AND z.bill_id=p_bill FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'INV_NOT_FOUND'; END IF;
- IF naruv_finance.credited(a.org_id,p_bill) OR naruv_finance.paid(a.org_id,p_bill)<>0 THEN RAISE EXCEPTION 'COST_RETURN_CONFLICT'; END IF;
+ prev:=naruv_finance.returned_qty(a.org_id,p_bill);q:=coalesce(p_qty,b.quantity);
+ paid:=naruv_finance.paid(a.org_id,p_bill);credit:=naruv_finance.credit_sum(a.org_id,p_bill);
+ IF q<1 OR prev+q>b.quantity THEN RAISE EXCEPTION 'COST_RETURN_CONFLICT'; END IF;
+ net:=naruv_finance.allocation(b.subtotal,b.quantity,prev,q)::bigint;
+ tax:=naruv_finance.allocation(b.vat,b.quantity,prev,q)::bigint;
+ IF paid+credit+net+tax>b.total THEN RAISE EXCEPTION 'COST_RETURN_CONFLICT'; END IF;
  PERFORM naruv_valuation.reconcile_bill(p_bill,p_csrf);
  SELECT * INTO STRICT f FROM naruv_trade.events z WHERE z.org_id=a.org_id AND z.request_id=b.fulfillment_id;
  SELECT * INTO STRICT m FROM naruv_inventory.movements z WHERE z.org_id=a.org_id AND z.request_id=f.movement_id;
  SELECT * INTO STRICT e FROM naruv_valuation.entries z WHERE z.org_id=a.org_id AND z.movement_id=m.request_id;
  mid:='doc:'||encode(sha256(convert_to(jsonb_build_array('cost-return',p_request)::text,'UTF8')),'hex');
- PERFORM naruv_inventory.post_movement_internal(m.source_id,m.normalized_id,mid,m.to_warehouse,m.from_warehouse,m.quantity,p_csrf);
- amt:=naruv_valuation.apply(a.org_id,mid,b.kind||'_return',p_request,CASE WHEN b.kind='sale' THEN e.amount_krw ELSE NULL END);
- IF amt<>e.amount_krw THEN RAISE EXCEPTION 'COST_RETURN_CONFLICT'; END IF;
- r:=naruv_finance.snapshot(b,0)||jsonb_build_object('credited',b.total,'outstanding',0,'state','CREDITED',
- 'request_id',p_request,'movement_id',mid,'returned_quantity',m.quantity,'returned_cost_krw',amt::text,'statutory_posted',false);
- INSERT INTO naruv_finance.events VALUES(a.org_id,p_request,p_bill,a.actor_id,'credit',jsonb_build_object('movement_id',mid),b.total,NULL,NULL,r,clock_timestamp());
+ cost:=naruv_finance.allocation(e.amount_krw,b.quantity,prev,q);
+ PERFORM naruv_inventory.post_movement_internal(m.source_id,m.normalized_id,mid,m.to_warehouse,m.from_warehouse,q,p_csrf);
+ amt:=naruv_valuation.apply(a.org_id,mid,b.kind||'_return',p_request,CASE WHEN b.kind='sale' THEN cost ELSE NULL END);
+ IF amt<>cost THEN RAISE EXCEPTION 'COST_RETURN_CONFLICT'; END IF;
+ r:=naruv_finance.snapshot(b,paid)||jsonb_build_object('credited',credit+net+tax,'outstanding',b.total-paid-credit-net-tax,
+ 'state',CASE WHEN prev+q=b.quantity THEN 'CREDITED' WHEN b.total-paid-credit-net-tax=0 THEN 'SETTLED' WHEN paid=0 THEN 'OPEN' ELSE 'PARTIAL' END,
+ 'request_id',p_request,'movement_id',mid,'returned_quantity',q,'cumulative_returned_quantity',prev+q,'returned_cost_krw',amt::text,'statutory_posted',false);
+ INSERT INTO naruv_finance.events VALUES(a.org_id,p_request,p_bill,a.actor_id,'credit',
+ jsonb_build_object('movement_id',mid,'requested_quantity',p_qty,'prior_quantity',prev,'quantity',q,'net',net,'vat',tax),
+ net+tax,NULL,NULL,r,clock_timestamp());
  PERFORM naruv_valuation.reconcile_bill(p_bill,p_csrf);
  RETURN r;
 END $$;
+CREATE FUNCTION naruv_valuation.return_bill(p_bill text,p_request text,p_confirm boolean,p_csrf text)
+ RETURNS jsonb LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+ SELECT naruv_valuation.return_quantity(p_bill,p_request,NULL::bigint,p_confirm,p_csrf)
+$$;
 -- Whole-tenant current-state audit. Bounded synchronous review, never a repair.
 CREATE FUNCTION naruv_valuation.audit_ledger(p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
@@ -396,5 +418,5 @@ BEGIN
  'wip_krw',wip::text,'bill_count',n,'status','RECONCILED','production_authorized',false,'statutory_posted',false);
 END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_valuation FROM PUBLIC,jw_app_dev,naruv_native_stage;
-GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text),naruv_valuation.return_bill(text,text,boolean,text),naruv_valuation.audit_ledger(text) TO jw_app_dev;
+GRANT EXECUTE ON FUNCTION naruv_valuation.receive(text,text,jsonb,boolean,text),naruv_valuation.inspect(text,text,text,text),naruv_valuation.reconcile_bill(text,text),naruv_valuation.return_bill(text,text,boolean,text),naruv_valuation.return_quantity(text,text,bigint,boolean,text),naruv_valuation.audit_ledger(text) TO jw_app_dev;
 RESET ROLE;

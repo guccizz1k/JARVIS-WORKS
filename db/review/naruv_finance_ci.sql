@@ -31,7 +31,7 @@ CREATE TABLE naruv_finance.events(
  CHECK((action='reverse')=(reversal_of IS NOT NULL)),
  CHECK((action='bill' AND amount=0) OR (action IN ('pay','reverse') AND amount>0) OR action='credit')
 );
-CREATE UNIQUE INDEX finance_one_credit ON naruv_finance.events(org_id,bill_id) WHERE action='credit';
+CREATE INDEX finance_credit_bill ON naruv_finance.events(org_id,bill_id) WHERE action='credit';
 CREATE INDEX finance_bill_doc ON naruv_finance.bills(org_id,doc_id);
 CREATE INDEX finance_event_bill ON naruv_finance.events(org_id,bill_id);
 DO $$ DECLARE t text; BEGIN
@@ -53,6 +53,19 @@ CREATE FUNCTION naruv_finance.credited(p_org text,p_bill text) RETURNS boolean
  LANGUAGE sql VOLATILE SET search_path=pg_catalog AS $$
  SELECT EXISTS(SELECT 1 FROM naruv_finance.events WHERE org_id=p_org AND bill_id=p_bill AND action='credit')
 $$;
+CREATE FUNCTION naruv_finance.credit_sum(p_org text,p_bill text) RETURNS bigint
+ LANGUAGE sql VOLATILE SET search_path=pg_catalog AS $$
+ SELECT coalesce(sum(amount),0)::bigint FROM naruv_finance.events WHERE org_id=p_org AND bill_id=p_bill AND action='credit'
+$$;
+CREATE FUNCTION naruv_finance.returned_qty(p_org text,p_bill text) RETURNS bigint
+ LANGUAGE sql VOLATILE SET search_path=pg_catalog AS $$
+ SELECT coalesce(sum((payload->>'quantity')::bigint),0)::bigint FROM naruv_finance.events WHERE org_id=p_org AND bill_id=p_bill AND action='credit'
+$$;
+-- Exact cumulative half-up allocation; the last unit drains the original amount.
+CREATE FUNCTION naruv_finance.allocation(p_amount numeric,p_total bigint,p_previous bigint,p_qty bigint)
+ RETURNS numeric LANGUAGE sql IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+ SELECT div(2*p_amount*(p_previous+p_qty)+p_total,2*p_total)-div(2*p_amount*p_previous+p_total,2*p_total)
+$$;
 CREATE FUNCTION naruv_finance.snapshot(b naruv_finance.bills,p_paid bigint) RETURNS jsonb
  LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS $$
  SELECT jsonb_build_object('bill_id',($1).bill_id,'doc_id',($1).doc_id,'fulfillment_id',($1).fulfillment_id,
@@ -60,6 +73,19 @@ CREATE FUNCTION naruv_finance.snapshot(b naruv_finance.bills,p_paid bigint) RETU
  'paid',$2,'outstanding',($1).total-$2,'state',CASE WHEN ($1).total=$2 THEN 'SETTLED' WHEN $2=0 THEN 'OPEN' ELSE 'PARTIAL' END,
  'production_authorized',false)
 $$;
+CREATE FUNCTION naruv_finance.adjusted_snapshot(b naruv_finance.bills,p_paid bigint) RETURNS jsonb
+ LANGUAGE plpgsql VOLATILE SET search_path=pg_catalog AS $$
+DECLARE c bigint; q bigint; due bigint; result jsonb;
+BEGIN
+ c:=naruv_finance.credit_sum(b.org_id,b.bill_id);q:=naruv_finance.returned_qty(b.org_id,b.bill_id);
+ due:=b.total-p_paid-c;
+ IF q<0 OR q>b.quantity OR c<0 OR c>b.total OR p_paid<0 OR due<0 OR (q=b.quantity AND c<>b.total)
+ THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
+ result:=naruv_finance.snapshot(b,p_paid);
+ IF q=0 THEN RETURN result; END IF;
+ RETURN result||jsonb_build_object('credited',c,'returned_quantity',q,'outstanding',due,
+ 'state',CASE WHEN q=b.quantity THEN 'CREDITED' WHEN due=0 THEN 'SETTLED' WHEN p_paid=0 THEN 'OPEN' ELSE 'PARTIAL' END);
+END $$;
 CREATE FUNCTION naruv_finance.command(p_bill text,p_request text,p_action text,p_payload jsonb,p_confirm boolean,p_csrf text)
  RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE a record; a2 record; b naruv_finance.bills; e naruv_finance.events; original naruv_finance.events;
@@ -111,15 +137,15 @@ BEGIN
   SELECT * INTO b FROM naruv_finance.bills x WHERE x.org_id=a.org_id AND x.bill_id=p_bill FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'FIN_NOT_FOUND'; END IF;
   paid_amt:=naruv_finance.paid(a.org_id,p_bill);
-  IF paid_amt<0 OR paid_amt>b.total THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
-  IF naruv_finance.credited(a.org_id,p_bill) THEN RAISE EXCEPTION 'FIN_CONFLICT'; END IF;
+  IF paid_amt<0 OR paid_amt>b.total-naruv_finance.credit_sum(a.org_id,p_bill) THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
+  IF naruv_finance.returned_qty(a.org_id,p_bill)=b.quantity THEN RAISE EXCEPTION 'FIN_CONFLICT'; END IF;
   IF p_action='pay' THEN
    IF p_payload-'amount'-'reference'<>'{}'::jsonb
    OR jsonb_typeof(p_payload->'amount') IS DISTINCT FROM 'number' OR (p_payload->>'amount') !~ '^[0-9]{1,15}$'
    OR jsonb_typeof(p_payload->'reference') IS DISTINCT FROM 'string' THEN RAISE EXCEPTION 'FIN_INPUT'; END IF;
    amt:=(p_payload->>'amount')::bigint; pref:=p_payload->>'reference';
    IF pref !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' OR amt<1 THEN RAISE EXCEPTION 'FIN_INPUT'; END IF;
-   IF amt>b.total-paid_amt THEN RAISE EXCEPTION 'FIN_OVERPAY'; END IF;
+   IF amt>b.total-paid_amt-naruv_finance.credit_sum(a.org_id,p_bill) THEN RAISE EXCEPTION 'FIN_OVERPAY'; END IF;
    paid_amt:=paid_amt+amt;
   ELSE
    IF p_payload-'payment_request_id'<>'{}'::jsonb OR jsonb_typeof(p_payload->'payment_request_id') IS DISTINCT FROM 'string'
@@ -136,7 +162,7 @@ BEGIN
  SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
  IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256) IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
  THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
- result:=naruv_finance.snapshot(b,paid_amt)||jsonb_build_object('request_id',p_request,'action',p_action,'amount',amt);
+ result:=naruv_finance.adjusted_snapshot(b,paid_amt)||jsonb_build_object('request_id',p_request,'action',p_action,'amount',amt);
  INSERT INTO naruv_finance.events VALUES(a.org_id,p_request,p_bill,a.actor_id,p_action,p_payload,amt,pref,rev,result,clock_timestamp());
  RETURN result;
 END $$;
@@ -149,12 +175,7 @@ BEGIN
  SELECT * INTO b FROM naruv_finance.bills x WHERE x.org_id=a.org_id AND x.bill_id=p_bill;
  IF NOT FOUND THEN RAISE EXCEPTION 'FIN_NOT_FOUND'; END IF;
  paid_amt:=naruv_finance.paid(a.org_id,p_bill);
- IF paid_amt<0 OR paid_amt>b.total THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
- IF naruv_finance.credited(a.org_id,p_bill) THEN
-  IF paid_amt<>0 THEN RAISE EXCEPTION 'FIN_INTEGRITY'; END IF;
-  RETURN naruv_finance.snapshot(b,0)||jsonb_build_object('credited',b.total,'outstanding',0,'state','CREDITED');
- END IF;
- RETURN naruv_finance.snapshot(b,paid_amt);
+ RETURN naruv_finance.adjusted_snapshot(b,paid_amt);
 END $$;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA naruv_finance FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_finance.command(text,text,text,jsonb,boolean,text),naruv_finance.inspect(text,text) TO jw_app_dev;
