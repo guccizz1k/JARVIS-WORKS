@@ -49,13 +49,18 @@ def verify(cert,dsns):
         # exact disposable service, not on any deployed DB.
         with psycopg.connect(fixture.root_dsn,autocommit=True) as root:
             root.execute((ROOT/"migrations/v85_auth_stage.sql").read_text())
+        from app import naruv_hr_profile_review as profiles
+        with psycopg.connect(fixture.root_dsn) as root:
+            root.execute("SELECT set_config('naruv.profile_ci','DISPOSABLE_ONLY',true)")
+            root.execute((ROOT/"db/review/naruv_hr_profile_ci.sql").read_text())
         tls={p:make_conninfo(d,sslmode="verify-full",sslrootcert=str(cert),gssencmode="disable",connect_timeout=3) for p,d in dsns.items()}
-        env={review.FLAG:review.ACK,"JW_PG_AUTH_STAGE_DSN":tls["auth"],"JW_PG_STAGE_DSN":tls["business"],
-            "JW_V90_ALLOWED_ORIGINS":"https://testserver","JW_DATA_KEY":key.decode(),"JW_ENV":"dev"}
+        env={review.FLAG:review.ACK,integrated.FLAG:integrated.ACK,integrated.drafts.FLAG:integrated.ACK,integrated.hr.FLAG:integrated.ACK,"JW_PG_AUTH_STAGE_DSN":tls["auth"],"JW_PG_STAGE_DSN":tls["business"],
+            "JW_V90_ALLOWED_ORIGINS":"https://testserver","JW_DATA_KEY":key.decode(),"JW_ENV":"dev",profiles.FLAG:"DISPOSABLE_FIXTURE_ONLY",profiles.KEY:secrets.token_hex(32)}
         with patch.dict(os.environ,env),patch.object(v90.stage,"_connect",lambda:psycopg.connect(tls["business"])):
             app=FastAPI(docs_url=None,redoc_url=None,openapi_url=None)
             assert integrated.register_integrated_review(app,include_drafts=True,include_hr=True)
             assert review.register(app)
+            assert profiles.register(app)
             login=review.PREFIX+"/login";logout=review.PREFIX+"/logout"
             path=integrated.PREFIX+"/drafts/payroll/worker-1/2026-11"
             origin={"origin":"https://testserver"}
@@ -80,6 +85,21 @@ def verify(cert,dsns):
                 bcsrf=br.json()["csrf_token"];bh=dict(origin,**{"x-csrf-token":bcsrf})
                 assert b.post(path,headers=bh).json()["gross_krw"]==171000
                 assert b.post(path,headers=ah).status_code==403
+                profile=profiles.PREFIX+"/workers/worker-1"
+                value={"revision":"r1","profile":{"display_name":"Synthetic Worker","work_email":"worker@example.invalid","employment_start":"2026-01-01"}}
+                assert a.post(profile+"/create",json=value,headers=ah).status_code==422
+                create=dict(ah,**{"x-naruv-confirm":"yes"})
+                assert a.post(profile+"/create",json=value,headers=create).status_code==200
+                assert a.post(profile+"/create",json=value,headers=create).status_code==409
+                assert a.post(profile+"/read",headers=ah).json()["profile"]==value["profile"]
+                assert b.post(profile+"/read",headers=bh).status_code==404
+                assert b.post(profile+"/read",headers=ah).status_code==403
+                with psycopg.connect(fixture.root_dsn) as root:
+                    encrypted=root.execute("SELECT envelope FROM naruv_draft.profile_envelopes").fetchone()[0]
+                    assert "Synthetic Worker" not in str(encrypted) and "worker@example.invalid" not in str(encrypted)
+                    assert root.execute("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='naruv_draft.profile_envelopes'::regclass").fetchone()==(True,)
+                    assert root.execute("SELECT has_table_privilege('jw_app_dev','naruv_draft.profile_envelopes','SELECT')").fetchone()==(False,)
+                print("NARUV_HR_PROFILE_PG_PASS authenticated encrypted storage, duplicate, tenant and CSRF denial",flush=True)
                 assert a.post(logout,headers=dict(origin,**{"x-csrf-token":"x"*32})).status_code==403
                 assert a.post(logout,headers=ah).status_code==200
                 assert a.cookies.get(auth.COOKIE) is None
@@ -111,4 +131,6 @@ def verify(cert,dsns):
             for uid,pw in before:root.execute("UPDATE jw_dev.users SET password_hash=%s WHERE id=%s",(pw,uid))
             for signature in ("v85_auth_candidate(text)","v85_auth_failed(text)","v85_auth_issue_session(text,text,text,bigint,text)","v85_auth_revoke_session(text)","v85_auth_check_csrf(text,text)"):
                 root.execute("DROP FUNCTION IF EXISTS jw_dev."+signature)
+            root.execute("DROP FUNCTION IF EXISTS naruv_draft.profile_envelope(text,text,jsonb,text)")
+            root.execute("DROP TABLE IF EXISTS naruv_draft.profile_envelopes")
             for name in names:root.execute("DROP TABLE jw_dev."+name)

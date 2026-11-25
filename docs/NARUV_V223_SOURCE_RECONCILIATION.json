@@ -8530,7 +8530,15 @@
       "mode": "100644"
     },
     "scripts/naruv_pg_auth_acceptance_ci.py": {
-      "sha": "1387dd7500b6ac5254913c74296f7a8fc0e044ce",
+      "sha": "fc0e8383add1f62bfc1e285d878541f94bd9cfae",
+      "mode": "100644"
+    },
+    "app/naruv_hr_profile_review.py": {
+      "sha": "4014b435b9f17bec4f72d32a2d5a14b50a75c8ea",
+      "mode": "100644"
+    },
+    "db/review/naruv_hr_profile_ci.sql": {
+      "sha": "c504c49969bbd562674bd27d7cfd729fc8466876",
       "mode": "100644"
     }
   },
@@ -8627,5 +8635,9 @@
   "insurance_reference_2026": {
     "parent": "5c826a1df16a122a42c527dccb3ea914d5d2889a",
     "reason": "NHIS 7.19%/0.9448% and employment 1.8% shared contribution, separate assessed bases, exact unrounded restricted references only; no withholding or statutory certification."
+  },
+  "auth_profile_candidate": {
+    "parent": "6bbc7047bf44d69ddc9ed286e69575e1a1bef35d",
+    "reason": "Correct missing explicit integrated gate evidenced by run 45705759620 round2. Add separate CI-only encrypted synthetic profile create/read using actual auth, RLS, guarded RPC and AES-GCM, duplicate and tenant denial. No real PII, hosted storage or payment."
   }
 }
