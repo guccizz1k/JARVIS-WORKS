@@ -662,6 +662,19 @@ class FixedPartTimeRest(unittest.TestCase):
         b["weeks"][0]["days"][0].update(status="PUBLIC_HOLIDAY",actual_minutes=0)
         with self.assertRaises(PayrollBlocked):review(**b)
 
+    def test_confirmed_month_overlap_and_premium_rejection(self):
+        from app.naruv_kr_payroll_review import source_bound_part_time_rest_2026
+        a=self.args([300,300,300]);a["ordinary_hourly"]=a.pop("hourly_krw")
+        rows=[dict(date=r["date"],regular=r["actual_minutes"],additional=0)
+              for w in a["weeks"] for r in w["days"] if r["status"]=="PRESENT"]
+        classified=[dict(date=r["date"],regular=r["regular"],overtime=0,holiday_first8=0,holiday_after8=0,night=0) for r in rows]
+        a.update(period="2026-11",minutes_by_day=rows,classified_days=classified,source_review_sha256="d"*64)
+        out=source_bound_part_time_rest_2026(**a)
+        self.assertEqual(out["rest_pay_estimate_krw"],36000)
+        self.assertFalse(out["included_in_gross"]);self.assertFalse(out["historical_attendance_authenticity_verified"])
+        for change in (dict(minutes_by_day=rows[:-1]),dict(period="2026-10"),dict(classified_days=[dict(classified[0],night=60)]+classified[1:])):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):source_bound_part_time_rest_2026(**dict(a,**change))
+
 
 class AnnualLeaveAccrualAndCompensation(unittest.TestCase):
     def args(self,hire="2025-01-01",year=1,stop="2026-01-01",n=12):
