@@ -1644,7 +1644,11 @@ def isolated_payroll_review_html(result):
         tax=result["monthly_tax_reference"]
         line("월 소득세 계산 참고액",tax["national_reference_krw"])
         line("월 지방소득세 계산 참고액",tax["local_reference_from_assessed_national_krw"])
-    comps=result.get("settlement_reference",{}).get("components",{})
+    settlement=result.get("settlement_reference",{})
+    comps=settlement.get("components",{})
+    if comps:
+        require(settlement.get("annual_source_authenticity_verified") is False and settlement.get("settlement_included_in_monthly_gross") is False,"KR_VIEW_SETTLEMENT_EVIDENCE")
+        rows.append("<tr><th scope=\"row\">정산 자료 검증 범위</th><td>수동 제출 · 월 급여에 미합산</td></tr>")
     for k,label,key in (("bonus","별도 상여 원천징수 차액","signed_difference_krw"),
         ("year_end","별도 연말정산 차액 (음수: 환급)","signed_difference_krw"),
         ("year_end_calculated","별도 연말정산 계산 참고 차액 (음수: 환급)","signed_difference_krw"),
