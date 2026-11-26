@@ -1341,3 +1341,98 @@ def fixed_part_time_weekly_rest_2026(*,tenant,worker,sunday,hourly_krw,
             "scope":scope,"hourly":hourly_krw,"contract":contract_sha256,"attendance":attendance_sha256,
             "schedule":contracted_minutes,"comparator":comparator_minutes,"weeks":sorted(normalized,key=lambda r:r["monday"])}),
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False,"requires_human_review":True}
+
+
+def annual_leave_accrual_review_2026(*,tenant,worker,employment_start,service_year,
+        as_of,last_employed_on,months,attendance_sha256,contract_sha256,scope):
+    """One service-year review, first-of-month hire, continuous full-time.
+    Article 60 and MOEL interpretation 2021-12-16; monthly attendance counts
+    must be independently classified under Art60(6), not inferred from hours.
+    The first year grants monthly days (up to 11) separately from annual grant.
+    No leave-use, expiration, compensation or legal eligibility determination.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_LEAVE_SCOPE")
+    require(scope=="CONTINUOUS_FULLTIME_5PLUS_FIRST_OF_MONTH_HIRE","KR_LEAVE_SCOPE")
+    require(_whole(service_year,1,60),"KR_LEAVE_YEAR")
+    require(all(type(x) is str and HEX.fullmatch(x) for x in (attendance_sha256,contract_sha256)),"KR_LEAVE_PROOF")
+    def dt(value):
+        require(type(value) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",value),"KR_LEAVE_DATE")
+        try:return date.fromisoformat(value)
+        except ValueError:raise PayrollBlocked("KR_LEAVE_DATE") from None
+    hire=dt(employment_start); now=dt(as_of)
+    require(1960<=hire.year<=2026 and hire.day==1 and now.year==2026 and hire<=now,"KR_LEAVE_DATE_SCOPE")
+    stop=now if last_employed_on is None else dt(last_employed_on)
+    require(hire<=stop<=now,"KR_LEAVE_END")
+    y=hire.year+service_year-1
+    require(y<=2026,"KR_LEAVE_YEAR")
+    start=date(y,hire.month,1)
+    def boundary(i):
+        n=start.month-1+i
+        return date(start.year+n//12,n%12+1,1)
+    require(start<=stop,"KR_LEAVE_YEAR")
+    # A monthly right requires employment on the next month's first day.
+    required=[i for i in range(12) if boundary(i+1)<=stop]
+    # If employment ends exactly on the last day of a complete period,
+    # that period is not a grant yet; exclude it rather than inventing a right.
+    require(type(months) is list and len(months)==len(required),"KR_LEAVE_COVERAGE")
+    rows={}
+    for r in months:
+        require(type(r) is dict and set(r)=={"start","scheduled_days","credited_days","evidence_sha256"},"KR_LEAVE_MONTH")
+        d=dt(r["start"])
+        require(d in {boundary(i) for i in required} and d not in rows,"KR_LEAVE_MONTH")
+        require(_whole(r["scheduled_days"],1,31) and _whole(r["credited_days"],0,r["scheduled_days"])
+            and type(r["evidence_sha256"]) is str and HEX.fullmatch(r["evidence_sha256"]),"KR_LEAVE_ATTENDANCE")
+        rows[d]=dict(r)
+    grants=[]
+    for i in required:
+        r=rows[boundary(i)]
+        if service_year==1 and i<11 and r["scheduled_days"]==r["credited_days"]:
+            grants.append({"date":boundary(i+1).isoformat(),"days":1,"kind":"FIRST_YEAR_MONTHLY"})
+    annual_complete=len(required)==12
+    if annual_complete:
+        scheduled=sum(r["scheduled_days"] for r in rows.values())
+        credited=sum(r["credited_days"] for r in rows.values())
+        if 5*credited>=4*scheduled:
+            grants.append({"date":boundary(12).isoformat(),"days":min(25,15+(service_year-1)//2),"kind":"ANNUAL"})
+        elif service_year>1:
+            days=sum(r["scheduled_days"]==r["credited_days"] for r in rows.values())
+            if days:grants.append({"date":boundary(12).isoformat(),"days":days,"kind":"LOW_ATTENDANCE_MONTHLY_REFERENCE"})
+    total=sum(g["days"] for g in grants)
+    return {"status":"ANNUAL_LEAVE_ACCRUAL_REFERENCE_ONLY","grants":grants,"earned_days_in_review":total,
+        "annual_period_complete":annual_complete,"requires_human_review":True,
+        "review_sha256":hash_input({"v":"KR_LEAVE_ACCRUAL_2026_V1","tenant":tenant,"worker":worker,"hire":employment_start,
+            "year":service_year,"as_of":as_of,"last_employed_on":last_employed_on,"scope":scope,
+            "attendance":attendance_sha256,"contract":contract_sha256,"months":[rows[k] for k in sorted(rows)],"grants":grants}),
+        "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+def unused_leave_compensation_review_2026(*,tenant,worker,period,ordinary_hourly,grant_ledger_sha256,
+        expected_grant_ids,entries):
+    """Reconcile independently assessed payable unused full-day grants.
+    No automatic expiry, use-promotion waiver, or entitlement inference.
+    Each lot requires a signed/approved assessment reference from HR.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_LEAVE_SETTLEMENT_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_LEAVE_SETTLEMENT_PERIOD")
+    require(_whole(ordinary_hourly,1,10**8),"KR_LEAVE_SETTLEMENT_RATE")
+    require(type(expected_grant_ids) is list and 1<=len(expected_grant_ids)<=120 and all(type(x) is str and ID.fullmatch(x) for x in expected_grant_ids)
+        and len(set(expected_grant_ids))==len(expected_grant_ids),"KR_LEAVE_SETTLEMENT_IDS")
+    require(type(entries) is list and len(entries)==len(expected_grant_ids),"KR_LEAVE_SETTLEMENT_COVERAGE")
+    clean={};payable=0;pending=[]
+    for r in entries:
+        require(type(r) is dict and set(r)=={"grant_id","tenant","worker","earned","used","previously_paid","payable","disposition","assessment_sha256"},"KR_LEAVE_SETTLEMENT_ROW")
+        k=r["grant_id"]; state=r["disposition"]
+        require(type(k) is str and k in expected_grant_ids and k not in clean and (r["tenant"],r["worker"])==(tenant,worker),"KR_LEAVE_SETTLEMENT_SCOPE")
+        require(all(_whole(r[x],0,25) for x in ("earned","used","previously_paid","payable")) and r["earned"]>0
+            and r["used"]+r["previously_paid"]+r["payable"]<=r["earned"],"KR_LEAVE_SETTLEMENT_BALANCE")
+        require(type(state) is str and state in ("ASSESSED_PAYABLE","ASSESSED_NO_PAYMENT","PENDING") and
+            type(r["assessment_sha256"]) is str and HEX.fullmatch(r["assessment_sha256"]),"KR_LEAVE_SETTLEMENT_EVIDENCE")
+        require(state=="ASSESSED_PAYABLE" or r["payable"]==0,"KR_LEAVE_SETTLEMENT_AMOUNT")
+        if state=="PENDING":pending.append(k)
+        payable+=r["payable"];clean[k]=dict(r)
+    digest=hash_input({"v":"KR_LEAVE_SETTLEMENT_LEDGER_V1","tenant":tenant,"worker":worker,"period":period,
+        "ids":sorted(expected_grant_ids),"entries":[clean[k] for k in sorted(clean)]})
+    require(type(grant_ledger_sha256) is str and grant_ledger_sha256==digest,"KR_LEAVE_SETTLEMENT_CHANGED")
+    return {"status":"PENDING_ASSESSMENT" if pending else "ASSESSED_COMPENSATION_REFERENCE_ONLY",
+        "pending_grants":sorted(pending),"assessed_payable_days":payable,"reference_krw":None if pending else payable*8*ordinary_hourly,
+        "review_sha256":hash_input({"v":"KR_LEAVE_SETTLEMENT_REVIEW_V1","ledger":digest,"rate":ordinary_hourly}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}

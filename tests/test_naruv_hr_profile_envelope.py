@@ -200,3 +200,37 @@ class HRProfileEnvelope(unittest.TestCase):
             dict(recovery_signature=args["inventory_signature"])):
             with self.subTest(change=list(change)),self.assertRaises(ProfileBlocked):
                 verify_combined_retirement_evidence(**dict(args,**change))
+
+
+    def test_mounted_key_store_read_only_rotation_and_denial(self):
+        import os,tempfile
+        from pathlib import Path
+        from app.naruv_hr_profile_envelope import MountedProfileKeyStore
+        if not hasattr(os,"O_NOFOLLOW"):self.skipTest("POSIX key mount required")
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for name,material in (("old",b"x"*32),("new",b"y"*32),("other",b"z"*32)):
+                p=root/(name+".key");p.write_bytes(material);p.chmod(0o600)
+            manifest={"ci-a":{"test-key":{"file":"old.key","state":"RECOVERY_ONLY"},
+                "new-key":{"file":"new.key","state":"ACTIVE"}},
+                "ci-b":{"other":{"file":"other.key","state":"ACTIVE"}}}
+            store=MountedProfileKeyStore(tmp,manifest)
+            old=seal_profile(**self.scope,profile=self.profile)
+            rotated=store.rotate(tenant="ci-a",worker="pilot-worker",old_revision="r1",new_revision="r2",envelope=old)
+            self.assertEqual(rotated["key_id"],"new-key")
+            self.assertEqual(store.recover(tenant="ci-a",worker="pilot-worker",revision="r2",envelope=rotated),self.profile)
+            self.assertEqual(store.recover(tenant="ci-a",worker="pilot-worker",revision="r1",envelope=old),self.profile)
+            self.assertEqual(store.seal(tenant="ci-a",worker="pilot-worker",revision="r3",profile=self.profile)["key_id"],"new-key")
+            with self.assertRaises(ProfileBlocked):store.recover(tenant="ci-b",worker="pilot-worker",revision="r2",envelope=rotated)
+            for mode in (0o644,0o660):
+                (root/"new.key").chmod(mode)
+                with self.assertRaises(ProfileBlocked):store.recover(tenant="ci-a",worker="pilot-worker",revision="r2",envelope=rotated)
+            (root/"new.key").chmod(0o600)
+            os.link(root/"new.key",root/"hardlink.key")
+            with self.assertRaises(ProfileBlocked):store.seal(tenant="ci-a",worker="pilot-worker",revision="r3",profile=self.profile)
+            (root/"hardlink.key").unlink()
+            (root/"new.key").rename(root/"saved.key")
+            (root/"new.key").symlink_to(root/"saved.key")
+            with self.assertRaises(ProfileBlocked):store.seal(tenant="ci-a",worker="pilot-worker",revision="r3",profile=self.profile)
+            self.assertEqual((root/"old.key").read_bytes(),b"x"*32)
+            self.assertEqual((root/"saved.key").read_bytes(),b"y"*32)

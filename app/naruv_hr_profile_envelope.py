@@ -313,3 +313,79 @@ def consume_combined_retirement_ci(cur,**args):
     _require(cur.rowcount==1)
     return {"status":"COMBINED_SINGLE_USE_CI_REVIEW_ONLY","combined_sha256":proof["combined_sha256"],
         "key_retirement_authorized":False,"production_authorized":False}
+
+
+class MountedProfileKeyStore:
+    """Read-only adapter for an externally provisioned POSIX secret directory.
+    Deployment must own the directory and its ancestors; no key generation,
+    deletion, remote KMS claim, or exposure to client-provided key IDs.
+    Each tenant/key ID is explicitly enrolled in a trusted server manifest.
+    """
+    def __init__(self,directory,manifest):
+        import os
+        _require(type(directory) is str and os.path.isabs(directory) and type(manifest) is dict and 1<=len(manifest)<=1000)
+        self._directory=directory
+        self._manifest={}
+        for tenant,entries in manifest.items():
+            _require(type(tenant) is str and ID.fullmatch(tenant) and type(entries) is dict and 1<=len(entries)<=64)
+            copied={}
+            for key_id,entry in entries.items():
+                _require(type(key_id) is str and ID.fullmatch(key_id) and type(entry) is dict
+                    and set(entry)=={"file","state"} and type(entry["file"]) is str
+                    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.key",entry["file"])
+                    and entry["state"] in ("ACTIVE","RECOVERY_ONLY","DISABLED"))
+                copied[key_id]=dict(entry)
+            _require(sum(x["state"]=="ACTIVE" for x in copied.values())==1)
+            self._manifest[tenant]=copied
+        files=[e["file"] for entries in self._manifest.values() for e in entries.values()]
+        _require(len(files)==len(set(files)))
+
+    def _read(self,tenant,key_id,*,for_write):
+        import os,stat
+        _require(type(tenant) is str and type(key_id) is str and type(for_write) is bool)
+        entry=self._manifest.get(tenant,{}).get(key_id)
+        _require(entry is not None and entry["state"] in (("ACTIVE",) if for_write else ("ACTIVE","RECOVERY_ONLY")))
+        _require(all(hasattr(os,k) for k in ("O_NOFOLLOW","O_DIRECTORY","O_NONBLOCK","O_CLOEXEC","geteuid")))
+        directory_fd=None;fd=None
+        try:
+            directory_fd=os.open(self._directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+            ds=os.fstat(directory_fd)
+            _require(stat.S_ISDIR(ds.st_mode) and ds.st_uid==os.geteuid() and stat.S_IMODE(ds.st_mode)==0o700)
+            fd=os.open(entry["file"],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=directory_fd)
+            st=os.fstat(fd)
+            _require(stat.S_ISREG(st.st_mode) and st.st_uid==os.geteuid() and st.st_nlink==1
+                and stat.S_IMODE(st.st_mode) in (0o400,0o600) and st.st_size==32)
+            raw=bytearray()
+            while len(raw)<33:
+                chunk=os.read(fd,33-len(raw))
+                if not chunk:break
+                raw.extend(chunk)
+            end=os.fstat(fd)
+            _require(len(raw)==32 and (st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns,st.st_ctime_ns,st.st_mode,st.st_nlink)
+                ==(end.st_dev,end.st_ino,end.st_size,end.st_mtime_ns,end.st_ctime_ns,end.st_mode,end.st_nlink))
+            return bytes(raw)
+        except OSError:raise ProfileBlocked("HR_PROFILE_INVALID") from None
+        finally:
+            if fd is not None:os.close(fd)
+            if directory_fd is not None:os.close(directory_fd)
+
+    def seal(self,*,tenant,worker,revision,profile):
+        _require(type(tenant) is str and tenant in self._manifest)
+        key_id=next(k for k,e in self._manifest[tenant].items() if e["state"]=="ACTIVE")
+        return seal_profile(tenant=tenant,worker=worker,revision=revision,key_id=key_id,
+            key=self._read(tenant,key_id,for_write=True),profile=profile)
+
+    def recover(self,*,tenant,worker,revision,envelope):
+        _require(type(envelope) is dict and type(envelope.get("key_id")) is str)
+        key_id=envelope["key_id"]
+        return open_profile(tenant=tenant,worker=worker,revision=revision,key_id=key_id,
+            key=self._read(tenant,key_id,for_write=False),envelope=envelope)
+
+    def rotate(self,*,tenant,worker,old_revision,new_revision,envelope):
+        _require(type(tenant) is str and tenant in self._manifest and type(envelope) is dict
+            and type(envelope.get("key_id")) is str)
+        old=envelope["key_id"]
+        new=next(k for k,e in self._manifest[tenant].items() if e["state"]=="ACTIVE")
+        return rotate_profile(tenant=tenant,worker=worker,old_revision=old_revision,new_revision=new_revision,
+            old_key_id=old,new_key_id=new,old_key=self._read(tenant,old,for_write=False),
+            new_key=self._read(tenant,new,for_write=True),envelope=envelope)

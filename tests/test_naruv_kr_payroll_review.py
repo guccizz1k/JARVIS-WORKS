@@ -622,3 +622,49 @@ class FixedPartTimeRest(unittest.TestCase):
         b=self.args([300,300,300])
         b["weeks"][0]["days"][0].update(status="PUBLIC_HOLIDAY",actual_minutes=0)
         with self.assertRaises(PayrollBlocked):review(**b)
+
+
+class AnnualLeaveAccrualAndCompensation(unittest.TestCase):
+    def args(self,hire="2025-01-01",year=1,stop="2026-01-01",n=12):
+        from datetime import date
+        h=date.fromisoformat(hire)
+        rows=[dict(start=date(h.year+year-1+(h.month-1+i)//12,(h.month-1+i)%12+1,1).isoformat(),
+            scheduled_days=20,credited_days=20,evidence_sha256="a"*64) for i in range(n)]
+        return dict(tenant="a",worker="w",employment_start=hire,service_year=year,as_of="2026-11-26",
+            last_employed_on=stop,months=rows,attendance_sha256="b"*64,contract_sha256="c"*64,
+            scope="CONTINUOUS_FULLTIME_5PLUS_FIRST_OF_MONTH_HIRE")
+    def test_anniversary_and_threshold(self):
+        from app.naruv_kr_payroll_review import annual_leave_accrual_review_2026 as review
+        self.assertEqual(review(**self.args(stop="2025-12-31",n=11))["earned_days_in_review"],11)
+        r=review(**self.args())
+        self.assertEqual(r["earned_days_in_review"],26)
+        self.assertFalse(r["payment_authorized"])
+        for year,expected in ((3,16),(5,17),(21,25),(25,25)):
+            a=self.args(hire=f"{2026-year}-01-01",year=year)
+            self.assertEqual(review(**a)["earned_days_in_review"],expected)
+        a=self.args(hire="2024-01-01",year=2)
+        for r in a["months"]:r["credited_days"]=16
+        self.assertEqual(review(**a)["earned_days_in_review"],15)
+        a["months"][0]["credited_days"]=15
+        self.assertEqual(review(**a)["earned_days_in_review"],0)
+        a["months"][1]["credited_days"]=20
+        a["months"][2]["credited_days"]=10
+        self.assertEqual(review(**a)["earned_days_in_review"],1)
+        for change in (dict(months=a["months"][:-1]),dict(scope="UNSUPPORTED"),dict(service_year=True)):
+            with self.assertRaises(PayrollBlocked):review(**dict(a,**change))
+    def test_settlement_pending_and_duplicate_payment(self):
+        from app.naruv_kr_payroll_review import unused_leave_compensation_review_2026 as review
+        from app.naruv_payroll_draft import hash_input
+        row=dict(grant_id="g1",tenant="a",worker="w",earned=15,used=7,previously_paid=3,payable=5,
+            disposition="ASSESSED_PAYABLE",assessment_sha256="a"*64)
+        def args(r):
+            return dict(tenant="a",worker="w",period="2026-11",ordinary_hourly=12000,expected_grant_ids=["g1"],entries=[r],
+                grant_ledger_sha256=hash_input({"v":"KR_LEAVE_SETTLEMENT_LEDGER_V1","tenant":"a","worker":"w",
+                    "period":"2026-11","ids":["g1"],"entries":[r]}))
+        out=review(**args(row))
+        self.assertEqual(out["reference_krw"],480000)
+        self.assertFalse(out["payment_authorized"])
+        self.assertIsNone(review(**args(dict(row,payable=0,disposition="PENDING")))["reference_krw"])
+        for r in (dict(row,payable=6),dict(row,tenant="b"),dict(row,disposition="PENDING")):
+            with self.assertRaises(PayrollBlocked):review(**args(r))
+        with self.assertRaises(PayrollBlocked):review(**dict(args(row),grant_ledger_sha256="0"*64))

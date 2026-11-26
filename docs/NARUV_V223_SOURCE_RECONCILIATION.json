@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "08dfdeb3114b6d2af2b52491408b43edd8695a65",
+      "sha": "0828ecd80b9d47541c0a75562c50f77050e63f1d",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "7bdae547c0929d0e42553eb15b88b4f4a96b9e01",
+      "sha": "f9a3c991960568b1e9a66d28b20a75a89e5c63c9",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "74272569b5ea6413b260c1885567c7d03865eb0f",
+      "sha": "2149472f09164f4eb5aafed9ea26c0239ea7d11a",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "64d4d3096f3c77e766135f66aa85a56bc1507657",
+      "sha": "8818126e31ffd77f6dff5290633aa54bc78bae6f",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8772,5 +8772,9 @@
   "part_time_and_combined_atomic": {
     "parent": "ee16eb0d57addeb7206317048934580db16751f9",
     "reason": "Restricted fixed recurring part-time 4-week reference, 15-hour threshold and comparator days, no broader statutory claim. V2 combined challenge atomic consumption in CI, DB time and pinned proof/signers, two-session replay and rollback tests."
+  },
+  "annual_leave_and_mounted_key_store": {
+    "parent": "6cfc4bace93de61736f4febd446bdaeee2a27858",
+    "reason": "Restricted leave accrual with next-day employment boundary, first-year monthly and anniversary grants, assessed unused compensation reconciliation; read-only trusted POSIX mounted secret adapter active/recovery scope, permissions, hard/symlink denial. No actual operational key access or legal acceptance."
   }
 }
