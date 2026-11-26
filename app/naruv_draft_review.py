@@ -253,6 +253,12 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 proof.update(v="KR_CI_MANUAL_API_V6",annual_leave_accrual=accrual["review_sha256"])
                 details["annual_leave_accrual_reference"]=dict(accrual,historical_attendance_authenticity_verified=False)
             if "fixed_week_paid_review" in data:
+                # The alternative gross covers ordinary work only. The source
+                # review can accept night minutes even when additional minutes
+                # are zero. Reject all premium categories rather than omit pay.
+                if any(r[k]!=0 for r in data["classified_days"]
+                       for k in ("overtime","holiday_first8","holiday_after8","night")):
+                    raise PayrollBlocked("KR_FIXED_WEEK_PREMIUM_SCOPE")
                 fixed=fixed_week_monthly_payroll_review_2026(tenant=org,worker=worker,period=period,
                     base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],policy_revision=revision,
                     minutes_by_day=days,additional_bps=bps,expected_draft_sha256=data["expected_draft_sha256"],
