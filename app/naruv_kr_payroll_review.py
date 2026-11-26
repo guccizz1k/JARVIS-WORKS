@@ -1627,6 +1627,59 @@ def ordinary_comparison_coverage_2026(*,source_review_sha256,pension,insurance,t
             "pension":pension["review_sha256"],"insurance":insurance["review_sha256"],"tax":tax["review_sha256"],"items":items}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
 
+def restricted_wage_statement_2026(*,tenant,worker,period,base_hourly,ordinary_hourly,classification_sha256,
+        classified_days,deductions,bound_review,payment_date,scope,completeness_assessment_sha256):
+    """Restricted arithmetic draft, not a legally issued wage statement.
+    Art.48(2), Enforcement Decree Art.27-2:
+    https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lspttninfSeq=70879
+    Only explicitly assessed cash wages with no other components. No evidence
+    of actual wage completeness, payment date, eligibility or delivery.
+    """
+    require(scope=="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY"
+        and type(completeness_assessment_sha256) is str and HEX.fullmatch(completeness_assessment_sha256),"KR_STATEMENT_SCOPE")
+    require(type(payment_date) is str and re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}",payment_date),"KR_STATEMENT_DATE")
+    wage=wage_review(tenant=tenant,worker=worker,period=period,base_hourly=base_hourly,
+        ordinary_hourly=ordinary_hourly,classification_sha256=classification_sha256,days=classified_days,
+        scope="ADULT_HOURLY_5PLUS_MANUALLY_CLASSIFIED")
+    try:pd=date.fromisoformat(payment_date)
+    except ValueError:raise PayrollBlocked("KR_STATEMENT_DATE") from None
+    y,m=map(int,period.split("-"));next_month=f"{y+(m==12):04}-{m%12+1:02}"
+    require(pd.isoformat()[:7] in (period,next_month),"KR_STATEMENT_DATE")
+    net=deduction_reconciliation(wage_result=wage,deductions=deductions)
+    require(type(bound_review) is dict and bound_review.get("status")=="SOURCE_BOUND_MANUAL_REVIEW_ONLY"
+        and bound_review.get("wage")==wage and bound_review.get("deductions")==net
+        and type(bound_review.get("source_draft_sha256")) is str and HEX.fullmatch(bound_review["source_draft_sha256"])
+        and bound_review.get("review_binding_sha256")==hash_input({"v":1,"source":bound_review["source_draft_sha256"],
+            "wage":wage["review_sha256"],"deductions":net["reconciliation_sha256"]}),"KR_STATEMENT_SOURCE")
+    minutes={k:sum(r[k] for r in classified_days) for k in KINDS}
+    specs=[("work_base",sum(minutes[k] for k in KINDS[:-1]),base_hourly,10000),
+        ("overtime_premium",minutes["overtime"],ordinary_hourly,5000),
+        ("holiday_first8_premium",minutes["holiday_first8"],ordinary_hourly,5000),
+        ("holiday_after8_premium",minutes["holiday_after8"],ordinary_hourly,10000),
+        ("night_premium",minutes["night"],ordinary_hourly,5000)]
+    rows=[]
+    for k,n,rate,bps in specs:
+        exact=Fraction(rate*n*bps,60*10000)
+        require(_money(exact)==wage["components"][k],"KR_STATEMENT_COMPONENT")
+        rows.append(dict(kind=k,minutes=n,hourly_krw=rate,multiplier_bps=bps,exact=_money(exact),amount_krw=exact.numerator//exact.denominator))
+    # Display allocation only, never a statutory rounding policy. Deterministic
+    # largest remainder makes displayed integer components reconcile to gross.
+    delta=net["gross_estimate_krw"]-sum(r["amount_krw"] for r in rows)
+    require(0<=delta<=len(rows),"KR_STATEMENT_ROUNDING")
+    order=sorted(range(len(rows)),key=lambda i:(-(Fraction(**rows[i]["exact"])-rows[i]["amount_krw"]),i))
+    for i in order[:delta]:rows[i]["amount_krw"]+=1
+    require(sum(r["amount_krw"] for r in rows)==net["gross_estimate_krw"],"KR_STATEMENT_TOTAL")
+    d=[dict(kind=k,amount_krw=deductions[k]["amount_krw"]) for k in DEDUCTIONS]
+    require(sum(r["amount_krw"] for r in d)==net["deductions_krw"],"KR_STATEMENT_DEDUCTION")
+    core=dict(worker=worker,period=period,proposed_payment_date=payment_date,components=rows,deductions=d,
+        gross_krw=net["gross_estimate_krw"],deductions_krw=net["deductions_krw"],net_krw=net["net_estimate_krw"],
+        source_review_sha256=bound_review["review_binding_sha256"],rounding="DISPLAY_ALLOCATION_ONLY")
+    return dict(core,status="RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY",
+        review_sha256=hash_input({"v":"KR_WAGE_STATEMENT_DRAFT_2026_V1","tenant":tenant,
+            "core":core,"assessment":completeness_assessment_sha256}),
+        completeness_verified=False,payment_date_verified=False,statutory_validated=False,
+        payment_authorized=False,delivery_authorized=False,production_authorized=False)
+
 def isolated_payroll_review_html(result):
     """CI-only no-script read-only representation; not the approved WORKS UI.
     Render only a fixed schema of numeric results; never embed client evidence.
@@ -1642,6 +1695,21 @@ def isolated_payroll_review_html(result):
     line("기본 급여 검토 총액",d["gross_estimate_krw"])
     line("수동 공제 합계",d["deductions_krw"])
     line("기본 급여 실수령 참고액",d["net_estimate_krw"])
+    if "wage_statement_reference" in result:
+        a=result["wage_statement_reference"]
+        require(a.get("status")=="RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY"
+            and all(a.get(k) is False for k in ("completeness_verified","payment_date_verified","statutory_validated","payment_authorized","delivery_authorized","production_authorized")),"KR_VIEW_STATEMENT")
+        require(type(a["worker"]) is str and ID.fullmatch(a["worker"])
+            and type(a["proposed_payment_date"]) is str and re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}",a["proposed_payment_date"]),"KR_VIEW_STATEMENT_SCOPE")
+        rows.append("<tr><th scope=\"row\">임금명세서 초안 (교부 금지)</th><td>"+escape(a["worker"])+" / 지급 예정일 "+escape(a["proposed_payment_date"])+"</td></tr>")
+        labels={"work_base":"근로 기본액","overtime_premium":"연장 가산","holiday_first8_premium":"휴일 8시간 이내 가산","holiday_after8_premium":"휴일 8시간 초과 가산","night_premium":"야간 가산"}
+        require(type(a["components"]) is list and [r["kind"] for r in a["components"]]==list(labels),"KR_VIEW_STATEMENT_COMPONENTS")
+        for r in a["components"]:
+            require(all(_whole(r[k],0,10**12) for k in ("minutes","hourly_krw","multiplier_bps")),"KR_VIEW_STATEMENT_NUMBERS")
+            line(labels[r["kind"]]+" ("+str(r["minutes"])+"분 × "+str(r["hourly_krw"])+"원/시간 × "+str(r["multiplier_bps"])+"/10000)",r["amount_krw"])
+        dl={"income_tax":"소득세","local_income_tax":"지방소득세","pension":"국민연금","health":"건강보험","long_term_care":"장기요양보험","employment_insurance":"고용보험"}
+        require(type(a["deductions"]) is list and [r["kind"] for r in a["deductions"]]==list(dl),"KR_VIEW_STATEMENT_DEDUCTIONS")
+        for r in a["deductions"]:line(dl[r["kind"]],r["amount_krw"])
     if "agency_exception_reference" in result:
         a=result["agency_exception_reference"]
         require(a.get("agency_source_authenticity_verified") is False and a.get("ordinary_collection_comparison_performed") is False
