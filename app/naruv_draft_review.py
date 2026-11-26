@@ -70,10 +70,15 @@ def _decode_kr_body(raw):
         if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review","annual_leave_accrual_review","fixed_week_paid_review","part_time_rest_review","agency_exception_review","wage_statement_review"}:raise ValueError("shape")
         if "wage_statement_review" in d:
             a=d["wage_statement_review"]
-            if (set(d)!=required|{"wage_statement_review"} or type(a) is not dict
-                or set(a)!={"payment_date","scope","completeness_assessment_sha256"}
+            if (type(a) is not dict or set(a)!={"payment_date","scope","completeness_assessment_sha256"}
                 or any(type(v) is not str for v in a.values())):
                 raise ValueError("statement scope")
+            optional={"wage_statement_review"}
+            if a["scope"]=="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE":
+                optional.add("fixed_week_paid_review")
+            elif a["scope"]!="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY":
+                raise ValueError("statement scope")
+            if set(d)!=required|optional:raise ValueError("statement conflicts")
         if "agency_exception_review" in d:
             # Alternative manual insurance reference, never combine with other
             # ordinary/exceptional reference modes in the same request.
@@ -215,7 +220,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026,ordinary_comparison_coverage_2026,restricted_wage_statement_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026,ordinary_comparison_coverage_2026,restricted_wage_statement_2026,fixed_week_wage_statement_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -330,10 +335,16 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 proof.update(v="KR_CI_MANUAL_API_V8",part_time_rest=rest["review_sha256"])
                 details["part_time_rest_reference"]=rest
             if "wage_statement_review" in data:
-                statement=restricted_wage_statement_2026(tenant=org,worker=worker,period=period,
-                    base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],classification_sha256=data["classification_sha256"],
-                    classified_days=data["classified_days"],deductions=data["deductions"],bound_review=review,
-                    **data["wage_statement_review"])
+                if "fixed_week_paid_review" in data:
+                    statement=fixed_week_wage_statement_2026(tenant=org,worker=worker,period=period,
+                        base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],minutes_by_day=days,
+                        deductions=data["deductions"],fixed_review=fixed,source_review=review,
+                        **data["wage_statement_review"])
+                else:
+                    statement=restricted_wage_statement_2026(tenant=org,worker=worker,period=period,
+                        base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],classification_sha256=data["classification_sha256"],
+                        classified_days=data["classified_days"],deductions=data["deductions"],bound_review=review,
+                        **data["wage_statement_review"])
                 proof["wage_statement"]=statement["review_sha256"]
                 details["wage_statement_reference"]=statement
             if "insurance_reference" in details and "monthly_tax_reference" in details:
