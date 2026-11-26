@@ -51,7 +51,7 @@ def test_eleven_synthetic_external_ciphers_really_restore_pg17(monkeypatch):
         pairs=list(zip(ids,[hashlib.sha256(x).hexdigest() for x in candidates]))
         known=dict(zip(ids,candidates))
         monkeypatch.setattr(ext,"preflight",lambda:"PASS")
-        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key if selected_scope=="legacy" else b"T"*32,pairs))
+        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key,pairs))
         monkeypatch.setattr(clean,"_head_tree",lambda _:set(known))
         monkeypatch.setattr(clean,"_download",lambda blob,expected:known[blob])
         report=ext.run()
@@ -116,7 +116,7 @@ def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path
         monkeypatch.setenv("JW_WORM_OWNER_SCOPE_SHA256",scope)
         for k in ("GH_TOKEN","GITHUB_TOKEN","B2_APPLICATION_KEY","B2_APPLICATION_KEY_ID","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY"):
             monkeypatch.delenv(k,raising=False)
-        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key,pairs))
+        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key if selected_scope=="legacy" else b"T"*32,pairs))
         def forbid(*args):raise AssertionError("GitHub access forbidden")
         monkeypatch.setattr(clean,"_head_tree",forbid)
         monkeypatch.setattr(clean,"_download",forbid)
