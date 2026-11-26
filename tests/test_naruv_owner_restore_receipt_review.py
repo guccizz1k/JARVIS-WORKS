@@ -35,3 +35,36 @@ def test_duplicate_and_symlink(tmp_path):
     p=tmp_path/"legacy.json";p.write_bytes(raw(fixture()));p.chmod(0o600)
     (tmp_path/"staged.json").symlink_to(p)
     with pytest.raises(OSError):r.review(tmp_path)
+
+def _pair(directory):
+    directory.mkdir(mode=0o700)
+    for name in ('legacy.json','staged.json'):
+        p=directory/name;p.write_bytes(raw(fixture()));p.chmod(0o600)
+
+def test_hardlink_denied(tmp_path):
+    d=tmp_path/'receipts';_pair(d)
+    (d/'staged.json').unlink();os.link(d/'legacy.json',d/'staged.json')
+    with pytest.raises(ValueError):r.review(d)
+
+def test_directory_swap_denied(tmp_path,monkeypatch):
+    d=tmp_path/'receipts';_pair(d);replacement=tmp_path/'replacement';_pair(replacement)
+    original=r.check;calls=0
+    def swap(data):
+        nonlocal calls
+        calls+=1
+        if calls==1:
+            d.rename(tmp_path/'old');replacement.rename(d)
+        return original(data)
+    monkeypatch.setattr(r,'check',swap)
+    with pytest.raises(ValueError):r.review(d)
+
+def test_first_file_replaced_during_second_check(tmp_path,monkeypatch):
+    d=tmp_path/'receipts';_pair(d);original=r.check;calls=0
+    def swap(data):
+        nonlocal calls
+        calls+=1
+        if calls==2:
+            (d/'legacy.json').unlink();p=d/'legacy.json';p.write_bytes(data);p.chmod(0o600)
+        return original(data)
+    monkeypatch.setattr(r,'check',swap)
+    with pytest.raises(ValueError):r.review(d)
