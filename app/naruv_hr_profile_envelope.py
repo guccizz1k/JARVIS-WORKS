@@ -540,7 +540,7 @@ def review_b2_compliance_version_metadata(*,bucket_id,expected,pages,as_of_ms):
                 and ret["value"]["retainUntilTimestamp"]>=upload+30*86400000
                 and ret["value"]["retainUntilTimestamp"]>as_of_ms
                 and type(hold) is dict and hold.get("isClientAuthorizedToRead") is True
-                and hold.get("value") in ("on","off")
+                and "value" in hold and (hold["value"] is None or hold["value"] in ("on","off"))
                 and type(enc) is dict and enc.get("mode")=="SSE-B2" and enc.get("algorithm")=="AES256")
             if not ok:bad.add(name)
             normalized.append([name,row["fileId"],bool(ok),upload,ret,hold,enc])
@@ -550,7 +550,7 @@ def review_b2_compliance_version_metadata(*,bucket_id,expected,pages,as_of_ms):
             _require(all(type(v) is str and v for v in n) and n not in cursors)
             cursors.add(n);prior=n
     missing=set(expected)-seen
-    digest=hashlib.sha256(_canonical(["NARUV_B2_METADATA_REVIEW_V2",bucket_id,expected,normalized,as_of_ms])).hexdigest()
+    digest=hashlib.sha256(_canonical(["NARUV_B2_METADATA_REVIEW_V3",bucket_id,expected,normalized,as_of_ms])).hexdigest()
     return {"status":"BLOCKED" if missing or bad or unexpected else "B2_COMPLIANCE_METADATA_MATCH_ONLY",
         "expected_count":len(expected),"missing_count":len(missing),"mismatch_count":len(bad),
         "unexpected_version_count":unexpected,"review_sha256":digest,"sha256_verified":False,
