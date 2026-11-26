@@ -313,11 +313,18 @@ class HRProfileEnvelope(unittest.TestCase):
         self.assertFalse(good["sha256_verified"])
         self.assertFalse(good["restore_verified"])
         self.assertFalse(good["deletion_authorized"])
+        unset=call([page([dict(row,legalHold={"isClientAuthorizedToRead":True,"value":None})])])
+        self.assertEqual(unset["status"],"B2_COMPLIANCE_METADATA_MATCH_ONLY")
+        self.assertNotEqual(unset["review_sha256"],good["review_sha256"])
+        self.assertFalse(unset["deletion_authorized"])
+        self.assertFalse(unset["key_retirement_authorized"])
         for bad in (dict(row,action="hide"),dict(row,fileId="v2"),dict(row,contentSha1="b"*40),
                 dict(row,fileRetention={"isClientAuthorizedToRead":False,"value":None}),
                 dict(row,fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"governance","retainUntilTimestamp":upload+30*86400000}}),
                 dict(row,fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"compliance","retainUntilTimestamp":upload+29*86400000}}),
                 dict(row,legalHold={"isClientAuthorizedToRead":False,"value":None}),
+                dict(row,legalHold={"isClientAuthorizedToRead":True}),
+                dict(row,legalHold={"isClientAuthorizedToRead":True,"value":"unknown"}),
                 dict(row,serverSideEncryption=None),dict(row,serverSideEncryption={"mode":"SSE-C","algorithm":"AES256"}),
                 dict(row,serverSideEncryption={"mode":"SSE-B2","algorithm":None})):
             with self.subTest(bad=bad):self.assertEqual(call([page([bad])])["status"],"BLOCKED")
