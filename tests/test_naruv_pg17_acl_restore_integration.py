@@ -5,6 +5,20 @@ import os,re,secrets,subprocess,time
 from scripts import jw_independent_security_v223 as auth
 from scripts import jw_pg17_role_graph_v223 as graph
 
+def denied_42501(p):
+    return p.returncode!=0 and re.search(rb"(?m)^ERROR:\s+42501:",p.stderr) is not None
+
+def test_sqlstate_classifier_regression():
+    # Exact redacted stderr shape from failed CI 45839966885.
+    for status,stderr,expected in (
+        (1,b'ERROR:  42501: new row violates row-level security policy',True),
+        (1,b'ERROR:  42P01: relation missing',False),
+        (0,b'ERROR:  42501: synthetic',False),
+        (1,b'NOTICE:  42501: synthetic',False),
+        (1,b'ERROR:  425010: synthetic',False),
+        (1,b'ERROR:  42501x: synthetic',False)):
+        assert denied_42501(subprocess.CompletedProcess([],status,b"",stderr)) is expected
+
 def test_full_authorization_restore_and_runtime_rls():
     assert os.environ.get("GITHUB_ACTIONS")=="true"
     assert os.environ.get("GITHUB_REPOSITORY")=="guccizz1k/JARVIS-WORKS"
@@ -52,7 +66,7 @@ def test_full_authorization_restore_and_runtime_rls():
             assert role_sql(c,role,"SELECT string_agg(id::text,',' ORDER BY id) FROM jw_dev.t00").stdout.strip()==expected
         for role,q in (("naruv_ci_a","INSERT INTO jw_dev.t00 VALUES(3,2)"),("naruv_ci_b","UPDATE jw_dev.t00 SET tenant=1 WHERE id=2"),("naruv_ci_a","SET LOCAL ROLE naruv_ci_b"),("naruv_ci_a","SELECT * FROM jw_dev.t01")):
             p=role_sql(c,role,q,check=False)
-            assert p.returncode!=0 and re.search(rb"(?m)^ERROR:\\s+42501:",p.stderr)
+            assert denied_42501(p)
         assert role_sql(c,"naruv_ci_a","WITH x AS (UPDATE jw_dev.t00 SET tenant=1 WHERE id=2 RETURNING 1) SELECT count(*) FROM x").stdout.strip()==b"0"
     try:
         source,target=launch(),launch()
@@ -88,7 +102,7 @@ def test_full_authorization_restore_and_runtime_rls():
         assert observed["owners"]!=baseline["owners"]
         assert observed["object_acl"]!=baseline["object_acl"]
         p=role_sql(target,"naruv_ci_a","SELECT * FROM jw_dev.t00",stripped,False)
-        assert p.returncode!=0 and re.search(rb"(?m)^ERROR:\\s+42501:",p.stderr)
+        assert denied_42501(p)
         sql(target,"ALTER ROLE naruv_ci_a BYPASSRLS")
         assert security(target)["role_attributes"]!=baseline["role_attributes"]
         assert role_sql(target,"naruv_ci_a","SELECT count(*) FROM jw_dev.t00").stdout.strip()==b"2"
