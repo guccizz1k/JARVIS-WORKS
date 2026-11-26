@@ -21,9 +21,45 @@ CREATE TABLE naruv_employee_ci.proof_challenges(
  render_sha256 text NOT NULL CHECK(render_sha256 ~ '^[0-9a-f]{64}$'),
  issued_at bigint NOT NULL,expires_at bigint NOT NULL CHECK(expires_at>issued_at AND expires_at-issued_at<=300),
  consumed boolean NOT NULL DEFAULT false,
+ invalidated boolean NOT NULL DEFAULT false,
  FOREIGN KEY(tenant,principal,worker) REFERENCES naruv_employee_ci.identities(tenant,principal,worker),
  FOREIGN KEY(tenant,worker,receipt) REFERENCES naruv_employee_ci.entitlements(tenant,worker,receipt));
 REVOKE ALL ON naruv_employee_ci.proof_enrollment,naruv_employee_ci.proof_challenges FROM PUBLIC;
+CREATE FUNCTION naruv_employee_ci.invalidate_proof_binding() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+ IF TG_TABLE_NAME='identities' OR TG_TABLE_NAME='proof_enrollment' THEN
+  UPDATE naruv_employee_ci.proof_challenges SET invalidated=true
+   WHERE tenant=OLD.tenant AND principal=OLD.principal AND NOT invalidated;
+  IF TG_TABLE_NAME='proof_enrollment' THEN
+   UPDATE naruv_employee_ci.sessions SET revoked=true
+    WHERE tenant=OLD.tenant AND principal=OLD.principal AND NOT revoked;
+  END IF;
+ ELSIF TG_TABLE_NAME='entitlements' THEN
+  UPDATE naruv_employee_ci.proof_challenges SET invalidated=true
+   WHERE tenant=OLD.tenant AND worker=OLD.worker AND receipt=OLD.receipt AND NOT invalidated;
+ ELSE RAISE EXCEPTION 'INVALID_PROOF_BINDING_SOURCE';
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION naruv_employee_ci.invalidate_proof_binding() FROM PUBLIC;
+CREATE TRIGGER invalidate_identity_proof AFTER UPDATE ON naruv_employee_ci.identities
+ FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION naruv_employee_ci.invalidate_proof_binding();
+CREATE TRIGGER invalidate_entitlement_proof AFTER UPDATE ON naruv_employee_ci.entitlements
+ FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION naruv_employee_ci.invalidate_proof_binding();
+CREATE TRIGGER invalidate_enrollment_proof AFTER UPDATE ON naruv_employee_ci.proof_enrollment
+ FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION naruv_employee_ci.invalidate_proof_binding();
+CREATE FUNCTION naruv_employee_ci.reject_proof_reactivation() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+ IF (OLD.invalidated AND NOT NEW.invalidated) OR (OLD.consumed AND NOT NEW.consumed) THEN
+  RAISE EXCEPTION 'EMPLOYEE_PROOF_REACTIVATION_DENIED' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION naruv_employee_ci.reject_proof_reactivation() FROM PUBLIC;
+CREATE TRIGGER reject_proof_reactivation BEFORE UPDATE OF invalidated,consumed ON naruv_employee_ci.proof_challenges
+ FOR EACH ROW EXECUTE FUNCTION naruv_employee_ci.reject_proof_reactivation();
 """
 
 @dataclass(frozen=True)
@@ -76,13 +112,13 @@ def finish(conn,*,tenant,principal,receipt,challenge,result):
         # timestamp to consume a challenge that has expired while waiting.
         locked=conn.execute("""SELECT id FROM naruv_employee_ci.proof_challenges
              WHERE id=%s AND tenant=%s AND principal=%s AND worker=%s AND receipt=%s
-             AND auth_epoch=%s AND subject_tag=%s AND review_sha256=%s AND render_sha256=%s AND NOT consumed FOR UPDATE""",
+             AND auth_epoch=%s AND subject_tag=%s AND review_sha256=%s AND render_sha256=%s AND NOT consumed AND NOT invalidated FOR UPDATE""",
              (challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag,e.review_sha256,e.render_sha256)).fetchone()
         need(locked==(challenge,))
         now=store._now(conn)
         row=conn.execute("""UPDATE naruv_employee_ci.proof_challenges SET consumed=true
              WHERE id=%s AND tenant=%s AND principal=%s AND worker=%s AND receipt=%s
-             AND auth_epoch=%s AND subject_tag=%s AND review_sha256=%s AND render_sha256=%s AND NOT consumed AND issued_at<=%s AND expires_at>%s
+             AND auth_epoch=%s AND subject_tag=%s AND review_sha256=%s AND render_sha256=%s AND NOT consumed AND NOT invalidated AND issued_at<=%s AND expires_at>%s
              RETURNING id""",(challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag,e.review_sha256,e.render_sha256,now,now)).fetchone()
         need(row==(challenge,))
         token=store.issue(conn,trusted_tenant=tenant,trusted_principal=principal,receipt=receipt)
