@@ -1364,9 +1364,16 @@ def source_bound_part_time_rest_2026(*,tenant,worker,period,ordinary_hourly,minu
     require(all(r["additional"]==0 for r in minutes_by_day if r["date"] in covered),"KR_PT_PREMIUM_SCOPE")
     require(all(all(r[k]==0 for k in ("overtime","holiday_first8","holiday_after8","night"))
                 for r in classified_days if r["date"] in covered),"KR_PT_PREMIUM_SCOPE")
-    return dict(ref,review_sha256=hash_input({"v":"KR_PT_CONFIRMED_REST_2026_V1","source":source_review_sha256,
-        "reference":ref["review_sha256"],"period":period,"covered":covered}),
-        confirmed_month_overlap_days=len(covered),historical_attendance_authenticity_verified=False,
+    # Missing zero-work rows are not proof of attendance classification or
+    # absence. Keep the existing overlap field for clients; distinguish actual
+    # positive minutes matched to the confirmed source from manual zero days.
+    matched=sum(n>0 for n in covered.values())
+    return dict(ref,review_sha256=hash_input({"v":"KR_PT_CONFIRMED_REST_2026_V2","source":source_review_sha256,
+        "reference":ref["review_sha256"],"period":period,"covered":covered,
+        "matched_positive_work_days":matched}),
+        confirmed_month_overlap_days=len(covered),matched_confirmed_positive_work_days=matched,
+        manual_zero_work_status_days=len(covered)-matched,
+        zero_minutes_attendance_status_verified=False,historical_attendance_authenticity_verified=False,
         included_in_gross=False)
 
 def annual_leave_accrual_review_2026(*,tenant,worker,employment_start,service_year,
@@ -1613,7 +1620,14 @@ def isolated_payroll_review_html(result):
     if "part_time_rest_reference" in result:
         rest=result["part_time_rest_reference"]
         require(rest.get("included_in_gross") is False and rest.get("historical_attendance_authenticity_verified") is False,"KR_VIEW_PT_REST")
+        require(rest.get("zero_minutes_attendance_status_verified") is False
+                and _whole(rest["matched_confirmed_positive_work_days"],0,28)
+                and _whole(rest["manual_zero_work_status_days"],0,28)
+                and rest["matched_confirmed_positive_work_days"]+rest["manual_zero_work_status_days"]==rest["confirmed_month_overlap_days"],"KR_VIEW_PT_REST_EVIDENCE")
         line("단시간 주휴수당 별도 참고액 (기본 급여 미합산)",rest["rest_pay_estimate_krw"])
+        rows.append("<tr><th scope=\"row\">근태 대조 범위</th><td>실근로 확인 "+
+            str(rest["matched_confirmed_positive_work_days"])+"일 / 0분 근태 분류 수동 제출 "+
+            str(rest["manual_zero_work_status_days"])+"일</td></tr>")
     if "fixed_week_paid_reference" in result:
         fixed=result["fixed_week_paid_reference"]
         require(fixed.get("classification_authenticity_verified") is False and fixed.get("payment_authorized") is False,"KR_VIEW_FIXED_WEEK")
