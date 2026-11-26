@@ -9,7 +9,7 @@ class RecoveryCustodyTests(unittest.TestCase):
         self.keys=[Ed25519PrivateKey.generate() for _ in range(2)]
         self.pub=[k.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw) for k in self.keys]
         now=datetime(2026,11,26,tzinfo=timezone.utc)
-        expected={"old":{"state":"RECOVERY_ONLY","expected_assets":["old-a","old-b"]},"new":{"state":"STAGED","expected_assets":["new-a"]}}
+        expected={"old":{"state":"RECOVERY_ONLY","expected_assets":{a:hashlib.sha256(a.encode()).hexdigest() for a in ("old-a","old-b")}},"new":{"state":"STAGED","expected_assets":{"new-a":hashlib.sha256(b"new-a").hexdigest()}}}
         observations=[]
         for k,v in expected.items():
             observations.append(dict(key_id=k,state=v["state"],site_id="site-b",custody_receipt_sha256="b"*64,
@@ -47,7 +47,14 @@ class RecoveryCustodyTests(unittest.TestCase):
             a=copy.deepcopy(self.a);a["trust"].update(change)
             with self.subTest(change=change),self.assertRaises(ValueError):self.signed(a)
     def test_digest_mutation(self):
-        a=self.signed();a["observations"][0]["restores"][0]["ciphertext_sha256"]="0"*64
+        a=self.signed();a["observations"][0]["restores"][0]["restore_evidence_sha256"]="0"*64
+        with self.assertRaisesRegex(ValueError,"CUSTODY_SIGNATURE"):review_custody_evidence(**a)
+    def test_wrong_ciphertext_even_if_signers_agree(self):
+        a=copy.deepcopy(self.a);a["observations"][0]["restores"][0]["ciphertext_sha256"]="0"*64
+        with self.assertRaisesRegex(ValueError,"CUSTODY_RESTORE_ROW"):self.signed(a)
+    def test_expected_inventory_bound_to_signatures(self):
+        a=self.signed();a["expected_keys"]["old"]["expected_assets"]["old-a"]="0"*64
+        a["observations"][0]["restores"][0]["ciphertext_sha256"]="0"*64
         with self.assertRaisesRegex(ValueError,"CUSTODY_SIGNATURE"):review_custody_evidence(**a)
 
 if __name__=="__main__":unittest.main()
