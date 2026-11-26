@@ -1584,6 +1584,11 @@ def isolated_payroll_review_html(result):
         hours=result["part_time_leave_reference"]["grant_hours"]
         require(_whole(hours,1,200),"KR_VIEW_LEAVE_HOURS")
         rows.append("<tr><th scope=\"row\">단시간 연차 부여 참고시간</th><td>"+str(hours)+" 시간</td></tr>")
+    if "annual_leave_accrual_reference" in result:
+        accrual=result["annual_leave_accrual_reference"]
+        days=accrual["earned_days_in_review"]
+        require(_whole(days,0,36) and accrual.get("historical_attendance_authenticity_verified") is False,"KR_VIEW_LEAVE_DAYS")
+        rows.append("<tr><th scope=\"row\">연차 발생 참고일수 (과거 근태 수동 제출)</th><td>"+str(days)+" 일</td></tr>")
     if "monthly_tax_reference" in result:
         tax=result["monthly_tax_reference"]
         line("월 소득세 계산 참고액",tax["national_reference_krw"])
