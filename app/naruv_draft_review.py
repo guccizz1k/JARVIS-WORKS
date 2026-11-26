@@ -209,7 +209,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026,ordinary_comparison_coverage_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -323,6 +323,11 @@ def _kr_review(token,csrf,prior,worker,period,data):
                     source_review_sha256=review["review_binding_sha256"],**data["part_time_rest_review"])
                 proof.update(v="KR_CI_MANUAL_API_V8",part_time_rest=rest["review_sha256"])
                 details["part_time_rest_reference"]=rest
+            if "insurance_reference" in details and "monthly_tax_reference" in details:
+                coverage=ordinary_comparison_coverage_2026(source_review_sha256=review["review_binding_sha256"],
+                    pension=pension_ref,insurance=details["insurance_reference"],tax=details["monthly_tax_reference"])
+                proof["ordinary_comparison_coverage"]=coverage["review_sha256"]
+                details["ordinary_comparison_coverage"]=coverage
             return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
