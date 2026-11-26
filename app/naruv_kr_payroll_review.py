@@ -1474,12 +1474,25 @@ def assessed_settlement_components_2026(*,tenant,worker,period,components):
             results[k]={"signed_difference_krw":delta,"collection_reference_krw":max(0,delta),
                 "refund_reference_krw":max(0,-delta),"status":"ASSESSED_REFERENCE_ONLY"}
         elif k=="severance":
-            check(r,("eligible_confirmed","service_days","average_period_days","included_wages_krw","ordinary_daily_krw"))
+            fields=("eligible_confirmed","service_days","average_period_days","included_wages_krw","ordinary_daily_krw")
+            extra=("excluded_days","excluded_wages_krw")
+            extended=type(r) is dict and set(r)==set(fields+extra)|{"assessment_sha256"}
+            check(r,fields+extra if extended else fields)
             require(r["eligible_confirmed"] is True and _whole(r["service_days"],365,36525)
                 and _whole(r["average_period_days"],89,92),"KR_SEVERANCE_SCOPE")
             money(r,"included_wages_krw","ordinary_daily_krw")
             require(r["ordinary_daily_krw"]>0,"KR_SEVERANCE_WAGE")
-            daily=max(Fraction(r["included_wages_krw"],r["average_period_days"]),Fraction(r["ordinary_daily_krw"]))
+            days=r["average_period_days"]
+            wages=r["included_wages_krw"]
+            # Extended shape takes pre-exclusion totals. Fully excluded
+            # periods require separate statutory assessment.
+            if extended:
+                require(_whole(r["excluded_days"],0,days-1),"KR_SEVERANCE_EXCLUDED_DAYS")
+                require(_whole(r["excluded_wages_krw"],0,wages)
+                    and (r["excluded_days"]>0 or r["excluded_wages_krw"]==0),"KR_SEVERANCE_EXCLUDED_WAGES")
+                days-=r["excluded_days"]
+                wages-=r["excluded_wages_krw"]
+            daily=max(Fraction(wages,days),Fraction(r["ordinary_daily_krw"]))
             amount=daily*30*r["service_days"]/365
             results[k]={"daily_basis_exact":_money(daily),"severance_exact":_money(amount),
                 "estimate_krw":_round(amount),"status":"ASSESSED_REFERENCE_ONLY"}
