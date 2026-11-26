@@ -69,6 +69,14 @@ def finish(conn,*,tenant,principal,receipt,challenge,result):
     with conn.transaction():
         i,e,tag=_binding(conn,tenant,principal,receipt)
         need(hmac.compare_digest(tag,result.subject_tag))
+        # Acquire the challenge row lock before sampling server time.
+        # A request queued behind another transaction must not use a stale
+        # timestamp to consume a challenge that has expired while waiting.
+        locked=conn.execute("""SELECT id FROM naruv_employee_ci.proof_challenges
+             WHERE id=%s AND tenant=%s AND principal=%s AND worker=%s AND receipt=%s
+             AND auth_epoch=%s AND subject_tag=%s AND NOT consumed FOR UPDATE""",
+             (challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag)).fetchone()
+        need(locked==(challenge,))
         now=store._now(conn)
         row=conn.execute("""UPDATE naruv_employee_ci.proof_challenges SET consumed=true
              WHERE id=%s AND tenant=%s AND principal=%s AND worker=%s AND receipt=%s

@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "01c4e7d4bd8072b45eba2143fd03199ab6f2d3af",
+      "sha": "b5415cdbf4e8260c774c0621afdb2481dc236381",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8658,7 +8658,7 @@
       "mode": "100644"
     },
     "scripts/naruv_employee_session_store_ci.py": {
-      "sha": "eb0e9c6d360d299ac8b20a160e6b5a72578913d8",
+      "sha": "e611502492a353115d02b72614ea720f2e4fc611",
       "mode": "100644"
     },
     "app/naruv_employee_statement_binding_review.py": {
@@ -8666,7 +8666,7 @@
       "mode": "100644"
     },
     "app/naruv_employee_proof_review.py": {
-      "sha": "333ed5c8d0b31fca3c9c398419de5b327c459b0f",
+      "sha": "8fd65439791e2b78245975980d8720179c256c01",
       "mode": "100644"
     }
   },
@@ -9245,6 +9245,15 @@
       "app/naruv_employee_proof_review.py",
       "scripts/naruv_employee_session_store_ci.py",
       "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "employee_proof_transaction_review": {
+    "base": "b326d4e59b9157dad0b12e1d181b501f413a31cd",
+    "scope": "CI-only expiry-after-lock, atomic issue rollback and concurrent replay",
+    "paths": [
+      "app/naruv_employee_proof_review.py",
+      "scripts/naruv_employee_session_store_ci.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }

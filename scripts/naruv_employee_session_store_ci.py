@@ -174,6 +174,74 @@ class EmployeeStore(unittest.TestCase):
             self.assertIsNone(conn.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
             conn.close()
 
+    def test_proof_concurrent_consume_and_atomic_rollback(self):
+        from unittest.mock import patch
+        from app import naruv_employee_proof_review as proof
+        dsn=os.environ["JW_PG_CI_ROOT_DSN"]
+        cfg=conninfo_to_dict(dsn)
+        self.assertEqual((cfg.get("host"),cfg.get("port"),cfg.get("dbname"),cfg.get("user")),("127.0.0.1","5432","postgres","postgres"))
+        self.assertEqual(os.environ.get("GITHUB_ACTIONS"),"true")
+        a=psycopg.connect(dsn)
+        b=None
+        created=False
+        def begin(c):
+            c.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            c.execute("SET LOCAL naruv.employee_store_ci='DISPOSABLE_ONLY'")
+            c.execute("SET LOCAL lock_timeout='250ms'")
+        try:
+            begin(a)
+            self.assertIsNone(a.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
+            a.execute(Path("db/review/naruv_employee_session_store_ci.sql").read_text())
+            a.execute(proof.DDL)
+            a.execute("INSERT INTO naruv_employee_ci.identities VALUES ('ci-a','e1','w1',1,true)")
+            a.execute("INSERT INTO naruv_employee_ci.entitlements VALUES ('ci-a','w1','r1',%s,%s,true)",("a"*64,"b"*64))
+            tag=proof.synthetic_tag(b"x"*32,"ci-a","fixture-person")
+            a.execute("INSERT INTO naruv_employee_ci.proof_enrollment VALUES ('ci-a','e1','w1',%s,true)",(tag,))
+            bind=dict(tenant="ci-a",principal="e1",receipt="r1")
+            challenge=proof.begin(a,**bind)
+            opts=dict(**bind,challenge=challenge,result=proof.SyntheticServerResult(challenge,"VERIFIED",tag))
+            a.commit()
+            created=True
+            b=psycopg.connect(dsn)
+            begin(a)
+            with patch.object(store,"issue",side_effect=AccessDenied("INJECTED")):
+                with self.assertRaises(AccessDenied):proof.finish(a,**opts)
+            self.assertEqual(a.execute("SELECT consumed FROM naruv_employee_ci.proof_challenges WHERE id=%s",(challenge,)).fetchone(),(False,))
+            self.assertEqual(a.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone(),(0,))
+            a.commit()
+            begin(a)
+            token,report=proof.finish(a,**opts)
+            self.assertTrue(report["synthetic_proof_binding_verified"])
+            begin(b)
+            with self.assertRaises(psycopg.errors.LockNotAvailable):proof.finish(b,**opts)
+            b.rollback()
+            a.commit()
+            begin(b)
+            with self.assertRaises(AccessDenied):proof.finish(b,**opts)
+            self.assertEqual(b.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone(),(1,))
+            self.assertTrue(store.access(b,trusted_tenant="ci-a",trusted_principal="e1",receipt="r1",review_sha256="a"*64,render_sha256="b"*64,token=token)["session_store_verified"])
+            b.commit()
+            begin(a)
+            challenge=proof.begin(a,**bind)
+            expired=dict(**bind,challenge=challenge,result=proof.SyntheticServerResult(challenge,"VERIFIED",tag))
+            # Independently set a deterministic test clock to the expiry boundary.
+            expiry=a.execute("SELECT expires_at FROM naruv_employee_ci.proof_challenges WHERE id=%s",(challenge,)).fetchone()[0]
+            with patch.object(store,"_now",return_value=expiry):
+                with self.assertRaises(AccessDenied):proof.finish(a,**expired)
+            self.assertEqual(a.execute("SELECT consumed FROM naruv_employee_ci.proof_challenges WHERE id=%s",(challenge,)).fetchone(),(False,))
+            a.rollback()
+            print("EMPLOYEE_PROOF_ATOMIC_REPLAY_ROLLBACK=PASS")
+        finally:
+            if b is not None:b.close()
+            a.rollback()
+            try:
+                if created:
+                    a.execute("DROP SCHEMA naruv_employee_ci CASCADE")
+                    a.execute("DROP ROLE naruv_employee_ci_a,naruv_employee_ci_b")
+                    a.commit()
+                    self.assertIsNone(a.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
+            finally:a.close()
+
     def test_committed_access_serializes_with_revocation(self):
         # A separate committed fixture is necessary for real independent transactions.
         dsn=os.environ["JW_PG_CI_ROOT_DSN"]
