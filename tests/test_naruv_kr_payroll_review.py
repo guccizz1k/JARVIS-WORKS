@@ -672,3 +672,34 @@ class AnnualLeaveAccrualAndCompensation(unittest.TestCase):
         for r in (dict(row,payable=6),dict(row,tenant="b"),dict(row,disposition="PENDING")):
             with self.assertRaises(PayrollBlocked):review(**args(r))
         with self.assertRaises(PayrollBlocked):review(**dict(args(row),grant_ledger_sha256="0"*64))
+
+
+class AssessedSettlementComponents(unittest.TestCase):
+    def test_all_four_components_and_signed_difference(self):
+        from app.naruv_kr_payroll_review import assessed_settlement_components_2026 as review
+        a="a"*64
+        rows=dict(bonus=dict(months=3,bonus_krw=300000,regular_taxable_krw=9000000,
+            assessed_monthly_table_tax_krw=100000,already_withheld_krw=270000,assessment_sha256=a),
+            year_end=dict(kind="MIDYEAR_TERMINATION",decided_national_krw=100000,previous_national_krw=130000,special_payment_krw=0,assessment_sha256=a),
+            severance=dict(eligible_confirmed=True,service_days=730,average_period_days=90,included_wages_krw=9000000,ordinary_daily_krw=120000,assessment_sha256=a),
+            health_leave=dict(kind="ORDINARY_LEAVE_50_PERCENT_DIFFERENCE",prior_full_premium_krw=100000,leave_full_premium_krw=20000,assessed_full_premium_krw=60000,assessment_sha256=a))
+        args=dict(tenant="a",worker="w",period="2026-11",components=rows)
+        r=review(**args)
+        self.assertEqual(r["components"]["bonus"]["signed_difference_krw"],30000)
+        self.assertEqual(r["components"]["year_end"]["refund_reference_krw"],30000)
+        self.assertEqual(r["components"]["severance"]["estimate_krw"],7200000)
+        self.assertEqual(r["components"]["health_leave"]["status"],"REFERENCE_MATCH_ONLY")
+        self.assertFalse(r["payment_authorized"])
+        for change in (dict(bonus=dict(rows["bonus"],months=0)),dict(severance=dict(rows["severance"],eligible_confirmed=False)),
+            dict(health_leave=dict(rows["health_leave"],kind="PARENTAL_LEAVE")),dict(year_end=dict(rows["year_end"],decided_national_krw=True))):
+            with self.assertRaises(PayrollBlocked):review(**dict(args,components=dict(rows,**change)))
+
+    def test_assessed_holiday_variable_schedule_and_duplicate(self):
+        from app.naruv_kr_payroll_review import approved_paid_holiday_review_2026 as review
+        row=dict(date="2026-10-09",paid_minutes=360,actual_minutes=120,kind="ASSESSED_PUBLIC_HOLIDAY",assessment_sha256="a"*64)
+        args=dict(tenant="a",worker="w",period="2026-10",ordinary_hourly=12000,calendar_sha256="b"*64,days=[row])
+        r=review(**args)
+        self.assertEqual(r["estimate_krw"],72000)
+        self.assertFalse(r["statutory_validated"])
+        for rows in ([row,row],[dict(row,date="2026-09-09")],[dict(row,paid_minutes=True)],[dict(row,kind="INFERRED")]):
+            with self.assertRaises(PayrollBlocked):review(**dict(args,days=rows))

@@ -389,3 +389,60 @@ class MountedProfileKeyStore:
         return rotate_profile(tenant=tenant,worker=worker,old_revision=old_revision,new_revision=new_revision,
             old_key_id=old,new_key_id=new,old_key=self._read(tenant,old,for_write=False),
             new_key=self._read(tenant,new,for_write=True),envelope=envelope)
+
+
+def reconcile_backup_provider_inventory(*,tenant,expected_assets,records,inventory_sha256):
+    """Compare independently retrieved provider metadata. Never fetch keys,
+    delete objects or assert WORM from a Git hash. Missing provider evidence blocks.
+    """
+    import hashlib
+    _require(type(tenant) is str and ID.fullmatch(tenant))
+    _require(type(expected_assets) is list and 1<=len(expected_assets)<=10000 and
+        all(type(x) is str and ID.fullmatch(x) for x in expected_assets) and len(set(expected_assets))==len(expected_assets))
+    _require(type(records) is list and len(records)<=20000)
+    seen={};bad=[]
+    for r in records:
+        _require(type(r) is dict and set(r)=={"asset","tenant","provider","sha256","key_id","retention_verified","restore_verified"})
+        _require(type(r["asset"]) is str and r["asset"] in expected_assets and r["tenant"]==tenant
+            and type(r["provider"]) is str and r["provider"] in ("GITHUB_PRIVATE","BACKBLAZE_B2")
+            and type(r["sha256"]) is str and re.fullmatch(r"[0-9a-f]{64}",r["sha256"])
+            and type(r["key_id"]) is str and ID.fullmatch(r["key_id"])
+            and type(r["retention_verified"]) is bool and type(r["restore_verified"]) is bool)
+        k=(r["asset"],r["provider"]);_require(k not in seen);seen[k]=dict(r)
+    missing=[]
+    for asset in sorted(expected_assets):
+        a=seen.get((asset,"GITHUB_PRIVATE"));b=seen.get((asset,"BACKBLAZE_B2"))
+        if a is None or b is None:missing.append(asset);continue
+        if a["sha256"]!=b["sha256"] or a["key_id"]!=b["key_id"] or not b["retention_verified"] or not a["restore_verified"] or not b["restore_verified"]:
+            bad.append(asset)
+    digest=hashlib.sha256(_canonical(["NARUV_PROVIDER_INVENTORY_V1",tenant,sorted(expected_assets),[seen[k] for k in sorted(seen)]])).hexdigest()
+    _require(type(inventory_sha256) is str and secrets.compare_digest(digest,inventory_sha256))
+    return {"status":"BLOCKED" if missing or bad else "INVENTORY_MATCH_ONLY","missing_assets":missing,"mismatch_assets":bad,
+        "key_retirement_authorized":False,"deletion_authorized":False,"production_authorized":False}
+
+class IncidentPinnedKeyStore(MountedProfileKeyStore):
+    """Read-only custody with an independently supplied manifest of SHA256
+    key fingerprints and quarantine list. Incident recovery is explicit,
+    never a normal-use bypass. Caller owns authorization and persistence.
+    """
+    def __init__(self,directory,manifest,fingerprints,quarantined):
+        import hashlib
+        super().__init__(directory,manifest)
+        _require(type(fingerprints) is dict and set(fingerprints)==set(self._manifest))
+        self._fingerprints={}
+        for tenant,entries in self._manifest.items():
+            f=fingerprints[tenant]
+            _require(type(f) is dict and set(f)==set(entries) and all(type(v) is str and re.fullmatch(r"[0-9a-f]{64}",v) for v in f.values()))
+            self._fingerprints[tenant]=dict(f)
+        flat=[v for f in self._fingerprints.values() for v in f.values()]
+        _require(len(flat)==len(set(flat)))
+        _require(type(quarantined) is list and all(type(x) is tuple and len(x)==2 and all(type(y) is str for y in x)
+            and x[0] in self._manifest and x[1] in self._manifest[x[0]] for x in quarantined))
+        self._quarantined=frozenset(quarantined)
+
+    def _read(self,tenant,key_id,*,for_write):
+        import hashlib
+        _require(type(tenant) is str and type(key_id) is str and (tenant,key_id) not in self._quarantined)
+        key=super()._read(tenant,key_id,for_write=for_write)
+        _require(secrets.compare_digest(hashlib.sha256(key).hexdigest(),self._fingerprints[tenant][key_id]))
+        return key

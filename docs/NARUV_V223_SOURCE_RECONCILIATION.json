@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "0f4da5ad4dce6cea95999c9634230ad64f17ca80",
+      "sha": "98615f0b40e689481f485911efcf36983fb713cd",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "e433707ab36ec23f9eecf01aa14de3e0047552e7",
+      "sha": "1be65955c88472ca1714f9cb8dd540c61d8c13e5",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "eba092adbb7a38e5f6b8d2cfbfdbf80e61d4710b",
+      "sha": "5758d74df0f399f62f3846873509644526158ac0",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "512b90fc88f1347ba519cf2261a1819d8eb8a1b0",
+      "sha": "1c5b19d1cefc0b48188cc73e47ce28b03617b865",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "2149472f09164f4eb5aafed9ea26c0239ea7d11a",
+      "sha": "f0cf9265db4f988a982315a6d08c4bfe14ce6293",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "8818126e31ffd77f6dff5290633aa54bc78bae6f",
+      "sha": "52014055651d1d91f56283d307dfb2d21eacfd11",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8780,5 +8780,9 @@
   "first_year_low_attendance_review_guard": {
     "parent": "6b1ea2f3edd9f0c395c3301971d6b5e72fcb62ec",
     "reason": "Fail closed on first anniversary below 80% to avoid unverified overlap of first-year grants and monthly alternative."
+  },
+  "p1_p2_assessed_settlement_hosted_recovery": {
+    "parent": "2066ba32ae9521860c150a6a31020ec129bc3847",
+    "reason": "Restricted assessed bonus, year-end, severance, ordinary health leave and holiday reference; extend authenticated CI review API, no statutory or payment claim. Provider inventory comparison and pinned key incident quarantine, no provider connection or real key actions. Actual hosted synthetic 2-row ciphertext roundtrip and restore evidence separately recorded."
   }
 }

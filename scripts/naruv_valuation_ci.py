@@ -760,6 +760,16 @@ def run_valuation(base):
                 self.assertNotEqual(expanded["review_sha256"],response["review_sha256"])
                 self.assertFalse(expanded["payment_authorized"])
                 self.check(self.call(krpath,dict(manual,insurance_assessed_bases=dict(insurance,health_base_krw=True))),422)
+                settlement={"year_end":dict(kind="MIDYEAR_TERMINATION",decided_national_krw=10000,
+                    previous_national_krw=12000,special_payment_krw=0,assessment_sha256="d"*64)}
+                holiday=dict(calendar_sha256="e"*64,days=[dict(date="2026-07-02",paid_minutes=360,
+                    actual_minutes=0,kind="ASSESSED_PUBLIC_HOLIDAY",assessment_sha256="f"*64)])
+                combined=self.check(self.call(krpath,dict(manual,settlement_components=settlement,paid_holiday_review=holiday)),200)
+                self.assertEqual(combined["settlement_reference"]["components"]["year_end"]["refund_reference_krw"],2000)
+                self.assertEqual(combined["paid_holiday_reference"]["estimate_krw"],72000)
+                self.assertFalse(combined["payment_authorized"])
+                bad_holiday=dict(holiday,days=[dict(holiday["days"][0],actual_minutes=60)])
+                self.check(self.call(krpath,dict(manual,paid_holiday_review=bad_holiday)),409)
                 for k in ("evidence_authenticity_verified","persisted","payment_authorized","production_authorized","statutory_validated"):
                     self.assertIs(response[k],False)
                 self.check(self.call(krpath,manual,who="B"),404)

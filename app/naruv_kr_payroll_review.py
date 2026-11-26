@@ -1440,3 +1440,85 @@ def unused_leave_compensation_review_2026(*,tenant,worker,period,ordinary_hourly
         "pending_grants":sorted(pending),"assessed_payable_days":payable,"reference_krw":None if pending else payable*8*ordinary_hourly,
         "review_sha256":hash_input({"v":"KR_LEAVE_SETTLEMENT_REVIEW_V1","ledger":digest,"rate":ordinary_hourly}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def assessed_settlement_components_2026(*,tenant,worker,period,components):
+    """Scoped arithmetic on assessed inputs; no automatic entitlement or tax filing.
+    Official NTS bonus and settlement calculation, MOEL severance formula and
+    NHIS ordinary leave reduction. Each component is separately evidenced.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_SETTLEMENT_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_SETTLEMENT_PERIOD")
+    allowed={"bonus","year_end","severance","health_leave"}
+    require(type(components) is dict and 1<=len(components)<=4 and set(components)<=allowed,"KR_SETTLEMENT_COMPONENTS")
+    results={}
+    def check(row,fields):
+        require(type(row) is dict and set(row)==set(fields)|{"assessment_sha256"},"KR_SETTLEMENT_SHAPE")
+        require(type(row["assessment_sha256"]) is str and HEX.fullmatch(row["assessment_sha256"]),"KR_SETTLEMENT_EVIDENCE")
+    def money(row,*keys):
+        require(all(_whole(row[k],0,10**12) for k in keys),"KR_SETTLEMENT_AMOUNT")
+    for k,r in components.items():
+        if k=="bonus":
+            check(r,("months","bonus_krw","regular_taxable_krw","assessed_monthly_table_tax_krw","already_withheld_krw"))
+            require(_whole(r["months"],1,12),"KR_BONUS_MONTHS")
+            money(r,"bonus_krw","regular_taxable_krw","assessed_monthly_table_tax_krw","already_withheld_krw")
+            avg=Fraction(r["bonus_krw"]+r["regular_taxable_krw"],r["months"])
+            delta=r["assessed_monthly_table_tax_krw"]*r["months"]-r["already_withheld_krw"]
+            results[k]={"average_taxable_exact":_money(avg),"signed_difference_krw":delta,
+                "status":"NEGATIVE_DIFFERENCE_REVIEW_REQUIRED" if delta<0 else "ASSESSED_REFERENCE_ONLY"}
+        elif k=="year_end":
+            check(r,("kind","decided_national_krw","previous_national_krw","special_payment_krw"))
+            require(type(r["kind"]) is str and r["kind"] in ("ANNUAL","MIDYEAR_TERMINATION"),"KR_YEAR_END_KIND")
+            money(r,"decided_national_krw","previous_national_krw","special_payment_krw")
+            delta=r["decided_national_krw"]-r["previous_national_krw"]-r["special_payment_krw"]
+            results[k]={"signed_difference_krw":delta,"collection_reference_krw":max(0,delta),
+                "refund_reference_krw":max(0,-delta),"status":"ASSESSED_REFERENCE_ONLY"}
+        elif k=="severance":
+            check(r,("eligible_confirmed","service_days","average_period_days","included_wages_krw","ordinary_daily_krw"))
+            require(r["eligible_confirmed"] is True and _whole(r["service_days"],365,36525)
+                and _whole(r["average_period_days"],89,92),"KR_SEVERANCE_SCOPE")
+            money(r,"included_wages_krw","ordinary_daily_krw")
+            require(r["ordinary_daily_krw"]>0,"KR_SEVERANCE_WAGE")
+            daily=max(Fraction(r["included_wages_krw"],r["average_period_days"]),Fraction(r["ordinary_daily_krw"]))
+            amount=daily*30*r["service_days"]/365
+            results[k]={"daily_basis_exact":_money(daily),"severance_exact":_money(amount),
+                "estimate_krw":_round(amount),"status":"ASSESSED_REFERENCE_ONLY"}
+        else:
+            check(r,("kind","prior_full_premium_krw","leave_full_premium_krw","assessed_full_premium_krw"))
+            require(r["kind"]=="ORDINARY_LEAVE_50_PERCENT_DIFFERENCE","KR_HEALTH_LEAVE_SCOPE")
+            money(r,"prior_full_premium_krw","leave_full_premium_krw","assessed_full_premium_krw")
+            require(r["leave_full_premium_krw"]<=r["prior_full_premium_krw"],"KR_HEALTH_LEAVE_BASE")
+            amount=Fraction(r["prior_full_premium_krw"]+r["leave_full_premium_krw"],2)
+            results[k]={"full_premium_exact":_money(amount),"assessed_full_premium_krw":r["assessed_full_premium_krw"],
+                "status":"REFERENCE_MATCH_ONLY" if amount==r["assessed_full_premium_krw"] else "AGENCY_REVIEW_REQUIRED"}
+    return {"status":"ASSESSED_SETTLEMENT_REFERENCE_ONLY","components":results,
+        "review_sha256":hash_input({"v":"KR_ASSESSED_SETTLEMENT_2026_V1","tenant":tenant,"worker":worker,
+        "period":period,"components":components,"result":results}),"requires_human_review":True,
+        "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+def approved_paid_holiday_review_2026(*,tenant,worker,period,ordinary_hourly,calendar_sha256,days):
+    """Assessed paid holiday schedule only; no legal calendar/substitution inference.
+    The work premium is calculated elsewhere; this covers non-work entitlement
+    explicitly confirmed by HR for hourly workers, including variable schedules.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_HOLIDAY_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_HOLIDAY_PERIOD")
+    require(_whole(ordinary_hourly,1,10**8) and type(calendar_sha256) is str and HEX.fullmatch(calendar_sha256),"KR_HOLIDAY_RATE")
+    require(type(days) is list and 1<=len(days)<=31,"KR_HOLIDAY_DAYS")
+    seen=set(); normalized=[]; total=0
+    for r in days:
+        require(type(r) is dict and set(r)=={"date","paid_minutes","actual_minutes","kind","assessment_sha256"},"KR_HOLIDAY_SHAPE")
+        d=r["date"]
+        require(type(d) is str and re.fullmatch(r"2026-[0-9]{2}-[0-9]{2}",d) and d.startswith(period+"-"),"KR_HOLIDAY_DATE")
+        try:date.fromisoformat(d)
+        except ValueError:raise PayrollBlocked("KR_HOLIDAY_DATE") from None
+        require(d not in seen and _whole(r["paid_minutes"],0,480) and _whole(r["actual_minutes"],0,1440)
+            and type(r["kind"]) is str and r["kind"] in ("ASSESSED_PUBLIC_HOLIDAY","ASSESSED_SUBSTITUTED_HOLIDAY")
+            and type(r["assessment_sha256"]) is str and HEX.fullmatch(r["assessment_sha256"]),"KR_HOLIDAY_VALUE")
+        seen.add(d);normalized.append(dict(r));total+=r["paid_minutes"]
+    exact=Fraction(total*ordinary_hourly,60)
+    return {"status":"ASSESSED_PAID_HOLIDAY_REFERENCE_ONLY","paid_minutes":total,"paid_exact":_money(exact),
+        "estimate_krw":_round(exact),"review_sha256":hash_input({"v":"KR_ASSESSED_HOLIDAY_2026_V1","tenant":tenant,
+            "worker":worker,"period":period,"rate":ordinary_hourly,"calendar":calendar_sha256,
+            "days":sorted(normalized,key=lambda r:r["date"])}),"requires_human_review":True,
+        "statutory_validated":False,"payment_authorized":False,"production_authorized":False}

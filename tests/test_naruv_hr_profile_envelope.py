@@ -234,3 +234,36 @@ class HRProfileEnvelope(unittest.TestCase):
             with self.assertRaises(ProfileBlocked):store.seal(tenant="ci-a",worker="pilot-worker",revision="r3",profile=self.profile)
             self.assertEqual((root/"old.key").read_bytes(),b"x"*32)
             self.assertEqual((root/"saved.key").read_bytes(),b"y"*32)
+
+
+    def test_incident_quarantine_and_pinned_material(self):
+        import tempfile,hashlib
+        from pathlib import Path
+        from app.naruv_hr_profile_envelope import IncidentPinnedKeyStore
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"active.key";path.write_bytes(b"x"*32);path.chmod(0o600)
+            manifest={"ci-a":{"test-key":{"file":"active.key","state":"ACTIVE"}}}
+            pins={"ci-a":{"test-key":hashlib.sha256(b"x"*32).hexdigest()}}
+            store=IncidentPinnedKeyStore(tmp,manifest,pins,[])
+            old=store.seal(tenant="ci-a",worker="pilot-worker",revision="r1",profile=self.profile)
+            self.assertEqual(store.recover(tenant="ci-a",worker="pilot-worker",revision="r1",envelope=old),self.profile)
+            blocked=IncidentPinnedKeyStore(tmp,manifest,pins,[("ci-a","test-key")])
+            with self.assertRaises(ProfileBlocked):blocked.recover(tenant="ci-a",worker="pilot-worker",revision="r1",envelope=old)
+            with self.assertRaises(ProfileBlocked):blocked.seal(tenant="ci-a",worker="pilot-worker",revision="r1",profile=self.profile)
+            path.write_bytes(b"y"*32)
+            with self.assertRaises(ProfileBlocked):store.seal(tenant="ci-a",worker="pilot-worker",revision="r1",profile=self.profile)
+
+    def test_provider_inventory_missing_retention_and_mismatch(self):
+        import hashlib
+        from app.naruv_hr_profile_envelope import _canonical,reconcile_backup_provider_inventory
+        a=dict(asset="archive",tenant="ci-a",provider="GITHUB_PRIVATE",sha256="a"*64,key_id="old",
+            retention_verified=False,restore_verified=True)
+        b=dict(a,provider="BACKBLAZE_B2",retention_verified=True)
+        def call(rows):
+            digest=hashlib.sha256(_canonical(["NARUV_PROVIDER_INVENTORY_V1","ci-a",["archive"],sorted(rows,key=lambda r:(r["asset"],r["provider"]))])).hexdigest()
+            return reconcile_backup_provider_inventory(tenant="ci-a",expected_assets=["archive"],records=rows,inventory_sha256=digest)
+        self.assertEqual(call([a,b])["status"],"INVENTORY_MATCH_ONLY")
+        self.assertEqual(call([a])["missing_assets"],["archive"])
+        self.assertEqual(call([a,dict(b,retention_verified=False)])["mismatch_assets"],["archive"])
+        self.assertEqual(call([a,dict(b,sha256="b"*64)])["status"],"BLOCKED")
+        self.assertFalse(call([a,b])["key_retirement_authorized"])

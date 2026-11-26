@@ -67,7 +67,11 @@ def _decode_kr_body(raw):
             parse_constant=inventory._reject_constant)
         required={"expected_draft_sha256","ordinary_hourly","classification_sha256",
                 "classified_days","deductions","pension_assessed_base_krw"}
-        if type(d) is not dict or set(d) not in (required,required|{"insurance_assessed_bases"}):raise ValueError("shape")
+        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review"}:raise ValueError("shape")
+        if "settlement_components" in d and type(d["settlement_components"]) is not dict:raise ValueError("settlement shape")
+        if "paid_holiday_review" in d:
+            h=d["paid_holiday_review"]
+            if type(h) is not dict or set(h)!={"calendar_sha256","days"}:raise ValueError("holiday shape")
         if "insurance_assessed_bases" in d:
             bases=d["insurance_assessed_bases"]
             if type(bases) is not dict or set(bases)!={"health_base_krw","employment_base_krw","assessment_sha256"}:
@@ -115,7 +119,8 @@ def _kr_review(token,csrf,prior,worker,period,data):
     Classification and assessments are manual submissions, not agency truth.
     """
     import psycopg
-    from .naruv_kr_payroll_review import source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026
+    from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
+        assessed_settlement_components_2026,approved_paid_holiday_review_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -151,6 +156,19 @@ def _kr_review(token,csrf,prior,worker,period,data):
                     scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES")
                 proof.update(v="KR_CI_MANUAL_API_V2",insurance=insurance["review_sha256"])
                 details={"insurance_reference":insurance}
+            if "settlement_components" in data:
+                settlement=assessed_settlement_components_2026(tenant=org,worker=worker,period=period,
+                    components=data["settlement_components"])
+                proof.update(v="KR_CI_MANUAL_API_V3",settlement=settlement["review_sha256"])
+                details["settlement_reference"]=settlement
+            if "paid_holiday_review" in data:
+                holiday=approved_paid_holiday_review_2026(tenant=org,worker=worker,period=period,
+                    ordinary_hourly=data["ordinary_hourly"],**data["paid_holiday_review"])
+                actual={r["date"]:r["regular"]+r["additional"] for r in days}
+                if any(actual.get(r["date"],0)!=r["actual_minutes"] for r in data["paid_holiday_review"]["days"]):
+                    raise PayrollBlocked("KR_HOLIDAY_SOURCE_MISMATCH")
+                proof.update(v="KR_CI_MANUAL_API_V3",holiday=holiday["review_sha256"])
+                details["paid_holiday_reference"]=holiday
             return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
