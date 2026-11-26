@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "58fa3f72ec1709de2496f92427bfbedead2bc69c",
+      "sha": "17ba61597d718ed4e27ed750274e53854cd6193d",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8624,6 +8624,18 @@
     "tests/test_naruv_owner_live_upload.py": {
       "sha": "2c209ab79165f1023b35a2644440f1d9a9c9efb6",
       "mode": "100644"
+    },
+    "app/naruv_employee_access_review.py": {
+      "sha": "decd907d12052ff9f8cf1756f3b599c2abed88d0",
+      "mode": "100644"
+    },
+    "tests/test_naruv_employee_access_review.py": {
+      "sha": "3990f99a6b311496720d224b18cecf2345705db7",
+      "mode": "100644"
+    },
+    "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md": {
+      "sha": "85c97cb632d8fbedbdb51e6008c529d7e23007fe",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -9065,41 +9077,76 @@
       "scripts/naruv_valuation_ci.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
-  }
-,
+  },
   "p1_print_formula_integrity": {
     "base": "6c658339e1a5b2829f96bfcfddbd8a080a7c71ee",
     "scope": "Restricted print exact component and deterministic allocation validation; no statutory or P2 custody acceptance",
-    "paths": ["app/naruv_kr_payroll_review.py","tests/test_naruv_kr_payroll_review.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
-  }
-,
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
   "p1_cash_deduction_integrated": {
     "base": "87801ce536f1b917aeae60e7904cf0e48c8c32f0",
     "scope": "Same statement six-reference ordinary fixed allowance and exception review; deterministic unpersisted audit digest; no statutory delivery or independent custody",
-    "paths": ["app/naruv_kr_payroll_review.py","app/naruv_draft_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
-  }
-,
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "app/naruv_draft_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
   "p1_bonus_table_reference": {
     "base": "5cef79ffb4c7a76a091c3025dffe9420e61f215a",
     "scope": "Restricted explicit-period bonus official table arithmetic; no statutory collection or actual custody",
-    "paths": ["app/naruv_kr_payroll_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
-  }
-,
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
   "p1_statement_review_audit_metadata": {
     "base": "3349c790d624ee4cba2e51b54867c4115148bb9a",
     "scope": "Isolated append-only review and rendered HTML digest receipt; no safe delivery or statutory acceptance",
-    "paths": ["app/naruv_draft_review.py","db/review/naruv_hr_ci.sql","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
-  }
-,
+    "paths": [
+      "app/naruv_draft_review.py",
+      "db/review/naruv_hr_ci.sql",
+      "scripts/naruv_valuation_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
   "p1_p2_minimum_wage_and_populated_audit_restore": {
     "base": "51d78128b7af3f6b1206d84867fbd99f73717712",
     "scope": "Assessed fixed-week minimum wage comparison; synthetic populated audit receipt restore in distinct clusters; no statutory or independent key acceptance",
-    "paths": ["app/naruv_kr_payroll_review.py","app/naruv_draft_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
-  }
-,
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "app/naruv_draft_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
   "p1_verified_statement_draft_retrieval": {
     "base": "bedc97b74a147fc3be90a42d63d4c9b9a0e6a341",
     "scope": "Read-only exact stored review/render receipt verification by same admin; no employee delivery or actual independent key custody",
-    "paths": ["app/naruv_draft_review.py","db/review/naruv_hr_ci.sql","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
+    "paths": [
+      "app/naruv_draft_review.py",
+      "db/review/naruv_hr_ci.sql",
+      "scripts/naruv_valuation_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "p1_p2_employee_scope_and_independent_recovery_plan": {
+    "base": "0384a4bc59520408edd9ee1defb9888ee3338634",
+    "scope": "Synthetic employee scope policy, cloud and escrow design only; no delivery, key transfer or legal acceptance",
+    "paths": [
+      "app/naruv_employee_access_review.py",
+      "tests/test_naruv_employee_access_review.py",
+      "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
   }
 }
