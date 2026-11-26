@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "ebdc8b4bbb904babd7a067cc031fbdec1499adcc",
+      "sha": "143fe67229fbb01fdf3cbc738fbdeb510e83c41f",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "e21b465cafdbe6a7813ceac74b0f1090ce80a083",
+      "sha": "783f1d4f63b652c620482949b88f9a34531f7902",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "a99b8d67a924c40bc1a3c7a7d2b225b9581f9393",
+      "sha": "a42f0ea047774d2d4ec37110d4c4fa94b0a2fc0b",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "1b77c7d154c2f12722f053c8d2d7066b3c86ad5c",
+      "sha": "ee1d515e06684d00ff04c12b039902dcb12f2912",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8592,6 +8592,14 @@
     "tests/test_naruv_recovery_custody_review.py": {
       "sha": "0f745db91527648adeb350ac9ee85886626b8395",
       "mode": "100644"
+    },
+    "app/naruv_b2_upload_execution.py": {
+      "sha": "14fdcdb0a629145c5a54978ee22bae0639f710ca",
+      "mode": "100644"
+    },
+    "tests/test_naruv_b2_upload_execution.py": {
+      "sha": "cd0439684989627254cfe0bfb13602118bc82fdf",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8932,6 +8940,18 @@
       "scripts/naruv_valuation_ci.py",
       "app/naruv_recovery_custody_review.py",
       "tests/test_naruv_recovery_custody_review.py"
+    ]
+  },
+  "p1_p2_parttime_upload_execution": {
+    "base": "b33513daa8d86b7826ef6ff8aa1dc7ef3a79fa1a",
+    "scope": "Restricted part-time Sunday rest reference with current-month confirmed overlap, manual historical evidence; disposable B2 execution with durable one-shot journal, strict retention and readback; no live provider, production, key or archive mutation",
+    "paths": [
+      "app/naruv_draft_review.py",
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_b2_upload_execution.py",
+      "tests/test_naruv_b2_upload_execution.py"
     ]
   }
 }
