@@ -1343,6 +1343,32 @@ def fixed_part_time_weekly_rest_2026(*,tenant,worker,sunday,hourly_krw,
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False,"requires_human_review":True}
 
 
+def source_bound_part_time_rest_2026(*,tenant,worker,period,ordinary_hourly,minutes_by_day,
+        classified_days,source_review_sha256,sunday,contracted_minutes,comparator_minutes,weeks,
+        contract_sha256,attendance_sha256,scope):
+    """One Sunday reference, current-month overlapping days bound to confirmed
+    work minutes. Previous-month evidence and eligibility remain manual.
+    Caller uses authenticated confirmed draft and source_bound_review first.
+    No addition to gross, no payment authority.
+    """
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_PT_PERIOD")
+    require(type(sunday) is str and sunday.startswith(period+"-"),"KR_PT_PERIOD")
+    require(type(source_review_sha256) is str and HEX.fullmatch(source_review_sha256),"KR_PT_SOURCE")
+    ref=fixed_part_time_weekly_rest_2026(tenant=tenant,worker=worker,sunday=sunday,
+        hourly_krw=ordinary_hourly,contracted_minutes=contracted_minutes,comparator_minutes=comparator_minutes,
+        weeks=weeks,contract_sha256=contract_sha256,attendance_sha256=attendance_sha256,scope=scope)
+    covered={r["date"]:r["actual_minutes"] for w in weeks for r in w["days"] if r["date"].startswith(period+"-")}
+    require(bool(covered),"KR_PT_PERIOD")
+    observed={r["date"]:r["regular"]+r["additional"] for r in minutes_by_day if r["date"] in covered}
+    require(all(observed.get(d,0)==n for d,n in covered.items()),"KR_PT_SOURCE_MISMATCH")
+    require(all(r["additional"]==0 for r in minutes_by_day if r["date"] in covered),"KR_PT_PREMIUM_SCOPE")
+    require(all(all(r[k]==0 for k in ("overtime","holiday_first8","holiday_after8","night"))
+                for r in classified_days if r["date"] in covered),"KR_PT_PREMIUM_SCOPE")
+    return dict(ref,review_sha256=hash_input({"v":"KR_PT_CONFIRMED_REST_2026_V1","source":source_review_sha256,
+        "reference":ref["review_sha256"],"period":period,"covered":covered}),
+        confirmed_month_overlap_days=len(covered),historical_attendance_authenticity_verified=False,
+        included_in_gross=False)
+
 def annual_leave_accrual_review_2026(*,tenant,worker,employment_start,service_year,
         as_of,last_employed_on,months,attendance_sha256,contract_sha256,scope,
         first_year_low_attendance_assessment=None):
@@ -1584,6 +1610,10 @@ def isolated_payroll_review_html(result):
         hours=result["part_time_leave_reference"]["grant_hours"]
         require(_whole(hours,1,200),"KR_VIEW_LEAVE_HOURS")
         rows.append("<tr><th scope=\"row\">단시간 연차 부여 참고시간</th><td>"+str(hours)+" 시간</td></tr>")
+    if "part_time_rest_reference" in result:
+        rest=result["part_time_rest_reference"]
+        require(rest.get("included_in_gross") is False and rest.get("historical_attendance_authenticity_verified") is False,"KR_VIEW_PT_REST")
+        line("단시간 주휴수당 별도 참고액 (기본 급여 미합산)",rest["rest_pay_estimate_krw"])
     if "fixed_week_paid_reference" in result:
         fixed=result["fixed_week_paid_reference"]
         require(fixed.get("classification_authenticity_verified") is False and fixed.get("payment_authorized") is False,"KR_VIEW_FIXED_WEEK")
