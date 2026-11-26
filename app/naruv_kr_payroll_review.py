@@ -1112,8 +1112,10 @@ def source_bound_agency_deduction_review_2026(*,tenant,worker,period,policy_revi
         minutes_by_day,additional_bps,expected_draft_sha256,ordinary_hourly,classification_sha256,
         classified_days,deductions,agency_cases,expected_agency_snapshot_sha256):
     """Review separately assessed deductions, including exceptional insurance.
-    Caller loads the attendance and agency decisions from authenticated,
-    authorized server-owned sources. The digest detects drift, not authenticity.
+    Caller must load authenticated, authorized attendance. Agency decisions
+    may be explicitly manual in an isolated review; the caller must not claim
+    authoritative agency provenance without separate evidence. The digest
+    detects drift, not authenticity.
     No automatic eligibility, rounding, refund, disbursement or posting.
     """
     bound=source_bound_review(tenant=tenant,worker=worker,period=period,policy_revision=policy_revision,
@@ -1609,6 +1611,15 @@ def isolated_payroll_review_html(result):
     line("기본 급여 검토 총액",d["gross_estimate_krw"])
     line("수동 공제 합계",d["deductions_krw"])
     line("기본 급여 실수령 참고액",d["net_estimate_krw"])
+    if "agency_exception_reference" in result:
+        a=result["agency_exception_reference"]
+        require(a.get("agency_source_authenticity_verified") is False and a.get("ordinary_collection_comparison_performed") is False
+            and a.get("status")=="AGENCY_EXCEPTION_REVIEW_REQUIRED","KR_VIEW_AGENCY_SCOPE")
+        exceptions=a.get("exception_items")
+        labels={"pension":"국민연금","health":"건강보험","long_term_care":"장기요양보험","employment_insurance":"고용보험"}
+        require(type(exceptions) is list and 1<=len(exceptions)<=4 and all(type(k) is str and k in labels for k in exceptions)
+            and len(set(exceptions))==len(exceptions),"KR_VIEW_AGENCY_ITEMS")
+        rows.append("<tr><th scope=\"row\">사회보험 특례 수동 검토</th><td>"+escape(", ".join(labels[k] for k in exceptions))+" (기관 확인 필요)</td></tr>")
     if "paid_holiday_reference" in result:line("별도 공휴일 수당 참고액",result["paid_holiday_reference"]["estimate_krw"])
     if "unused_leave_reference" in result:
         leave=result["unused_leave_reference"]
