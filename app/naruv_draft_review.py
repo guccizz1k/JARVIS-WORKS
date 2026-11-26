@@ -71,7 +71,7 @@ def _decode_kr_body(raw):
         if "wage_statement_review" in d:
             a=d["wage_statement_review"]
             fields={"payment_date","scope","completeness_assessment_sha256"}
-            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages","cash_deduction_review"}
+            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages","cash_deduction_review","draft_audit"}
                 or any(type(a[k]) is not str for k in fields)):
                 raise ValueError("statement scope")
             if "additional_cash_wages" in a:
@@ -95,6 +95,12 @@ def _decode_kr_body(raw):
                         or type(c["monthly_tax"]) is not dict or type(c["insurance_assessed_bases"]) is not dict):
                         raise ValueError("cash deduction shape")
                 else:raise ValueError("cash deduction scope")
+            if "draft_audit" in a:
+                audit=a["draft_audit"]
+                if (type(audit) is not dict or set(audit)!={"request_id","expected_review_sha256"}
+                    or type(audit["request_id"]) is not str or not preview.IDENT.fullmatch(audit["request_id"])
+                    or type(audit["expected_review_sha256"]) is not str or not HEX.fullmatch(audit["expected_review_sha256"])):
+                    raise ValueError("statement audit shape")
             optional={"wage_statement_review"}
             if a["scope"]=="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE":
                 optional.add("fixed_week_paid_review")
@@ -357,7 +363,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 proof.update(v="KR_CI_MANUAL_API_V8",part_time_rest=rest["review_sha256"])
                 details["part_time_rest_reference"]=rest
             if "wage_statement_review" in data:
-                statement_args={k:v for k,v in data["wage_statement_review"].items() if k not in ("additional_cash_wages","cash_deduction_review")}
+                statement_args={k:v for k,v in data["wage_statement_review"].items() if k not in ("additional_cash_wages","cash_deduction_review","draft_audit")}
                 if "fixed_week_paid_review" in data:
                     statement=fixed_week_wage_statement_2026(tenant=org,worker=worker,period=period,
                         base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],minutes_by_day=days,
@@ -384,14 +390,36 @@ def _kr_review(token,csrf,prior,worker,period,data):
                     pension=pension_ref,insurance=details["insurance_reference"],tax=details["monthly_tax_reference"])
                 proof["ordinary_comparison_coverage"]=coverage["review_sha256"]
                 details["ordinary_comparison_coverage"]=coverage
-            return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
+            result={"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
+            audit=data.get("wage_statement_review",{}).get("draft_audit")
+            if audit is not None:
+                from hashlib import sha256
+                from .naruv_kr_payroll_review import isolated_wage_statement_print_html
+                if audit["expected_review_sha256"]!=result["review_sha256"]:
+                    raise PayrollBlocked("KR_AUDIT_STALE_REVIEW")
+                rendered=isolated_wage_statement_print_html(result)
+                render_sha=sha256(rendered.encode("utf-8")).hexdigest()
+                cur.execute("SELECT naruv_draft.record_statement_review(%s,%s,%s,%s,%s,%s,true,%s)",
+                    (worker,period,audit["request_id"],result["review_sha256"],statement["review_sha256"],render_sha,csrf))
+                row=cur.fetchone()
+                receipt=row[0] if row else None
+                if (type(receipt) is not dict or receipt.get("review_sha256")!=result["review_sha256"]
+                    or receipt.get("statement_sha256")!=statement["review_sha256"] or receipt.get("render_sha256")!=render_sha
+                    or receipt.get("audit_metadata_persisted") is not True
+                    or any(receipt.get(k) is not False for k in ("delivery_authorized","payment_authorized","production_authorized","statutory_validated"))):
+                    raise HTTPException(503,"KR_AUDIT_UNAVAILABLE")
+                result["draft_audit_receipt"]=receipt
+            return result
     except PayrollBlocked:
         raise HTTPException(409,"KR_REVIEW_INPUT_OR_SOURCE_CHANGED") from None
     except psycopg.Error as exc:
-        if getattr(getattr(exc,"diag",None),"message_primary","")=="HR_CONFLICT":
-            raise HTTPException(409,"DRAFT_SOURCE_CHANGED") from None
+        reason=getattr(getattr(exc,"diag",None),"message_primary","")
+        if reason in ("HR_CONFLICT","KR_AUDIT_CONFLICT","KR_AUDIT_CAPACITY"):
+            raise HTTPException(409,"DRAFT_SOURCE_CHANGED" if reason=="HR_CONFLICT" else reason) from None
+        if reason=="KR_AUDIT_INPUT":raise HTTPException(422,reason) from None
+        if reason=="KR_AUDIT_NOT_FOUND":raise HTTPException(404,reason) from None
         raise write._db_error(exc) from None
 
 def _admit_document(token,csrf,prior,key,rid,fmt,raw,observations):
@@ -478,8 +506,13 @@ def create_router():
                 raise HTTPException(415,"KR_REVIEW_CONTENT_TYPE")
             prior=await run_in_threadpool(write._auth,token,csrf)
             data=await _kr_body(request)
-            result=await run_in_threadpool(_kr_review,token,csrf,prior,worker,period,data)
             accept=preview._one_header(request,"accept","")
+            if "draft_audit" in data.get("wage_statement_review",{}):
+                if preview._one_header(request,"x-naruv-confirm","")!="yes":
+                    raise HTTPException(422,"KR_AUDIT_CONFIRM_REQUIRED")
+                if accept not in ("","application/json","*/*"):
+                    raise HTTPException(406,"KR_AUDIT_JSON_ONLY")
+            result=await run_in_threadpool(_kr_review,token,csrf,prior,worker,period,data)
             if accept in ("text/html","text/html;profile=naruv-wage-statement-draft"):
                 from fastapi.responses import HTMLResponse
                 from .naruv_kr_payroll_review import isolated_payroll_review_html,isolated_wage_statement_print_html

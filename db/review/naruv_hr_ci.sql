@@ -435,4 +435,68 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION naruv_draft.amend_period(text,text,text,text,text,jsonb,boolean,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_draft.amend_period(text,text,text,text,text,jsonb,boolean,text) TO jw_app_dev;
+-- Isolated review metadata only. No document bytes, amounts, payment or delivery.
+-- Application review hashes are assertions from the trusted app role, not an
+-- independent signature or proof that a direct privileged RPC caller calculated them.
+CREATE TABLE naruv_draft.statement_review_receipts(
+ org_id text NOT NULL, request_id text NOT NULL, actor_id text NOT NULL,
+ worker_id text NOT NULL, period text NOT NULL,
+ review_sha256 text NOT NULL CHECK(review_sha256 ~ '^[0-9a-f]{64}$'),
+ statement_sha256 text NOT NULL CHECK(statement_sha256 ~ '^[0-9a-f]{64}$'),
+ render_sha256 text NOT NULL CHECK(render_sha256 ~ '^[0-9a-f]{64}$'),
+ recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(org_id,request_id),
+ UNIQUE(org_id,worker_id,period,review_sha256),
+ FOREIGN KEY(org_id,worker_id,period) REFERENCES naruv_draft.pay_periods);
+ALTER TABLE naruv_draft.statement_review_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_draft.statement_review_receipts FORCE ROW LEVEL SECURITY;
+CREATE POLICY statement_receipt_scope ON naruv_draft.statement_review_receipts TO naruv_native_owner
+ USING(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'))
+ WITH CHECK(org_id=(SELECT i.org_id FROM jw_dev.stage_identity_v84() i WHERE i.actor_role='admin'));
+REVOKE ALL ON naruv_draft.statement_review_receipts FROM PUBLIC,jw_app_dev,naruv_native_stage;
+CREATE TRIGGER statement_receipt_immutable BEFORE UPDATE OR DELETE ON naruv_draft.statement_review_receipts
+ FOR EACH ROW EXECUTE FUNCTION naruv_native_review.immutable();
+CREATE FUNCTION naruv_draft.record_statement_review(p_worker text,p_period text,p_request text,
+ p_review text,p_statement text,p_render text,p_confirm boolean,p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; a2 record; r naruv_draft.statement_review_receipts;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF p_worker IS NULL OR p_worker !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_period IS NULL OR p_period !~ '^2026-(0[1-9]|1[0-2])$'
+ OR p_request IS NULL OR p_request !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_review IS NULL OR p_review !~ '^[0-9a-f]{64}$'
+ OR p_statement IS NULL OR p_statement !~ '^[0-9a-f]{64}$'
+ OR p_render IS NULL OR p_render !~ '^[0-9a-f]{64}$'
+ OR p_confirm IS DISTINCT FROM true THEN RAISE EXCEPTION 'KR_AUDIT_INPUT'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-attendance-v1:'||a.org_id,0));
+ PERFORM 1 FROM naruv_draft.pay_source(p_worker,p_period,p_csrf);
+ IF NOT FOUND THEN RAISE EXCEPTION 'KR_AUDIT_NOT_FOUND'; END IF;
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ SELECT * INTO r FROM naruv_draft.statement_review_receipts x WHERE x.org_id=a.org_id AND x.request_id=p_request;
+ IF FOUND THEN
+  IF (r.actor_id,r.worker_id,r.period,r.review_sha256,r.statement_sha256,r.render_sha256)
+  IS DISTINCT FROM (a.actor_id,p_worker,p_period,p_review,p_statement,p_render)
+  THEN RAISE EXCEPTION 'KR_AUDIT_CONFLICT'; END IF;
+ ELSE
+  IF (SELECT count(*) FROM naruv_draft.statement_review_receipts x WHERE x.org_id=a.org_id)>=1000
+  OR (SELECT count(*) FROM naruv_draft.statement_review_receipts x WHERE (x.org_id,x.worker_id,x.period)=(a.org_id,p_worker,p_period))>=32
+  THEN RAISE EXCEPTION 'KR_AUDIT_CAPACITY'; END IF;
+  INSERT INTO naruv_draft.statement_review_receipts(org_id,request_id,actor_id,worker_id,period,review_sha256,statement_sha256,render_sha256)
+  VALUES(a.org_id,p_request,a.actor_id,p_worker,p_period,p_review,p_statement,p_render) RETURNING * INTO r;
+ END IF;
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ RETURN jsonb_build_object('status','ISOLATED_STATEMENT_REVIEW_METADATA_RECORDED','request_id',r.request_id,
+ 'review_sha256',r.review_sha256,'statement_sha256',r.statement_sha256,'render_sha256',r.render_sha256,
+ 'audit_metadata_persisted',true,'delivery_authorized',false,'payment_authorized',false,
+ 'production_authorized',false,'statutory_validated',false);
+END $$;
+REVOKE ALL ON FUNCTION naruv_draft.record_statement_review(text,text,text,text,text,text,boolean,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
+GRANT EXECUTE ON FUNCTION naruv_draft.record_statement_review(text,text,text,text,text,text,boolean,text) TO jw_app_dev;
 RESET ROLE;

@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "8eec3cd5e6feea355cdb168a380bcd10868f6294",
+      "sha": "c933f493ec1c476ac88dd20c1cdf06464c6c5ac1",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4706,7 +4706,7 @@
       "mode": "100644"
     },
     "db/review/naruv_hr_ci.sql": {
-      "sha": "5c15f11a87b6484d1a312c50fb8990081c5aff72",
+      "sha": "6c5e4178d9a7d3421b1de9ccb28b22dbb89009ac",
       "mode": "100644"
     },
     "db/review/naruv_inventory_ci.sql": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "0e2df0c85021fe17fac8efbd3e56d52d22c0b784",
+      "sha": "043ba77897de6a6faa1b8a368b19f8733dee4cbf",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "12bd21e1858e61d43d3b175820b0e086e213c8aa",
+      "sha": "f0b4979c71d5b11297da8968d043dd0d8434ee13",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -9083,5 +9083,11 @@
     "base": "5cef79ffb4c7a76a091c3025dffe9420e61f215a",
     "scope": "Restricted explicit-period bonus official table arithmetic; no statutory collection or actual custody",
     "paths": ["app/naruv_kr_payroll_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
+  }
+,
+  "p1_statement_review_audit_metadata": {
+    "base": "3349c790d624ee4cba2e51b54867c4115148bb9a",
+    "scope": "Isolated append-only review and rendered HTML digest receipt; no safe delivery or statutory acceptance",
+    "paths": ["app/naruv_draft_review.py","db/review/naruv_hr_ci.sql","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
   }
 }

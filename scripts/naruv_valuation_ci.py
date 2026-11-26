@@ -1033,6 +1033,34 @@ def run_valuation(base):
                     dict(spec,cash_deduction_review=dict(ordinary,cash_allocations=[dict(ordinary["cash_allocations"][0],taxable_krw=50001)]))):
                     self.check(self.call(taxpath,dict(fa,wage_statement_review=bad)),409)
                 print("NARUV_CASH_DEDUCTION_RECONCILIATION_PASS same-statement six comparisons, exception and tenant denial; no delivery",flush=True)
+                from hashlib import sha256
+                audit=dict(request_id="cash-statement-audit-1",expected_review_sha256=rr["review_sha256"])
+                audit_req=dict(fa,wage_statement_review=dict(spec,draft_audit=audit))
+                aud_headers={"accept":"application/json","x-naruv-confirm":"yes"}
+                self.check(self.call(taxpath,audit_req,extra=dict(aud_headers,**{"x-naruv-confirm":"no"})),422)
+                self.check(self.call(taxpath,audit_req,extra=dict(print_accept,**{"x-naruv-confirm":"yes"})),406)
+                self.check(self.call(taxpath,audit_req,who="B",extra=aud_headers),404)
+                recorded=self.check(self.call(taxpath,audit_req,extra=aud_headers),200)
+                receipt=recorded["draft_audit_receipt"]
+                self.assertTrue(receipt["audit_metadata_persisted"]);self.assertFalse(receipt["delivery_authorized"])
+                self.assertFalse(recorded["persisted"])
+                self.assertEqual(receipt["review_sha256"],rr["review_sha256"])
+                self.assertEqual(receipt["render_sha256"],sha256(self.call(taxpath,od,extra=print_accept).text.encode("utf-8")).hexdigest())
+                self.assertEqual(receipt,self.check(self.call(taxpath,audit_req,extra=aud_headers),200)["draft_audit_receipt"])
+                self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(spec,draft_audit=dict(audit,expected_review_sha256="0"*64))),extra=aud_headers),409)
+                self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(spec,draft_audit=dict(audit,request_id="cash-statement-audit-2"))),extra=aud_headers),409)
+                with psycopg.connect(fixture.root_dsn) as c:
+                    self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.statement_review_receipts WHERE org_id='ci-a' AND worker_id='tax-worker'").fetchone()[0],1)
+                    for role in ("jw_app_dev","naruv_native_stage"):
+                        for privilege in ("SELECT","INSERT","UPDATE","DELETE"):
+                            self.assertFalse(c.execute("SELECT has_table_privilege(%s,'naruv_draft.statement_review_receipts',%s)",(role,privilege)).fetchone()[0])
+                    self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.record_statement_review(text,text,text,text,text,text,boolean,text)','EXECUTE')").fetchone()[0])
+                    self.assertTrue(c.execute("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid='naruv_draft.statement_review_receipts'::regclass").fetchone()[0])
+                with psycopg.connect(fixture.root_dsn) as c:
+                    with self.assertRaises(psycopg.Error):
+                        with c.transaction():
+                            c.execute("UPDATE naruv_draft.statement_review_receipts SET render_sha256=repeat('0',64) WHERE org_id='ci-a' AND worker_id='tax-worker'")
+                print("NARUV_STATEMENT_REVIEW_AUDIT_PASS exact review and render hash, idempotence, RLS, no delivery",flush=True)
                 ptweeks=[]
                 for w in range(4):
                     mon=date(2026,6,8)+timedelta(days=7*w);entries=[]
