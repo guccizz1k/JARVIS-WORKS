@@ -789,6 +789,20 @@ def run_valuation(base):
                 self.assertEqual(pt_html.headers["cache-control"],"no-store")
                 self.check(self.call(krpath,dict(manual,part_time_leave_review=part_time),who="B"),404)
                 print("NARUV_PART_TIME_LEAVE_API_PASS isolated assessed grant, HTML and tenant denial",flush=True)
+                annual=dict(kind="MIDYEAR_TERMINATION",scope="RESIDENT_WAGE_ONLY_NO_RELIEF_ASSESSED_OTHER_DEDUCTIONS_CREDITS",
+                    annual_income_krw=200000000,exempt_income_krw=5000000,assessed_other_deductions_krw=7000000,
+                    assessed_cap_addback_krw=0,assessed_other_credits_krw=0,previous_national_krw=44334000,
+                    annual_source_sha256="a"*64,deduction_assessment_sha256="b"*64,credit_assessment_sha256="c"*64,assessment_sha256="d"*64)
+                yr=self.check(self.call(krpath,dict(manual,settlement_components={"year_end_calculated":annual})),200)
+                self.assertEqual(yr["settlement_reference"]["components"]["year_end_calculated"]["signed_difference_krw"],639000)
+                self.assertFalse(yr["statutory_validated"])
+                self.assertFalse(yr["payment_authorized"])
+                self.check(self.call(krpath,dict(manual,settlement_components={"year_end_calculated":dict(annual,scope="UNSUPPORTED")})),409)
+                self.check(self.call(krpath,dict(manual,settlement_components={"year_end_calculated":annual}),who="B"),404)
+                annual_html=self.call(krpath,dict(manual,settlement_components={"year_end_calculated":annual}),extra={"accept":"text/html"})
+                self.assertEqual(annual_html.status_code,200)
+                self.assertIn("639,000",annual_html.text)
+                print("NARUV_ANNUAL_NATIONAL_TAX_API_PASS assessed ordinary calculation, HTML and tenant denial",flush=True)
                 shift=dict(shift_sha256="e"*64,segments=[dict(start="2026-07-01T14:00+09:00",end="2026-07-01T23:00+09:00",evidence_sha256="f"*64)])
                 shift_result=self.check(self.call(krpath,dict(manual,shift_review=shift)),200)
                 self.assertEqual(shift_result["shift_reference"]["days"],[{"date":"2026-07-01","work_minutes":540,"night_minutes":60}])
