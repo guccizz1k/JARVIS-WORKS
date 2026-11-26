@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "d2a684902b3f2b9a015dc7554b17575b2041226c",
+      "sha": "ad185001381317e3ac6e402920e9f7db2439b3ba",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "ca9e0f82f60d9c051ad77238cf7874e7b2122b51",
+      "sha": "9adb0435f7f4896e70ff46266cf660cb80048005",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "b92983ab4af2046d50b3afc5600f15839d3a30d5",
+      "sha": "a016209d9d7c0fca351bf6a71231825e54bbfd06",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8823,6 +8823,15 @@
       "scripts/naruv_valuation_ci.py",
       "app/naruv_hr_profile_envelope.py",
       "tests/test_naruv_hr_profile_envelope.py"
+    ]
+  },
+  "p1_annual_resident_wage_tax": {
+    "base": "b2384be6dff68d4f496553d6fd0524c932be9c30",
+    "scope": "Assessed resident wage-only, no special relief, H2 2026, Arts 47/55/59; exact reference only, no statutory eligibility or filing",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py"
     ]
   }
 }
