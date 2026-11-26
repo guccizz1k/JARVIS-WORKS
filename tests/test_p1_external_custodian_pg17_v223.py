@@ -191,3 +191,46 @@ def test_owner_scope_requires_staged_before_key(monkeypatch):
     assert r["blocker"]=="OWNER_SITE_STAGED_INPUT_REQUIRED"
     assert r["owner_site_restore"]=="BLOCKED"
     assert r["external_pg17_restore"]=="NOT_APPLICABLE_OWNER_SITE"
+
+def test_owner_reference_pipe_no_external_fds_and_alias_denied(monkeypatch):
+    for k in ("JW_PG_CLEANROOM_KEY_FD","JW_PG_CLEANROOM_MANIFEST_FD"):
+        monkeypatch.delenv(k,raising=False)
+    r,w=os.pipe()
+    kr,kw=os.pipe()
+    try:
+        os.write(w,b'{"synthetic":true}')
+        os.close(w);w=None
+        monkeypatch.setenv("JW_PG_RESTORE_REFERENCE_FD",str(r))
+        monkeypatch.setenv("JW_PG_OWNER_KEY_FD",str(kr))
+        assert e._owner_reference_pipe()==b'{"synthetic":true}'
+        monkeypatch.setenv("JW_PG_OWNER_KEY_FD",str(r))
+        with pytest.raises(e.Blocked,match="OWNER_REFERENCE_PIPE_INVALID"):
+            e._owner_reference_pipe()
+        dup=os.dup(r)
+        try:
+            monkeypatch.setenv("JW_PG_OWNER_KEY_FD",str(dup))
+            with pytest.raises(e.Blocked,match="OWNER_REFERENCE_PIPE_INVALID"):
+                e._owner_reference_pipe()
+        finally:os.close(dup)
+    finally:
+        for fd in (r,w,kr,kw):
+            if fd is not None:os.close(fd)
+
+def test_owner_cli_uses_owner_reference_pipe(monkeypatch,tmp_path,capsys):
+    manifest=tmp_path/"manifest.json"
+    manifest.write_bytes(b"{}")
+    monkeypatch.setenv("JW_PG_B2_OFFLINE_ACK",e.B2_ACK)
+    monkeypatch.setenv("JW_PG_B2_MANIFEST_PATH",str(manifest))
+    monkeypatch.setenv("JW_PG_B2_STAGE_DIRECTORY",str(tmp_path))
+    monkeypatch.setenv("JW_PG_B2_SCOPE","legacy")
+    monkeypatch.setattr(e,"preflight",lambda **kw:"PASS")
+    monkeypatch.setattr(e,"_owner_reference_pipe",lambda:b"synthetic")
+    monkeypatch.setattr(e.equivalence,"read_reference_pipe",lambda *_:pytest.fail("external pipe used"))
+    def run(raw,pin,**kw):
+        assert raw==b"synthetic" and kw["owner_controlled"] is True
+        return dict(owner_site_restore="PASS_ELEVEN_OWNER_SITE_CIPHERS",
+            b2_staged_scope_bound=True,normalized_catalog_comparison="PASS_11_SCOPED_CATALOG_CHECKPOINTS",
+            disposable_pg17_removed="PASS",overall="BLOCKED")
+    monkeypatch.setattr(e,"run",run)
+    assert e.main(["restore-owner-b2-offline-catalog"])==0
+    assert "PASS_ELEVEN_OWNER_SITE_CIPHERS" in capsys.readouterr().out

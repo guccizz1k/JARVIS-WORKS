@@ -183,6 +183,33 @@ def _staged_inputs(staged):
         raise Blocked("B2_OFFLINE_SCOPE_COUNT")
     return known
 
+def _owner_reference_pipe():
+    """Bind separate reference and owner-key pipes, without external-custodian FDs."""
+    import select, stat
+    try:
+        fd=int(os.environ.get("JW_PG_RESTORE_REFERENCE_FD",""))
+        keyfd=int(os.environ.get("JW_PG_OWNER_KEY_FD",""))
+        if not (3<=fd<=1048576 and 3<=keyfd<=1048576 and fd!=keyfd):
+            raise ValueError()
+        a,b=os.fstat(fd),os.fstat(keyfd)
+        if not (stat.S_ISFIFO(a.st_mode) and stat.S_ISFIFO(b.st_mode)
+                and (a.st_dev,a.st_ino)!=(b.st_dev,b.st_ino)):
+            raise ValueError()
+        data=bytearray()
+        deadline=time.monotonic()+10
+        while True:
+            remaining=deadline-time.monotonic()
+            if remaining<=0 or not select.select([fd],[],[],remaining)[0]:
+                raise ValueError()
+            chunk=os.read(fd,min(8192,equivalence.MAX_JSON+1-len(data)))
+            if not chunk:break
+            data.extend(chunk)
+            if len(data)>equivalence.MAX_JSON:raise ValueError()
+        if not data:raise ValueError()
+        return bytes(data)
+    except (OSError,ValueError,TypeError):
+        raise Blocked("OWNER_REFERENCE_PIPE_INVALID") from None
+
 def _owner_key():
     """Local hidden-input pipe; no argv/env key, bounded read until EOF."""
     import base64, select, stat
@@ -407,7 +434,7 @@ def main(argv=None):
                 if not stat.S_ISREG(info.st_mode) or not 0<info.st_size<=65536:
                     raise Blocked("B2_OFFLINE_MANIFEST_FILE")
                 manifest=f.read(65537)
-            raw=equivalence.read_reference_pipe(os.environ)
+            raw=_owner_reference_pipe() if owner_controlled else equivalence.read_reference_pipe(os.environ)
             receipt=run(raw,os.environ.get("JW_PG_RESTORE_REFERENCE_SHA256",""),catalog_required=True,
                         staged=(manifest,os.environ.get("JW_PG_B2_MANIFEST_SHA256",""),
                                 os.environ["JW_PG_B2_STAGE_DIRECTORY"],os.environ.get("JW_PG_B2_SCOPE","")),owner_controlled=owner_controlled)
