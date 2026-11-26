@@ -672,6 +672,9 @@ class FixedPartTimeRest(unittest.TestCase):
         out=source_bound_part_time_rest_2026(**a)
         self.assertEqual(out["rest_pay_estimate_krw"],36000)
         self.assertFalse(out["included_in_gross"]);self.assertFalse(out["historical_attendance_authenticity_verified"])
+        self.assertFalse(out["zero_minutes_attendance_status_verified"])
+        self.assertEqual(out["matched_confirmed_positive_work_days"],12)
+        self.assertEqual(out["manual_zero_work_status_days"],16)
         for change in (dict(minutes_by_day=rows[:-1]),dict(period="2026-10"),dict(classified_days=[dict(classified[0],night=60)]+classified[1:])):
             with self.subTest(change=change),self.assertRaises(PayrollBlocked):source_bound_part_time_rest_2026(**dict(a,**change))
 
