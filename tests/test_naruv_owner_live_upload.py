@@ -33,5 +33,5 @@ class OwnerProbeTests(unittest.TestCase):
     def test_pinned_module_blobs(self):
         # Verify original exact source without executing a live runner or network.
         for name,pin in m.PINS.items():
-            raw=m.run(["git","--no-replace-objects","show",m.SOURCE+":app/"+name+".py"]).stdout
+            raw=m.run(["git","--no-replace-objects","show","HEAD:app/"+name+".py"]).stdout
             self.assertEqual(hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest(),pin)
