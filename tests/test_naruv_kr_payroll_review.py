@@ -483,6 +483,26 @@ class KRRequestParser(unittest.TestCase):
                 _decode_kr_body(v)
             self.assertEqual(ex.exception.status_code,422)
 
+    def test_annual_leave_optional_shape_and_conflicts(self):
+        import json
+        from fastapi import HTTPException
+        from app.naruv_draft_review import _decode_kr_body
+        a=dict(employment_start="2025-07-01",service_year=1,as_of="2026-07-01",
+            last_employed_on=None,months=[],attendance_sha256="b"*64,contract_sha256="c"*64,
+            scope="CONTINUOUS_FULLTIME_5PLUS_FIRST_OF_MONTH_HIRE")
+        base=dict(expected_draft_sha256="a"*64,ordinary_hourly=12000,
+            classification_sha256="b"*64,classified_days=[day()],
+            deductions=deductions(),pension_assessed_base_krw=410000)
+        data=dict(base,annual_leave_accrual_review=a)
+        self.assertEqual(_decode_kr_body(json.dumps(data).encode()),data)
+        for bad in (dict(a,tenant="ci-b"),dict(a,service_year=True),dict(a,months=[{}]),
+                    dict(a,first_year_low_attendance_assessment=None),dict(a,as_of=1)):
+            with self.subTest(bad=bad),self.assertRaises(HTTPException) as ex:
+                _decode_kr_body(json.dumps(dict(base,annual_leave_accrual_review=bad)).encode())
+            self.assertEqual(ex.exception.status_code,422)
+        for key in ("part_time_leave_review","unused_leave_review"):
+            with self.assertRaises(HTTPException):_decode_kr_body(json.dumps(dict(data,**{key:{}})).encode())
+
 
 class InsuranceCollectionComparison(unittest.TestCase):
     def test_reference_sequences_no_automatic_selection(self):
