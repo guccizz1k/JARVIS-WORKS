@@ -1566,6 +1566,10 @@ def isolated_payroll_review_html(result):
         hours=result["part_time_leave_reference"]["grant_hours"]
         require(_whole(hours,1,200),"KR_VIEW_LEAVE_HOURS")
         rows.append("<tr><th scope=\"row\">단시간 연차 부여 참고시간</th><td>"+str(hours)+" 시간</td></tr>")
+    if "monthly_tax_reference" in result:
+        tax=result["monthly_tax_reference"]
+        line("월 소득세 계산 참고액",tax["national_reference_krw"])
+        line("월 지방소득세 계산 참고액",tax["local_reference_from_assessed_national_krw"])
     comps=result.get("settlement_reference",{}).get("components",{})
     for k,label,key in (("bonus","별도 상여 원천징수 차액","signed_difference_krw"),
         ("year_end","별도 연말정산 차액 (음수: 환급)","signed_difference_krw"),
@@ -1720,4 +1724,39 @@ def annual_resident_wage_tax_review_2026(*,tenant,worker,period,kind,scope,
         "rounding_status":"REFERENCE_FLOOR_ONE_WON_NOT_STATUTORY_COLLECTION",
         "review_sha256":hash_input({"v":"KR_ANNUAL_RESIDENT_WAGE_REFERENCE_2026_V1","tenant":tenant,"worker":worker,
             "period":period,"kind":kind,"scope":scope,"amounts":amounts,"proofs":proofs}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def assessed_monthly_tax_comparison_2026(*,tenant,worker,period,gross_krw,deductions,
+        withholding_date,taxable_monthly_krw,eligible_family_count,eligible_children_8_20,
+        selection_percent,assessment_sha256):
+    """Compare ordinary official table reference with assessed national/local amounts.
+    Gross is obtained from confirmed attendance; taxable composition is assessed,
+    not inferred. No filing, eligibility or payment authorization.
+    """
+    require(type(withholding_date) is str and withholding_date[:7]==period
+        and _whole(gross_krw,0,10**12) and _whole(taxable_monthly_krw,0,gross_krw),"KR_MONTHLY_TAX_GROSS_OR_PERIOD")
+    require(type(deductions) is dict and set(deductions)==set(DEDUCTIONS),"KR_MONTHLY_TAX_DEDUCTIONS")
+    for key in ("income_tax","local_income_tax"):
+        row=deductions[key]
+        require(type(row) is dict and set(row)=={"amount_krw","evidence_sha256","assessment"}
+            and row["assessment"]=="ASSESSED" and _whole(row["amount_krw"],0,10**9)
+            and type(row["evidence_sha256"]) is str and HEX.fullmatch(row["evidence_sha256"]),"KR_MONTHLY_TAX_ASSESSMENT")
+    n,l=deductions["income_tax"],deductions["local_income_tax"]
+    require(n["evidence_sha256"]==assessment_sha256,"KR_MONTHLY_TAX_EVIDENCE")
+    national=national_collection_review_2026(tenant=tenant,worker=worker,withholding_date=withholding_date,
+        taxable_monthly_krw=taxable_monthly_krw,eligible_family_count=eligible_family_count,
+        eligible_children_8_20=eligible_children_8_20,selection_percent=selection_percent,
+        assessment_sha256=assessment_sha256,scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF")
+    local=local_collection_review_2026(tenant=tenant,worker=worker,period=period,
+        assessed_national_collection_krw=n["amount_krw"],assessment_sha256=n["evidence_sha256"],
+        scope="ASSESSED_ORDINARY_MONTHLY_WITHHOLDING_NO_EXCEPTIONS")
+    mismatches=[]
+    if n["amount_krw"]!=national["national_collection_krw"]:mismatches.append("income_tax")
+    if l["amount_krw"]!=local["local_collection_krw"]:mismatches.append("local_income_tax")
+    return {"status":"ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED" if mismatches else "REFERENCE_MATCH_ONLY",
+        "mismatches":mismatches,"national_reference_krw":national["national_collection_krw"],
+        "local_reference_from_assessed_national_krw":local["local_collection_krw"],
+        "review_sha256":hash_input({"v":"KR_MONTHLY_TAX_COMPARISON_2026_V1","gross":gross_krw,
+            "national":national["review_sha256"],"local":local["review_sha256"],"assessed":[n,l]}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
