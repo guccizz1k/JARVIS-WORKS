@@ -789,6 +789,27 @@ def run_valuation(base):
                 self.assertEqual(pt_html.headers["cache-control"],"no-store")
                 self.check(self.call(krpath,dict(manual,part_time_leave_review=part_time),who="B"),404)
                 print("NARUV_PART_TIME_LEAVE_API_PASS isolated assessed grant, HTML and tenant denial",flush=True)
+                leave=dict(employment_start="2025-07-01",service_year=1,as_of="2026-07-01",
+                    last_employed_on=None,attendance_sha256="b"*64,contract_sha256="c"*64,
+                    scope="CONTINUOUS_FULLTIME_5PLUS_FIRST_OF_MONTH_HIRE",
+                    months=[dict(start=f"2025-{m:02}-01",scheduled_days=20,credited_days=20 if m<11 else 10,evidence_sha256="a"*64) for m in range(7,13)]
+                    +[dict(start=f"2026-{m:02}-01",scheduled_days=20,credited_days=10,evidence_sha256="a"*64) for m in range(1,7)])
+                assessment=dict(attendance_sha256="b"*64,contract_sha256="c"*64,anniversary="2026-07-01",assessed_additional_days=4,assessment_sha256="d"*64)
+                self.check(self.call(krpath,dict(manual,annual_leave_accrual_review=leave)),409)
+                leave["first_year_low_attendance_assessment"]=assessment
+                lr=self.check(self.call(krpath,dict(manual,annual_leave_accrual_review=leave)),200)
+                self.assertEqual(lr["annual_leave_accrual_reference"]["earned_days_in_review"],8)
+                self.assertFalse(lr["annual_leave_accrual_reference"]["historical_attendance_authenticity_verified"])
+                self.assertFalse(lr["statutory_validated"]);self.assertFalse(lr["payment_authorized"])
+                self.assertNotEqual(lr["review_sha256"],response["review_sha256"])
+                self.check(self.call(krpath,dict(manual,annual_leave_accrual_review=dict(leave,as_of="2026-08-01"))),409)
+                self.check(self.call(krpath,dict(manual,annual_leave_accrual_review=dict(leave,first_year_low_attendance_assessment=dict(assessment,assessed_additional_days=5)))),409)
+                self.check(self.call(krpath,dict(manual,annual_leave_accrual_review=leave,part_time_leave_review=part_time)),422)
+                self.check(self.call(krpath,dict(manual,annual_leave_accrual_review=leave),who="B"),404)
+                lh=self.call(krpath,dict(manual,annual_leave_accrual_review=leave),extra={"accept":"text/html"})
+                self.assertEqual(lh.status_code,200);self.assertIn("8 일",lh.text)
+                self.assertEqual(lh.headers["cache-control"],"no-store")
+                print("NARUV_ANNUAL_LEAVE_ACCRUAL_API_PASS manual evidence, period, scope, HTML and tenant denial",flush=True)
                 annual=dict(kind="MIDYEAR_TERMINATION",scope="RESIDENT_WAGE_ONLY_NO_RELIEF_ASSESSED_OTHER_DEDUCTIONS_CREDITS",
                     annual_income_krw=200000000,exempt_income_krw=5000000,assessed_other_deductions_krw=7000000,
                     assessed_cap_addback_krw=0,assessed_other_credits_krw=0,previous_national_krw=44334000,
