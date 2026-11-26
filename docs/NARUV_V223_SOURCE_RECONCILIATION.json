@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "783f1d4f63b652c620482949b88f9a34531f7902",
+      "sha": "65bb2197f7dbc03069c99b692717cca35740e7b2",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "a42f0ea047774d2d4ec37110d4c4fa94b0a2fc0b",
+      "sha": "6b1531828bb9322191c2cc3ff7e5a436f7ab111f",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "ee1d515e06684d00ff04c12b039902dcb12f2912",
+      "sha": "7377ef3ff8f867bf41ce95d5ef8e0db39841ca1e",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8600,6 +8600,14 @@
     "tests/test_naruv_b2_upload_execution.py": {
       "sha": "cd0439684989627254cfe0bfb13602118bc82fdf",
       "mode": "100644"
+    },
+    "app/naruv_b2_native_upload.py": {
+      "sha": "f4847359ccd30e32ec103a5e21d8834a60bb6acc",
+      "mode": "100644"
+    },
+    "tests/test_naruv_b2_native_upload.py": {
+      "sha": "eea7ec4d71b1c18d860a4eeeff9268890c44d9a6",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8952,6 +8960,17 @@
       "scripts/naruv_valuation_ci.py",
       "app/naruv_b2_upload_execution.py",
       "tests/test_naruv_b2_upload_execution.py"
+    ]
+  },
+  "p1_p2_native_upload_evidence": {
+    "base": "4fdb23de62a886fa01b632f2fc74821853365484",
+    "scope": "Part-time rest evidence distinguishes confirmed positive minutes from manual zero-work statuses; owner-only B2 Native upload candidate with exact independent approval pin, separate new prefix, exclusive per-object writer, durable no-retry journal and strict readback. No live upload, new keys or production action.",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_b2_native_upload.py",
+      "tests/test_naruv_b2_native_upload.py"
     ]
   }
 }
