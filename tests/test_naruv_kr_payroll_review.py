@@ -1039,3 +1039,33 @@ class RestrictedStatementTests(unittest.TestCase):
         self.assertEqual(sum(r["amount_krw"] for r in out["components"]),bound["wage"]["gross_estimate_krw"])
         self.assertEqual(out["rounding"],"DISPLAY_ALLOCATION_ONLY")
         self.assertEqual(out,restricted_wage_statement_2026(**inputs))
+
+
+    def test_fixed_week_statement_paid_days(self):
+        from app.naruv_kr_payroll_review import fixed_week_wage_statement_2026, fixed_week_monthly_payroll_review_2026,source_bound_review
+        from app.naruv_payroll_draft import draft_gross
+        a=FixedWeekPaidRestLeave().fixture()
+        a["weeks"][1]["days"][1].update(status="APPROVED_FULL_DAY_ANNUAL_LEAVE",actual_minutes=0)
+        rows=[dict(date=d["date"],regular=d["actual_minutes"],additional=0) for w in a["weeks"] for d in w["days"]
+            if d["date"].startswith("2026-11-") and d["status"]=="PRESENT"]
+        src=dict(tenant="a",worker="w",period="2026-11",policy_revision="r1",hourly_krw=12000,minutes_by_day=rows)
+        pin=draft_gross(**src,multiplier_bps={"regular":10000,"additional":15000})["draft_sha256"]
+        cls=[dict(date=r["date"],regular=r["regular"],overtime=0,holiday_first8=0,holiday_after8=0,night=0) for r in rows]
+        d=deductions()
+        bound=source_bound_review(**src,additional_bps=15000,expected_draft_sha256=pin,
+            ordinary_hourly=12000,classification_sha256="a"*64,classified_days=cls,deductions=d)
+        fixed=fixed_week_monthly_payroll_review_2026(**a,base_hourly=12000,policy_revision="r1",
+            minutes_by_day=rows,additional_bps=15000,expected_draft_sha256=pin,deductions=d)
+        args=dict(tenant="a",worker="w",period="2026-11",base_hourly=12000,ordinary_hourly=12000,
+            minutes_by_day=rows,deductions=d,fixed_review=fixed,source_review=bound,payment_date="2026-12-10",
+            scope="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE",completeness_assessment_sha256="e"*64)
+        result=fixed_week_wage_statement_2026(**args)
+        self.assertEqual(result["gross_krw"],2496000)
+        self.assertEqual(result["net_krw"],2490000)
+        self.assertEqual([r["amount_krw"] for r in result["components"]],[1920000,480000,96000])
+        self.assertFalse(result["add_to_basic_gross"])
+        self.assertFalse(result["delivery_authorized"])
+        for change in (dict(payment_date="2027-01-01"),dict(fixed_review=dict(fixed,gross_estimate_krw=1)),
+            dict(minutes_by_day=rows+[dict(date="2026-11-03",regular=480,additional=0)])):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):
+                fixed_week_wage_statement_2026(**dict(args,**change))
