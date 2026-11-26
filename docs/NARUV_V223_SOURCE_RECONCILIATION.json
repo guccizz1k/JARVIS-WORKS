@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "56df63cbf315de5d2d5421b41a23a8e6a61d836d",
+      "sha": "d14d013b4f2a290477acb28531ca7e7f89a5b1ba",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "02c3e768f6af47657dfe148151dc647e2e373510",
+      "sha": "161fbbcc036309591938e7522bdf883cd9cd0a2f",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "fb7a07ced5574d13cd7f7dac0946a16a851aa4fa",
+      "sha": "dadfe1c99307924b12b33fbba5cdbf3d92562cde",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "b4cac75b162a351f9ee10bad47125b5ffc1c4236",
+      "sha": "fa7076dec52bd8542b371c40019e6c343e740965",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "c665e2266e3fc2243af6b0f68ca1294c752b6388",
+      "sha": "79c1c24722fc9ccc4e2b1763002e9b822da63482",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8608,6 +8608,14 @@
     "tests/test_naruv_b2_native_upload.py": {
       "sha": "c47471c876ccb53d177cc51db6f097425399e74b",
       "mode": "100644"
+    },
+    "app/naruv_operational_readiness.py": {
+      "sha": "e05f1f5b6107a6e8318147ef3ca17229bffdb0e0",
+      "mode": "100644"
+    },
+    "tests/test_naruv_operational_readiness.py": {
+      "sha": "66cd962ad24a8f570ac5011d591573cdba87245b",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8995,6 +9003,19 @@
       "scripts/naruv_valuation_ci.py",
       "app/naruv_b2_native_upload.py",
       "tests/test_naruv_b2_native_upload.py"
+    ]
+  },
+  "p1_p2_batched_readiness": {
+    "base": "3e00b31349ab5d3f4427086c6e905dd6cb625621",
+    "scope": "Six-reference ordinary payroll comparison, owner unsigned scope proposal and local custody challenge consumption, explicit remaining operational blockers; no production acceptance or live provider access",
+    "paths": [
+      "app/naruv_draft_review.py",
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_operational_readiness.py",
+      "tests/test_naruv_operational_readiness.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }
 }
