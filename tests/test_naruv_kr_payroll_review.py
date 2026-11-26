@@ -847,3 +847,29 @@ class AnnualResidentTaxReview(unittest.TestCase):
             self.assertEqual(credit(gross,Fraction(100000000))[1],cap)
         self.assertEqual(credit(30000000,Fraction(1300000))[0],715000)
         self.assertEqual(credit(30000000,Fraction(1300001))[0],Fraction(7150003,10))
+
+
+class AssessedMonthlyTaxComparison(unittest.TestCase):
+    def test_reference_and_scope(self):
+        from app.naruv_kr_payroll_review import assessed_monthly_tax_comparison_2026 as compare,national_collection_review_2026
+        a=dict(tenant="a",worker="w",period="2026-11",gross_krw=3000000,
+            withholding_date="2026-11-25",taxable_monthly_krw=3000000,
+            eligible_family_count=1,eligible_children_8_20=0,selection_percent=100,
+            assessment_sha256="a"*64)
+        tax=national_collection_review_2026(**{k:v for k,v in a.items() if k not in ("period","gross_krw")},
+            scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF")["national_collection_krw"]
+        rows=deductions()
+        rows["income_tax"]=dict(amount_krw=tax,evidence_sha256="a"*64,assessment="ASSESSED")
+        rows["local_income_tax"]=dict(amount_krw=tax//100*10,evidence_sha256="b"*64,assessment="ASSESSED")
+        a["deductions"]=rows
+        r=compare(**a)
+        self.assertEqual(r["status"],"REFERENCE_MATCH_ONLY")
+        self.assertFalse(r["payment_authorized"])
+        self.assertEqual(r["national_reference_krw"],tax)
+        bad=dict(rows,local_income_tax=dict(rows["local_income_tax"],amount_krw=1))
+        self.assertEqual(compare(**dict(a,deductions=bad))["mismatches"],["local_income_tax"])
+        for change in (dict(gross_krw=2999999),dict(withholding_date="2026-10-25"),
+                dict(assessment_sha256="b"*64),dict(eligible_children_8_20=1),
+                dict(deductions=dict(rows,income_tax=dict(rows["income_tax"],assessment="NOT_APPLICABLE")))):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):
+                compare(**dict(a,**change))
