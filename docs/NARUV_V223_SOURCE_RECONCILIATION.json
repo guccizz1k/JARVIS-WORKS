@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "8f7a05c143af5b8dd1a09ebd6fc714eb1b5e763f",
+      "sha": "5efc0e7bb925f82003a9081fa48529009ee788c2",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8634,7 +8634,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md": {
-      "sha": "ba9a08acc86edbbf5fa7731415e45401014ecd02",
+      "sha": "1a6da8d6fd7332498b30b275d3b06aed3ad61c09",
       "mode": "100644"
     },
     "scripts/naruv_b2_offline_stage.py": {
@@ -8658,7 +8658,11 @@
       "mode": "100644"
     },
     "scripts/naruv_employee_session_store_ci.py": {
-      "sha": "5036517c854d60970c2c9e1f9fd8f9064f5ac868",
+      "sha": "88b268dcfce1315b3279655355a5bd04c794740b",
+      "mode": "100644"
+    },
+    "app/naruv_employee_statement_binding_review.py": {
+      "sha": "4849739208877339658a24e7ac0aecfa820a7d1a",
       "mode": "100644"
     }
   },
@@ -9218,6 +9222,16 @@
     "paths": [
       "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "employee_render_binding_review": {
+    "base": "3a2c44f14af991fabdc0beee8006846c42277112",
+    "scope": "CI-only existing payroll renderer bound to PG17 live session; no delivery or real identity",
+    "paths": [
+      "app/naruv_employee_statement_binding_review.py",
+      "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md",
+      "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md"
     ]
   }
 }

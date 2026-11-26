@@ -71,6 +71,50 @@ class EmployeeStore(unittest.TestCase):
             conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
             self.assertEqual(conn.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone()[0],2)
             conn.execute("RESET ROLE")
+            # Build an actual existing payroll draft and bind the rendered
+            # content to the live scoped session without issuing a document.
+            from copy import deepcopy
+            from dataclasses import replace
+            import runpy
+            from app.naruv_payroll_draft import draft_gross
+            from app.naruv_kr_payroll_review import source_bound_review,restricted_wage_statement_2026,isolated_wage_statement_print_html
+            from app.naruv_employee_statement_binding_review import TrustedDraft,review_bound_statement
+            fixture=runpy.run_path("tests/test_naruv_kr_payroll_review.py")
+            a=fixture["SourceBoundKRReview"]().inputs()
+            a.update(tenant="ci-a",worker="w1")
+            base={k:a[k] for k in ("tenant","worker","period","policy_revision","hourly_krw","minutes_by_day")}
+            a["expected_draft_sha256"]=draft_gross(**base,multiplier_bps={"regular":10000,"additional":15000})["draft_sha256"]
+            bound=source_bound_review(**a)
+            args2={k:a[k] for k in ("tenant","worker","period","ordinary_hourly","classification_sha256","classified_days","deductions")}
+            args2.update(base_hourly=a["hourly_krw"],bound_review=bound,payment_date="2026-12-10",scope="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY",completeness_assessment_sha256="e"*64)
+            statement=restricted_wage_statement_2026(**args2)
+            wrapped=dict(status="MANUAL_SUBMISSION_REFERENCE_ONLY",wage_statement_reference=statement,
+                         evidence_authenticity_verified=False,persisted=False,statutory_validated=False,payment_authorized=False,production_authorized=False)
+            h=hashlib.sha256(isolated_wage_statement_print_html(wrapped).encode("utf-8")).hexdigest()
+            conn.execute("INSERT INTO naruv_employee_ci.entitlements VALUES ('ci-a','w1','r2',%s,%s,true)",(statement["review_sha256"],h))
+            conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
+            bind=dict(trusted_tenant="ci-a",trusted_principal="e1",receipt="r2")
+            tok=store.issue(conn,**bind)
+            draft=TrustedDraft("ci-a","w1","r2",wrapped)
+            options=dict(**bind,token=tok,draft=draft)
+            result=review_bound_statement(conn,**options)
+            self.assertTrue(result["render_binding_verified"])
+            self.assertEqual(result["render_sha256"],h)
+            for flag in ("document_returned","delivery_authorized","production_authorized","statutory_validated","identity_proofing_verified"):
+                self.assertIs(result[flag],False)
+            for changes in (dict(trusted_tenant="ci-b"),dict(trusted_principal="e2"),dict(receipt="r1"),dict(token="x"*43),
+                            dict(draft=replace(draft,worker="w2")),dict(draft=replace(draft,tenant="ci-b"))):
+                with self.assertRaises(AccessDenied):review_bound_statement(conn,**dict(options,**changes))
+            changed=deepcopy(wrapped)
+            changed["wage_statement_reference"]["proposed_payment_date"]="2026-12-11"
+            with self.assertRaises(AccessDenied):
+                review_bound_statement(conn,**dict(options,draft=replace(draft,result=changed)))
+            conn.execute("RESET ROLE")
+            conn.execute("UPDATE naruv_employee_ci.entitlements SET active=false WHERE tenant='ci-a' AND receipt='r2'")
+            conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
+            with self.assertRaises(AccessDenied):review_bound_statement(conn,**options)
+            conn.execute("RESET ROLE")
+            print("EMPLOYEE_STATEMENT_RENDER_BINDING=PASS")
             conn.execute("SET LOCAL naruv.employee_store_ci='OFF'")
             with self.assertRaises(AccessDenied):store.access(conn,**args)
         finally:
