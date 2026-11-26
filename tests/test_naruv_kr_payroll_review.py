@@ -506,13 +506,14 @@ class InsuranceCollectionComparison(unittest.TestCase):
 
     def test_ambiguous_ltc_sequence_is_never_selected(self):
         from app.naruv_kr_payroll_review import insurance_collection_review_2026
-        from fractions import Fraction
-        base=next(b for b in range(1000000,1001000)
-            if (Fraction(b*9448,2000000)//10)!=(Fraction((Fraction(b*719,20000)//10)*10*9448,71900)//10))
+        # Independent boundary example: 35995.69245 health and
+        # 4730.004204 LTC before truncation; truncating health first changes LTC.
+        base=1001271
         r=insurance_collection_review_2026(tenant="a",worker="w",period="2026-11",
             health_base_krw=base,employment_base_krw=base,assessment_sha256="c"*64,
             scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES",
             assessed_employee_krw={"health":0,"long_term_care":0,"employment_insurance":0})
         self.assertIn("LTC_SEQUENCE_REQUIRES_AGENCY_CONFIRMATION",r["flags"])
-        self.assertNotEqual(r["candidates"]["ltc_exact_base_10won"],r["candidates"]["ltc_truncated_health_base_10won"])
+        self.assertEqual(r["candidates"]["ltc_exact_base_10won"],4730)
+        self.assertEqual(r["candidates"]["ltc_truncated_health_base_10won"],4720)
         self.assertFalse(r["production_authorized"])
