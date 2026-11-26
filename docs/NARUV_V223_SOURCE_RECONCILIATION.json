@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "eda7c3636f7a603cf4f698d10718ae1c1c01ab76",
+      "sha": "8f7a05c143af5b8dd1a09ebd6fc714eb1b5e763f",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8634,7 +8634,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md": {
-      "sha": "073f697af233279603714f25473fdbd25d0eb41b",
+      "sha": "ba9a08acc86edbbf5fa7731415e45401014ecd02",
       "mode": "100644"
     },
     "scripts/naruv_b2_offline_stage.py": {
@@ -9208,6 +9208,14 @@
     "scope": "CI-only multi-connection row lock and post-revocation denial, external handoff; no live identity",
     "paths": [
       "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "p2_owner_self_custody_acceptance": {
+    "base": "451c7826d6aeb06b361a3bdb8d9143add149d0ff",
+    "scope": "explicit owner-approved policy change; independent third-party custody deferred, real recovery still required",
+    "paths": [
       "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
