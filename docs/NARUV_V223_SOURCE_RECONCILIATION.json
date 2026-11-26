@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "121bf8203898d29dd2335037bb23f20688151a90",
+      "sha": "c0f805f000bfda4ec99ec0482f0408c3d9108106",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8676,6 +8676,14 @@
     "tests/test_naruv_statutory_review_intake.py": {
       "sha": "0c406613b9f81bdcd10d3eb6f7a828f54a92943d",
       "mode": "100644"
+    },
+    "app/naruv_portone_test_review.py": {
+      "sha": "6376fc3cc3b52a190c982c5072af2b78eb78e30b",
+      "mode": "100644"
+    },
+    "tests/test_naruv_portone_test_review.py": {
+      "sha": "7467f4d3c4d367249b16ae2da8c56457df22289d",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -9290,6 +9298,15 @@
     "paths": [
       "app/naruv_statutory_review_intake.py",
       "tests/test_naruv_statutory_review_intake.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "portone_test_admission_review": {
+    "base": "aa8894305dda413127e2994064f456a966d5e3c2",
+    "scope": "Disconnected V2 TEST-only review candidate; no actual provider call or production authority",
+    "paths": [
+      "app/naruv_portone_test_review.py",
+      "tests/test_naruv_portone_test_review.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }
