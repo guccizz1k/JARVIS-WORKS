@@ -134,3 +134,52 @@ class NativeUploadTests(unittest.TestCase):
     def test_excess_key_scope(self):
         a,s=m._auth(("writer","fake"));s["allowed"]["capabilities"].append("deleteFiles")
         with self.assertRaisesRegex(ValueError,"NATIVE_SESSION_CAPS"):m._scope_session(a,s,self.s,True)
+
+    def recovery_args(self):
+        files=list(Path(self.tmp.name).glob("*.jsonl"));self.assertEqual(len(files),1)
+        raw=files[0].read_bytes()
+        return dict(scope=self.s,approved_scope_sha256=self.args["approved_scope_sha256"],raw=self.raw,
+            journal_raw=raw,journal_sha256=m.sha(raw),audit_credentials=self.args["audit_credentials"])
+    def test_reconcile_lost_ack(self):
+        original=m._upload.side_effect
+        def lost(*args):
+            original(*args);raise TimeoutError()
+        m._upload.side_effect=lost
+        with self.assertRaises(TimeoutError):self.run_upload()
+        args=self.recovery_args();calls=m._upload.call_count
+        result=m.reconcile_interrupted_upload(**args)
+        self.assertEqual(result["status"],"NATIVE_RECOVERY_REMOTE_MATCH_READ_ONLY")
+        self.assertTrue(result["ciphertext_reverified"])
+        self.assertFalse(result["retry_authorized"]);self.assertFalse(result["remote_write"])
+        self.assertEqual(m._upload.call_count,calls)
+        self.assertEqual(self.stages(),["attempt"])
+        self.assertEqual(self.recovery_args()["journal_raw"],args["journal_raw"])
+    def test_reconcile_remote_absent_no_retry(self):
+        m._upload.side_effect=TimeoutError()
+        with self.assertRaises(TimeoutError):self.run_upload()
+        r=m.reconcile_interrupted_upload(**self.recovery_args())
+        self.assertEqual(r["status"],"NATIVE_RECOVERY_REMOTE_ABSENT_UNCERTAIN")
+        self.assertFalse(r["retry_authorized"]);self.assertFalse(r["ciphertext_reverified"])
+        self.assertEqual(m._upload.call_count,1)
+    def test_reconcile_complete_no_remote_repeat(self):
+        self.run_upload();calls=m._auth.call_count
+        r=m.reconcile_interrupted_upload(**self.recovery_args())
+        self.assertEqual(r["status"],"NATIVE_RECOVERY_ALREADY_COMPLETE_NO_REMOTE_READ")
+        self.assertFalse(r["remote_read"]);self.assertEqual(m._auth.call_count,calls)
+    def test_reconcile_tampered_pin_and_multiple_versions(self):
+        original=m._upload.side_effect
+        def lost(*args):
+            original(*args);raise TimeoutError()
+        m._upload.side_effect=lost
+        with self.assertRaises(TimeoutError):self.run_upload()
+        args=self.recovery_args();calls=m._auth.call_count
+        with self.assertRaisesRegex(ValueError,"NATIVE_RECOVERY_JOURNAL_PIN"):
+            m.reconcile_interrupted_upload(**dict(args,journal_sha256="0"*64))
+        self.assertEqual(m._auth.call_count,calls)
+        self.rows.append(dict(self.info,fileId="other"))
+        with self.assertRaisesRegex(ValueError,"NATIVE_RECOVERY_MULTIPLE_VERSIONS"):m.reconcile_interrupted_upload(**args)
+    def test_reconcile_ack_drift(self):
+        m._download.side_effect=None;m._download.return_value=(b"wrong",{})
+        with self.assertRaisesRegex(ValueError,"NATIVE_READBACK"):self.run_upload()
+        args=self.recovery_args();self.rows=[dict(self.info,fileId="other")]
+        with self.assertRaisesRegex(ValueError,"NATIVE_RECOVERY_FILE_ID"):m.reconcile_interrupted_upload(**args)
