@@ -1449,8 +1449,9 @@ def assessed_settlement_components_2026(*,tenant,worker,period,components):
     """
     require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_SETTLEMENT_SCOPE")
     require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_SETTLEMENT_PERIOD")
-    allowed={"bonus","year_end","severance","health_leave"}
-    require(type(components) is dict and 1<=len(components)<=4 and set(components)<=allowed,"KR_SETTLEMENT_COMPONENTS")
+    allowed={"bonus","year_end","year_end_calculated","severance","health_leave"}
+    require(type(components) is dict and 1<=len(components)<=4 and set(components)<=allowed
+        and not {"year_end","year_end_calculated"}<=set(components),"KR_SETTLEMENT_COMPONENTS")
     results={}
     def check(row,fields):
         require(type(row) is dict and set(row)==set(fields)|{"assessment_sha256"},"KR_SETTLEMENT_SHAPE")
@@ -1473,6 +1474,11 @@ def assessed_settlement_components_2026(*,tenant,worker,period,components):
             delta=r["decided_national_krw"]-r["previous_national_krw"]-r["special_payment_krw"]
             results[k]={"signed_difference_krw":delta,"collection_reference_krw":max(0,delta),
                 "refund_reference_krw":max(0,-delta),"status":"ASSESSED_REFERENCE_ONLY"}
+        elif k=="year_end_calculated":
+            check(r,("kind","scope","annual_income_krw","exempt_income_krw","assessed_other_deductions_krw",
+                "assessed_cap_addback_krw","assessed_other_credits_krw","previous_national_krw","annual_source_sha256",
+                "deduction_assessment_sha256","credit_assessment_sha256"))
+            results[k]=annual_resident_wage_tax_review_2026(tenant=tenant,worker=worker,period=period,**r)
         elif k=="severance":
             fields=("eligible_confirmed","service_days","average_period_days","included_wages_krw","ordinary_daily_krw")
             extra=("excluded_days","excluded_wages_krw")
@@ -1563,6 +1569,7 @@ def isolated_payroll_review_html(result):
     comps=result.get("settlement_reference",{}).get("components",{})
     for k,label,key in (("bonus","별도 상여 원천징수 차액","signed_difference_krw"),
         ("year_end","별도 연말정산 차액 (음수: 환급)","signed_difference_krw"),
+        ("year_end_calculated","별도 연말정산 계산 참고 차액 (음수: 환급)","signed_difference_krw"),
         ("severance","별도 퇴직금 참고액","estimate_krw")):
         if k in comps:line(label,comps[k][key])
     return ("<!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
@@ -1641,4 +1648,76 @@ def fixed_part_time_annual_leave_reference_2026(*,tenant,worker,period,comparato
         "review_sha256":hash_input({"v":"KR_FIXED_PART_TIME_LEAVE_2026_V1","tenant":tenant,"worker":worker,
             "period":period,"comparator_grant_days":comparator_grant_days,"contracted_week_minutes":contracted_week_minutes,
             "ordinary_hourly":ordinary_hourly,"contract":contract_sha256,"grant_assessment":grant_assessment_sha256}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def _annual_wage_deduction_2026(gross):
+    """Income Tax Act Art. 47, exact pre-rounding arithmetic."""
+    require(_whole(gross,0,10**12),"KR_ANNUAL_GROSS")
+    rates=((5000000,70),(15000000,40),(45000000,15),(100000000,5),(10**12,2))
+    deduction=Fraction(0);lower=0
+    for upper,rate in rates:
+        deduction+=Fraction(max(0,min(gross,upper)-lower)*rate,100)
+        lower=upper
+        if gross<=upper:break
+    return min(Fraction(20000000),deduction)
+
+def _annual_progressive_tax_2026(taxable):
+    """Income Tax Act Art. 55, exact marginal bands."""
+    require(type(taxable) in (int,Fraction) and 0<=taxable<=10**12,"KR_ANNUAL_TAXABLE")
+    bands=((14000000,6),(50000000,15),(88000000,24),(150000000,35),
+        (300000000,38),(500000000,40),(1000000000,42),(10**12,45))
+    tax=Fraction(0);lower=0
+    for upper,rate in bands:
+        tax+=Fraction(max(0,min(taxable,upper)-lower)*rate,100)
+        lower=upper
+        if taxable<=upper:break
+    return tax
+
+def _annual_employee_credit_2026(gross,tax):
+    """Income Tax Act Art. 59. No special tax reductions in supported scope."""
+    raw=tax*Fraction(55,100) if tax<=1300000 else 715000+(tax-1300000)*Fraction(30,100)
+    if gross<=33000000:cap=Fraction(740000)
+    elif gross<=70000000:cap=max(Fraction(660000),740000-Fraction((gross-33000000)*8,1000))
+    elif gross<=120000000:cap=max(Fraction(500000),660000-Fraction(gross-70000000,2))
+    else:cap=max(Fraction(200000),500000-Fraction(gross-120000000,2))
+    return min(raw,cap),cap
+
+def annual_resident_wage_tax_review_2026(*,tenant,worker,period,kind,scope,
+        annual_income_krw,exempt_income_krw,assessed_other_deductions_krw,assessed_cap_addback_krw,
+        assessed_other_credits_krw,previous_national_krw,annual_source_sha256,
+        deduction_assessment_sha256,credit_assessment_sha256,assessment_sha256):
+    """Ordinary resident, wage income only, no special reductions, 2026 H2.
+    Official Art.47/55/59 and NTS sequence. Other deductions/credits and
+    exemption eligibility must already be assessed; no local tax/filing or
+    statutory rounding claim. Annual preview is not a final year-end filing.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_ANNUAL_SCOPE")
+    require(scope=="RESIDENT_WAGE_ONLY_NO_RELIEF_ASSESSED_OTHER_DEDUCTIONS_CREDITS","KR_ANNUAL_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(07|08|09|10|11|12)",period),"KR_ANNUAL_PERIOD")
+    require(type(kind) is str and kind in ("ANNUAL_PREVIEW","MIDYEAR_TERMINATION"),"KR_ANNUAL_KIND")
+    amounts=(annual_income_krw,exempt_income_krw,assessed_other_deductions_krw,
+        assessed_cap_addback_krw,assessed_other_credits_krw,previous_national_krw)
+    require(all(_whole(v,0,10**12) for v in amounts) and exempt_income_krw<=annual_income_krw
+        and assessed_cap_addback_krw<=assessed_other_deductions_krw,"KR_ANNUAL_AMOUNTS")
+    proofs=(annual_source_sha256,deduction_assessment_sha256,credit_assessment_sha256,assessment_sha256)
+    require(all(type(v) is str and HEX.fullmatch(v) for v in proofs),"KR_ANNUAL_PROOF")
+    gross=annual_income_krw-exempt_income_krw
+    deduction=_annual_wage_deduction_2026(gross);income=gross-deduction
+    taxable=max(Fraction(0),income-assessed_other_deductions_krw+assessed_cap_addback_krw)
+    tax=_annual_progressive_tax_2026(taxable)
+    credit,cap=_annual_employee_credit_2026(gross,tax)
+    decided=max(Fraction(0),tax-credit-assessed_other_credits_krw)
+    estimate=decided.numerator//decided.denominator
+    delta=estimate-previous_national_krw
+    return {"status":"ASSESSED_ANNUAL_NATIONAL_TAX_REFERENCE_ONLY","gross_krw":gross,
+        "earned_income_deduction_exact":_money(deduction),"earned_income_exact":_money(income),
+        "taxable_exact":_money(taxable),"calculated_tax_exact":_money(tax),
+        "employee_tax_credit_exact":_money(credit),"employee_tax_credit_cap_exact":_money(cap),
+        "decided_tax_exact":_money(decided),"decided_national_estimate_krw":estimate,
+        "signed_difference_krw":delta,"signed_difference_exact":_money(decided-previous_national_krw),
+        "collection_reference_krw":max(0,delta),"refund_reference_krw":max(0,-delta),
+        "rounding_status":"REFERENCE_FLOOR_ONE_WON_NOT_STATUTORY_COLLECTION",
+        "review_sha256":hash_input({"v":"KR_ANNUAL_RESIDENT_WAGE_REFERENCE_2026_V1","tenant":tenant,"worker":worker,
+            "period":period,"kind":kind,"scope":scope,"amounts":amounts,"proofs":proofs}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
