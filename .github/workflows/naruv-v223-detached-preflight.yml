@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: a4605964614c7af31f5010ec0492b7439fcd7934
+      EXPECTED_SOURCE: aa8894305dda413127e2994064f456a966d5e3c2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: a4605964614c7af31f5010ec0492b7439fcd7934
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           python -m scripts.jw_evidence_gate --check-project .
           python -m pytest -q --strict-markers --junitxml="$RUNNER_TEMP/naruv-v223-detached.xml" \
-            tests/test_security.py tests/test_auth_integrity_v89.py \
+            tests/test_security.py tests/test_auth_integrity_v89.py tests/test_naruv_statutory_review_intake.py \
             tests/test_security_hardening_v17.py tests/test_quote_import.py \
             tests/test_complex_settlement_v69.py tests/test_pg_rls_gate_v79.py \
             tests/test_jw_skill_contract.py tests/test_jw_evidence_gate.py \
@@ -99,7 +99,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: a4605964614c7af31f5010ec0492b7439fcd7934
+      EXPECTED_SOURCE: aa8894305dda413127e2994064f456a966d5e3c2
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: a4605964614c7af31f5010ec0492b7439fcd7934
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -144,11 +144,11 @@ jobs:
     permissions:
       contents: read
     env:
-      EXPECTED_SOURCE: a4605964614c7af31f5010ec0492b7439fcd7934
+      EXPECTED_SOURCE: aa8894305dda413127e2994064f456a966d5e3c2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: a4605964614c7af31f5010ec0492b7439fcd7934
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
           fetch-depth: 1
           persist-credentials: false
       - name: Independently obtain and compare official Appendix 2 PDF
