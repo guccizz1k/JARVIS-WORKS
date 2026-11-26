@@ -446,3 +446,22 @@ class IncidentPinnedKeyStore(MountedProfileKeyStore):
         key=super()._read(tenant,key_id,for_write=for_write)
         _require(secrets.compare_digest(hashlib.sha256(key).hexdigest(),self._fingerprints[tenant][key_id]))
         return key
+
+def reconcile_backup_provider_inventory_against_manifest(*,tenant,expected_manifest,expected_manifest_sha256,records,inventory_sha256):
+    """Bind provider observations to an independently pinned original manifest.
+    Caller must obtain both digests through trusted channels; review only.
+    """
+    import hashlib
+    _require(type(expected_manifest) is dict and 1<=len(expected_manifest)<=10000)
+    for asset,entry in expected_manifest.items():
+        _require(type(asset) is str and ID.fullmatch(asset) and type(entry) is dict
+            and set(entry)=={"sha256","key_id"} and type(entry["sha256"]) is str
+            and re.fullmatch(r"[0-9a-f]{64}",entry["sha256"]) and type(entry["key_id"]) is str and ID.fullmatch(entry["key_id"]))
+    assets=sorted(expected_manifest)
+    result=reconcile_backup_provider_inventory(tenant=tenant,expected_assets=assets,records=records,inventory_sha256=inventory_sha256)
+    digest=hashlib.sha256(_canonical(["NARUV_ORIGINAL_BACKUP_MANIFEST_V1",tenant,expected_manifest])).hexdigest()
+    _require(type(expected_manifest_sha256) is str and re.fullmatch(r"[0-9a-f]{64}",expected_manifest_sha256)
+        and secrets.compare_digest(digest,expected_manifest_sha256))
+    original_mismatch=sorted({r["asset"] for r in records if any(r[k]!=expected_manifest[r["asset"]][k] for k in ("sha256","key_id"))})
+    return dict(result,status="BLOCKED" if original_mismatch or result["status"]=="BLOCKED" else "ORIGINAL_AND_PROVIDER_MATCH_ONLY",
+        original_mismatch_assets=original_mismatch,original_manifest_sha256=digest)
