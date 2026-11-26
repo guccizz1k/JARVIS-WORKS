@@ -1781,6 +1781,25 @@ def extend_assessed_cash_statement_2026(*,tenant,statement,additional_cash_wages
         additional_cash_authenticity_verified=False,requires_human_review=True,
         review_sha256=hash_input({"v":"KR_CASH_STATEMENT_2026_V1","tenant":tenant,"base":statement["review_sha256"],"items":items,"gross":gross}))
 
+def _validate_statement_component_math(components, base_kind):
+    require(type(components) is list and all(type(r) is dict and set(r)=={'kind','minutes','hourly_krw','multiplier_bps','exact','amount_krw'} for r in components),'KR_PRINT_COMPONENTS')
+    expected=(10000,5000,5000,10000,5000) if base_kind=='RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY' else (10000,10000,10000)
+    require(len(components)==len(expected),'KR_PRINT_COMPONENTS')
+    amounts=[]; exacts=[]
+    for r,bps in zip(components,expected):
+        require(_whole(r['minutes'],0,31*1440) and _whole(r['hourly_krw'],1,10**8) and type(r['multiplier_bps']) is int and r['multiplier_bps']==bps and _whole(r['amount_krw'],0,10**12),'KR_PRINT_NUMBERS')
+        exact=Fraction(r['minutes']*r['hourly_krw']*bps,600000)
+        proof=r['exact']
+        require(type(proof) is dict and set(proof)=={'numerator','denominator'} and all(type(v) is int for v in proof.values()) and proof==_money(exact),'KR_PRINT_FORMULA')
+        exacts.append(exact);amounts.append(exact.numerator//exact.denominator)
+    if base_kind=='RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY':
+        delta=_round(sum(exacts,Fraction()))-sum(amounts)
+        order=sorted(range(len(exacts)),key=lambda i:(-(exacts[i]-amounts[i]),i))
+        for i in order[:delta]: amounts[i]+=1
+    else: amounts=[_round(x) for x in exacts]
+    require([r['amount_krw'] for r in components]==amounts,'KR_PRINT_ALLOCATION')
+
+
 def _statement_print_rows(a):
     """Validate the complete presentation arithmetic, even on an internal result."""
     require(type(a) is dict and all(a.get(k) is False for k in _STATEMENT_DENIALS)
@@ -1792,7 +1811,8 @@ def _statement_print_rows(a):
     base_kind=a.get("base_statement_status") if cash else kind
     require(base_kind in ("RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY","FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY"),"KR_PRINT_STATEMENT_SCOPE")
     labels=_STATEMENT_BASE_LABELS if base_kind=="RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY" else _STATEMENT_PAID_LABELS
-    require(type(a.get("components")) is list and [r["kind"] for r in a["components"]]==list(labels),"KR_PRINT_COMPONENTS")
+    _validate_statement_component_math(a.get("components"),base_kind)
+    require([r["kind"] for r in a["components"]]==list(labels),"KR_PRINT_COMPONENTS")
     rows=[];base=0
     for r in a["components"]:
         require(all(_whole(r[k],0,10**12) for k in ("minutes","hourly_krw","multiplier_bps","amount_krw")),"KR_PRINT_NUMBERS")

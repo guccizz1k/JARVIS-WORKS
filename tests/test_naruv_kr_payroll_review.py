@@ -1041,6 +1041,8 @@ class RestrictedStatementTests(unittest.TestCase):
         self.assertEqual(sum(r["amount_krw"] for r in out["components"]),bound["wage"]["gross_estimate_krw"])
         self.assertEqual(out["rounding"],"DISPLAY_ALLOCATION_ONLY")
         self.assertEqual(out,restricted_wage_statement_2026(**inputs))
+        from app.naruv_kr_payroll_review import _statement_print_rows
+        self.assertTrue(_statement_print_rows(out))
 
 
     def test_fixed_week_statement_paid_days(self):
@@ -1067,6 +1069,8 @@ class RestrictedStatementTests(unittest.TestCase):
         self.assertEqual([r["amount_krw"] for r in result["components"]],[1920000,480000,96000])
         self.assertFalse(result["add_to_basic_gross"])
         self.assertFalse(result["delivery_authorized"])
+        from app.naruv_kr_payroll_review import _statement_print_rows
+        self.assertTrue(_statement_print_rows(result))
         for change in (dict(payment_date="2027-01-01"),dict(fixed_review=dict(fixed,gross_estimate_krw=1)),
             dict(minutes_by_day=rows+[dict(date="2026-11-03",regular=480,additional=0)])):
             with self.subTest(change=change),self.assertRaises(PayrollBlocked):
@@ -1097,3 +1101,29 @@ class RestrictedStatementTests(unittest.TestCase):
         self.assertIn("교부 금지",html);self.assertIn("1,000",html)
         self.assertNotIn("assessment_sha256",html);self.assertNotIn("<script",html)
         with self.assertRaises(PayrollBlocked):isolated_wage_statement_print_html(dict(wrapper,wage_statement_reference=dict(result,gross_krw=1)))
+
+    def test_print_rejects_balanced_formula_tampering(self):
+        from copy import deepcopy
+        from app.naruv_kr_payroll_review import restricted_wage_statement_2026,source_bound_review,extend_assessed_cash_statement_2026,_statement_print_rows
+        a=SourceBoundKRReview().inputs()
+        bound=source_bound_review(**a)
+        args={k:a[k] for k in ("tenant","worker","period","ordinary_hourly","classification_sha256","classified_days","deductions")}
+        args.update(base_hourly=a["hourly_krw"],bound_review=bound,payment_date="2026-12-10",
+            scope="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY",completeness_assessment_sha256="e"*64)
+        base=restricted_wage_statement_2026(**args)
+        cash=extend_assessed_cash_statement_2026(tenant=a["tenant"],statement=base,additional_cash_wages=[
+            dict(kind="ASSESSED_BONUS",component_id="b",amount_krw=1000,assessment_sha256="a"*64)])
+        for original in (base,cash):
+            self.assertTrue(_statement_print_rows(original))
+            for key,value in (("minutes",original["components"][0]["minutes"]+1),
+                              ("hourly_krw",original["components"][0]["hourly_krw"]+1),
+                              ("multiplier_bps",True),("exact",{"numerator":True,"denominator":1})):
+                bad=deepcopy(original);bad["components"][0][key]=value
+                with self.subTest(key=key,status=original["status"]),self.assertRaises(PayrollBlocked):
+                    _statement_print_rows(bad)
+            bad=deepcopy(original)
+            bad["components"][0]["amount_krw"]-=1;bad["components"][1]["amount_krw"]+=1
+            self.assertEqual(sum(r["amount_krw"] for r in bad["components"]),sum(r["amount_krw"] for r in original["components"]))
+            with self.assertRaises(PayrollBlocked):_statement_print_rows(bad)
+            bad=deepcopy(original);bad["components"][0]=None
+            with self.assertRaises(PayrollBlocked):_statement_print_rows(bad)

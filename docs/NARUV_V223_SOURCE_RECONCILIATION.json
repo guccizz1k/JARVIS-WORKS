@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "f547efda9b009d450c3743e683dd42525361beea",
+      "sha": "b18ba2960134444ec66a64da2afc57eefbacfad8",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "1bb37e28b4dce6b660e4214b55c78696422a6ac2",
+      "sha": "8a0faf2476187eb01e805d3d597c56b085977725",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "be52ec9638904b5940495aaea0f76ef1beef512c",
+      "sha": "3284e671cb1538972d0cd75d608c1342e5dc5d75",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -9065,5 +9065,11 @@
       "scripts/naruv_valuation_ci.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
+  }
+,
+  "p1_print_formula_integrity": {
+    "base": "6c658339e1a5b2829f96bfcfddbd8a080a7c71ee",
+    "scope": "Restricted print exact component and deterministic allocation validation; no statutory or P2 custody acceptance",
+    "paths": ["app/naruv_kr_payroll_review.py","tests/test_naruv_kr_payroll_review.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
   }
 }
