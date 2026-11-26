@@ -51,7 +51,7 @@ def test_eleven_synthetic_external_ciphers_really_restore_pg17(monkeypatch):
         pairs=list(zip(ids,[hashlib.sha256(x).hexdigest() for x in candidates]))
         known=dict(zip(ids,candidates))
         monkeypatch.setattr(ext,"preflight",lambda:"PASS")
-        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key,pairs))
+        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key if selected_scope=="legacy" else b"T"*32,pairs))
         monkeypatch.setattr(clean,"_head_tree",lambda _:set(known))
         monkeypatch.setattr(clean,"_download",lambda blob,expected:known[blob])
         report=ext.run()
@@ -68,7 +68,10 @@ def test_eleven_synthetic_external_ciphers_really_restore_pg17(monkeypatch):
         docker("exec",SOURCE_CONTAINER,"dropdb","-U","postgres","--force",SOURCE_DB)
 
 
-def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path):
+import pytest
+
+@pytest.mark.parametrize("selected_scope",["legacy","staged"])
+def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path,selected_scope):
     import hashlib,json
     from scripts import naruv_b2_offline_stage as stage
     from tests.test_p1_external_custodian_pg17_v223 import cipher
@@ -92,7 +95,7 @@ def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path
         raw=json.dumps(dict(version=1,archives=rows)).encode()
         pin=stage.hash256(raw)
         directory=stage.stage(raw,pin,tmp_path,lambda r:data[int(r["file_id"])])
-        pairs=[(r["git_blob_sha1"],r["sha256"]) for r in rows[:11]]
+        pairs=[(r["git_blob_sha1"],r["sha256"]) for r in rows if r["scope"]==selected_scope]
         scope=ext.equivalence.owner_scope([b for b,_ in pairs])
         # Independently query the synthetic source, not the restored target.
         manifest=ext.offline._audit_restored_row_manifest(SOURCE_CONTAINER,db)
@@ -118,7 +121,7 @@ def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path
         monkeypatch.setattr(clean,"_head_tree",forbid)
         monkeypatch.setattr(clean,"_download",forbid)
         report=ext.run(reference,hashlib.sha256(reference).hexdigest(),catalog_required=True,
-                       staged=(raw,pin,directory,"legacy"))
+                       staged=(raw,pin,directory,selected_scope))
         assert report["b2_staged_scope_bound"] is True,report
         assert report["restored_pg17_archive_count"]==11,report
         assert report["normalized_catalog_comparison"]=="PASS_11_SCOPED_CATALOG_CHECKPOINTS",report

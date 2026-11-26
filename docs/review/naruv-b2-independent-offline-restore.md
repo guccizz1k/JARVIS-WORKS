@@ -14,3 +14,6 @@ Source adapter from 317a00912ff2d3c557befd2ec18316d7079e1ff9, copied unchanged. 
 
 ## Offline runtime CI rehearsal
 New synthetic-only CI step downloads binary cryptography wheels before isolation, records wheel SHA256s and local image IDs, then installs with --no-index and imports the verified source package in a networkless, read-only non-root Python container. Separately probes the cached PG17 image with --pull=never and --network none. Existing actual synthetic PG17 restore remains the integration test. This does not produce an independently trusted distribution or attest GCP runtime, image portability or real custody. CI-generated hashes are evidence, not independent approval pins.
+
+## Runtime command correction and both-scope integration
+Run 45810360087 passed prior actual PG17 tests but offline runtime setup failed because the source package build CLI omitted the commit argument. Supply exact HEAD as a separate argument; set writable temporary HOME and disable pip cache in read-only container. Parameterize existing actual staged catalog restoration over legacy and staged synthetic key scopes (11 each). No live archives or keys used. Pending CI.

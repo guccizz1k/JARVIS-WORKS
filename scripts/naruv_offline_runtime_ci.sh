@@ -6,7 +6,7 @@ test -n "${RUNNER_TEMP:-}"
 W=$(mktemp -d "$RUNNER_TEMP/naruv-offline.XXXXXX")
 trap 'rm -rf "$W"' EXIT
 SHA=$(git rev-parse HEAD)
-python -m scripts.naruv_offline_recovery_package build . "$W/recovery.zip"
+python -m scripts.naruv_offline_recovery_package build . "$SHA" "$W/recovery.zip"
 cp scripts/naruv_offline_recovery_package.py "$W/verify.py"
 PIN=$(sha256sum "$W/recovery.zip" | cut -d' ' -f1)
 docker pull python:3.11-slim
@@ -20,12 +20,12 @@ sudo chown -R "$(id -u):$(id -g)" "$W"
 # No host checkout, Docker socket, provider credentials, or network in this test.
 docker run --rm --pull=never --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=512m \
   --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
-  -v "$W:/bundle:ro" -e PYTHONDONTWRITEBYTECODE=1 "$PY_IMAGE" \
+  -v "$W:/bundle:ro" -e PYTHONDONTWRITEBYTECODE=1 -e HOME=/tmp "$PY_IMAGE" \
   sh -ec '
     cd /bundle
     sha256sum -c wheels.sha256
     python -m venv /tmp/venv
-    /tmp/venv/bin/python -m pip install --disable-pip-version-check --no-index --find-links=/bundle/wheels "cryptography>=43,<47"
+    /tmp/venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir --no-index --find-links=/bundle/wheels "cryptography>=43,<47"
     /tmp/venv/bin/python /bundle/verify.py verify /bundle/recovery.zip "$1" "$2"
     mkdir /tmp/recovery
     cd /tmp/recovery
