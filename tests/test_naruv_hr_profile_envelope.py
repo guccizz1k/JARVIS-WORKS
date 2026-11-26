@@ -267,3 +267,30 @@ class HRProfileEnvelope(unittest.TestCase):
         self.assertEqual(call([a,dict(b,retention_verified=False)])["mismatch_assets"],["archive"])
         self.assertEqual(call([a,dict(b,sha256="b"*64)])["status"],"BLOCKED")
         self.assertFalse(call([a,b])["key_retirement_authorized"])
+
+    def test_provider_inventory_independent_original_manifest(self):
+        import hashlib
+        from app.naruv_hr_profile_envelope import _canonical,reconcile_backup_provider_inventory_against_manifest
+        a=dict(asset="archive",tenant="ci-a",provider="GITHUB_PRIVATE",sha256="a"*64,key_id="old",
+            retention_verified=False,restore_verified=True)
+        b=dict(a,provider="BACKBLAZE_B2",retention_verified=True)
+        original={"archive":{"sha256":"a"*64,"key_id":"old"}}
+        pin=hashlib.sha256(_canonical(["NARUV_ORIGINAL_BACKUP_MANIFEST_V1","ci-a",original])).hexdigest()
+        def call(rows,**kw):
+            digest=hashlib.sha256(_canonical(["NARUV_PROVIDER_INVENTORY_V1","ci-a",["archive"],
+                sorted(rows,key=lambda r:(r["asset"],r["provider"]))])).hexdigest()
+            args=dict(tenant="ci-a",expected_manifest=original,expected_manifest_sha256=pin,records=rows,inventory_sha256=digest)
+            return reconcile_backup_provider_inventory_against_manifest(**dict(args,**kw))
+        good=call([a,b])
+        self.assertEqual(good["status"],"ORIGINAL_AND_PROVIDER_MATCH_ONLY")
+        self.assertFalse(good["key_retirement_authorized"])
+        self.assertFalse(good["production_authorized"])
+        for change in (dict(sha256="b"*64),dict(key_id="new")):
+            r=call([dict(a,**change),dict(b,**change)])
+            self.assertEqual(r["status"],"BLOCKED")
+            self.assertEqual(r["original_mismatch_assets"],["archive"])
+        self.assertEqual(call([a])["status"],"BLOCKED")
+        self.assertEqual(call([a,dict(b,retention_verified=False)])["status"],"BLOCKED")
+        for change in (dict(expected_manifest_sha256="0"*64),
+            dict(expected_manifest={"archive":{"sha256":"c"*64,"key_id":"old"}})):
+            with self.assertRaises(ProfileBlocked):call([a,b],**change)
