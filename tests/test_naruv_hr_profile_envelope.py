@@ -326,3 +326,27 @@ class HRProfileEnvelope(unittest.TestCase):
         self.assertEqual(call([page([row,dict(row,fileId="v2")])])["status"],"BLOCKED")
         with self.assertRaises(ProfileBlocked):call([page([row],"next","v2")])
         with self.assertRaises(ProfileBlocked):call([page([row],"next","v2"),page([dict(row,fileId="v2")],s="wrong",i="v2")])
+
+
+    def test_key_directory_ancestor_symlink_and_writable_denial(self):
+        import os,tempfile
+        from pathlib import Path
+        from app.naruv_hr_profile_envelope import MountedProfileKeyStore
+        if not hasattr(os,"O_NOFOLLOW"):self.skipTest("POSIX required")
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);parent=root/"parent";parent.mkdir(mode=0o700)
+            leaf=parent/"keys";leaf.mkdir(mode=0o700)
+            key=leaf/"active.key";key.write_bytes(b"x"*32);key.chmod(0o600)
+            manifest={"ci-a":{"test-key":{"file":"active.key","state":"ACTIVE"}}}
+            def seal(p):
+                return MountedProfileKeyStore(str(p),manifest).seal(tenant="ci-a",
+                    worker="pilot-worker",revision="r1",profile=self.profile)
+            self.assertEqual(seal(leaf)["key_id"],"test-key")
+            alias=root/"alias";alias.symlink_to(parent,target_is_directory=True)
+            with self.assertRaises(ProfileBlocked):seal(alias/"keys")
+            with self.assertRaises(ProfileBlocked):seal(str(parent)+"/../parent/keys")
+            with self.assertRaises(ProfileBlocked):seal(str(parent)+"//keys")
+            parent.chmod(0o777)
+            with self.assertRaises(ProfileBlocked):seal(leaf)
+            parent.chmod(0o700)
+            self.assertEqual(seal(leaf)["key_id"],"test-key")
