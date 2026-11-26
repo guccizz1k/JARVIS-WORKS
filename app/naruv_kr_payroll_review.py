@@ -1556,6 +1556,10 @@ def isolated_payroll_review_html(result):
     if "unused_leave_reference" in result:
         leave=result["unused_leave_reference"]
         if leave["reference_krw"] is not None:line("별도 미사용 연차수당 참고액",leave["reference_krw"])
+    if "part_time_leave_reference" in result:
+        hours=result["part_time_leave_reference"]["grant_hours"]
+        require(_whole(hours,1,200),"KR_VIEW_LEAVE_HOURS")
+        rows.append("<tr><th scope=\"row\">단시간 연차 부여 참고시간</th><td>"+str(hours)+" 시간</td></tr>")
     comps=result.get("settlement_reference",{}).get("components",{})
     for k,label,key in (("bonus","별도 상여 원천징수 차액","signed_difference_krw"),
         ("year_end","별도 연말정산 차액 (음수: 환급)","signed_difference_krw"),
@@ -1617,3 +1621,24 @@ def shift_night_source_review_2026(*,tenant,worker,period,segments,shift_sha256,
         "review_sha256":hash_input({"v":"KR_SHIFT_NIGHT_2026_V1","tenant":tenant,"worker":worker,"period":period,
             "source":shift_sha256,"segments":[r for _,_,r in parsed],"classified":sorted(classified_days,key=lambda r:r["date"])}),
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def fixed_part_time_annual_leave_reference_2026(*,tenant,worker,period,comparator_grant_days,
+        contracted_week_minutes,ordinary_hourly,contract_sha256,grant_assessment_sha256):
+    """Assessed equivalent annual grant; fixed ordinary 40h comparator only.
+    MOEL guidance and Enforcement Decree Appendix 2. Fractional hours round up.
+    This is not an eligibility, expiration, mixed-contract or payment determination.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_PT_LEAVE_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_PT_LEAVE_PERIOD")
+    require(_whole(comparator_grant_days,1,25) and _whole(contracted_week_minutes,900,2399)
+        and _whole(ordinary_hourly,1,10**8),"KR_PT_LEAVE_INPUT")
+    require(all(type(x) is str and HEX.fullmatch(x) for x in (contract_sha256,grant_assessment_sha256)),"KR_PT_LEAVE_EVIDENCE")
+    exact=Fraction(comparator_grant_days*contracted_week_minutes*8,2400)
+    hours=(exact.numerator+exact.denominator-1)//exact.denominator
+    return {"status":"ASSESSED_FIXED_PART_TIME_LEAVE_REFERENCE_ONLY","grant_hours_exact":_money(exact),
+        "grant_hours":hours,"grant_minutes":hours*60,"full_unused_value_reference_krw":hours*ordinary_hourly,
+        "review_sha256":hash_input({"v":"KR_FIXED_PART_TIME_LEAVE_2026_V1","tenant":tenant,"worker":worker,
+            "period":period,"comparator_grant_days":comparator_grant_days,"contracted_week_minutes":contracted_week_minutes,
+            "ordinary_hourly":ordinary_hourly,"contract":contract_sha256,"grant_assessment":grant_assessment_sha256}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
