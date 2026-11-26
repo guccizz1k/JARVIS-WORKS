@@ -26,8 +26,8 @@ def custody_evidence_message(*,tenant,expected_keys,observations,trust,challenge
     need(type(expected_keys) is dict and 2<=len(expected_keys)<=100,"CUSTODY_EXPECTED")
     for k,v in expected_keys.items():
         need(identifier(k) and type(v) is dict and set(v)=={"state","expected_assets"} and v["state"] in ("ACTIVE","STAGED","RECOVERY_ONLY")
-            and type(v["expected_assets"]) is list and 1<=len(v["expected_assets"])<=10000
-            and all(identifier(a) for a in v["expected_assets"]) and len(set(v["expected_assets"]))==len(v["expected_assets"]),"CUSTODY_EXPECTED")
+            and type(v["expected_assets"]) is dict and 1<=len(v["expected_assets"])<=10000
+            and all(identifier(a) and digest(h) for a,h in v["expected_assets"].items()),"CUSTODY_EXPECTED")
     need(sum(v["state"]=="ACTIVE" for v in expected_keys.values())<=1
         and any(v["state"]=="RECOVERY_ONLY" for v in expected_keys.values()),"CUSTODY_KEY_STATE")
     need(type(observations) is list and len(observations)==len(expected_keys),"CUSTODY_COVERAGE")
@@ -44,12 +44,13 @@ def custody_evidence_message(*,tenant,expected_keys,observations,trust,challenge
         for r in restores:
             need(type(r) is dict and set(r)=={"asset_id","ciphertext_sha256","restore_evidence_sha256","full_authentication","restore_ok","network_isolated"}
                 and identifier(r["asset_id"]) and r["asset_id"] in assets and r["asset_id"] not in restored
-                and digest(r["ciphertext_sha256"]) and digest(r["restore_evidence_sha256"])
+                and digest(r["ciphertext_sha256"]) and secrets.compare_digest(r["ciphertext_sha256"],assets[r["asset_id"]])
+                and digest(r["restore_evidence_sha256"])
                 and all(r[x] is True for x in ("full_authentication","restore_ok","network_isolated")),"CUSTODY_RESTORE_ROW")
             restored.add(r["asset_id"]);clean.append(dict(r))
         normalized.append(dict(row,restores=sorted(clean,key=lambda r:r["asset_id"])))
-    expected={k:dict(v,expected_assets=sorted(v["expected_assets"])) for k,v in expected_keys.items()}
-    return canonical(["NARUV_RECOVERY_CUSTODY_V1",tenant,expected,sorted(normalized,key=lambda r:r["key_id"]),trust,challenge,issued_at.isoformat()])
+    expected={k:dict(v,expected_assets=dict(sorted(v["expected_assets"].items()))) for k,v in expected_keys.items()}
+    return canonical(["NARUV_RECOVERY_CUSTODY_V2",tenant,expected,sorted(normalized,key=lambda r:r["key_id"]),trust,challenge,issued_at.isoformat()])
 
 def review_custody_evidence(*,tenant,expected_keys,observations,trust,challenge,issued_at,as_of,
         inventory_public_key,custodian_public_key,inventory_signature,custodian_signature):
