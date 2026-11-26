@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "78a0c80f926632787db50ef0855b628d39cdc047",
+      "sha": "22aaf94ab985452a556e9aba9f9201a4ea313f5a",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8654,11 +8654,11 @@
       "mode": "100644"
     },
     "db/review/naruv_employee_session_store_ci.sql": {
-      "sha": "c7c524093343ecbdf0ef1d4faefa35e010b2a0b8",
+      "sha": "5d1cdff091b5f4769e6511ae41769ce48bb2d621",
       "mode": "100644"
     },
     "scripts/naruv_employee_session_store_ci.py": {
-      "sha": "e804ff3f6f002a0f44dee59da1c308d0969f020b",
+      "sha": "f590990e7a495a248ddbcda75b3ada4db16113cb",
       "mode": "100644"
     },
     "app/naruv_employee_statement_binding_review.py": {
@@ -8666,7 +8666,7 @@
       "mode": "100644"
     },
     "app/naruv_employee_proof_review.py": {
-      "sha": "ed2217bcd3f4d5b462d72e2c1dc3668637625549",
+      "sha": "0e0d9e7b671321b76533b47927c2b9a19e7491fd",
       "mode": "100644"
     }
   },
@@ -9261,6 +9261,16 @@
     "base": "0fb0c5b0b83bc0c98bf874d54c8a0dbc410a7971",
     "scope": "CI-only exact statement snapshot binding; no real provider or delivery",
     "paths": [
+      "app/naruv_employee_proof_review.py",
+      "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "employee_authorization_history_review": {
+    "base": "30c8c29a6175c156a281c7b8e0bb63c51686ae39",
+    "scope": "Disposable PG17 monotonic challenge and session revocation; no production authority",
+    "paths": [
+      "db/review/naruv_employee_session_store_ci.sql",
       "app/naruv_employee_proof_review.py",
       "scripts/naruv_employee_session_store_ci.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
