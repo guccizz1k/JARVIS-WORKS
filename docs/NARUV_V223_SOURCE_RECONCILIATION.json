@@ -8602,11 +8602,11 @@
       "mode": "100644"
     },
     "app/naruv_b2_native_upload.py": {
-      "sha": "f4847359ccd30e32ec103a5e21d8834a60bb6acc",
+      "sha": "065101e5857b7bd55e5750259f289de2fe23499a",
       "mode": "100644"
     },
     "tests/test_naruv_b2_native_upload.py": {
-      "sha": "eea7ec4d71b1c18d860a4eeeff9268890c44d9a6",
+      "sha": "405d8b59203c88a210e8edf5ba8a5fcdd050c6a4",
       "mode": "100644"
     }
   },
@@ -8971,6 +8971,7 @@
       "scripts/naruv_valuation_ci.py",
       "app/naruv_b2_native_upload.py",
       "tests/test_naruv_b2_native_upload.py"
-    ]
+    ],
+    "ci_failure_fix": "45760920208 / 139710446636: five tests failed at NATIVE_BASE_URL because audit session passed download URL to API host validator; explicit download=True and regression negatives; no loosened allowlist"
   }
 }
