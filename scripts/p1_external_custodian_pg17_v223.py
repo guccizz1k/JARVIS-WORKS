@@ -208,7 +208,7 @@ def _owner_key():
     except (OSError,ValueError,TypeError):
         raise Blocked("OWNER_KEY_PIPE_INVALID") from None
     finally:
-        raw[:]=b"\\0"*len(raw)
+        raw[:]=bytes(len(raw))
 
 def run(reference_raw=None, reference_pin=None, *, catalog_required=False, staged=None, owner_controlled=False) -> dict[str, object]:
     result={
