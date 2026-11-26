@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "817cba3bb7e7f559f58f718f33ee4f97f0a0622f",
+      "sha": "ac6b69cfcbba0eb23199afbb62594c621369032b",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "74b183f960f7221bdb7072b44182aa66c760a297",
+      "sha": "e21b465cafdbe6a7813ceac74b0f1090ce80a083",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "f6a781daa88fc42a08d446521ab5befe693e926e",
+      "sha": "1009ea89b0253d6a7555a394e2082172b74d83a4",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "c1095814d16ac667b1cdbca12f5c3c80ba6fec6d",
+      "sha": "1b77c7d154c2f12722f053c8d2d7066b3c86ad5c",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8584,6 +8584,14 @@
     "tests/test_naruv_b2_upload_policy.py": {
       "sha": "8fb5402ee04f85c5a1cdd8f0c52e5c13756c5798",
       "mode": "100644"
+    },
+    "app/naruv_recovery_custody_review.py": {
+      "sha": "15cf3d206f468689933854d6706e7e44e6527378",
+      "mode": "100644"
+    },
+    "tests/test_naruv_recovery_custody_review.py": {
+      "sha": "7aaf9173f456eb9dafeb1898db07db88404bac2f",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8902,6 +8910,18 @@
       "scripts/naruv_valuation_ci.py",
       "app/naruv_b2_upload_policy.py",
       "tests/test_naruv_b2_upload_policy.py"
+    ]
+  },
+  "p1_p2_paid_rest_recovery": {
+    "base": "b0efde6a5f32019d86eae6b1c7247d598b9a9a14",
+    "scope": "Isolated alternative fixed-week gross with paid rest/leave against confirmed work minutes; custody assertion signature review only, no real key action, independent custody or site acceptance; actual owner screenshot reports 22 corrected receipts reconciled offline, no remote writes",
+    "paths": [
+      "app/naruv_draft_review.py",
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_recovery_custody_review.py",
+      "tests/test_naruv_recovery_custody_review.py"
     ]
   }
 }
