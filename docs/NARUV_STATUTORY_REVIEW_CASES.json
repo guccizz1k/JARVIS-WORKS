@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "classification": "SYNTHETIC_ONLY_NOT_LEGAL_ACCEPTANCE",
+  "reviewer_expected_values": null,
+  "submission_authorized": false,
+  "cases": [
+    {
+      "id": "KR01",
+      "topic": "ordinary and overtime",
+      "input": {
+        "base_hourly_krw": 12000,
+        "ordinary_hourly_krw": 12000,
+        "ordinary_minutes": 480,
+        "overtime_minutes": 120
+      },
+      "questions": [
+        "ordinary hourly scope",
+        "overtime entitlement",
+        "rounding"
+      ]
+    },
+    {
+      "id": "KR02",
+      "topic": "night holiday overlap",
+      "input": {
+        "ordinary_hourly_krw": 12000,
+        "holiday_minutes": 540,
+        "night_overlap_minutes": 120
+      },
+      "questions": [
+        "holiday 8-hour boundary",
+        "overlapping night premium"
+      ]
+    },
+    {
+      "id": "KR03",
+      "topic": "minimum wage inclusion",
+      "input": {
+        "base_hourly_krw": 10000,
+        "monthly_fixed_allowance_krw": 150000,
+        "scheduled_weekly_hours": 40
+      },
+      "questions": [
+        "2026 threshold",
+        "inclusion and denominator"
+      ]
+    },
+    {
+      "id": "KR04",
+      "topic": "paid weekly rest part-time",
+      "input": {
+        "weekly_contract_hours": 15,
+        "actual_hours": 15,
+        "ordinary_hourly_krw": 12000
+      },
+      "questions": [
+        "eligibility boundary",
+        "comparator schedule"
+      ]
+    },
+    {
+      "id": "KR05",
+      "topic": "annual leave and termination",
+      "input": {
+        "employment_start": "2025-01-01",
+        "employment_end": "2026-06-30",
+        "unused_leave_days": 3
+      },
+      "questions": [
+        "grant and expiry",
+        "termination settlement"
+      ]
+    },
+    {
+      "id": "KR06",
+      "topic": "fixed allowance and bonus",
+      "input": {
+        "monthly_base_krw": 3000000,
+        "fixed_allowance_krw": 250000,
+        "bonus_krw": 500000
+      },
+      "questions": [
+        "ordinary wage",
+        "taxable base",
+        "separate bonus withholding"
+      ]
+    },
+    {
+      "id": "KR07",
+      "topic": "six deductions and relief",
+      "input": {
+        "monthly_gross_krw": 3250000,
+        "dependents": 1
+      },
+      "questions": [
+        "pension",
+        "health",
+        "long-term care",
+        "employment",
+        "national income tax",
+        "local income tax",
+        "eligibility and relief"
+      ]
+    },
+    {
+      "id": "KR08",
+      "topic": "year-end tax and severance",
+      "input": {
+        "annual_gross_krw": 39000000,
+        "service_months": 18
+      },
+      "questions": [
+        "additional mandatory inputs",
+        "tax settlement",
+        "severance eligibility and formula"
+      ]
+    },
+    {
+      "id": "KR09",
+      "topic": "statement delivery",
+      "input": {
+        "tenant": "synthetic-a",
+        "worker": "synthetic-worker",
+        "recipient": "synthetic-recipient"
+      },
+      "questions": [
+        "required fields",
+        "recipient identity",
+        "access duration",
+        "delivery evidence",
+        "retention"
+      ]
+    }
+  ],
+  "instructions": "Reviewer must request missing inputs and determine applicability, cite effective official rules, supply independent expected outputs and signed approval; no assumed zero or automatic pass."
+}

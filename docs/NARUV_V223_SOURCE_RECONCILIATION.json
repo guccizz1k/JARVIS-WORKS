@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "17ba61597d718ed4e27ed750274e53854cd6193d",
+      "sha": "198c12ff3bbe0f0185ca57d717e6b1c7cc97fb27",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8634,7 +8634,19 @@
       "mode": "100644"
     },
     "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md": {
-      "sha": "85c97cb632d8fbedbdb51e6008c529d7e23007fe",
+      "sha": "9ec3f8bc42d9cdc769336948154aed63297c18dc",
+      "mode": "100644"
+    },
+    "scripts/naruv_b2_offline_stage.py": {
+      "sha": "8c4fd632e3c79d6d4a756a46a760888aad0eeb14",
+      "mode": "100644"
+    },
+    "tests/test_naruv_b2_offline_stage.py": {
+      "sha": "4586f5ad0e376e072d753d17cbda56f990445324",
+      "mode": "100644"
+    },
+    "docs/NARUV_STATUTORY_REVIEW_CASES.json": {
+      "sha": "01e62a9413b80883168d7e85177fdb1b5b97fece",
       "mode": "100644"
     }
   },
@@ -9145,6 +9157,17 @@
     "paths": [
       "app/naruv_employee_access_review.py",
       "tests/test_naruv_employee_access_review.py",
+      "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "p2_b2_offline_stage_and_p1_legal_case_inventory": {
+    "base": "4be6d9b5568098810ade013ff6919c361e1f1f97",
+    "scope": "B2 read-only staging adapter and synthetic legal case inventory; no live restore or legal acceptance",
+    "paths": [
+      "scripts/naruv_b2_offline_stage.py",
+      "tests/test_naruv_b2_offline_stage.py",
+      "docs/NARUV_STATUTORY_REVIEW_CASES.json",
       "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]

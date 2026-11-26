@@ -19,3 +19,6 @@ Only synthetic cases and proposed results: independent Korean labor/tax speciali
 - https://www.ses-secure.co.uk/software-escrow-services
 - https://www.escrowtech.com/
 - https://docs.aws.amazon.com/kms/latest/developerguide/importing-keys-considerations.html
+
+## Owner-operated GCP synthetic setup evidence (2026-11-26)
+User terminal screenshots show PG17 networkless synthetic 1000-row restore, AES-GCM invalid key/tamper rejection, row SHA-256 match, container cleanup, NAT/router absent, IAP-only configuration and actual SSH admin login with 2FA, original firewall equality, VM TERMINATED. This is owner-operated, not independent custodian evidence. Negative actual traffic test remains NOT RUN. New B2 exact-version ciphertext staging and offline reread adapter is review-only; no live B2 call, no key, no existing object changes, no restore-runner integration yet. The legal case inventory is synthetic and incomplete as a legal acceptance package; no external transmission or signed expert opinion.
