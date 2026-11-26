@@ -1022,3 +1022,20 @@ class RestrictedStatementTests(unittest.TestCase):
         for change in (dict(payment_date="2027-01-01"),dict(payment_date="2026-11-31"),dict(worker="other"),
             dict(bound_review=dict(bound,review_binding_sha256="0"*64)),dict(scope="ALL_WAGES")):
             with self.subTest(change=change),self.assertRaises(PayrollBlocked):restricted_wage_statement_2026(**dict(inputs,**change))
+
+    def test_fractional_component_allocation(self):
+        from app.naruv_kr_payroll_review import restricted_wage_statement_2026,source_bound_review
+        from app.naruv_payroll_draft import draft_gross
+        a=SourceBoundKRReview().inputs()
+        a.update(hourly_krw=12001,ordinary_hourly=12001,minutes_by_day=[dict(date="2026-11-02",regular=479,additional=59)],
+            classified_days=[day(r=479,o=59,n=59)])
+        source={k:a[k] for k in ("tenant","worker","period","policy_revision","hourly_krw","minutes_by_day")}
+        a["expected_draft_sha256"]=draft_gross(**source,multiplier_bps={"regular":10000,"additional":15000})["draft_sha256"]
+        bound=source_bound_review(**a)
+        inputs={k:a[k] for k in ("tenant","worker","period","ordinary_hourly","classification_sha256","classified_days","deductions")}
+        inputs.update(base_hourly=a["hourly_krw"],bound_review=bound,payment_date="2026-12-10",
+            scope="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY",completeness_assessment_sha256="e"*64)
+        out=restricted_wage_statement_2026(**inputs)
+        self.assertEqual(sum(r["amount_krw"] for r in out["components"]),bound["wage"]["gross_estimate_krw"])
+        self.assertEqual(out["rounding"],"DISPLAY_ALLOCATION_ONLY")
+        self.assertEqual(out,restricted_wage_statement_2026(**inputs))
