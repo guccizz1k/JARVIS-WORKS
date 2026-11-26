@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "961c90e63180311f9cdb0af78c91f353a7b44b21",
+      "sha": "4019ad574e3e9565b40a9dd14d625902643398bf",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "571bc18c479cfc9639274b75981175a82c6872db",
+      "sha": "1a7a6cd200e394191d97aa68fcfcebab27a1158d",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "b580f19527d9f4b435ae66ede4b07c1bbfdfe9c0",
+      "sha": "fd95e51aa2dc93fac726fd826c2ad8c86cd7ad0f",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "0bcbeb61566b964e329238ed5c502ba61f77972e",
+      "sha": "7cf08be8d0fd7f2e96468936aca754b5944234f9",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8788,5 +8788,9 @@
   "isolated_payroll_html_and_leave_api": {
     "parent": "b689119d2222bfe9f00be9a605198595f0b4dbf0",
     "reason": "Optional assessed unused leave reconciler wired into existing authenticated CI-only payroll API, isolated no-script HTML view with separate totals, no original UI or production bridge changes. Actual browser NOT RUN."
+  },
+  "shift_night_boundary": {
+    "parent": "ab935b9d9ddf67c4dd4d6a92367f1c14e7b6c94c",
+    "reason": "KST exact nonoverlapping shift segments cross midnight and count 22-06 night; bind to authenticated classified daily work totals via optional existing CI API. Not statutory shift classification."
   }
 }

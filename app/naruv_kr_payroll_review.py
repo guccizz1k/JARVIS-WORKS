@@ -1553,3 +1553,50 @@ def isolated_payroll_review_html(result):
         "<p>수동 증거 · 법정 정확성 미확정 · 지급 및 운영 반영 금지. 별도 항목은 기본 급여 합계에 합산되지 않았습니다.</p>"
         "<table><caption>계산 참고 결과</caption><thead><tr><th scope=\"col\">항목</th><th scope=\"col\">금액</th></tr></thead><tbody>"
         +"".join(rows)+"</tbody></table></main></html>")
+
+
+def shift_night_source_review_2026(*,tenant,worker,period,segments,shift_sha256,classified_days):
+    """Minute-exact KST shift segments, including midnight, no automatic legal
+    overtime/holiday classification. Breaks must already be excluded by the
+    attendance custodian; complete per-date work and night totals must match
+    the separate classified work ledger. Adjacent-month time stays separate.
+    """
+    from datetime import datetime,timedelta
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_SHIFT_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_SHIFT_PERIOD")
+    require(type(shift_sha256) is str and HEX.fullmatch(shift_sha256),"KR_SHIFT_PROOF")
+    require(type(segments) is list and 1<=len(segments)<=248,"KR_SHIFT_SEGMENTS")
+    def parse(s):
+        require(type(s) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}\+09:00",s),"KR_SHIFT_TIME")
+        try:return datetime.fromisoformat(s)
+        except ValueError:raise PayrollBlocked("KR_SHIFT_TIME") from None
+    parsed=[]
+    for row in segments:
+        require(type(row) is dict and set(row)=={"start","end","evidence_sha256"},"KR_SHIFT_SHAPE")
+        a,b=parse(row["start"]),parse(row["end"])
+        require(timedelta(0)<b-a<=timedelta(hours=24) and type(row["evidence_sha256"]) is str and HEX.fullmatch(row["evidence_sha256"]),"KR_SHIFT_RANGE")
+        # Only the current month or one calendar day across a boundary.
+        require(a.strftime("%Y-%m")==period or (b-timedelta(minutes=1)).strftime("%Y-%m")==period,"KR_SHIFT_OUTSIDE_PERIOD")
+        parsed.append((a,b,dict(row)))
+    parsed.sort(key=lambda x:x[0])
+    require(all(parsed[i-1][1]<=parsed[i][0] for i in range(1,len(parsed))),"KR_SHIFT_OVERLAP")
+    totals={}
+    for a,b,_ in parsed:
+        while a<b:
+            if a.strftime("%Y-%m")==period:
+                d=a.date().isoformat();work,night=totals.get(d,(0,0))
+                totals[d]=(work+1,night+int(a.hour>=22 or a.hour<6))
+            a+=timedelta(minutes=1)
+    require(type(classified_days) is list and 1<=len(classified_days)<=31,"KR_SHIFT_CLASSIFIED")
+    expected={}
+    for r in classified_days:
+        require(type(r) is dict and set(r)=={"date",*KINDS} and type(r["date"]) is str
+            and r["date"] not in expected and all(_whole(r[k],0,1440) for k in KINDS),"KR_SHIFT_CLASSIFIED")
+        work=sum(r[k] for k in KINDS[:-1])
+        if work:expected[r["date"]]=(work,r["night"])
+        else:require(r["night"]==0,"KR_SHIFT_CLASSIFIED")
+    require(totals==expected,"KR_SHIFT_SOURCE_MISMATCH")
+    return {"status":"SHIFT_NIGHT_RECONCILIATION_ONLY","days":[{"date":d,"work_minutes":v[0],"night_minutes":v[1]} for d,v in sorted(totals.items())],
+        "review_sha256":hash_input({"v":"KR_SHIFT_NIGHT_2026_V1","tenant":tenant,"worker":worker,"period":period,
+            "source":shift_sha256,"segments":[r for _,_,r in parsed],"classified":sorted(classified_days,key=lambda r:r["date"])}),
+        "statutory_validated":False,"payment_authorized":False,"production_authorized":False}

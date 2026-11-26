@@ -717,3 +717,19 @@ class AssessedSettlementComponents(unittest.TestCase):
         self.assertNotIn("<script",html)
         self.assertNotIn("unsafe",html)
         with self.assertRaises(PayrollBlocked):isolated_payroll_review_html(dict(r,payment_authorized=True))
+
+
+class ShiftNightBoundary(unittest.TestCase):
+    def test_cross_midnight_overlap_and_breaks(self):
+        from app.naruv_kr_payroll_review import shift_night_source_review_2026 as review
+        segments=[dict(start="2026-11-01T21:00+09:00",end="2026-11-02T02:00+09:00",evidence_sha256="a"*64),
+            dict(start="2026-11-02T03:00+09:00",end="2026-11-02T07:00+09:00",evidence_sha256="b"*64)]
+        rows=[day(d="2026-11-01",r=180,n=120),day(d="2026-11-02",r=360,n=300)]
+        a=dict(tenant="a",worker="w",period="2026-11",segments=segments,shift_sha256="c"*64,classified_days=rows)
+        r=review(**a)
+        self.assertEqual(r["days"],[{"date":"2026-11-01","work_minutes":180,"night_minutes":120},
+            {"date":"2026-11-02","work_minutes":360,"night_minutes":300}])
+        self.assertEqual(r,review(**dict(a,segments=segments[::-1])))
+        for change in (dict(segments=segments+[segments[0]]),dict(classified_days=[rows[0],dict(rows[1],night=301)]),
+            dict(segments=[dict(segments[0],start="2026-11-01T21:00+00:00"),segments[1]])):
+            with self.assertRaises(PayrollBlocked):review(**dict(a,**change))
