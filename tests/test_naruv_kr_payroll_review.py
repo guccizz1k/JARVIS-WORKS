@@ -747,3 +747,26 @@ class ShiftNightBoundary(unittest.TestCase):
                     rows+[day(d="x",r=0)],[day(d="2026-11-01",r=0)]+rows):
             with self.subTest(bad=bad),self.assertRaisesRegex(PayrollBlocked,"KR_SHIFT_CLASSIFIED"):
                 review(**a,classified_days=bad)
+
+
+class SeveranceExcludedPeriod(unittest.TestCase):
+    def test_assessed_exclusions_and_ordinary_floor(self):
+        from app.naruv_kr_payroll_review import assessed_settlement_components_2026 as review
+        row=dict(eligible_confirmed=True,service_days=730,average_period_days=90,
+            included_wages_krw=9000000,ordinary_daily_krw=100000,excluded_days=30,
+            excluded_wages_krw=1800000,assessment_sha256="a"*64)
+        def call(r):
+            return review(tenant="a",worker="w",period="2026-11",components={"severance":r})
+        result=call(row)
+        self.assertEqual(result["components"]["severance"]["estimate_krw"],7200000)
+        self.assertFalse(result["payment_authorized"])
+        self.assertFalse(result["statutory_validated"])
+        self.assertEqual(call(dict(row,ordinary_daily_krw=130000))["components"]["severance"]["estimate_krw"],7800000)
+        for change in (dict(excluded_days=90),dict(excluded_days=-1),dict(excluded_days=True),
+                dict(excluded_wages_krw=9000001),dict(excluded_days=0),dict(excluded_wages_krw=-1)):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):
+                call(dict(row,**change))
+        partial=dict(row);del partial["excluded_wages_krw"]
+        with self.assertRaises(PayrollBlocked):call(partial)
+        legacy={k:v for k,v in row.items() if k not in ("excluded_days","excluded_wages_krw")}
+        self.assertEqual(call(legacy)["components"]["severance"]["estimate_krw"],6000000)
