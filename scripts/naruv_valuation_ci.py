@@ -957,6 +957,39 @@ def run_valuation(base):
                 fxh=self.call(taxpath,fa,extra={"accept":"text/html"})
                 self.assertEqual(fxh.status_code,200);self.assertIn("명세서 대체 급여 총액",fxh.text)
                 print("NARUV_FIXED_WEEK_WAGE_STATEMENT_API_PASS paid rest and leave breakdown without double counting",flush=True)
+                cash=[dict(kind="ASSESSED_BONUS",component_id="bonus-1",amount_krw=100000,assessment_sha256="a"*64),
+                      dict(kind="ASSESSED_FIXED_ALLOWANCE",component_id="allowance-1",amount_krw=50000,assessment_sha256="b"*64)]
+                ca=dict(fa,wage_statement_review=dict(fspec,additional_cash_wages=cash))
+                cas=self.check(self.call(taxpath,ca),200)["wage_statement_reference"]
+                self.assertEqual(cas["gross_krw"],3350000);self.assertEqual(cas["additional_cash_total_krw"],150000)
+                self.assertFalse(cas["additional_cash_tax_and_insurance_verified"]);self.assertFalse(cas["delivery_authorized"])
+                self.check(self.call(taxpath,ca,who="B"),404)
+                self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(fspec,additional_cash_wages=[cash[0],cash[0]]))),409)
+                print_accept={"accept":"text/html;profile=naruv-wage-statement-draft"}
+                ph=self.call(taxpath,ca,extra=print_accept)
+                self.assertEqual(ph.status_code,200);self.assertEqual(ph.headers["cache-control"],"no-store")
+                self.assertIn("3,350,000",ph.text);self.assertIn("교부 금지",ph.text)
+                self.assertNotIn("assessment_sha256",ph.text);self.assertNotIn("<script",ph.text)
+                self.check(self.call(taxpath,ca,who="B",extra=print_accept),404)
+                self.check(self.call(taxpath,fixed,extra=print_accept),409)
+                if os.environ.get("NARUV_WORKSPACE_BROWSER")=="EPHEMERAL_ONLY":
+                    from playwright.sync_api import sync_playwright
+                    import io,pdfplumber
+                    with sync_playwright() as pw:
+                        browser=pw.chromium.launch(headless=True)
+                        try:
+                            context=browser.new_context(offline=True)
+                            page=context.new_page()
+                            page.set_content(ph.text)
+                            pdf=page.pdf(format="A4",margin={"top":"12mm","bottom":"12mm","left":"12mm","right":"12mm"})
+                            self.assertTrue(pdf.startswith(b"%PDF-"));self.assertLess(len(pdf),2*1024*1024)
+                            with pdfplumber.open(io.BytesIO(pdf)) as doc:
+                                self.assertGreaterEqual(len(doc.pages),1);self.assertLessEqual(len(doc.pages),2)
+                                txt=" ".join(p.extract_text() or "" for p in doc.pages)
+                                self.assertIn("3,350,000",txt);self.assertIn("100,000",txt)
+                        finally:browser.close()
+                    print("NARUV_SYNTHETIC_WAGE_STATEMENT_PDF_PASS offline browser, no delivery",flush=True)
+                print("NARUV_CASH_WAGE_STATEMENT_API_PASS assessed cash components and authenticated print draft",flush=True)
                 ptweeks=[]
                 for w in range(4):
                     mon=date(2026,6,8)+timedelta(days=7*w);entries=[]
