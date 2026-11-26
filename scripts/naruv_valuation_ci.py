@@ -816,6 +816,9 @@ def run_valuation(base):
                     annual_source_sha256="a"*64,deduction_assessment_sha256="b"*64,credit_assessment_sha256="c"*64,assessment_sha256="d"*64)
                 yr=self.check(self.call(krpath,dict(manual,settlement_components={"year_end_calculated":annual})),200)
                 self.assertEqual(yr["settlement_reference"]["components"]["year_end_calculated"]["signed_difference_krw"],639000)
+                self.assertFalse(yr["settlement_reference"]["annual_source_authenticity_verified"])
+                self.assertFalse(yr["settlement_reference"]["settlement_included_in_monthly_gross"])
+                self.assertEqual(yr["settlement_reference"]["confirmed_month_gross_estimate_krw"],yr["review"]["wage"]["gross_estimate_krw"])
                 self.assertFalse(yr["statutory_validated"])
                 self.assertFalse(yr["payment_authorized"])
                 self.check(self.call(krpath,dict(manual,settlement_components={"year_end_calculated":dict(annual,scope="UNSUPPORTED")})),409)
@@ -823,6 +826,7 @@ def run_valuation(base):
                 annual_html=self.call(krpath,dict(manual,settlement_components={"year_end_calculated":annual}),extra={"accept":"text/html"})
                 self.assertEqual(annual_html.status_code,200)
                 self.assertIn("639,000",annual_html.text)
+                self.assertIn("수동 제출 · 월 급여에 미합산",annual_html.text)
                 print("NARUV_ANNUAL_NATIONAL_TAX_API_PASS assessed ordinary calculation, HTML and tenant denial",flush=True)
                 tw="/hr/workers/tax-worker";tp=tw+"/periods/2026-07"
                 self.check(self.call(tw+"/register/tax-reg"),200)
