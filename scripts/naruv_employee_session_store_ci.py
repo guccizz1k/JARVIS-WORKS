@@ -153,6 +153,15 @@ class EmployeeStore(unittest.TestCase):
             conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=false WHERE tenant='ci-a'")
             with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
             conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=true WHERE tenant='ci-a'")
+            # A proof issued for one rendered statement cannot grant a changed statement.
+            for column,old,new in (("review_sha256","a"*64,"c"*64),
+                                   ("render_sha256","b"*64,"d"*64)):
+                conn.execute(f"UPDATE naruv_employee_ci.entitlements SET {column}=%s WHERE tenant='ci-a' AND receipt='r1'",(new,))
+                with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
+                self.assertEqual(conn.execute("SELECT consumed FROM naruv_employee_ci.proof_challenges WHERE id=%s",(challenge,)).fetchone(),(False,))
+                self.assertEqual(conn.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone()[0],0)
+                conn.execute(f"UPDATE naruv_employee_ci.entitlements SET {column}=%s WHERE tenant='ci-a' AND receipt='r1'",(old,))
+            print("EMPLOYEE_PROOF_SNAPSHOT_DRIFT_DENIAL=PASS")
             conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
             with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):
