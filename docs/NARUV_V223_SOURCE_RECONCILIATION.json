@@ -8616,6 +8616,14 @@
     "tests/test_naruv_operational_readiness.py": {
       "sha": "66cd962ad24a8f570ac5011d591573cdba87245b",
       "mode": "100644"
+    },
+    "scripts/naruv_owner_live_upload.py": {
+      "sha": "98c3f681d37aeae3e7c41a22744b5b514953c877",
+      "mode": "100644"
+    },
+    "tests/test_naruv_owner_live_upload.py": {
+      "sha": "2c209ab79165f1023b35a2644440f1d9a9c9efb6",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -9016,6 +9024,14 @@
       "app/naruv_operational_readiness.py",
       "tests/test_naruv_operational_readiness.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "p2_owner_live_probe": {
+    "base": "5c3fc3a9f7bd50e6ec281460cb79c37c18d531d5",
+    "scope": "Owner-only single synthetic PG17 V2 backup preparation, local restore, free allowance owner confirmation, one exact object proposal and two temporary keys, approved remote upload only after local confirmation. CI never contacts B2 or creates keys; production keys and existing archives excluded.",
+    "paths": [
+      "scripts/naruv_owner_live_upload.py",
+      "tests/test_naruv_owner_live_upload.py"
     ]
   }
 }
