@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: 6e742d9c010512cc2ff4125ca7389c51f4103ea6
+      EXPECTED_SOURCE: 25a988face5d46aeb84fd2a2972007991a4c6723
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 6e742d9c010512cc2ff4125ca7389c51f4103ea6
+          ref: 25a988face5d46aeb84fd2a2972007991a4c6723
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -99,7 +99,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: 6e742d9c010512cc2ff4125ca7389c51f4103ea6
+      EXPECTED_SOURCE: 25a988face5d46aeb84fd2a2972007991a4c6723
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 6e742d9c010512cc2ff4125ca7389c51f4103ea6
+          ref: 25a988face5d46aeb84fd2a2972007991a4c6723
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -143,11 +143,11 @@ jobs:
     permissions:
       contents: read
     env:
-      EXPECTED_SOURCE: 6e742d9c010512cc2ff4125ca7389c51f4103ea6
+      EXPECTED_SOURCE: 25a988face5d46aeb84fd2a2972007991a4c6723
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 6e742d9c010512cc2ff4125ca7389c51f4103ea6
+          ref: 25a988face5d46aeb84fd2a2972007991a4c6723
           fetch-depth: 1
           persist-credentials: false
       - name: Independently obtain and compare official Appendix 2 PDF
