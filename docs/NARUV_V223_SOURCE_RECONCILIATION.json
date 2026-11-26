@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "143fe67229fbb01fdf3cbc738fbdeb510e83c41f",
+      "sha": "37ed3f4cf2fdf85f364454db1d5b6d98e21e0f66",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "65bb2197f7dbc03069c99b692717cca35740e7b2",
+      "sha": "8f0539296f497763d37c7c117b284b2fa3251381",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "6b1531828bb9322191c2cc3ff7e5a436f7ab111f",
+      "sha": "959743f939dbccea314c24be5753cf4eff6c5cf9",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8602,11 +8602,11 @@
       "mode": "100644"
     },
     "app/naruv_b2_native_upload.py": {
-      "sha": "065101e5857b7bd55e5750259f289de2fe23499a",
+      "sha": "1bb6b505363cda425986b31a699f609b790e44ac",
       "mode": "100644"
     },
     "tests/test_naruv_b2_native_upload.py": {
-      "sha": "405d8b59203c88a210e8edf5ba8a5fcdd050c6a4",
+      "sha": "647a94ed4f5559a23fa756e42ca48f91f8eb1065",
       "mode": "100644"
     }
   },
@@ -8973,5 +8973,16 @@
       "tests/test_naruv_b2_native_upload.py"
     ],
     "ci_failure_fix": "45760920208 / 139710446636: five tests failed at NATIVE_BASE_URL because audit session passed download URL to API host validator; explicit download=True and regression negatives; no loosened allowlist"
+  },
+  "p1_p2_authenticated_archive": {
+    "base": "1a95730084947fa3eb9da0d546214b9fce976dca",
+    "scope": "New B2 uploads require local AES-256-GCM authentication of every V2 chunk before network, PostgreSQL custom prefix, no plaintext output, not restore proof. Manual settlement source and gross non-addition explicit in isolated API/HTML. No live upload or key changes.",
+    "paths": [
+      "app/naruv_b2_native_upload.py",
+      "tests/test_naruv_b2_native_upload.py",
+      "app/naruv_draft_review.py",
+      "app/naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py"
+    ]
   }
 }
