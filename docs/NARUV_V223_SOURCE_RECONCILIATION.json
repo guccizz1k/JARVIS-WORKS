@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "1ab035b10641a6e66a67cf7972c4c65a8cd5e38a",
+      "sha": "02becb87519fb71aacf33b1bc1bf2e9b1f5d0c3d",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "ad185001381317e3ac6e402920e9f7db2439b3ba",
+      "sha": "98c7a028a7a59958b27c004d822fdbb73285e9a8",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "9adb0435f7f4896e70ff46266cf660cb80048005",
+      "sha": "294865b9ea563496e15b6014fd3a0b2ecd6d9f60",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "a016209d9d7c0fca351bf6a71231825e54bbfd06",
+      "sha": "ad980e06626e18b6ccf38ad716a65afa00337ee2",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "18da208d3fd49ca3136914fe7666a025d50aa7b6",
+      "sha": "beccaa76296120c8eb741181c731d6784279b29f",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "1e948cac8087975ae7045de9aa727ffe52e5bf00",
+      "sha": "134cd153af230c878846d5372876d7ec75eedb63",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8832,6 +8832,18 @@
       "app/naruv_kr_payroll_review.py",
       "tests/test_naruv_kr_payroll_review.py",
       "scripts/naruv_valuation_ci.py"
+    ]
+  },
+  "p1_p2_monthly_tax_keypath": {
+    "base": "6e742d9c010512cc2ff4125ca7389c51f4103ea6",
+    "scope": "Restricted assessed monthly tax comparison and safe descriptor-relative key path traversal; no statutory or production authorization",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "app/naruv_draft_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_hr_profile_envelope.py",
+      "tests/test_naruv_hr_profile_envelope.py"
     ]
   }
 }
