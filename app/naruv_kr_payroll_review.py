@@ -1289,3 +1289,55 @@ def fixed_week_monthly_payroll_review_2026(*,tenant,worker,period,base_hourly,or
         "review_sha256":hash_input({"v":"KR_FIXED_WEEK_MONTHLY_RECONCILED_2026_V1","gross":proof,
             "deductions":manual["reconciliation_sha256"]}),"requires_human_review":True,
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def fixed_part_time_weekly_rest_2026(*,tenant,worker,sunday,hourly_krw,
+        contracted_minutes,comparator_minutes,weeks,contract_sha256,attendance_sha256,scope):
+    """Fixed recurring schedule, four complete weeks, continuous employment.
+    MOEL guidance: four-week contracted hours / comparator workdays.
+    No public holidays, approved leave, variable contracts or short employment.
+    """
+    from datetime import timedelta
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_PT_SCOPE")
+    require(scope=="FIXED_PART_TIME_4_COMPLETE_WEEKS_SUNDAY_REST","KR_PT_SCOPE")
+    require(type(sunday) is str and re.fullmatch(r"2026-[0-9]{2}-[0-9]{2}",sunday),"KR_PT_DATE")
+    try: end=date.fromisoformat(sunday)
+    except ValueError:raise PayrollBlocked("KR_PT_DATE") from None
+    require(end.weekday()==6 and _whole(hourly_krw,1,10**8),"KR_PT_RATE_DATE")
+    require(all(type(x) is str and HEX.fullmatch(x) for x in (contract_sha256,attendance_sha256)),"KR_PT_EVIDENCE")
+    for schedule in (contracted_minutes,comparator_minutes):
+        require(type(schedule) is list and len(schedule)==6 and all(_whole(n,0,480) for n in schedule),"KR_PT_SCHEDULE")
+    total=sum(contracted_minutes); comp=sum(comparator_minutes)
+    require(0<total<comp<=2400 and all(a<=b for a,b in zip(contracted_minutes,comparator_minutes)),"KR_PT_COMPARATOR")
+    require(type(weeks) is list and len(weeks)==4,"KR_PT_WEEK_COVERAGE")
+    normalized=[];seen=set();eligible=None
+    for w in weeks:
+        require(type(w) is dict and set(w)=={"monday","employed_full_week","days"} and w["employed_full_week"] is True,"KR_PT_WEEK")
+        require(type(w["monday"]) is str,"KR_PT_WEEK")
+        try:monday=date.fromisoformat(w["monday"])
+        except ValueError:raise PayrollBlocked("KR_PT_WEEK") from None
+        require(monday.isoformat()==w["monday"] and monday in {end-timedelta(days=6+7*i) for i in range(4)} and monday not in seen,"KR_PT_WEEK")
+        seen.add(monday)
+        require(type(w["days"]) is list and len(w["days"])==7,"KR_PT_DAYS")
+        rows=[]
+        for i,row in enumerate(w["days"]):
+            require(type(row) is dict and set(row)=={"date","status","actual_minutes","evidence_sha256"},"KR_PT_DAY")
+            require(row["date"]==(monday+timedelta(days=i)).isoformat() and type(row["evidence_sha256"]) is str and HEX.fullmatch(row["evidence_sha256"]),"KR_PT_DAY")
+            n=contracted_minutes[i] if i<6 else 0
+            st=row["status"]; actual=row["actual_minutes"]
+            require(type(st) is str and _whole(actual,0,480),"KR_PT_DAY")
+            if n:require((st=="PRESENT" and 0<actual<=n) or (st=="ABSENT" and actual==0),"KR_PT_ATTENDANCE")
+            else:require(st==("WEEKLY_REST" if i==6 else "NON_WORK_DAY") and actual==0,"KR_PT_NONWORK")
+            rows.append(dict(row))
+        if monday==end-timedelta(days=6):eligible=all(r["status"]!="ABSENT" for r in rows)
+        normalized.append(dict(monday=w["monday"],days=rows))
+    require(eligible is not None,"KR_PT_WEEK_COVERAGE")
+    daily=Fraction(total,sum(n>0 for n in comparator_minutes))
+    amount=daily*hourly_krw/60 if eligible and total>=900 else Fraction(0)
+    return {"status":"PART_TIME_FIXED_WEEK_REFERENCE_ONLY","eligible_in_scope":eligible and total>=900,
+        "contracted_week_minutes":total,"rest_minutes_exact":_money(daily),"rest_pay_exact":_money(amount),
+        "rest_pay_estimate_krw":_round(amount),
+        "review_sha256":hash_input({"v":"KR_PT_FIXED_2026_V1","tenant":tenant,"worker":worker,"sunday":sunday,
+            "scope":scope,"hourly":hourly_krw,"contract":contract_sha256,"attendance":attendance_sha256,
+            "schedule":contracted_minutes,"comparator":comparator_minutes,"weeks":sorted(normalized,key=lambda r:r["monday"])}),
+        "statutory_validated":False,"payment_authorized":False,"production_authorized":False,"requires_human_review":True}

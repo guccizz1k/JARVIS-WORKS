@@ -589,3 +589,36 @@ class FixedWeekPaidRestLeave(unittest.TestCase):
             review(**dict(a,minutes_by_day=tampered,expected_draft_sha256=draft(tampered)))
         with self.assertRaisesRegex(PayrollBlocked,"KR_PAID_DRAFT_CHANGED"):
             review(**dict(a,expected_draft_sha256="0"*64))
+
+
+class FixedPartTimeRest(unittest.TestCase):
+    def args(self,minutes):
+        from datetime import date,timedelta
+        end=date(2026,11,29)
+        weeks=[]
+        for k in range(4):
+            mon=end-timedelta(days=6+7*k)
+            rows=[dict(date=(mon+timedelta(days=i)).isoformat(),
+                status="PRESENT" if i<3 else ("WEEKLY_REST" if i==6 else "NON_WORK_DAY"),
+                actual_minutes=minutes[i] if i<3 else 0,evidence_sha256="a"*64) for i in range(7)]
+            weeks.append(dict(monday=mon.isoformat(),employed_full_week=True,days=rows))
+        return dict(tenant="a",worker="w",sunday=end.isoformat(),hourly_krw=12000,
+            contracted_minutes=minutes+[0,0,0],comparator_minutes=[480]*5+[0],
+            weeks=weeks,contract_sha256="b"*64,attendance_sha256="c"*64,
+            scope="FIXED_PART_TIME_4_COMPLETE_WEEKS_SUNDAY_REST")
+    def test_threshold_comparator_and_absence(self):
+        from app.naruv_kr_payroll_review import fixed_part_time_weekly_rest_2026 as review
+        a=self.args([300,300,300])
+        r=review(**a)
+        self.assertEqual(r["rest_pay_estimate_krw"],36000)
+        self.assertTrue(r["eligible_in_scope"])
+        self.assertFalse(r["payment_authorized"])
+        self.assertEqual(review(**self.args([300,300,299]))["rest_pay_estimate_krw"],0)
+        a["weeks"][0]["days"][0].update(status="ABSENT",actual_minutes=0)
+        self.assertEqual(review(**a)["rest_pay_estimate_krw"],0)
+        self.assertEqual(review(**dict(a,weeks=a["weeks"][::-1])),review(**a))
+        for change in (dict(weeks=a["weeks"][:3]),dict(comparator_minutes=[0]*6),dict(hourly_krw=True)):
+            with self.assertRaises(PayrollBlocked):review(**dict(a,**change))
+        b=self.args([300,300,300])
+        b["weeks"][0]["days"][0].update(status="PUBLIC_HOLIDAY",actual_minutes=0)
+        with self.assertRaises(PayrollBlocked):review(**b)

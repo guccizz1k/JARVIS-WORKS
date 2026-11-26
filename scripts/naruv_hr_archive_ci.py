@@ -200,6 +200,7 @@ def verify_single_use_attestations(dsn,archive_digest):
         need(db.execute("SELECT consumed_at>=issued_at AND consumed_at<=clock_timestamp() FROM naruv_retirement_ci.challenge WHERE challenge=%s",(challenge,)).fetchone()==(True,),
              "RETIREMENT_LEDGER_CLOCK_MISMATCH")
     print("NARUV_RETIREMENT_SINGLE_USE_CI_PASS independent signed verified archive evidence, atomic replay refusal, no retirement",flush=True)
+    verify_combined_single_use(dsn,archive_digest)
 
 
 def verify_archive_lifecycle_fixture(archive_digest):
@@ -246,3 +247,59 @@ def verify_archive_lifecycle_fixture(archive_digest):
     except ProfileBlocked:pass
     else:raise RuntimeError("ARCHIVE_COMBINED_HOLD_BYPASS")
     print("NARUV_ARCHIVE_LIFECYCLE_FIXTURE_PASS actual synthetic archive digest, simulated retained prior copy, combined signed hold denial, no key or deletion authorization",flush=True)
+
+
+def verify_combined_single_use(dsn,archive_digest):
+    from datetime import datetime,timezone
+    from concurrent.futures import ThreadPoolExecutor
+    import secrets
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
+    from app.naruv_hr_profile_envelope import (_canonical,retirement_inventory_digest,key_retirement_review,
+        archive_lifecycle_review,verify_combined_retirement_evidence,consume_combined_retirement_ci)
+    now=datetime.now(timezone.utc)
+    scope=dict(tenant="ci-a",old_key_id="old",new_key_id="new",expected_assets=["restored-archive"])
+    inventory=retirement_inventory_digest(**scope)
+    obs=[dict(asset="restored-archive",tenant="ci-a",key_id="new",restore_sha256=archive_digest,old_key_denied=True)]
+    review=key_retirement_review(**scope,inventory_sha256=inventory,observations=obs)
+    rows=[dict(asset="restored-archive",tenant="ci-a",archive_sha256=archive_digest,
+        retain_until=now,legal_hold=False,old_key_required=False)]
+    arc=hashlib.sha256(_canonical(["NARUV_ARCHIVE_LIFECYCLE_V1","ci-a",["restored-archive"],
+        [["restored-archive",archive_digest,now.isoformat(),False,False]]])).hexdigest()
+    life=archive_lifecycle_review(tenant="ci-a",as_of=now,expected_assets=["restored-archive"],inventory_sha256=arc,records=rows)
+    a,b=Ed25519PrivateKey.generate(),Ed25519PrivateKey.generate()
+    ap,bp=(k.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw) for k in (a,b))
+    trust={"inventory":hashlib.sha256(ap).hexdigest(),"recovery":hashlib.sha256(bp).hexdigest()}
+    challenge=secrets.token_hex(32)
+    msg=_canonical(["NARUV_COMBINED_RETIREMENT_V2","ci-a","old","new",inventory,
+        review["review_sha256"],arc,life["review_sha256"],trust,challenge,now.isoformat()])
+    args=dict(scope,inventory_sha256=inventory,observations=obs,expected_archive_assets=["restored-archive"],
+        archive_inventory_sha256=arc,archive_records=rows,inventory_public_key=ap,recovery_public_key=bp,
+        trust_fingerprints=trust,inventory_signature=a.sign(b"inventory:"+msg),recovery_signature=b.sign(b"recovery:"+msg),
+        challenge=challenge,issued_at=now,as_of=now)
+    proof=verify_combined_retirement_evidence(**args)["combined_sha256"]
+    with psycopg.connect(dsn) as db:
+        db.execute("""CREATE TABLE naruv_retirement_ci.combined_challenge(
+            challenge text PRIMARY KEY,combined_sha256 text NOT NULL,tenant text NOT NULL,
+            old_key_id text NOT NULL,new_key_id text NOT NULL,inventory_fingerprint text NOT NULL,
+            recovery_fingerprint text NOT NULL,issued_at timestamptz NOT NULL,consumed_at timestamptz);
+            REVOKE ALL ON naruv_retirement_ci.combined_challenge FROM PUBLIC""")
+        db.execute("INSERT INTO naruv_retirement_ci.combined_challenge VALUES(%s,%s,%s,%s,%s,%s,%s,%s,NULL)",
+            (challenge,proof,"ci-a","old","new",trust["inventory"],trust["recovery"],now))
+    def attempt(payload=args):
+        with psycopg.connect(dsn) as db,db.cursor() as cur:
+            try:r=consume_combined_retirement_ci(cur,**payload)
+            except ProfileBlocked:return False
+            need(r["key_retirement_authorized"] is False,"COMBINED_UNEXPECTED_AUTH")
+            return True
+    need(not attempt(dict(args,recovery_signature=b"x"*64)),"COMBINED_BAD_SIGNATURE")
+    with psycopg.connect(dsn) as db,db.cursor() as cur:
+        consume_combined_retirement_ci(cur,**args)
+        db.rollback()
+        need(db.execute("SELECT consumed_at IS NULL FROM naruv_retirement_ci.combined_challenge").fetchone()==(True,),"COMBINED_ROLLBACK")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes=list(pool.map(lambda _:attempt(),range(2)))
+    need(sorted(outcomes)==[False,True] and not attempt(),"COMBINED_REPLAY")
+    with psycopg.connect(dsn) as db:
+        need(db.execute("SELECT count(*) FROM naruv_retirement_ci.combined_challenge WHERE consumed_at>=issued_at AND consumed_at<=clock_timestamp()").fetchone()==(1,),"COMBINED_CLOCK")
+    print("NARUV_COMBINED_RETIREMENT_SINGLE_USE_CI_PASS rollback and two-session replay denial; no key action",flush=True)

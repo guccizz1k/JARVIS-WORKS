@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "88078e5f2047aa0eee44ed878a42be5233b64b76",
+      "sha": "08dfdeb3114b6d2af2b52491408b43edd8695a65",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "167a400fc123e2c37dde63bde19b9563f3368602",
+      "sha": "7bdae547c0929d0e42553eb15b88b4f4a96b9e01",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,7 +8502,7 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "ad58d880eefb03d72fafb856c353053b9d9c8b04",
+      "sha": "74272569b5ea6413b260c1885567c7d03865eb0f",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
@@ -8542,7 +8542,7 @@
       "mode": "100644"
     },
     "scripts/naruv_hr_archive_ci.py": {
-      "sha": "374e909c87d51a3732fe0c651a2049eb3e15ee07",
+      "sha": "0b5299f93799b0eb16b2a9d31aeebb42f7d4770e",
       "mode": "100644"
     },
     "scripts/naruv_tax_source_audit.py": {
@@ -8768,5 +8768,9 @@
   "fixed_week_confirmed_draft_paid_days": {
     "parent": "abb4e8bfa281508254cb139b08d3ed9f6dcd5249",
     "reason": "Join restricted fixed week paid rest/leave to confirmed source draft and manual deductions, reject missing/extra worked minutes including double counted leave. No overtime or full statutory claim."
+  },
+  "part_time_and_combined_atomic": {
+    "parent": "ee16eb0d57addeb7206317048934580db16751f9",
+    "reason": "Restricted fixed recurring part-time 4-week reference, 15-hour threshold and comparator days, no broader statutory claim. V2 combined challenge atomic consumption in CI, DB time and pinned proof/signers, two-session replay and rollback tests."
   }
 }

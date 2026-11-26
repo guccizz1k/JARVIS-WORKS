@@ -286,3 +286,30 @@ def verify_combined_retirement_evidence(*,tenant,old_key_id,new_key_id,expected_
     return {"status":"COMBINED_SIGNED_EVIDENCE_REVIEW_ONLY","combined_sha256":hashlib.sha256(msg).hexdigest(),
         "requires_atomic_challenge_consumption":True,"key_retirement_authorized":False,
         "deletion_authorized":False,"production_authorized":False}
+
+
+def consume_combined_retirement_ci(cur,**args):
+    """Atomic V2 consumption in the isolated CI database only.
+    The ledger row pins the independently provisioned combined proof and
+    signer fingerprints; database time decides freshness, not caller time.
+    """
+    import os
+    _require(os.getenv("GITHUB_ACTIONS")=="true"
+        and os.getenv("JW_PG_CI_ALLOW")=="ONLY_EPHEMERAL_LOCAL_DATABASE"
+        and os.getenv("NARUV_ERP_RESTORE_ALLOW")=="TWO_DISPOSABLE_SERVICES_ONLY")
+    cur.execute("SELECT current_database(),current_setting('server_version_num')::int/10000,session_user,clock_timestamp()")
+    db,version,user,now=cur.fetchone()
+    _require((db,version,user)==("naruv_profile_quarantine_ci",17,"postgres"))
+    # psycopg timezone may be non-UTC; normalize before verifying.
+    from datetime import timezone
+    proof=verify_combined_retirement_evidence(**dict(args,as_of=now.astimezone(timezone.utc)))
+    cur.execute("""UPDATE naruv_retirement_ci.combined_challenge SET consumed_at=clock_timestamp()
+        WHERE challenge=%s AND combined_sha256=%s AND tenant=%s AND old_key_id=%s AND new_key_id=%s
+          AND inventory_fingerprint=%s AND recovery_fingerprint=%s AND issued_at=%s
+          AND consumed_at IS NULL AND issued_at<=clock_timestamp()
+          AND issued_at>=clock_timestamp()-interval '10 minutes'""",
+        (args["challenge"],proof["combined_sha256"],args["tenant"],args["old_key_id"],args["new_key_id"],
+         args["trust_fingerprints"]["inventory"],args["trust_fingerprints"]["recovery"],args["issued_at"]))
+    _require(cur.rowcount==1)
+    return {"status":"COMBINED_SINGLE_USE_CI_REVIEW_ONLY","combined_sha256":proof["combined_sha256"],
+        "key_retirement_authorized":False,"production_authorized":False}
