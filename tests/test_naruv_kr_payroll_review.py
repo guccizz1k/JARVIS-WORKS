@@ -493,6 +493,9 @@ class KRRequestParser(unittest.TestCase):
         self.assertEqual(_decode_kr_body(json.dumps(d).encode()),d)
         extra=[dict(kind="ASSESSED_BONUS",component_id="bonus1",amount_krw=1000,assessment_sha256="a"*64)]
         self.assertEqual(_decode_kr_body(json.dumps(dict(d,wage_statement_review=dict(a,additional_cash_wages=extra))).encode())["wage_statement_review"]["additional_cash_wages"],extra)
+        exc=dict(scope="ASSESSED_EXCEPTION_REVIEW_ONLY",assessment_sha256="a"*64,exception_reason="SEPARATE_BONUS_WITHHOLDING")
+        self.assertEqual(_decode_kr_body(json.dumps(dict(d,wage_statement_review=dict(a,additional_cash_wages=extra,cash_deduction_review=exc))).encode())["wage_statement_review"]["cash_deduction_review"],exc)
+        with self.assertRaises(HTTPException):_decode_kr_body(json.dumps(dict(d,wage_statement_review=dict(a,cash_deduction_review=exc))).encode())
         for bad in (dict(d,paid_holiday_review={}),dict(d,wage_statement_review=dict(a,additional_cash_wages=[])),dict(d,wage_statement_review=dict(a,additional_cash_wages=[dict(extra[0],amount_krw=True)])),dict(d,wage_statement_review=dict(a,scope="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE")),dict(d,wage_statement_review=dict(a,worker="other")),
                     dict(d,wage_statement_review=dict(a,payment_date=True))):
             with self.assertRaises(HTTPException):_decode_kr_body(json.dumps(bad).encode())
@@ -1127,3 +1130,24 @@ class RestrictedStatementTests(unittest.TestCase):
             with self.assertRaises(PayrollBlocked):_statement_print_rows(bad)
             bad=deepcopy(original);bad["components"][0]=None
             with self.assertRaises(PayrollBlocked):_statement_print_rows(bad)
+
+    def test_cash_deduction_exception_binding_and_denials(self):
+        from app.naruv_kr_payroll_review import restricted_wage_statement_2026,source_bound_review,extend_assessed_cash_statement_2026,cash_statement_deduction_review_2026
+        a=SourceBoundKRReview().inputs()
+        bound=source_bound_review(**a)
+        args={k:a[k] for k in ("tenant","worker","period","ordinary_hourly","classification_sha256","classified_days","deductions")}
+        args.update(base_hourly=a["hourly_krw"],bound_review=bound,payment_date="2026-12-10",
+            scope="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY",completeness_assessment_sha256="e"*64)
+        base=restricted_wage_statement_2026(**args)
+        cash=extend_assessed_cash_statement_2026(tenant=a["tenant"],statement=base,additional_cash_wages=[
+            dict(kind="ASSESSED_BONUS",component_id="b",amount_krw=1000,assessment_sha256="a"*64)])
+        sub=dict(scope="ASSESSED_EXCEPTION_REVIEW_ONLY",assessment_sha256="e"*64,exception_reason="SEPARATE_BONUS_WITHHOLDING")
+        kwargs=dict(tenant=a["tenant"],statement=cash,deductions=a["deductions"],pension_assessed_base_krw=410000,submission=sub)
+        out=cash_statement_deduction_review_2026(**kwargs)
+        self.assertFalse(out["ordinary_comparison_performed"]);self.assertFalse(out["delivery_authorized"])
+        self.assertFalse(out["persisted"]);self.assertEqual(out["statement_review_sha256"],cash["review_sha256"])
+        self.assertNotEqual(out["review_sha256"],cash_statement_deduction_review_2026(**dict(kwargs,submission=dict(sub,assessment_sha256="d"*64)))["review_sha256"])
+        for bad in (dict(sub,exception_reason="AUTO_APPROVE"),dict(sub,scope="ASSESSED_ORDINARY_MONTHLY_FIXED_ALLOWANCES_ONLY"),dict(sub,extra=True)):
+            with self.assertRaises(PayrollBlocked):cash_statement_deduction_review_2026(**dict(kwargs,submission=bad))
+        changed={k:dict(v) for k,v in a["deductions"].items()};changed["health"]["amount_krw"]+=1
+        with self.assertRaises(PayrollBlocked):cash_statement_deduction_review_2026(**dict(kwargs,deductions=changed))

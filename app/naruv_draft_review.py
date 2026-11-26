@@ -71,7 +71,7 @@ def _decode_kr_body(raw):
         if "wage_statement_review" in d:
             a=d["wage_statement_review"]
             fields={"payment_date","scope","completeness_assessment_sha256"}
-            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages"}
+            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages","cash_deduction_review"}
                 or any(type(a[k]) is not str for k in fields)):
                 raise ValueError("statement scope")
             if "additional_cash_wages" in a:
@@ -81,6 +81,20 @@ def _decode_kr_body(raw):
                     if (type(r) is not dict or set(r)!={"kind","component_id","amount_krw","assessment_sha256"}
                         or type(r["amount_krw"]) is not int or any(type(r[k]) is not str for k in set(r)-{"amount_krw"})):
                         raise ValueError("cash wage shape")
+            if "cash_deduction_review" in a:
+                c=a["cash_deduction_review"]
+                if "additional_cash_wages" not in a or type(c) is not dict or type(c.get("scope")) is not str:
+                    raise ValueError("cash deduction scope")
+                if c["scope"]=="ASSESSED_EXCEPTION_REVIEW_ONLY":
+                    if set(c)!={"scope","assessment_sha256","exception_reason"} or any(type(v) is not str for v in c.values()):
+                        raise ValueError("cash exception shape")
+                elif c["scope"]=="ASSESSED_ORDINARY_MONTHLY_FIXED_ALLOWANCES_ONLY":
+                    if (set(c)!={"scope","assessment_sha256","base_taxable_krw","cash_allocations","monthly_tax","insurance_assessed_bases"}
+                        or type(c["assessment_sha256"]) is not str or type(c["base_taxable_krw"]) is not int
+                        or type(c["cash_allocations"]) is not list or not 1<=len(c["cash_allocations"])<=8
+                        or type(c["monthly_tax"]) is not dict or type(c["insurance_assessed_bases"]) is not dict):
+                        raise ValueError("cash deduction shape")
+                else:raise ValueError("cash deduction scope")
             optional={"wage_statement_review"}
             if a["scope"]=="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE":
                 optional.add("fixed_week_paid_review")
@@ -228,7 +242,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026,ordinary_comparison_coverage_2026,restricted_wage_statement_2026,fixed_week_wage_statement_2026,extend_assessed_cash_statement_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026,ordinary_comparison_coverage_2026,restricted_wage_statement_2026,fixed_week_wage_statement_2026,extend_assessed_cash_statement_2026,cash_statement_deduction_review_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -343,7 +357,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 proof.update(v="KR_CI_MANUAL_API_V8",part_time_rest=rest["review_sha256"])
                 details["part_time_rest_reference"]=rest
             if "wage_statement_review" in data:
-                statement_args={k:v for k,v in data["wage_statement_review"].items() if k!="additional_cash_wages"}
+                statement_args={k:v for k,v in data["wage_statement_review"].items() if k not in ("additional_cash_wages","cash_deduction_review")}
                 if "fixed_week_paid_review" in data:
                     statement=fixed_week_wage_statement_2026(tenant=org,worker=worker,period=period,
                         base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],minutes_by_day=days,
@@ -359,6 +373,12 @@ def _kr_review(token,csrf,prior,worker,period,data):
                         additional_cash_wages=data["wage_statement_review"]["additional_cash_wages"])
                 proof["wage_statement"]=statement["review_sha256"]
                 details["wage_statement_reference"]=statement
+                if "cash_deduction_review" in data["wage_statement_review"]:
+                    cash_deduction=cash_statement_deduction_review_2026(tenant=org,statement=statement,
+                        deductions=data["deductions"],pension_assessed_base_krw=pension,
+                        submission=data["wage_statement_review"]["cash_deduction_review"])
+                    proof["cash_deduction_review"]=cash_deduction["review_sha256"]
+                    details["cash_deduction_reference"]=cash_deduction
             if "insurance_reference" in details and "monthly_tax_reference" in details:
                 coverage=ordinary_comparison_coverage_2026(source_review_sha256=review["review_binding_sha256"],
                     pension=pension_ref,insurance=details["insurance_reference"],tax=details["monthly_tax_reference"])

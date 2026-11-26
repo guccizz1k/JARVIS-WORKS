@@ -1834,6 +1834,77 @@ def _statement_print_rows(a):
     for r in a["deductions"]:rows.append((_STATEMENT_DEDUCTION_LABELS[r["kind"]],"수동 공제",r["amount_krw"]))
     return rows
 
+def cash_statement_deduction_review_2026(*,tenant,statement,deductions,pension_assessed_base_krw,submission):
+    """Same-request statement/assessment reconciliation; no legal determination or delivery.
+    Ordinary mode only covers assessed fixed monthly allowances in same payment month.
+    Bonus/agency exceptions require separately assessed treatment, never ordinary inference.
+    """
+    require(type(tenant) is str and ID.fullmatch(tenant) and type(statement) is dict
+        and statement.get("status")=="ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY"
+        and type(statement.get("review_sha256")) is str and HEX.fullmatch(statement["review_sha256"]),
+        "KR_CASH_DEDUCTION_SOURCE")
+    _statement_print_rows(statement)
+    require(type(deductions) is dict and set(deductions)==set(DEDUCTIONS),"KR_CASH_DEDUCTION_ITEMS")
+    for row,shown in zip((deductions[k] for k in DEDUCTIONS),statement["deductions"]):
+        require(type(row) is dict and set(row)=={"amount_krw","evidence_sha256","assessment"}
+            and _whole(row["amount_krw"],0,10**12) and row["amount_krw"]==shown["amount_krw"]
+            and type(row["evidence_sha256"]) is str and HEX.fullmatch(row["evidence_sha256"])
+            and type(row["assessment"]) is str and row["assessment"] in ("ASSESSED","NOT_APPLICABLE")
+            and (row["assessment"]=="ASSESSED" or row["amount_krw"]==0),"KR_CASH_DEDUCTION_ITEMS")
+    require(type(submission) is dict and type(submission.get("assessment_sha256")) is str
+        and HEX.fullmatch(submission["assessment_sha256"]),"KR_CASH_DEDUCTION_ASSESSMENT")
+    scope=submission.get("scope");worker=statement["worker"];period=statement["period"]
+    base={"v":"KR_CASH_STATEMENT_DEDUCTION_REVIEW_2026_V1","tenant":tenant,"worker":worker,"period":period,
+          "statement":statement["review_sha256"],"deductions":deductions,"pension_base":pension_assessed_base_krw,
+          "submission":submission}
+    denial=dict(requires_human_review=True,statutory_validated=False,payment_authorized=False,
+        delivery_authorized=False,production_authorized=False,evidence_authenticity_verified=False,persisted=False)
+    if scope=="ASSESSED_EXCEPTION_REVIEW_ONLY":
+        require(set(submission)=={"scope","assessment_sha256","exception_reason"}
+            and type(submission["exception_reason"]) is str and submission["exception_reason"] in
+            ("SEPARATE_BONUS_WITHHOLDING","AGENCY_EXCEPTION","CROSS_MONTH_PAYMENT","OTHER_UNSUPPORTED_TREATMENT"),
+            "KR_CASH_EXCEPTION_SCOPE")
+        return dict(denial,status="CASH_DEDUCTION_EXCEPTION_REVIEW_REQUIRED",
+            statement_review_sha256=statement["review_sha256"],ordinary_comparison_performed=False,
+            exception_reason=submission["exception_reason"],review_sha256=hash_input(base))
+    require(scope=="ASSESSED_ORDINARY_MONTHLY_FIXED_ALLOWANCES_ONLY"
+        and set(submission)=={"scope","assessment_sha256","base_taxable_krw","cash_allocations","monthly_tax","insurance_assessed_bases"}
+        and all(r["kind"]=="ASSESSED_FIXED_ALLOWANCE" for r in statement["additional_cash_wages"])
+        and statement["proposed_payment_date"][:7]==period,"KR_CASH_ORDINARY_SCOPE")
+    require(all(deductions[k]["assessment"]=="ASSESSED" for k in DEDUCTIONS),"KR_CASH_ORDINARY_ASSESSMENTS")
+    require(_whole(submission["base_taxable_krw"],0,statement["base_statement_gross_krw"]),"KR_CASH_TAXABLE_BASE")
+    allocations=submission["cash_allocations"];items={r["component_id"]:r for r in statement["additional_cash_wages"]}
+    require(type(allocations) is list and len(allocations)==len(items),"KR_CASH_ALLOCATION_SHAPE")
+    seen=set();taxable_extra=0
+    for row in allocations:
+        require(type(row) is dict and set(row)=={"component_id","taxable_krw","assessment_sha256"}
+            and type(row["component_id"]) is str and row["component_id"] in items
+            and row["component_id"] not in seen and _whole(row["taxable_krw"],0,items[row["component_id"]]["amount_krw"])
+            and type(row["assessment_sha256"]) is str and HEX.fullmatch(row["assessment_sha256"]),"KR_CASH_ALLOCATION")
+        seen.add(row["component_id"]);taxable_extra+=row["taxable_krw"]
+    taxable=submission["base_taxable_krw"]+taxable_extra
+    t=submission["monthly_tax"];i=submission["insurance_assessed_bases"]
+    require(type(t) is dict and set(t)=={"withholding_date","eligible_family_count","eligible_children_8_20","selection_percent","assessment_sha256"}
+        and t["withholding_date"]==statement["proposed_payment_date"],"KR_CASH_TAX_DATE")
+    require(type(i) is dict and set(i)=={"health_base_krw","employment_base_krw","assessment_sha256"},"KR_CASH_INSURANCE_BASES")
+    p=pension_collection_reference_2026(tenant=tenant,worker=worker,period=period,assessed_base_krw=pension_assessed_base_krw,
+        assessment_sha256=deductions["pension"]["evidence_sha256"],assessed_employee_krw=deductions["pension"]["amount_krw"],
+        scope="ORDINARY_SINGLE_WORKPLACE_NO_RELIEF")
+    ins=insurance_collection_review_2026(tenant=tenant,worker=worker,period=period,**i,
+        assessed_employee_krw={k:deductions[k]["amount_krw"] for k in ("health","long_term_care","employment_insurance")},
+        scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES")
+    tax=assessed_monthly_tax_comparison_2026(tenant=tenant,worker=worker,period=period,
+        gross_krw=statement["gross_krw"],deductions=deductions,taxable_monthly_krw=taxable,**t)
+    coverage=ordinary_comparison_coverage_2026(source_review_sha256=statement["review_sha256"],pension=p,insurance=ins,tax=tax)
+    base["submission"]=dict(submission,cash_allocations=sorted(allocations,key=lambda r:r["component_id"]))
+    base["coverage"]=coverage["review_sha256"]
+    return dict(denial,status="CASH_STATEMENT_SIX_REFERENCES_REVIEW_ONLY",
+        statement_review_sha256=statement["review_sha256"],ordinary_comparison_performed=True,
+        gross_krw=statement["gross_krw"],assessed_taxable_krw=taxable,assessed_taxable_cash_krw=taxable_extra,
+        coverage=coverage,pension_reference=p,insurance_reference=ins,tax_reference=tax,
+        review_sha256=hash_input(base))
+
+
 def isolated_wage_statement_print_html(result):
     """Authenticated isolated POST result, no script, external content or delivery."""
     from html import escape
@@ -1841,6 +1912,19 @@ def isolated_wage_statement_print_html(result):
         and all(result.get(k) is False for k in ("evidence_authenticity_verified","persisted","statutory_validated","payment_authorized","production_authorized")),"KR_PRINT_SCOPE")
     a=result["wage_statement_reference"];rows=_statement_print_rows(a)
     note="<p>추가 수당의 통상임금 산입 여부와 세금·보험료는 별도 확인이 필요합니다.</p>" if a["status"]=="ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY" else ""
+    if "cash_deduction_reference" in result:
+        c=result["cash_deduction_reference"]
+        require(type(c) is dict and c.get("statement_review_sha256")==a["review_sha256"]
+            and all(c.get(k) is False for k in ("statutory_validated","payment_authorized","delivery_authorized","production_authorized","persisted")),"KR_PRINT_CASH_DEDUCTION_SCOPE")
+        if c.get("status")=="CASH_STATEMENT_SIX_REFERENCES_REVIEW_ONLY":
+            cov=c["coverage"]
+            require(c.get("ordinary_comparison_performed") is True and cov.get("reference_count")==6
+                and _whole(cov.get("difference_count"),0,6) and _whole(cov.get("agency_confirmation_count"),0,6)
+                and cov["difference_count"]+cov["agency_confirmation_count"]<=6,"KR_PRINT_CASH_COVERAGE")
+            note+="<p>추가수당 포함 6개 공제 대조: 차이 "+str(cov["difference_count"])+"개 / 기관 확인 "+str(cov["agency_confirmation_count"])+"개. 법정 확정 아님.</p>"
+        else:
+            require(c.get("status")=="CASH_DEDUCTION_EXCEPTION_REVIEW_REQUIRED" and c.get("ordinary_comparison_performed") is False,"KR_PRINT_CASH_DEDUCTION_SCOPE")
+            note+="<p>별도 공제 특례 검토 필요. 일반 공제 비교 미실행.</p>"
     table="".join("<tr><th scope=\"row\">"+escape(k)+"</th><td>"+escape(f)+"</td><td>"+format(n,",")+" 원</td></tr>" for k,f,n in rows)
     return ("<!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><title>임금명세서 검토용 초안</title>"
         "<main><h1>임금명세서 검토용 초안 — 교부 금지</h1><p>법정 적합성, 실제 지급일 및 공제 검증 미확정. 실제 지급 및 교부 금지.</p>"

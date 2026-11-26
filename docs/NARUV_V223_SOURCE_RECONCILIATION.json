@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "f35ce3c260d6521ebf687b646f3718d673a8585a",
+      "sha": "8eec3cd5e6feea355cdb168a380bcd10868f6294",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "b18ba2960134444ec66a64da2afc57eefbacfad8",
+      "sha": "c9ce3f4a3997335c5b19968c8b19849ab3188626",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "8a0faf2476187eb01e805d3d597c56b085977725",
+      "sha": "07ecf65588156bd3a0a12e09d337464d737786b7",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "82178619db3dd2028de8bdf0fc5e124d7772dbf3",
+      "sha": "185720e5b7c04ef0eb3145cea2f50c62b893f7dd",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "3284e671cb1538972d0cd75d608c1342e5dc5d75",
+      "sha": "58dcd6d07972d4e2e0b56f9603d19b328ad7cd0a",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -9071,5 +9071,11 @@
     "base": "6c658339e1a5b2829f96bfcfddbd8a080a7c71ee",
     "scope": "Restricted print exact component and deterministic allocation validation; no statutory or P2 custody acceptance",
     "paths": ["app/naruv_kr_payroll_review.py","tests/test_naruv_kr_payroll_review.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
+  }
+,
+  "p1_cash_deduction_integrated": {
+    "base": "87801ce536f1b917aeae60e7904cf0e48c8c32f0",
+    "scope": "Same statement six-reference ordinary fixed allowance and exception review; deterministic unpersisted audit digest; no statutory delivery or independent custody",
+    "paths": ["app/naruv_kr_payroll_review.py","app/naruv_draft_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
   }
 }

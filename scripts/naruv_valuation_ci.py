@@ -990,6 +990,35 @@ def run_valuation(base):
                         finally:browser.close()
                     print("NARUV_SYNTHETIC_WAGE_STATEMENT_PDF_PASS offline browser, no delivery",flush=True)
                 print("NARUV_CASH_WAGE_STATEMENT_API_PASS assessed cash components and authenticated print draft",flush=True)
+                exception=dict(scope="ASSESSED_EXCEPTION_REVIEW_ONLY",assessment_sha256="e"*64,exception_reason="SEPARATE_BONUS_WITHHOLDING")
+                ex_req=dict(ca,wage_statement_review=dict(ca["wage_statement_review"],cash_deduction_review=exception))
+                ex_resp=self.check(self.call(taxpath,ex_req),200)
+                ex=ex_resp["cash_deduction_reference"]
+                self.assertFalse(ex["ordinary_comparison_performed"]);self.assertFalse(ex["delivery_authorized"])
+                self.assertEqual(ex["statement_review_sha256"],ex_resp["wage_statement_reference"]["review_sha256"])
+                self.assertIn("일반 공제 비교 미실행",self.call(taxpath,ex_req,extra=print_accept).text)
+                self.check(self.call(taxpath,ex_req,who="B"),404)
+                ordinary=dict(scope="ASSESSED_ORDINARY_MONTHLY_FIXED_ALLOWANCES_ONLY",assessment_sha256="e"*64,
+                    base_taxable_krw=3200000,cash_allocations=[dict(component_id="allowance-1",taxable_krw=50000,assessment_sha256="d"*64)],
+                    monthly_tax=dict(withholding_date="2026-07-25",eligible_family_count=1,eligible_children_8_20=0,
+                        selection_percent=100,assessment_sha256=fixed["deductions"]["income_tax"]["evidence_sha256"]),
+                    insurance_assessed_bases=dict(health_base_krw=3250000,employment_base_krw=3250000,assessment_sha256="c"*64))
+                spec=dict(fspec,payment_date="2026-07-25",additional_cash_wages=[cash[1]],cash_deduction_review=ordinary)
+                od=dict(fa,wage_statement_review=spec)
+                rr=self.check(self.call(taxpath,od),200)
+                cr=rr["cash_deduction_reference"]
+                self.assertEqual(cr["gross_krw"],3250000);self.assertEqual(cr["assessed_taxable_krw"],3250000)
+                self.assertEqual(cr["coverage"]["reference_count"],6)
+                self.assertEqual(cr["statement_review_sha256"],rr["wage_statement_reference"]["review_sha256"])
+                self.assertFalse(cr["statutory_validated"]);self.assertFalse(cr["persisted"]);self.assertFalse(cr["delivery_authorized"])
+                self.assertEqual(cr,self.check(self.call(taxpath,od),200)["cash_deduction_reference"])
+                self.assertIn("추가수당 포함 6개 공제 대조",self.call(taxpath,od,extra=print_accept).text)
+                self.check(self.call(taxpath,od,who="B"),404)
+                for bad in (dict(spec,additional_cash_wages=cash),dict(spec,payment_date="2026-08-10"),
+                    dict(spec,cash_deduction_review=dict(ordinary,base_taxable_krw=3200001)),
+                    dict(spec,cash_deduction_review=dict(ordinary,cash_allocations=[dict(ordinary["cash_allocations"][0],taxable_krw=50001)]))):
+                    self.check(self.call(taxpath,dict(fa,wage_statement_review=bad)),409)
+                print("NARUV_CASH_DEDUCTION_RECONCILIATION_PASS same-statement six comparisons, exception and tenant denial; no delivery",flush=True)
                 ptweeks=[]
                 for w in range(4):
                     mon=date(2026,6,8)+timedelta(days=7*w);entries=[]
