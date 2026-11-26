@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "b5415cdbf4e8260c774c0621afdb2481dc236381",
+      "sha": "78a0c80f926632787db50ef0855b628d39cdc047",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8658,7 +8658,7 @@
       "mode": "100644"
     },
     "scripts/naruv_employee_session_store_ci.py": {
-      "sha": "e611502492a353115d02b72614ea720f2e4fc611",
+      "sha": "e804ff3f6f002a0f44dee59da1c308d0969f020b",
       "mode": "100644"
     },
     "app/naruv_employee_statement_binding_review.py": {
@@ -8666,7 +8666,7 @@
       "mode": "100644"
     },
     "app/naruv_employee_proof_review.py": {
-      "sha": "8fd65439791e2b78245975980d8720179c256c01",
+      "sha": "ed2217bcd3f4d5b462d72e2c1dc3668637625549",
       "mode": "100644"
     }
   },
@@ -9251,6 +9251,15 @@
   "employee_proof_transaction_review": {
     "base": "b326d4e59b9157dad0b12e1d181b501f413a31cd",
     "scope": "CI-only expiry-after-lock, atomic issue rollback and concurrent replay",
+    "paths": [
+      "app/naruv_employee_proof_review.py",
+      "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "employee_proof_snapshot_review": {
+    "base": "0fb0c5b0b83bc0c98bf874d54c8a0dbc410a7971",
+    "scope": "CI-only exact statement snapshot binding; no real provider or delivery",
     "paths": [
       "app/naruv_employee_proof_review.py",
       "scripts/naruv_employee_session_store_ci.py",
