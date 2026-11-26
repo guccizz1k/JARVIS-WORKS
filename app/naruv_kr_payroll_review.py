@@ -1706,7 +1706,7 @@ def isolated_payroll_review_html(result):
         require(type(a["components"]) is list and [r["kind"] for r in a["components"]]==list(labels),"KR_VIEW_STATEMENT_COMPONENTS")
         for r in a["components"]:
             require(all(_whole(r[k],0,10**12) for k in ("minutes","hourly_krw","multiplier_bps")),"KR_VIEW_STATEMENT_NUMBERS")
-            line(labels[r["kind"]]+" ("+str(r["minutes"])+"분 × "+str(r["hourly_krw"])+"원/시간 × "+str(r["multiplier_bps"])+"/10000)",r["amount_krw"])
+            line(labels[r["kind"]]+" ("+str(r["minutes"])+"분 ÷ 60 × "+str(r["hourly_krw"])+"원/시간 × "+str(r["multiplier_bps"])+"/10000)",r["amount_krw"])
         dl={"income_tax":"소득세","local_income_tax":"지방소득세","pension":"국민연금","health":"건강보험","long_term_care":"장기요양보험","employment_insurance":"고용보험"}
         require(type(a["deductions"]) is list and [r["kind"] for r in a["deductions"]]==list(dl),"KR_VIEW_STATEMENT_DEDUCTIONS")
         for r in a["deductions"]:line(dl[r["kind"]],r["amount_krw"])
