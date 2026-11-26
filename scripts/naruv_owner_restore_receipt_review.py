@@ -50,20 +50,41 @@ def check(raw):
     require(all(r[k]==v for k,v in STATUS.items()),"RECEIPT_STATUS")
     return hashlib.sha256(raw).hexdigest()
 
-def private_read(p):
-    fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+def _stamp(s):
+    return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+
+def _private_file(s):
+    return (stat.S_ISREG(s.st_mode) and s.st_uid==os.geteuid() and s.st_nlink==1
+            and s.st_mode&0o077==0 and 0<s.st_size<=16384)
+
+def _read_at(directory_fd,name):
+    fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory_fd)
     with os.fdopen(fd,"rb") as f:
         a=os.fstat(f.fileno())
-        require(stat.S_ISREG(a.st_mode) and a.st_mode&0o077==0 and 0<a.st_size<=16384,"PRIVATE_RECEIPT")
+        require(_private_file(a),"PRIVATE_RECEIPT")
         raw=f.read(16385);b=os.fstat(f.fileno())
-        require(len(raw)==a.st_size and (a.st_dev,a.st_ino,a.st_size,a.st_mtime_ns,a.st_ctime_ns)==(b.st_dev,b.st_ino,b.st_size,b.st_mtime_ns,b.st_ctime_ns),"RECEIPT_CHANGED")
-        return raw
+        require(len(raw)==a.st_size and _stamp(a)==_stamp(b),"RECEIPT_CHANGED")
+        return raw,_stamp(a)
 
 def review(directory):
-    d=Path(directory);s=d.lstat()
-    require(stat.S_ISDIR(s.st_mode) and s.st_mode&0o077==0,"PRIVATE_DIRECTORY")
-    require({p.name for p in d.iterdir()}=={"legacy.json","staged.json"},"RECEIPT_SET")
-    pins={scope:check(private_read(d/(scope+".json"))) for scope in ("legacy","staged")}
+    d=Path(directory)
+    fd=os.open(d,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    try:
+        s=os.fstat(fd)
+        require(stat.S_ISDIR(s.st_mode) and s.st_uid==os.geteuid() and s.st_mode&0o077==0,"PRIVATE_DIRECTORY")
+        names={"legacy.json","staged.json"}
+        require(set(os.listdir(fd))==names,"RECEIPT_SET")
+        pins={};stamps={}
+        for scope in ("legacy","staged"):
+            name=scope+".json"
+            raw,stamps[name]=_read_at(fd,name)
+            pins[scope]=check(raw)
+        for name in names:
+            require(_stamp(os.stat(name,dir_fd=fd,follow_symlinks=False))==stamps[name],"RECEIPT_CHANGED")
+        require(set(os.listdir(fd))==names and _stamp(os.fstat(fd))==_stamp(s)
+                and _stamp(d.lstat())==_stamp(s),"DIRECTORY_CHANGED")
+    finally:
+        os.close(fd)
     return {"receipt_consistency":"PASS_TWO_11_COUNT_RECEIPTS",
             "receipt_sha256":pins,"scope_binding_in_receipts":False,
             "independent_provenance":"NOT_ATTESTED","historical_acl":"NOT_RUN",
