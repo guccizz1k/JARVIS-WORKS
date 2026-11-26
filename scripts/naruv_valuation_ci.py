@@ -870,6 +870,13 @@ def run_valuation(base):
                 self.assertFalse(fr["payment_authorized"])
                 self.check(self.call(taxpath,dict(tm,fixed_week_paid_review=paid)),422)
                 self.check(self.call(taxpath,dict(fixed,fixed_week_paid_review=paid),who="B"),404)
+                # A confirmed ordinary-hours draft can still include a manual
+                # night classification. Alternative gross must not discard it.
+                night_days=[dict(r) for r in fixed["classified_days"]]
+                night_days[0]["night"]=60
+                night_fixed=dict(fixed,classified_days=night_days)
+                self.check(self.call(taxpath,night_fixed),200)
+                self.check(self.call(taxpath,dict(night_fixed,fixed_week_paid_review=paid)),409)
                 import copy
                 mismatch=copy.deepcopy(paid);mismatch["weeks"][0]["days"][2]["actual_minutes"]=479
                 self.check(self.call(taxpath,dict(fixed,fixed_week_paid_review=mismatch)),409)
