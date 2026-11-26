@@ -483,6 +483,17 @@ class KRRequestParser(unittest.TestCase):
                 _decode_kr_body(v)
             self.assertEqual(ex.exception.status_code,422)
 
+    def test_statement_shape_and_conflicts(self):
+        import json
+        from fastapi import HTTPException
+        from app.naruv_draft_review import _decode_kr_body
+        a=dict(payment_date="2026-11-25",scope="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY",completeness_assessment_sha256="a"*64)
+        d=dict(expected_draft_sha256="a"*64,ordinary_hourly=12000,classification_sha256="b"*64,
+            classified_days=[day()],deductions=deductions(),pension_assessed_base_krw=410000,wage_statement_review=a)
+        self.assertEqual(_decode_kr_body(json.dumps(d).encode()),d)
+        for bad in (dict(d,paid_holiday_review={}),dict(d,wage_statement_review=dict(a,worker="other")),
+                    dict(d,wage_statement_review=dict(a,payment_date=True))):
+            with self.assertRaises(HTTPException):_decode_kr_body(json.dumps(bad).encode())
     def test_agency_exception_shape_and_conflicts(self):
         import json
         from fastapi import HTTPException
@@ -993,3 +1004,21 @@ class OrdinaryComparisonCoverage(unittest.TestCase):
         self.assertFalse(r["statutory_validated"]);self.assertFalse(r["payment_authorized"])
         for changes in (dict(tax=dict(a["tax"],mismatches=[])),dict(insurance=dict(a["insurance"],flags=["unknown"])),dict(pension=dict(a["pension"],payment_authorized=True))):
             with self.subTest(changes=changes),self.assertRaises(PayrollBlocked):review(**dict(a,**changes))
+
+
+class RestrictedStatementTests(unittest.TestCase):
+    def test_source_bound_statement_and_totals(self):
+        from app.naruv_kr_payroll_review import restricted_wage_statement_2026,source_bound_review
+        a=SourceBoundKRReview().inputs()
+        bound=source_bound_review(**a)
+        inputs={k:a[k] for k in ("tenant","worker","period","ordinary_hourly","classification_sha256","classified_days","deductions")}
+        inputs.update(base_hourly=a["hourly_krw"],bound_review=bound,payment_date="2026-12-10",
+            scope="MANUALLY_ASSESSED_WORK_AND_PREMIUMS_ONLY",completeness_assessment_sha256="e"*64)
+        out=restricted_wage_statement_2026(**inputs)
+        self.assertEqual(sum(r["amount_krw"] for r in out["components"]),out["gross_krw"])
+        self.assertEqual(sum(r["amount_krw"] for r in out["deductions"]),out["deductions_krw"])
+        self.assertEqual(out["gross_krw"]-out["deductions_krw"],out["net_krw"])
+        self.assertFalse(out["delivery_authorized"]);self.assertFalse(out["completeness_verified"])
+        for change in (dict(payment_date="2027-01-01"),dict(payment_date="2026-11-31"),dict(worker="other"),
+            dict(bound_review=dict(bound,review_binding_sha256="0"*64)),dict(scope="ALL_WAGES")):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):restricted_wage_statement_2026(**dict(inputs,**change))
