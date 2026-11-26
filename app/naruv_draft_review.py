@@ -67,7 +67,27 @@ def _decode_kr_body(raw):
             parse_constant=inventory._reject_constant)
         required={"expected_draft_sha256","ordinary_hourly","classification_sha256",
                 "classified_days","deductions","pension_assessed_base_krw"}
-        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review","annual_leave_accrual_review"}:raise ValueError("shape")
+        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review","annual_leave_accrual_review","fixed_week_paid_review"}:raise ValueError("shape")
+        if "fixed_week_paid_review" in d:
+            a=d["fixed_week_paid_review"]
+            # Never combine this alternative gross with separate pay components
+            # or a monthly tax comparison using the basic gross.
+            if set(d)&{"paid_holiday_review","unused_leave_review","part_time_leave_review","shift_review","monthly_tax_review","annual_leave_accrual_review","settlement_components","insurance_assessed_bases"}:
+                raise ValueError("fixed week conflicts")
+            if (type(a) is not dict or set(a)!={"schedule_sha256","attendance_sha256","weeks","scope"}
+                or any(type(a[k]) is not str for k in ("schedule_sha256","attendance_sha256","scope"))
+                or type(a["weeks"]) is not list or not 1<=len(a["weeks"])<=6):
+                raise ValueError("fixed week shape")
+            for w in a["weeks"]:
+                if (type(w) is not dict or set(w)!={"monday","employed_full_week","days"}
+                    or type(w["monday"]) is not str or type(w["employed_full_week"]) is not bool
+                    or type(w["days"]) is not list or len(w["days"])!=7):
+                    raise ValueError("fixed week row")
+                for r in w["days"]:
+                    if (type(r) is not dict or set(r)!={"date","status","actual_minutes","evidence_sha256"}
+                        or any(type(r[k]) is not str for k in ("date","status","evidence_sha256"))
+                        or type(r["actual_minutes"]) is not int):
+                        raise ValueError("fixed week day")
         if "annual_leave_accrual_review" in d:
             a=d["annual_leave_accrual_review"]
             required_leave={"employment_start","service_year","as_of","last_employed_on","months","attendance_sha256","contract_sha256","scope"}
@@ -156,7 +176,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -232,6 +252,13 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 accrual=annual_leave_accrual_review_2026(tenant=org,worker=worker,**a)
                 proof.update(v="KR_CI_MANUAL_API_V6",annual_leave_accrual=accrual["review_sha256"])
                 details["annual_leave_accrual_reference"]=dict(accrual,historical_attendance_authenticity_verified=False)
+            if "fixed_week_paid_review" in data:
+                fixed=fixed_week_monthly_payroll_review_2026(tenant=org,worker=worker,period=period,
+                    base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],policy_revision=revision,
+                    minutes_by_day=days,additional_bps=bps,expected_draft_sha256=data["expected_draft_sha256"],
+                    deductions=data["deductions"],**data["fixed_week_paid_review"])
+                proof.update(v="KR_CI_MANUAL_API_V7",fixed_week_paid=fixed["review_sha256"])
+                details["fixed_week_paid_reference"]=dict(fixed,classification_authenticity_verified=False)
             return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
