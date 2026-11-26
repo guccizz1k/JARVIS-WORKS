@@ -4,6 +4,8 @@ from unittest.mock import patch
 from app import naruv_b2_native_upload as m
 from app.naruv_b2_retention_journal import DAY
 
+REAL_UPLOAD=m._upload
+
 class NativeUploadTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -67,8 +69,34 @@ class NativeUploadTests(unittest.TestCase):
         self.assertEqual(self.stages(),["attempt","ack"])
     def test_retention_shortfall(self):
         self.info["uploadTimestamp"]=self.ts+180001
-        with self.assertRaises(ValueError):self.run_upload()
+        original=m._upload.side_effect
+        def late(*args):
+            out=original(*args);self.ts+=180002;return out
+        m._upload.side_effect=late
+        with self.assertRaisesRegex(ValueError,"UPLOAD_RETENTION_SHORTFALL"):self.run_upload()
         self.assertEqual(self.stages(),["attempt","ack"])
+    def test_upload_header_contract(self):
+        with patch.object(m,"_request",return_value=(b'{"fileId":"v"}',{})) as req:
+            # Exercise the actual HTTP header builder without opening a socket.
+            result=REAL_UPLOAD("https://pod-1.backblaze.com/b2api/v4/b2_upload_file/bucket/token",
+                "fake",self.s["name"],self.raw,self.until)
+            self.assertEqual(result,{"fileId":"v"})
+            args=req.call_args.args
+            self.assertEqual(args[2],self.raw)
+            self.assertEqual(args[3]["X-Bz-File-Retention-Mode"],"compliance")
+            self.assertEqual(args[3]["X-Bz-File-Retention-Retain-Until-Timestamp"],str(self.until))
+            self.assertEqual(args[3]["X-Bz-Content-Sha1"],hashlib.sha1(self.raw).hexdigest())
+            self.assertEqual(args[3]["X-Bz-Server-Side-Encryption"],"AES256")
+    def test_prefix_and_pagination(self):
+        a,s=m._auth(("writer","fake"));s["allowed"]["namePrefix"]="naruv-one/"
+        with self.assertRaisesRegex(ValueError,"NATIVE_SESSION_PREFIX"):m._scope_session(a,s,self.s,True)
+        original=m._api.side_effect
+        def paged(a,s,method,params):
+            if method=="b2_list_file_versions":return {"files":[],"nextFileName":"other","nextFileId":"v"}
+            return original(a,s,method,params)
+        m._api.side_effect=paged
+        with self.assertRaisesRegex(ValueError,"NATIVE_VERSION_PAGINATION"):self.run_upload()
+        self.assertEqual(self.upload_count,0)
     def test_urls(self):
         for url in ("http://pod-1.backblaze.com/b2api/v4/b2_upload_file/bucket/token",
             "https://pod-1.backblaze.com.evil.example/b2api/v4/b2_upload_file/bucket/token",
