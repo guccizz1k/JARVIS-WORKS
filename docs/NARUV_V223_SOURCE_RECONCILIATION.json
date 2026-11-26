@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "40757d63cfe0521c8da54e151cd5c2cbc22e1abe",
+      "sha": "88078e5f2047aa0eee44ed878a42be5233b64b76",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "3967ec89572b5b912edb9813ffe5d262dac2b817",
+      "sha": "167a400fc123e2c37dde63bde19b9563f3368602",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8764,5 +8764,9 @@
   "p1_p2_priority_paid_rest_and_combined_custody": {
     "parent": "85c14ea96cfd22ab0b5cc2729d84264adbee69bc",
     "reason": "Owner priority P1/P2 before other feature expansion. Restricted complete fixed 40h week rest/approved full-day leave arithmetic based on MOEL, boundary coverage, unsupported cases blocked. Unknown retention fails closed and legal hold takes priority after purpose closure. Recompute inventory+archive reviews with pinned signers, combined signed hold denial in synthetic archive CI. No operational key action or full statutory acceptance."
+  },
+  "fixed_week_confirmed_draft_paid_days": {
+    "parent": "abb4e8bfa281508254cb139b08d3ed9f6dcd5249",
+    "reason": "Join restricted fixed week paid rest/leave to confirmed source draft and manual deductions, reject missing/extra worked minutes including double counted leave. No overtime or full statutory claim."
   }
 }

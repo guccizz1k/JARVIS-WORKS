@@ -566,3 +566,26 @@ class FixedWeekPaidRestLeave(unittest.TestCase):
                 for row in w["days"][:5]:row.update(status="APPROVED_FULL_DAY_ANNUAL_LEAVE",actual_minutes=0)
             else:w["days"][0]["status"]="APPROVED_FULL_DAY_ANNUAL_LEAVE"
             with self.subTest(kind=kind),self.assertRaises(PayrollBlocked):review(**a)
+
+
+    def test_monthly_integration_with_confirmed_draft(self):
+        from app.naruv_kr_payroll_review import fixed_week_monthly_payroll_review_2026 as review
+        from app.naruv_payroll_draft import draft_gross
+        a=self.fixture()
+        a["weeks"][1]["days"][1].update(status="APPROVED_FULL_DAY_ANNUAL_LEAVE",actual_minutes=0)
+        rows=[dict(date=d["date"],regular=d["actual_minutes"],additional=0) for w in a["weeks"] for d in w["days"]
+              if d["date"].startswith("2026-11-") and d["status"]=="PRESENT"]
+        def draft(rows):
+            return draft_gross(tenant="a",worker="w",period="2026-11",policy_revision="r1",
+                hourly_krw=12000,minutes_by_day=rows,multiplier_bps={"regular":10000,"additional":15000})["draft_sha256"]
+        a.update(base_hourly=12000,policy_revision="r1",minutes_by_day=rows,additional_bps=15000,
+            expected_draft_sha256=draft(rows),deductions=deductions())
+        r=review(**a)
+        self.assertEqual(r["gross_estimate_krw"],2496000)
+        self.assertEqual(r["deductions"]["net_estimate_krw"],2490000)
+        self.assertFalse(r["payment_authorized"])
+        tampered=rows+[dict(date="2026-11-03",regular=480,additional=0)]
+        with self.assertRaisesRegex(PayrollBlocked,"KR_PAID_WORK_SOURCE_MISMATCH"):
+            review(**dict(a,minutes_by_day=tampered,expected_draft_sha256=draft(tampered)))
+        with self.assertRaisesRegex(PayrollBlocked,"KR_PAID_DRAFT_CHANGED"):
+            review(**dict(a,expected_draft_sha256="0"*64))

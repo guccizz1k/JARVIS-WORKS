@@ -1257,3 +1257,35 @@ def fixed_week_paid_rest_leave_review_2026(*,tenant,worker,period,ordinary_hourl
             "period":period,"scope":scope,"ordinary_hourly":ordinary_hourly,"schedule":schedule_sha256,
             "attendance":attendance_sha256,"weeks":sorted(normalized,key=lambda x:x["monday"])}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def fixed_week_monthly_payroll_review_2026(*,tenant,worker,period,base_hourly,ordinary_hourly,
+        policy_revision,minutes_by_day,additional_bps,expected_draft_sha256,
+        schedule_sha256,attendance_sha256,weeks,scope,deductions):
+    """Join paid non-work compensation to a confirmed ordinary-hours draft.
+    Only the fixed week no-overtime scope is covered. Never double count leave
+    as worked time. Caller supplies authenticated server-owned source snapshots.
+    """
+    source=draft_gross(tenant=tenant,worker=worker,period=period,policy_revision=policy_revision,
+        hourly_krw=base_hourly,minutes_by_day=minutes_by_day,
+        multiplier_bps={"regular":10000,"additional":additional_bps})
+    require(type(expected_draft_sha256) is str and expected_draft_sha256==source["draft_sha256"],"KR_PAID_DRAFT_CHANGED")
+    paid=fixed_week_paid_rest_leave_review_2026(tenant=tenant,worker=worker,period=period,
+        ordinary_hourly=ordinary_hourly,schedule_sha256=schedule_sha256,attendance_sha256=attendance_sha256,
+        weeks=weeks,scope=scope)
+    require(_whole(ordinary_hourly,base_hourly,10**8),"KR_PAID_RATE")
+    expected={r["date"]:r["actual_minutes"] for w in weeks for r in w["days"]
+              if r["date"].startswith(period+"-") and r["status"]=="PRESENT"}
+    observed={r["date"]:r["regular"] for r in minutes_by_day if r["regular"]>0}
+    require(all(r["additional"]==0 for r in minutes_by_day) and observed==expected,"KR_PAID_WORK_SOURCE_MISMATCH")
+    gross=Fraction(base_hourly*sum(expected.values()),60)+paid["weekly_rest_krw"]+paid["annual_leave_krw"]
+    require(gross<=10**12,"KR_LIMIT")
+    proof=hash_input({"v":"KR_FIXED_WEEK_MONTHLY_2026_V1","draft":source["draft_sha256"],"paid":paid["review_sha256"],"gross":_money(gross)})
+    # Internal reconstruction, not a user-supplied wage result or legal posting.
+    manual=deduction_reconciliation(wage_result={"policy":POLICY,"review_sha256":proof,
+        "gross_estimate_krw":_round(gross),"statutory_validated":False,"payment_authorized":False},deductions=deductions)
+    return {"status":"FIXED_WEEK_MONTHLY_REVIEW_ONLY","paid_days":paid,"gross_exact":_money(gross),
+        "gross_estimate_krw":_round(gross),"deductions":manual,
+        "review_sha256":hash_input({"v":"KR_FIXED_WEEK_MONTHLY_RECONCILED_2026_V1","gross":proof,
+            "deductions":manual["reconciliation_sha256"]}),"requires_human_review":True,
+        "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
