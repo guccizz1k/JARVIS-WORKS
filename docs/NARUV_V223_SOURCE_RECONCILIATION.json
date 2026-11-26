@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "4019ad574e3e9565b40a9dd14d625902643398bf",
+      "sha": "1ab035b10641a6e66a67cf7972c4c65a8cd5e38a",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "4db39ce819400656997fbfa53e63cb52ffc748bb",
+      "sha": "d2a684902b3f2b9a015dc7554b17575b2041226c",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "fd95e51aa2dc93fac726fd826c2ad8c86cd7ad0f",
+      "sha": "ca9e0f82f60d9c051ad77238cf7874e7b2122b51",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "f697f5f7cd25848048ffe058d5aa60d525672057",
+      "sha": "b92983ab4af2046d50b3afc5600f15839d3a30d5",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "7dc35ca8a715361ead7d4fed75fced2740d4e548",
+      "sha": "18da208d3fd49ca3136914fe7666a025d50aa7b6",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "f6c3f229bb29825e5f98e443b463b26bba63932a",
+      "sha": "1e948cac8087975ae7045de9aa727ffe52e5bf00",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8809,6 +8809,18 @@
     "paths": [
       "app/naruv_kr_payroll_review.py",
       "tests/test_naruv_kr_payroll_review.py",
+      "app/naruv_hr_profile_envelope.py",
+      "tests/test_naruv_hr_profile_envelope.py"
+    ]
+  },
+  "p1_p2_part_time_leave_and_b2_encryption": {
+    "base": "70fae0c68d7507c814cc1ef9abac5e7ebe7fb113",
+    "scope": "Assessed fixed 40h comparator leave hours and actual isolated API tests; B2 compliance metadata includes SSE-B2 AES256. Historical owner evidence preserved; no production authorization.",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "app/naruv_draft_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
       "app/naruv_hr_profile_envelope.py",
       "tests/test_naruv_hr_profile_envelope.py"
     ]
