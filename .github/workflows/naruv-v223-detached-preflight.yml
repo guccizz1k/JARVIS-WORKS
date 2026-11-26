@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: 5cef79ffb4c7a76a091c3025dffe9420e61f215a
+      EXPECTED_SOURCE: 3349c790d624ee4cba2e51b54867c4115148bb9a
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 5cef79ffb4c7a76a091c3025dffe9420e61f215a
+          ref: 3349c790d624ee4cba2e51b54867c4115148bb9a
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -99,7 +99,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: 5cef79ffb4c7a76a091c3025dffe9420e61f215a
+      EXPECTED_SOURCE: 3349c790d624ee4cba2e51b54867c4115148bb9a
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 5cef79ffb4c7a76a091c3025dffe9420e61f215a
+          ref: 3349c790d624ee4cba2e51b54867c4115148bb9a
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -143,11 +143,11 @@ jobs:
     permissions:
       contents: read
     env:
-      EXPECTED_SOURCE: 5cef79ffb4c7a76a091c3025dffe9420e61f215a
+      EXPECTED_SOURCE: 3349c790d624ee4cba2e51b54867c4115148bb9a
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: 5cef79ffb4c7a76a091c3025dffe9420e61f215a
+          ref: 3349c790d624ee4cba2e51b54867c4115148bb9a
           fetch-depth: 1
           persist-credentials: false
       - name: Independently obtain and compare official Appendix 2 PDF
@@ -158,5 +158,5 @@ jobs:
           command -v pdftotext || (sudo apt-get update -qq && sudo apt-get install -y poppler-utils)
           pdf="$(mktemp --suffix=.pdf)"
           trap 'rm -f "$pdf"' EXIT
-          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --max-redirs 3 --connect-timeout 12 --max-time 60 --max-filesize 10000000 'https://law.go.kr/flDownload.do?bylClsCd=110201&flSeq=163623339&gubun=' --output "$pdf"
+          curl --fail --silent --show-error --location --retry 2 --retry-all-errors --retry-delay 3 --retry-max-time 75 --proto '=https' --proto-redir '=https' --max-redirs 3 --connect-timeout 12 --max-time 60 --max-filesize 10000000 'https://law.go.kr/flDownload.do?bylClsCd=110201&flSeq=163623339&gubun=' --output "$pdf"
           python -m scripts.naruv_tax_source_audit "$pdf" app/naruv_kr_payroll_review.py
