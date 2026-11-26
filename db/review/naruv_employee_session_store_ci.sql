@@ -48,3 +48,34 @@ ALTER TABLE naruv_employee_ci.sessions FORCE ROW LEVEL SECURITY;
 CREATE POLICY broker_read ON naruv_employee_ci.sessions FOR SELECT TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1');
 CREATE POLICY broker_lock ON naruv_employee_ci.sessions FOR UPDATE TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1') WITH CHECK (false);
 CREATE POLICY broker_insert ON naruv_employee_ci.sessions FOR INSERT TO naruv_employee_ci_a,naruv_employee_ci_b WITH CHECK (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1' AND NOT revoked AND EXISTS (SELECT 1 FROM naruv_employee_ci.identities i WHERE (i.tenant,i.principal,i.worker,i.auth_epoch)=(sessions.tenant,sessions.principal,sessions.worker,sessions.auth_epoch) AND i.active) AND EXISTS (SELECT 1 FROM naruv_employee_ci.entitlements e WHERE (e.tenant,e.worker,e.receipt,e.review_sha256,e.render_sha256)=(sessions.tenant,sessions.worker,sessions.receipt,sessions.review_sha256,sessions.render_sha256) AND e.active));
+
+-- Invalidation is monotonic even if the original binding is restored.
+CREATE FUNCTION naruv_employee_ci.revoke_changed_binding() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+ IF TG_TABLE_NAME='identities' THEN
+  UPDATE naruv_employee_ci.sessions SET revoked=true
+  WHERE tenant=OLD.tenant AND principal=OLD.principal AND NOT revoked;
+ ELSIF TG_TABLE_NAME='entitlements' THEN
+  UPDATE naruv_employee_ci.sessions SET revoked=true
+  WHERE tenant=OLD.tenant AND worker=OLD.worker AND receipt=OLD.receipt AND NOT revoked;
+ ELSE RAISE EXCEPTION 'INVALID_REVOCATION_SOURCE';
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION naruv_employee_ci.revoke_changed_binding() FROM PUBLIC;
+CREATE TRIGGER revoke_identity_change AFTER UPDATE ON naruv_employee_ci.identities
+ FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION naruv_employee_ci.revoke_changed_binding();
+CREATE TRIGGER revoke_entitlement_change AFTER UPDATE ON naruv_employee_ci.entitlements
+ FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION naruv_employee_ci.revoke_changed_binding();
+CREATE FUNCTION naruv_employee_ci.reject_session_reactivation() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+ IF OLD.revoked AND NOT NEW.revoked THEN
+  RAISE EXCEPTION 'EMPLOYEE_SESSION_REACTIVATION_DENIED' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION naruv_employee_ci.reject_session_reactivation() FROM PUBLIC;
+CREATE TRIGGER reject_session_reactivation BEFORE UPDATE OF revoked ON naruv_employee_ci.sessions
+ FOR EACH ROW EXECUTE FUNCTION naruv_employee_ci.reject_session_reactivation();
