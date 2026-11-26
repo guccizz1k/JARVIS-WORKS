@@ -53,10 +53,10 @@ def synthetic_dump():
     need(re.fullmatch("[0-9a-f]{64}",cid),"OWNER_CONTAINER_ID")
     try:
         for _ in range(40):
-            if docker(["exec",cid,"pg_isready","-U","postgres"],check=False).returncode==0:
+            if docker(["exec",cid,"pg_isready","-h","127.0.0.1","-U","postgres"],check=False).returncode==0:
                 # Ensure init has finished and the isolated server remains up.
                 time.sleep(1)
-                if docker(["exec",cid,"pg_isready","-U","postgres"],check=False).returncode==0:break
+                if docker(["exec",cid,"pg_isready","-h","127.0.0.1","-U","postgres"],check=False).returncode==0:break
             time.sleep(1)
         else:raise ValueError("OWNER_PG17_NOT_READY")
         inspect=json.loads(docker(["inspect",cid]).stdout)
