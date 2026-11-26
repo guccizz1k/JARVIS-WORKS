@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "5aec01e5a364323883c5b9249d04f0d062c3fb66",
+      "sha": "eda7c3636f7a603cf4f698d10718ae1c1c01ab76",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8634,7 +8634,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md": {
-      "sha": "9ec3f8bc42d9cdc769336948154aed63297c18dc",
+      "sha": "073f697af233279603714f25473fdbd25d0eb41b",
       "mode": "100644"
     },
     "scripts/naruv_b2_offline_stage.py": {
@@ -8658,7 +8658,7 @@
       "mode": "100644"
     },
     "scripts/naruv_employee_session_store_ci.py": {
-      "sha": "5442eb3166eafce54c8f30a983975206d292f512",
+      "sha": "5036517c854d60970c2c9e1f9fd8f9064f5ac868",
       "mode": "100644"
     }
   },
@@ -9200,6 +9200,15 @@
     "paths": [
       "db/review/naruv_employee_session_store_ci.sql",
       "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "employee_concurrent_revocation_review": {
+    "base": "3bf76060aba29abfc2ce2e6a5093d90733b7068c",
+    "scope": "CI-only multi-connection row lock and post-revocation denial, external handoff; no live identity",
+    "paths": [
+      "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }

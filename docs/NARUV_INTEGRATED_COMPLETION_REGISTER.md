@@ -151,3 +151,6 @@ Prior detached CI 45808723608, migration 45808723763 and main required 458087236
 
 ## Employee broker scoped DB role review
 Add synthetic NOLOGIN roles per worker scope, FORCE RLS, read and session insertion only; row-share-lock UPDATE column grants with false write checks. Direct identity/entitlement/session mutation, cross-tenant scope and alternate worker tests; no real identity mapping, endpoint, service role credentials, cross-connection concurrency or production migration. Pending actual PG17 CI.
+
+## 2026-11-26 employee concurrent revocation and external acceptance handoff
+Prior b75a1b37 CI 45810544013/45810543993/45810544001 completed success. New actual independent-connection PG17 test verifies existing row-share locks block concurrent revocation until access transaction ends; after committed identity epoch, entitlement or session revocation, next access denies. Committed disposable fixture only, exact preflight/cleanup. External review handoff and actual identity/delivery blockers recorded; no provider selected/contracted or real data transferred. New CI pending.

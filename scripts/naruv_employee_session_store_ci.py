@@ -77,4 +77,70 @@ class EmployeeStore(unittest.TestCase):
             conn.rollback()
             self.assertIsNone(conn.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
             conn.close()
+    def test_committed_access_serializes_with_revocation(self):
+        # A separate committed fixture is necessary for real independent transactions.
+        dsn=os.environ["JW_PG_CI_ROOT_DSN"]
+        cfg=conninfo_to_dict(dsn)
+        self.assertEqual((cfg.get("host"),cfg.get("port"),cfg.get("dbname"),cfg.get("user")),
+                         ("127.0.0.1","5432","postgres","postgres"))
+        self.assertEqual(os.environ.get("GITHUB_ACTIONS"),"true")
+        owner=psycopg.connect(dsn)
+        reader=None
+        created=False
+        try:
+            self.assertIsNone(owner.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
+            self.assertEqual(owner.execute("SELECT count(*) FROM pg_roles WHERE rolname IN ('naruv_employee_ci_a','naruv_employee_ci_b')").fetchone()[0],0)
+            owner.execute("SET LOCAL naruv.employee_store_ci='DISPOSABLE_ONLY'")
+            owner.execute(Path("db/review/naruv_employee_session_store_ci.sql").read_text())
+            owner.execute("INSERT INTO naruv_employee_ci.identities VALUES ('ci-a','e1','w1',1,true)")
+            owner.execute("INSERT INTO naruv_employee_ci.entitlements VALUES ('ci-a','w1','r1',%s,%s,true)",("a"*64,"b"*64))
+            owner.commit()
+            created=True
+            reader=psycopg.connect(dsn)
+            issue=dict(trusted_tenant="ci-a",trusted_principal="e1",receipt="r1")
+            def begin():
+                reader.execute("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                reader.execute("SET LOCAL naruv.employee_store_ci='DISPOSABLE_ONLY'")
+                reader.execute("SET LOCAL ROLE naruv_employee_ci_a")
+            for revoke,restore in (
+                ("UPDATE naruv_employee_ci.identities SET auth_epoch=2","UPDATE naruv_employee_ci.identities SET auth_epoch=1"),
+                ("UPDATE naruv_employee_ci.entitlements SET active=false","UPDATE naruv_employee_ci.entitlements SET active=true"),
+                ("UPDATE naruv_employee_ci.sessions SET revoked=true","UPDATE naruv_employee_ci.sessions SET revoked=false")):
+                begin()
+                token=store.issue(reader,**issue)
+                reader.commit()
+                args=dict(**issue,review_sha256="a"*64,render_sha256="b"*64,token=token)
+                begin()
+                self.assertTrue(store.access(reader,**args)["session_store_verified"])
+                # Locks must be held until the access transaction completes.
+                owner.execute("SET LOCAL lock_timeout='250ms'")
+                with self.assertRaises(psycopg.errors.LockNotAvailable):
+                    with owner.transaction():owner.execute(revoke)
+                owner.rollback()
+                reader.commit()
+                owner.execute(revoke)
+                owner.commit()
+                begin()
+                with self.assertRaises(AccessDenied):store.access(reader,**args)
+                reader.rollback()
+                # Restore only synthetic fixture state for the next independent case.
+                owner.execute(restore)
+                owner.commit()
+                begin()
+                with self.assertRaises(AccessDenied):store.access(reader,**dict(args,token="x"*43))
+                reader.rollback()
+            print("EMPLOYEE_ACCESS_REVOCATION_SERIALIZATION=PASS")
+        finally:
+            if reader is not None:reader.close()
+            owner.rollback()
+            try:
+                if created:
+                    owner.execute("DROP SCHEMA naruv_employee_ci CASCADE")
+                    owner.execute("DROP ROLE naruv_employee_ci_a,naruv_employee_ci_b")
+                    owner.commit()
+                    self.assertIsNone(owner.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
+                    self.assertEqual(owner.execute("SELECT count(*) FROM pg_roles WHERE rolname IN ('naruv_employee_ci_a','naruv_employee_ci_b')").fetchone()[0],0)
+                    print("EMPLOYEE_CONCURRENCY_FIXTURE_CLEANUP=PASS")
+            finally:owner.close()
+
 if __name__=="__main__":unittest.main()
