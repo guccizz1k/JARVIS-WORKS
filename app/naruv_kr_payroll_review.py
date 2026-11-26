@@ -1495,6 +1495,43 @@ def unused_leave_compensation_review_2026(*,tenant,worker,period,ordinary_hourly
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
 
 
+def assessed_bonus_table_review_2026(*,tenant,worker,period,scope,withholding_date,months,bonus_krw,
+        regular_taxable_krw,already_withheld_krw,eligible_family_count,eligible_children_8_20,
+        selection_percent,assessed_bonus_tax_krw,history_sha256,assessment_sha256):
+    """NTS wage bonus formula, assessed explicit period, whole-won average only.
+    No automatic eligibility, fractional average rounding, negative collection,
+    legal rounding, filing or actual payment. Uses exact table before collection.
+    https://www.nts.go.kr/nts/cm/cntnts/cntntsView.do?cntntsId=7862&mi=6426
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker))
+        and type(period) is str and re.fullmatch(r"2026-(0[3-9]|1[0-2])",period)
+        and scope=="ASSESSED_EXPLICIT_BONUS_PERIOD_ORDINARY_TABLE_ONLY"
+        and type(withholding_date) is str and withholding_date[:7]==period,"KR_BONUS_TABLE_SCOPE")
+    require(_whole(months,1,int(period[-2:])) and _whole(bonus_krw,1,10**9)
+        and all(_whole(x,0,10**12) for x in (regular_taxable_krw,already_withheld_krw,assessed_bonus_tax_krw))
+        and all(type(x) is str and HEX.fullmatch(x) for x in (history_sha256,assessment_sha256)),"KR_BONUS_TABLE_INPUT")
+    average=Fraction(bonus_krw+regular_taxable_krw,months)
+    require(average.denominator==1,"KR_BONUS_AVERAGE_ROUNDING_UNRESOLVED")
+    args=dict(tenant=tenant,worker=worker,withholding_date=withholding_date,
+        taxable_monthly_krw=average.numerator,eligible_family_count=eligible_family_count,
+        eligible_children_8_20=eligible_children_8_20,selection_percent=selection_percent,
+        assessment_sha256=assessment_sha256,scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF")
+    if average>=10000000:
+        table=withholding_high_reference_2026(**args);exact=Fraction(**table["national_exact"])
+    else:
+        table=withholding_table_review_2026(**args);exact=Fraction(**table["reference"]["national_exact"])
+    delta=exact*months-already_withheld_krw
+    status=("NEGATIVE_DIFFERENCE_REVIEW_REQUIRED" if delta<0 else
+        "FRACTIONAL_COLLECTION_REVIEW_REQUIRED" if delta.denominator!=1 else
+        "REFERENCE_MATCH_ONLY" if delta==assessed_bonus_tax_krw else "ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED")
+    return {"status":status,"average_taxable_exact":_money(average),"monthly_table_exact":_money(exact),
+        "signed_difference_exact":_money(delta),"signed_difference_krw":delta.numerator if delta.denominator==1 else None,
+        "assessed_bonus_tax_krw":assessed_bonus_tax_krw,"requires_human_review":True,
+        "historical_wages_authenticity_verified":False,"statutory_validated":False,"payment_authorized":False,"production_authorized":False,
+        "review_sha256":hash_input({"v":"KR_BONUS_TABLE_REFERENCE_2026_V1","scope":scope,"table":table["review_sha256"],
+            "months":months,"bonus":bonus_krw,"regular":regular_taxable_krw,"withheld":already_withheld_krw,
+            "assessed":assessed_bonus_tax_krw,"history":history_sha256,"assessment":assessment_sha256})}
+
 def assessed_settlement_components_2026(*,tenant,worker,period,components):
     """Scoped arithmetic on assessed inputs; no automatic entitlement or tax filing.
     Official NTS bonus and settlement calculation, MOEL severance formula and
@@ -1502,9 +1539,10 @@ def assessed_settlement_components_2026(*,tenant,worker,period,components):
     """
     require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_SETTLEMENT_SCOPE")
     require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_SETTLEMENT_PERIOD")
-    allowed={"bonus","year_end","year_end_calculated","severance","health_leave"}
+    allowed={"bonus","bonus_table_calculated","year_end","year_end_calculated","severance","health_leave"}
     require(type(components) is dict and 1<=len(components)<=4 and set(components)<=allowed
-        and not {"year_end","year_end_calculated"}<=set(components),"KR_SETTLEMENT_COMPONENTS")
+        and not {"year_end","year_end_calculated"}<=set(components)
+        and not {"bonus","bonus_table_calculated"}<=set(components),"KR_SETTLEMENT_COMPONENTS")
     results={}
     def check(row,fields):
         require(type(row) is dict and set(row)==set(fields)|{"assessment_sha256"},"KR_SETTLEMENT_SHAPE")
@@ -1520,6 +1558,10 @@ def assessed_settlement_components_2026(*,tenant,worker,period,components):
             delta=r["assessed_monthly_table_tax_krw"]*r["months"]-r["already_withheld_krw"]
             results[k]={"average_taxable_exact":_money(avg),"signed_difference_krw":delta,
                 "status":"NEGATIVE_DIFFERENCE_REVIEW_REQUIRED" if delta<0 else "ASSESSED_REFERENCE_ONLY"}
+        elif k=="bonus_table_calculated":
+            check(r,("scope","withholding_date","months","bonus_krw","regular_taxable_krw","already_withheld_krw",
+                "eligible_family_count","eligible_children_8_20","selection_percent","assessed_bonus_tax_krw","history_sha256"))
+            results[k]=assessed_bonus_table_review_2026(tenant=tenant,worker=worker,period=period,**r)
         elif k=="year_end":
             check(r,("kind","decided_national_krw","previous_national_krw","special_payment_krw"))
             require(type(r["kind"]) is str and r["kind"] in ("ANNUAL","MIDYEAR_TERMINATION"),"KR_YEAR_END_KIND")
@@ -2037,6 +2079,11 @@ def isolated_payroll_review_html(result):
         ("year_end_calculated","별도 연말정산 계산 참고 차액 (음수: 환급)","signed_difference_krw"),
         ("severance","별도 퇴직금 참고액","estimate_krw")):
         if k in comps:line(label,comps[k][key])
+    if "bonus_table_calculated" in comps:
+        b=comps["bonus_table_calculated"]
+        require(b.get("statutory_validated") is False and b.get("payment_authorized") is False and b.get("historical_wages_authenticity_verified") is False,"KR_VIEW_BONUS")
+        if b["signed_difference_krw"] is not None:line("별도 상여 간이세액표 참고 차액",b["signed_difference_krw"])
+        else:rows.append("<tr><th scope=\"row\">상여 원천징수 참고</th><td>원 단위 처리 별도 검토 필요</td></tr>")
     return ("<!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         "<title>급여 격리 검토</title><main><h1>급여 격리 검토</h1>"
         "<p>수동 증거 · 법정 정확성 미확정 · 지급 및 운영 반영 금지. 별도 항목은 기본 급여 합계에 합산되지 않았습니다.</p>"

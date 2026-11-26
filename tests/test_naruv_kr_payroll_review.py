@@ -1151,3 +1151,32 @@ class RestrictedStatementTests(unittest.TestCase):
             with self.assertRaises(PayrollBlocked):cash_statement_deduction_review_2026(**dict(kwargs,submission=bad))
         changed={k:dict(v) for k,v in a["deductions"].items()};changed["health"]["amount_krw"]+=1
         with self.assertRaises(PayrollBlocked):cash_statement_deduction_review_2026(**dict(kwargs,deductions=changed))
+
+class BonusTableSettlement(unittest.TestCase):
+    def test_bonus_table_reference_and_scope(self):
+        from app.naruv_kr_payroll_review import assessed_settlement_components_2026,withholding_table_review_2026
+        from fractions import Fraction
+        a=dict(scope="ASSESSED_EXPLICIT_BONUS_PERIOD_ORDINARY_TABLE_ONLY",withholding_date="2026-11-25",
+            months=3,bonus_krw=300000,regular_taxable_krw=9000000,already_withheld_krw=0,
+            eligible_family_count=1,eligible_children_8_20=0,selection_percent=100,assessed_bonus_tax_krw=0,
+            history_sha256="a"*64,assessment_sha256="b"*64)
+        def review(row):return assessed_settlement_components_2026(tenant="a",worker="w",period="2026-11",
+            components={"bonus_table_calculated":row})["components"]["bonus_table_calculated"]
+        table=withholding_table_review_2026(tenant="a",worker="w",withholding_date="2026-11-25",taxable_monthly_krw=3100000,
+            eligible_family_count=1,eligible_children_8_20=0,selection_percent=100,assessment_sha256="b"*64,
+            scope="ASSESSED_ORDINARY_MONTHLY_TABLE_NO_RELIEF")
+        expected=Fraction(**table["reference"]["national_exact"])*3
+        self.assertEqual(expected.denominator,1)
+        self.assertGreater(expected,0)
+        good=review(dict(a,assessed_bonus_tax_krw=int(expected)))
+        self.assertEqual(good["status"],"REFERENCE_MATCH_ONLY")
+        self.assertEqual(good["signed_difference_krw"],int(expected))
+        self.assertFalse(good["statutory_validated"]);self.assertFalse(good["historical_wages_authenticity_verified"])
+        neg=review(dict(a,already_withheld_krw=int(expected)+1))
+        self.assertEqual(neg["signed_difference_krw"],-1)
+        self.assertEqual(neg["status"],"NEGATIVE_DIFFERENCE_REVIEW_REQUIRED")
+        for change in (dict(bonus_krw=300001),dict(months=True),dict(months=12),dict(withholding_date="2026-10-25"),
+            dict(history_sha256="invalid"),dict(scope="AUTO")):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):review(dict(a,**change))
+        with self.assertRaises(PayrollBlocked):assessed_settlement_components_2026(tenant="a",worker="w",period="2026-11",
+            components={"bonus":{},"bonus_table_calculated":a})

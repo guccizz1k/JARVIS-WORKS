@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "c9ce3f4a3997335c5b19968c8b19849ab3188626",
+      "sha": "4f8cf443d669fc843a66b97555378478fc050225",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "07ecf65588156bd3a0a12e09d337464d737786b7",
+      "sha": "0e2df0c85021fe17fac8efbd3e56d52d22c0b784",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "185720e5b7c04ef0eb3145cea2f50c62b893f7dd",
+      "sha": "12bd21e1858e61d43d3b175820b0e086e213c8aa",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "58dcd6d07972d4e2e0b56f9603d19b328ad7cd0a",
+      "sha": "a2c681e78164eee5cad0c0c83835f495d59cd0e1",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -9077,5 +9077,11 @@
     "base": "87801ce536f1b917aeae60e7904cf0e48c8c32f0",
     "scope": "Same statement six-reference ordinary fixed allowance and exception review; deterministic unpersisted audit digest; no statutory delivery or independent custody",
     "paths": ["app/naruv_kr_payroll_review.py","app/naruv_draft_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
+  }
+,
+  "p1_bonus_table_reference": {
+    "base": "5cef79ffb4c7a76a091c3025dffe9420e61f215a",
+    "scope": "Restricted explicit-period bonus official table arithmetic; no statutory collection or actual custody",
+    "paths": ["app/naruv_kr_payroll_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
   }
 }

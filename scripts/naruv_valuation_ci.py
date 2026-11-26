@@ -842,6 +842,20 @@ def run_valuation(base):
                 self.assertIn("639,000",annual_html.text)
                 self.assertIn("수동 제출 · 월 급여에 미합산",annual_html.text)
                 print("NARUV_ANNUAL_NATIONAL_TAX_API_PASS assessed ordinary calculation, HTML and tenant denial",flush=True)
+                bonus_table=dict(scope="ASSESSED_EXPLICIT_BONUS_PERIOD_ORDINARY_TABLE_ONLY",withholding_date="2026-07-25",
+                    months=3,bonus_krw=300000,regular_taxable_krw=9000000,already_withheld_krw=0,
+                    eligible_family_count=1,eligible_children_8_20=0,selection_percent=100,assessed_bonus_tax_krw=0,
+                    history_sha256="a"*64,assessment_sha256="b"*64)
+                b_req=dict(manual,settlement_components={"bonus_table_calculated":bonus_table})
+                b_result=self.check(self.call(krpath,b_req),200)
+                b=b_result["settlement_reference"]["components"]["bonus_table_calculated"]
+                self.assertGreater(b["signed_difference_krw"],0)
+                self.assertFalse(b["statutory_validated"]);self.assertFalse(b["historical_wages_authenticity_verified"])
+                self.assertFalse(b_result["settlement_reference"]["settlement_included_in_monthly_gross"])
+                self.assertIn("별도 상여 간이세액표 참고 차액",self.call(krpath,b_req,extra={"accept":"text/html"}).text)
+                self.check(self.call(krpath,b_req,who="B"),404)
+                self.check(self.call(krpath,dict(manual,settlement_components={"bonus_table_calculated":dict(bonus_table,bonus_krw=300001)})),409)
+                print("NARUV_BONUS_TABLE_REFERENCE_API_PASS exact assessed average, no payment, tenant and fractional denial",flush=True)
                 from app.naruv_payroll_draft import hash_input
                 import copy
                 agd=copy.deepcopy(manual["deductions"])
