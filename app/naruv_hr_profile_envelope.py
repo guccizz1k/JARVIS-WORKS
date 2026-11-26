@@ -465,3 +465,59 @@ def reconcile_backup_provider_inventory_against_manifest(*,tenant,expected_manif
     original_mismatch=sorted({r["asset"] for r in records if any(r[k]!=expected_manifest[r["asset"]][k] for k in ("sha256","key_id"))})
     return dict(result,status="BLOCKED" if original_mismatch or result["status"]=="BLOCKED" else "ORIGINAL_AND_PROVIDER_MATCH_ONLY",
         original_mismatch_assets=original_mismatch,original_manifest_sha256=digest)
+
+
+def review_b2_compliance_version_metadata(*,bucket_id,expected,pages,as_of_ms):
+    """Review supplied complete B2 version-list responses; no network or secrets.
+    Expected metadata must be independently trusted. No authenticity or restore claim.
+    """
+    import hashlib
+    _require(type(bucket_id) is str and 1<=len(bucket_id)<=128 and type(as_of_ms) is int and as_of_ms>0)
+    _require(type(expected) is dict and 1<=len(expected)<=10000 and type(pages) is list and 1<=len(pages)<=100)
+    for name,e in expected.items():
+        _require(type(name) is str and 1<=len(name)<=1024 and type(e) is dict
+            and set(e)=={"fileId","contentLength","contentSha1"}
+            and type(e["fileId"]) is str and 1<=len(e["fileId"])<=256
+            and type(e["contentLength"]) is int and e["contentLength"]>0
+            and type(e["contentSha1"]) is str and re.fullmatch(r"[0-9a-f]{40}",e["contentSha1"]))
+    _require(len({e["fileId"] for e in expected.values()})==len(expected))
+    seen=set();seen_ids=set();bad=set();unexpected=0;prior=(None,None);cursors=set();normalized=[]
+    for index,page in enumerate(pages):
+        _require(type(page) is dict and set(page)=={"startFileName","startFileId","response"})
+        _require((page["startFileName"],page["startFileId"])==prior)
+        response=page["response"]
+        _require(type(response) is dict and set(response)>={"files","nextFileName","nextFileId"}
+            and type(response["files"]) is list and len(response["files"])<=1000)
+        if index>0:_require(bool(response["files"]))
+        for row in response["files"]:
+            _require(type(row) is dict and row.get("bucketId")==bucket_id
+                and type(row.get("fileName")) is str and type(row.get("fileId")) is str
+                and row["fileId"] not in seen_ids)
+            name=row["fileName"];seen_ids.add(row["fileId"])
+            if name not in expected:unexpected+=1;continue
+            if name in seen:bad.add(name)
+            seen.add(name)
+            e=expected[name];ret=row.get("fileRetention");hold=row.get("legalHold");upload=row.get("uploadTimestamp")
+            ok=(row.get("action")=="upload" and all(type(row.get(k)) is type(e[k]) and row[k]==e[k] for k in e)
+                and type(upload) is int and 0<upload<=as_of_ms
+                and type(ret) is dict and ret.get("isClientAuthorizedToRead") is True
+                and type(ret.get("value")) is dict and ret["value"].get("mode")=="compliance"
+                and type(ret["value"].get("retainUntilTimestamp")) is int
+                and ret["value"]["retainUntilTimestamp"]>=upload+30*86400000
+                and ret["value"]["retainUntilTimestamp"]>as_of_ms
+                and type(hold) is dict and hold.get("isClientAuthorizedToRead") is True
+                and hold.get("value") in ("on","off"))
+            if not ok:bad.add(name)
+            normalized.append([name,row["fileId"],bool(ok),upload,ret,hold])
+        n=(response["nextFileName"],response["nextFileId"])
+        if index==len(pages)-1:_require(n==(None,None))
+        else:
+            _require(all(type(v) is str and v for v in n) and n not in cursors)
+            cursors.add(n);prior=n
+    missing=set(expected)-seen
+    digest=hashlib.sha256(_canonical(["NARUV_B2_METADATA_REVIEW_V1",bucket_id,expected,normalized,as_of_ms])).hexdigest()
+    return {"status":"BLOCKED" if missing or bad or unexpected else "B2_COMPLIANCE_METADATA_MATCH_ONLY",
+        "expected_count":len(expected),"missing_count":len(missing),"mismatch_count":len(bad),
+        "unexpected_version_count":unexpected,"review_sha256":digest,"sha256_verified":False,
+        "restore_verified":False,"provider_authenticity_verified":False,"key_retirement_authorized":False,
+        "deletion_authorized":False,"production_authorized":False}
