@@ -789,3 +789,61 @@ class FixedPartTimeAnnualLeave(unittest.TestCase):
                 dict(grant_assessment_sha256=""),dict(period="2027-01")):
             with self.subTest(change=change),self.assertRaises(PayrollBlocked):
                 review(**dict(a,**change))
+
+class AnnualResidentTaxReview(unittest.TestCase):
+    def args(self):
+        return dict(tenant="a",worker="w",period="2026-11",kind="ANNUAL_PREVIEW",
+            scope="RESIDENT_WAGE_ONLY_NO_RELIEF_ASSESSED_OTHER_DEDUCTIONS_CREDITS",
+            annual_income_krw=200000000,exempt_income_krw=5000000,
+            assessed_other_deductions_krw=7000000,assessed_cap_addback_krw=0,
+            assessed_other_credits_krw=0,previous_national_krw=44334000,
+            annual_source_sha256="a"*64,deduction_assessment_sha256="b"*64,
+            credit_assessment_sha256="c"*64,assessment_sha256="d"*64)
+    def test_official_example_and_denials(self):
+        from app.naruv_kr_payroll_review import annual_resident_wage_tax_review_2026 as review,assessed_settlement_components_2026
+        a=self.args();r=review(**a)
+        self.assertEqual(r["earned_income_deduction_exact"],{"numerator":16650000,"denominator":1})
+        self.assertEqual(r["taxable_exact"],{"numerator":171350000,"denominator":1})
+        self.assertEqual(r["calculated_tax_exact"],{"numerator":45173000,"denominator":1})
+        self.assertEqual(r["employee_tax_credit_exact"],{"numerator":200000,"denominator":1})
+        self.assertEqual(r["decided_national_estimate_krw"],44973000)
+        self.assertEqual(r["signed_difference_krw"],639000)
+        self.assertEqual(review(**dict(a,previous_national_krw=50000000))["refund_reference_krw"],5027000)
+        self.assertEqual(review(**dict(a,assessed_other_credits_krw=999999999))["decided_national_estimate_krw"],0)
+        self.assertEqual(review(**dict(a,annual_income_krw=0,exempt_income_krw=0))["decided_national_estimate_krw"],0)
+        for change in (dict(exempt_income_krw=200000001),dict(assessed_cap_addback_krw=7000001),
+                dict(annual_income_krw=True),dict(scope="OTHER_INCOME"),dict(period="2026-06"),
+                dict(annual_source_sha256="bad"),dict(kind="ACTUAL_FINAL_FILING")):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):
+                review(**dict(a,**change))
+        for key in ("statutory_validated","payment_authorized","production_authorized"):
+            self.assertFalse(r[key])
+        row={k:v for k,v in a.items() if k not in ("tenant","worker","period")}
+        scoped=assessed_settlement_components_2026(tenant="a",worker="w",period="2026-11",components={"year_end_calculated":row})
+        self.assertEqual(scoped["components"]["year_end_calculated"],r)
+        with self.assertRaises(PayrollBlocked):
+            assessed_settlement_components_2026(tenant="a",worker="w",period="2026-11",
+                components={"year_end_calculated":row,"year_end":{}})
+
+    def test_all_income_and_tax_bracket_edges(self):
+        from fractions import Fraction
+        from app.naruv_kr_payroll_review import (_annual_wage_deduction_2026 as d,_annual_progressive_tax_2026 as tax,
+            _annual_employee_credit_2026 as credit)
+        for edge,value,left,right in ((5000000,3500000,70,40),(15000000,7500000,40,15),
+                (45000000,12000000,15,5),(100000000,14750000,5,2)):
+            with self.subTest(edge=edge):
+                self.assertEqual(d(edge),value);self.assertEqual(d(edge)-d(edge-1),Fraction(left,100))
+                self.assertEqual(d(edge+1)-d(edge),Fraction(right,100))
+        self.assertEqual(d(33800000),10320000);self.assertEqual(d(10**9),20000000)
+        for edge,value,left,right in ((14000000,840000,6,15),(50000000,6240000,15,24),
+                (88000000,15360000,24,35),(150000000,37060000,35,38),
+                (300000000,94060000,38,40),(500000000,174060000,40,42),
+                (1000000000,384060000,42,45)):
+            with self.subTest(edge=edge):
+                self.assertEqual(tax(edge),value);self.assertEqual(tax(edge)-tax(edge-1),Fraction(left,100))
+                self.assertEqual(tax(edge+1)-tax(edge),Fraction(right,100))
+        for gross,cap in ((33000000,740000),(43000000,660000),(70000000,660000),
+                (70320000,500000),(120000000,500000),(120600000,200000)):
+            self.assertEqual(credit(gross,Fraction(100000000))[1],cap)
+        self.assertEqual(credit(30000000,Fraction(1300000))[0],715000)
+        self.assertEqual(credit(30000000,Fraction(1300001))[0],Fraction(7150003,10))
