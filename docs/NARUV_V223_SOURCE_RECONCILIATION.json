@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "198c12ff3bbe0f0185ca57d717e6b1c7cc97fb27",
+      "sha": "fe810fcf701e0da74fc5c699e007a0db289f2291",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8648,6 +8648,18 @@
     "docs/NARUV_STATUTORY_REVIEW_CASES.json": {
       "sha": "01e62a9413b80883168d7e85177fdb1b5b97fece",
       "mode": "100644"
+    },
+    "app/naruv_employee_session_store_review.py": {
+      "sha": "01a0d900752fe9bf169200803c438dab4cc0315d",
+      "mode": "100644"
+    },
+    "db/review/naruv_employee_session_store_ci.sql": {
+      "sha": "78d00237a53c356e89fa7b75d078aa8aa635c332",
+      "mode": "100644"
+    },
+    "scripts/naruv_employee_session_store_ci.py": {
+      "sha": "592e7c749d85e44514eb23da5275882408b4c9fe",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -9169,6 +9181,16 @@
       "tests/test_naruv_b2_offline_stage.py",
       "docs/NARUV_STATUTORY_REVIEW_CASES.json",
       "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "employee_session_pg17_review": {
+    "base": "317a00912ff2d3c557befd2ec18316d7079e1ff9",
+    "scope": "rollback-only PostgreSQL session persistence review; no real identity, production auth or release",
+    "paths": [
+      "app/naruv_employee_session_store_review.py",
+      "db/review/naruv_employee_session_store_ci.sql",
+      "scripts/naruv_employee_session_store_ci.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }
