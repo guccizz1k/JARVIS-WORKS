@@ -67,7 +67,21 @@ def _decode_kr_body(raw):
             parse_constant=inventory._reject_constant)
         required={"expected_draft_sha256","ordinary_hourly","classification_sha256",
                 "classified_days","deductions","pension_assessed_base_krw"}
-        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review","annual_leave_accrual_review","fixed_week_paid_review","part_time_rest_review"}:raise ValueError("shape")
+        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review","annual_leave_accrual_review","fixed_week_paid_review","part_time_rest_review","agency_exception_review"}:raise ValueError("shape")
+        if "agency_exception_review" in d:
+            # Alternative manual insurance reference, never combine with other
+            # ordinary/exceptional reference modes in the same request.
+            if set(d)!=required|{"agency_exception_review"} or type(d["pension_assessed_base_krw"]) is not int or d["pension_assessed_base_krw"]!=0:
+                raise ValueError("agency review conflicts")
+            a=d["agency_exception_review"]
+            if (type(a) is not dict or set(a)!={"agency_cases","expected_agency_snapshot_sha256"}
+                or type(a["expected_agency_snapshot_sha256"]) is not str or not HEX.fullmatch(a["expected_agency_snapshot_sha256"])
+                or type(a["agency_cases"]) is not dict or set(a["agency_cases"])!={"pension","health","long_term_care","employment_insurance"}):
+                raise ValueError("agency shape")
+            for r in a["agency_cases"].values():
+                if (type(r) is not dict or set(r)!={"tenant","worker","period","case","amount_krw","evidence_sha256"}
+                    or type(r["amount_krw"]) is not int or any(type(r[k]) is not str for k in set(r)-{"amount_krw"})):
+                    raise ValueError("agency case shape")
         if "part_time_rest_review" in d:
             a=d["part_time_rest_review"]
             if set(d)&{"fixed_week_paid_review","paid_holiday_review","annual_leave_accrual_review","shift_review","monthly_tax_review"}:
@@ -195,7 +209,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -214,6 +228,23 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 deductions=data["deductions"])
             pension=data["pension_assessed_base_krw"]
             item=data["deductions"]["pension"]
+            if "agency_exception_review" in data:
+                agency=source_bound_agency_deduction_review_2026(tenant=org,worker=worker,period=period,
+                    policy_revision=revision,hourly_krw=rate,minutes_by_day=days,additional_bps=bps,
+                    expected_draft_sha256=data["expected_draft_sha256"],ordinary_hourly=data["ordinary_hourly"],
+                    classification_sha256=data["classification_sha256"],classified_days=data["classified_days"],
+                    deductions=data["deductions"],**data["agency_exception_review"])
+                if not agency["exception_items"] or agency["source_bound_review"]!=review:
+                    raise PayrollBlocked("KR_AGENCY_EXCEPTION_SCOPE")
+                # Agency decisions are manual here, not server-owned agency truth.
+                evidence={k:v for k,v in agency.items() if k!="source_bound_review"}
+                evidence.update(agency_source_authenticity_verified=False,ordinary_collection_comparison_performed=False)
+                return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,
+                    "pension_reference":{"status":"ORDINARY_REFERENCE_NOT_APPLICABLE_TO_EXCEPTION_REVIEW",
+                        "statutory_validated":False,"payment_authorized":False,"production_authorized":False},
+                    "agency_exception_reference":evidence,"evidence_authenticity_verified":False,"persisted":False,
+                    "statutory_validated":False,"payment_authorized":False,"production_authorized":False,
+                    "review_sha256":digest({"v":"KR_CI_MANUAL_AGENCY_EXCEPTION_V1","source":review["review_binding_sha256"],"agency":agency["review_sha256"]})}
             if item["assessment"]!="ASSESSED":raise PayrollBlocked("KR_NPS_ASSESSMENT_REQUIRED")
             pension_ref=pension_collection_reference_2026(tenant=org,worker=worker,period=period,
                 assessed_base_krw=pension,assessment_sha256=item["evidence_sha256"],
