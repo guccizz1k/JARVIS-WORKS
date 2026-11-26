@@ -302,7 +302,8 @@ class HRProfileEnvelope(unittest.TestCase):
         e={"fileId":"v1","contentLength":123,"contentSha1":"a"*40}
         row=dict(e,bucketId="b",fileName="synthetic/a",action="upload",uploadTimestamp=upload,
             fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"compliance","retainUntilTimestamp":upload+30*86400000}},
-            legalHold={"isClientAuthorizedToRead":True,"value":"off"})
+            legalHold={"isClientAuthorizedToRead":True,"value":"off"},
+            serverSideEncryption={"mode":"SSE-B2","algorithm":"AES256"})
         def page(rows,n=None,f=None,s=None,i=None):
             return {"startFileName":s,"startFileId":i,"response":{"files":rows,"nextFileName":n,"nextFileId":f}}
         def call(pages,now=upload+1):
@@ -316,7 +317,9 @@ class HRProfileEnvelope(unittest.TestCase):
                 dict(row,fileRetention={"isClientAuthorizedToRead":False,"value":None}),
                 dict(row,fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"governance","retainUntilTimestamp":upload+30*86400000}}),
                 dict(row,fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"compliance","retainUntilTimestamp":upload+29*86400000}}),
-                dict(row,legalHold={"isClientAuthorizedToRead":False,"value":None})):
+                dict(row,legalHold={"isClientAuthorizedToRead":False,"value":None}),
+                dict(row,serverSideEncryption=None),dict(row,serverSideEncryption={"mode":"SSE-C","algorithm":"AES256"}),
+                dict(row,serverSideEncryption={"mode":"SSE-B2","algorithm":None})):
             with self.subTest(bad=bad):self.assertEqual(call([page([bad])])["status"],"BLOCKED")
         self.assertEqual(call([page([])])["status"],"BLOCKED")
         self.assertEqual(call([page([row])],upload+30*86400000)["status"],"BLOCKED")

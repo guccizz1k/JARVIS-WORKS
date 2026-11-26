@@ -770,3 +770,22 @@ class SeveranceExcludedPeriod(unittest.TestCase):
         with self.assertRaises(PayrollBlocked):call(partial)
         legacy={k:v for k,v in row.items() if k not in ("excluded_days","excluded_wages_krw")}
         self.assertEqual(call(legacy)["components"]["severance"]["estimate_krw"],6000000)
+
+class FixedPartTimeAnnualLeave(unittest.TestCase):
+    def test_assessed_fixed_schedule_hours_and_boundaries(self):
+        from app.naruv_kr_payroll_review import fixed_part_time_annual_leave_reference_2026 as review
+        a=dict(tenant="a",worker="w",period="2026-11",comparator_grant_days=15,
+            contracted_week_minutes=1200,ordinary_hourly=12000,contract_sha256="a"*64,grant_assessment_sha256="b"*64)
+        r=review(**a)
+        self.assertEqual(r["grant_hours"],60)
+        self.assertEqual(r["full_unused_value_reference_krw"],720000)
+        self.assertEqual(review(**dict(a,contracted_week_minutes=1210))["grant_hours"],61)
+        self.assertEqual(review(**dict(a,contracted_week_minutes=900))["grant_hours"],45)
+        self.assertEqual(review(**dict(a,comparator_grant_days=1,contracted_week_minutes=901))["grant_hours"],4)
+        for k in ("payment_authorized","statutory_validated","production_authorized"):
+            self.assertFalse(r[k])
+        for change in (dict(contracted_week_minutes=899),dict(contracted_week_minutes=2400),
+                dict(contracted_week_minutes=True),dict(comparator_grant_days=26),
+                dict(grant_assessment_sha256=""),dict(period="2027-01")):
+            with self.subTest(change=change),self.assertRaises(PayrollBlocked):
+                review(**dict(a,**change))
