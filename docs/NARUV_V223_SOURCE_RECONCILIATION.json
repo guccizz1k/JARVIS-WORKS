@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "98c7a028a7a59958b27c004d822fdbb73285e9a8",
+      "sha": "2b1a43324426b61929641955abca9e7b7fd11975",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "ad980e06626e18b6ccf38ad716a65afa00337ee2",
+      "sha": "d60ae6de6ab5296eee066ad4d7e2c0896c67dace",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "beccaa76296120c8eb741181c731d6784279b29f",
+      "sha": "f85ca2a553432044421781f51eae16f8a7b86794",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "134cd153af230c878846d5372876d7ec75eedb63",
+      "sha": "bcfa8d078e899fa61baabd6063e79c94b1179b2e",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8559,6 +8559,14 @@
     },
     "db/review/naruv_supabase_qa_role_rehearsal.sql": {
       "sha": "1ca23b2fef5ad670e37c1b8cce168862f5ad72bc",
+      "mode": "100644"
+    },
+    "app/naruv_b2_retention_journal.py": {
+      "sha": "241397b9ff941b6a46cb20119633c94215796540",
+      "mode": "100644"
+    },
+    "tests/test_naruv_b2_retention_journal.py": {
+      "sha": "84dc731fe57c4fdff8f0cc6e0f445ba88ea3f153",
       "mode": "100644"
     }
   },
@@ -8844,6 +8852,18 @@
       "scripts/naruv_valuation_ci.py",
       "app/naruv_hr_profile_envelope.py",
       "tests/test_naruv_hr_profile_envelope.py"
+    ]
+  },
+  "p1_p2_retention_calendar": {
+    "base": "25a988face5d46aeb84fd2a2972007991a4c6723",
+    "scope": "Review-only actual calendar month bound, authorized unset legal hold, pinned completed correction journal reconciliation, future upload retention guard; synthetic tests only, no live provider or legal acceptance",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "app/naruv_hr_profile_envelope.py",
+      "tests/test_naruv_hr_profile_envelope.py",
+      "app/naruv_b2_retention_journal.py",
+      "tests/test_naruv_b2_retention_journal.py"
     ]
   }
 }
