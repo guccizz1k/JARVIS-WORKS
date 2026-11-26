@@ -733,3 +733,17 @@ class ShiftNightBoundary(unittest.TestCase):
         for change in (dict(segments=segments+[segments[0]]),dict(classified_days=[rows[0],dict(rows[1],night=301)]),
             dict(segments=[dict(segments[0],start="2026-11-01T21:00+00:00"),segments[1]])):
             with self.assertRaises(PayrollBlocked):review(**dict(a,**change))
+
+    def test_zero_work_days_have_unique_valid_period_dates(self):
+        from app.naruv_kr_payroll_review import shift_night_source_review_2026 as review
+        segments=[dict(start="2026-11-01T21:00+09:00",end="2026-11-02T02:00+09:00",evidence_sha256="a"*64),
+            dict(start="2026-11-02T03:00+09:00",end="2026-11-02T07:00+09:00",evidence_sha256="b"*64)]
+        rows=[day(d="2026-11-01",r=180,n=120),day(d="2026-11-02",r=360,n=300)]
+        a=dict(tenant="a",worker="w",period="2026-11",segments=segments,shift_sha256="c"*64)
+        good=review(**a,classified_days=rows)
+        zero=day(d="2026-11-03",r=0)
+        self.assertEqual(review(**a,classified_days=rows+[zero])["days"],good["days"])
+        for bad in (rows+[zero,zero],rows+[day(d="2026-11-31",r=0)],rows+[day(d="2026-12-01",r=0)],
+                    rows+[day(d="x",r=0)],[day(d="2026-11-01",r=0)]+rows):
+            with self.subTest(bad=bad),self.assertRaisesRegex(PayrollBlocked,"KR_SHIFT_CLASSIFIED"):
+                review(**a,classified_days=bad)
