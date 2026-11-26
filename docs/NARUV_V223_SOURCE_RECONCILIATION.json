@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "d14d013b4f2a290477acb28531ca7e7f89a5b1ba",
+      "sha": "929dc07c40e181b1e1176924ae9378d8bb2fdf47",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "161fbbcc036309591938e7522bdf883cd9cd0a2f",
+      "sha": "75201bc9c121057391aa1237a8c4f58222f557d6",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "dadfe1c99307924b12b33fbba5cdbf3d92562cde",
+      "sha": "9a04351dfff2b0a6806b386afcf2ef60ff2820d3",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "fa7076dec52bd8542b371c40019e6c343e740965",
+      "sha": "bb88adc3fa5a36d531cc6c75a4a88424a1549842",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "79c1c24722fc9ccc4e2b1763002e9b822da63482",
+      "sha": "fbf9520f4514e526cad4866bcf464d12964303a9",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -9032,6 +9032,17 @@
     "paths": [
       "scripts/naruv_owner_live_upload.py",
       "tests/test_naruv_owner_live_upload.py"
+    ]
+  },
+  "p1_p2_statement_acceptance": {
+    "base": "f9ed648dc9dde144ce1581fb2c4000d2cf235504",
+    "scope": "Restricted wage statement draft only, source-bound components/formulas/deductions, display allocation; independent recovery handoff and owner B2 evidence preserved; no statutory acceptance, delivery, remote restore or key action",
+    "paths": [
+      "app/naruv_draft_review.py",
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }
 }
