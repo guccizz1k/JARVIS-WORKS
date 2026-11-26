@@ -67,7 +67,11 @@ def _decode_kr_body(raw):
             parse_constant=inventory._reject_constant)
         required={"expected_draft_sha256","ordinary_hourly","classification_sha256",
                 "classified_days","deductions","pension_assessed_base_krw"}
-        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review"}:raise ValueError("shape")
+        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review"}:raise ValueError("shape")
+        if "unused_leave_review" in d:
+            leave=d["unused_leave_review"]
+            if type(leave) is not dict or set(leave)!={"grant_ledger_sha256","expected_grant_ids","entries"}:
+                raise ValueError("leave shape")
         if "settlement_components" in d and type(d["settlement_components"]) is not dict:raise ValueError("settlement shape")
         if "paid_holiday_review" in d:
             h=d["paid_holiday_review"]
@@ -120,7 +124,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     """
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
-        assessed_settlement_components_2026,approved_paid_holiday_review_2026)
+        assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -169,6 +173,11 @@ def _kr_review(token,csrf,prior,worker,period,data):
                     raise PayrollBlocked("KR_HOLIDAY_SOURCE_MISMATCH")
                 proof.update(v="KR_CI_MANUAL_API_V3",holiday=holiday["review_sha256"])
                 details["paid_holiday_reference"]=holiday
+            if "unused_leave_review" in data:
+                leave=unused_leave_compensation_review_2026(tenant=org,worker=worker,period=period,
+                    ordinary_hourly=data["ordinary_hourly"],**data["unused_leave_review"])
+                proof.update(v="KR_CI_MANUAL_API_V3",leave=leave["review_sha256"])
+                details["unused_leave_reference"]=leave
             return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
@@ -264,6 +273,12 @@ def create_router():
             prior=await run_in_threadpool(write._auth,token,csrf)
             data=await _kr_body(request)
             result=await run_in_threadpool(_kr_review,token,csrf,prior,worker,period,data)
+            if preview._one_header(request,"accept","")=="text/html":
+                from fastapi.responses import HTMLResponse
+                from .naruv_kr_payroll_review import isolated_payroll_review_html
+                return HTMLResponse(isolated_payroll_review_html(result),headers={
+                    "Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY",
+                    "Referrer-Policy":"no-referrer","Content-Security-Policy":"default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"})
             response.headers["Cache-Control"]="no-store"
             return result
     @router.post("/documents/{key}/register/{rid}")

@@ -703,3 +703,17 @@ class AssessedSettlementComponents(unittest.TestCase):
         self.assertFalse(r["statutory_validated"])
         for rows in ([row,row],[dict(row,date="2026-09-09")],[dict(row,paid_minutes=True)],[dict(row,kind="INFERRED")]):
             with self.assertRaises(PayrollBlocked):review(**dict(args,days=rows))
+
+
+    def test_isolated_html_view_does_not_embed_evidence(self):
+        from app.naruv_kr_payroll_review import isolated_payroll_review_html
+        r=dict(status="MANUAL_SUBMISSION_REFERENCE_ONLY",evidence_authenticity_verified=False,persisted=False,
+            statutory_validated=False,payment_authorized=False,production_authorized=False,
+            review={"deductions":{"gross_estimate_krw":120000,"deductions_krw":6000,"net_estimate_krw":114000}},
+            paid_holiday_reference={"estimate_krw":72000,"evidence":"<script>unsafe</script>"})
+        html=isolated_payroll_review_html(r)
+        self.assertIn("114,000",html)
+        self.assertIn("72,000",html)
+        self.assertNotIn("<script",html)
+        self.assertNotIn("unsafe",html)
+        with self.assertRaises(PayrollBlocked):isolated_payroll_review_html(dict(r,payment_authorized=True))

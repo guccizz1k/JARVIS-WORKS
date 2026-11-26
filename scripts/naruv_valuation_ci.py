@@ -768,6 +768,13 @@ def run_valuation(base):
                 self.assertEqual(combined["settlement_reference"]["components"]["year_end"]["refund_reference_krw"],2000)
                 self.assertEqual(combined["paid_holiday_reference"]["estimate_krw"],72000)
                 self.assertFalse(combined["payment_authorized"])
+                html=self.call(krpath,dict(manual,settlement_components=settlement,paid_holiday_review=holiday),extra={"accept":"text/html"})
+                self.assertEqual(html.status_code,200)
+                self.assertIn("text/html",html.headers["content-type"])
+                self.assertIn("72,000",html.text)
+                self.assertIn("지급 및 운영 반영 금지",html.text)
+                self.assertEqual(html.headers["cache-control"],"no-store")
+                self.assertNotIn("<script",html.text)
                 bad_holiday=dict(holiday,days=[dict(holiday["days"][0],actual_minutes=60)])
                 self.check(self.call(krpath,dict(manual,paid_holiday_review=bad_holiday)),409)
                 for k in ("evidence_authenticity_verified","persisted","payment_authorized","production_authorized","statutory_validated"):

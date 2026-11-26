@@ -1522,3 +1522,34 @@ def approved_paid_holiday_review_2026(*,tenant,worker,period,ordinary_hourly,cal
             "worker":worker,"period":period,"rate":ordinary_hourly,"calendar":calendar_sha256,
             "days":sorted(normalized,key=lambda r:r["date"])}),"requires_human_review":True,
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def isolated_payroll_review_html(result):
+    """CI-only no-script read-only representation; not the approved WORKS UI.
+    Render only a fixed schema of numeric results; never embed client evidence.
+    """
+    from html import escape
+    require(type(result) is dict and result.get("status")=="MANUAL_SUBMISSION_REFERENCE_ONLY"
+        and all(result.get(k) is False for k in ("evidence_authenticity_verified","persisted","statutory_validated","payment_authorized","production_authorized")),"KR_VIEW_SCOPE")
+    rows=[]
+    def line(label,v):
+        require(type(v) is int and abs(v)<=10**15,"KR_VIEW_AMOUNT")
+        rows.append("<tr><th scope=\"row\">"+escape(label)+"</th><td>"+format(v,",")+" 원</td></tr>")
+    d=result["review"]["deductions"]
+    line("기본 급여 검토 총액",d["gross_estimate_krw"])
+    line("수동 공제 합계",d["deductions_krw"])
+    line("기본 급여 실수령 참고액",d["net_estimate_krw"])
+    if "paid_holiday_reference" in result:line("별도 공휴일 수당 참고액",result["paid_holiday_reference"]["estimate_krw"])
+    if "unused_leave_reference" in result:
+        leave=result["unused_leave_reference"]
+        if leave["reference_krw"] is not None:line("별도 미사용 연차수당 참고액",leave["reference_krw"])
+    comps=result.get("settlement_reference",{}).get("components",{})
+    for k,label,key in (("bonus","별도 상여 원천징수 차액","signed_difference_krw"),
+        ("year_end","별도 연말정산 차액 (음수: 환급)","signed_difference_krw"),
+        ("severance","별도 퇴직금 참고액","estimate_krw")):
+        if k in comps:line(label,comps[k][key])
+    return ("<!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<title>급여 격리 검토</title><main><h1>급여 격리 검토</h1>"
+        "<p>수동 증거 · 법정 정확성 미확정 · 지급 및 운영 반영 금지. 별도 항목은 기본 급여 합계에 합산되지 않았습니다.</p>"
+        "<table><caption>계산 참고 결과</caption><thead><tr><th scope=\"col\">항목</th><th scope=\"col\">금액</th></tr></thead><tbody>"
+        +"".join(rows)+"</tbody></table></main></html>")

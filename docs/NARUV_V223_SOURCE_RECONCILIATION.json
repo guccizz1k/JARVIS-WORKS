@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "98615f0b40e689481f485911efcf36983fb713cd",
+      "sha": "961c90e63180311f9cdb0af78c91f353a7b44b21",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "1be65955c88472ca1714f9cb8dd540c61d8c13e5",
+      "sha": "571bc18c479cfc9639274b75981175a82c6872db",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "5758d74df0f399f62f3846873509644526158ac0",
+      "sha": "b580f19527d9f4b435ae66ede4b07c1bbfdfe9c0",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "1c5b19d1cefc0b48188cc73e47ce28b03617b865",
+      "sha": "0bcbeb61566b964e329238ed5c502ba61f77972e",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8784,5 +8784,9 @@
   "p1_p2_assessed_settlement_hosted_recovery": {
     "parent": "2066ba32ae9521860c150a6a31020ec129bc3847",
     "reason": "Restricted assessed bonus, year-end, severance, ordinary health leave and holiday reference; extend authenticated CI review API, no statutory or payment claim. Provider inventory comparison and pinned key incident quarantine, no provider connection or real key actions. Actual hosted synthetic 2-row ciphertext roundtrip and restore evidence separately recorded."
+  },
+  "isolated_payroll_html_and_leave_api": {
+    "parent": "b689119d2222bfe9f00be9a605198595f0b4dbf0",
+    "reason": "Optional assessed unused leave reconciler wired into existing authenticated CI-only payroll API, isolated no-script HTML view with separate totals, no original UI or production bridge changes. Actual browser NOT RUN."
   }
 }
