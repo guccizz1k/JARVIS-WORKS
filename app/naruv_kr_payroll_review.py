@@ -1344,7 +1344,8 @@ def fixed_part_time_weekly_rest_2026(*,tenant,worker,sunday,hourly_krw,
 
 
 def annual_leave_accrual_review_2026(*,tenant,worker,employment_start,service_year,
-        as_of,last_employed_on,months,attendance_sha256,contract_sha256,scope):
+        as_of,last_employed_on,months,attendance_sha256,contract_sha256,scope,
+        first_year_low_attendance_assessment=None):
     """One service-year review, first-of-month hire, continuous full-time.
     Article 60 and MOEL interpretation 2021-12-16; monthly attendance counts
     must be independently classified under Art60(6), not inferred from hours.
@@ -1390,24 +1391,40 @@ def annual_leave_accrual_review_2026(*,tenant,worker,employment_start,service_ye
         if service_year==1 and i<11 and r["scheduled_days"]==r["credited_days"]:
             grants.append({"date":boundary(i+1).isoformat(),"days":1,"kind":"FIRST_YEAR_MONTHLY"})
     annual_complete=len(required)==12
+    assessment=None
+    if first_year_low_attendance_assessment is not None:
+        require(service_year==1 and annual_complete,"KR_LEAVE_TRANSITION_SCOPE")
     if annual_complete:
         scheduled=sum(r["scheduled_days"] for r in rows.values())
         credited=sum(r["credited_days"] for r in rows.values())
         if 5*credited>=4*scheduled:
             grants.append({"date":boundary(12).isoformat(),"days":min(25,15+(service_year-1)//2),"kind":"ANNUAL"})
         elif service_year==1:
-            # Avoid overlapping first-year monthly grants and the below-80%
-            # annual calculation until that exact transition is independently settled.
-            raise PayrollBlocked("KR_LEAVE_FIRST_YEAR_LOW_ATTENDANCE_REVIEW_REQUIRED")
+            # Explicitly assessed anniversary award, not an automatic legal
+            # determination. Art.60(2) / MOLEG 24-0114; first-year overlap
+            # must be separately assessed by the authorized HR reviewer.
+            a=first_year_low_attendance_assessment
+            require(type(a) is dict and set(a)=={"attendance_sha256","contract_sha256","anniversary","assessed_additional_days","assessment_sha256"},
+                "KR_LEAVE_FIRST_YEAR_LOW_ATTENDANCE_REVIEW_REQUIRED")
+            require(a["attendance_sha256"]==attendance_sha256 and a["contract_sha256"]==contract_sha256
+                and a["anniversary"]==boundary(12).isoformat()
+                and type(a["assessment_sha256"]) is str and HEX.fullmatch(a["assessment_sha256"]),"KR_LEAVE_TRANSITION_EVIDENCE")
+            fully_attended=sum(r["scheduled_days"]==r["credited_days"] for r in rows.values())
+            require(_whole(a["assessed_additional_days"],0,fully_attended),"KR_LEAVE_TRANSITION_DAYS")
+            assessment=dict(a)
+            if a["assessed_additional_days"]:
+                grants.append({"date":boundary(12).isoformat(),"days":a["assessed_additional_days"],"kind":"FIRST_YEAR_LOW_ATTENDANCE_ASSESSED_REFERENCE"})
         else:
             days=sum(r["scheduled_days"]==r["credited_days"] for r in rows.values())
             if days:grants.append({"date":boundary(12).isoformat(),"days":days,"kind":"LOW_ATTENDANCE_MONTHLY_REFERENCE"})
+    require(first_year_low_attendance_assessment is None or assessment is not None,"KR_LEAVE_TRANSITION_SCOPE")
     total=sum(g["days"] for g in grants)
+    proof_extra={} if assessment is None else {"first_year_low_attendance_assessment":assessment}
     return {"status":"ANNUAL_LEAVE_ACCRUAL_REFERENCE_ONLY","grants":grants,"earned_days_in_review":total,
         "annual_period_complete":annual_complete,"requires_human_review":True,
         "review_sha256":hash_input({"v":"KR_LEAVE_ACCRUAL_2026_V1","tenant":tenant,"worker":worker,"hire":employment_start,
             "year":service_year,"as_of":as_of,"last_employed_on":last_employed_on,"scope":scope,
-            "attendance":attendance_sha256,"contract":contract_sha256,"months":[rows[k] for k in sorted(rows)],"grants":grants}),
+            "attendance":attendance_sha256,"contract":contract_sha256,"months":[rows[k] for k in sorted(rows)],"grants":grants,**proof_extra}),
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
 
 def unused_leave_compensation_review_2026(*,tenant,worker,period,ordinary_hourly,grant_ledger_sha256,
