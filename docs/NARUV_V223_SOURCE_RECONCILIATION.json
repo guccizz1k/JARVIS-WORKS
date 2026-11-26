@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "0828ecd80b9d47541c0a75562c50f77050e63f1d",
+      "sha": "e433707ab36ec23f9eecf01aa14de3e0047552e7",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "f9a3c991960568b1e9a66d28b20a75a89e5c63c9",
+      "sha": "512b90fc88f1347ba519cf2261a1819d8eb8a1b0",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8776,5 +8776,9 @@
   "annual_leave_and_mounted_key_store": {
     "parent": "6cfc4bace93de61736f4febd446bdaeee2a27858",
     "reason": "Restricted leave accrual with next-day employment boundary, first-year monthly and anniversary grants, assessed unused compensation reconciliation; read-only trusted POSIX mounted secret adapter active/recovery scope, permissions, hard/symlink denial. No actual operational key access or legal acceptance."
+  },
+  "first_year_low_attendance_review_guard": {
+    "parent": "6b1ea2f3edd9f0c395c3301971d6b5e72fcb62ec",
+    "reason": "Fail closed on first anniversary below 80% to avoid unverified overlap of first-year grants and monthly alternative."
   }
 }

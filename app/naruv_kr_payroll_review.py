@@ -1394,7 +1394,11 @@ def annual_leave_accrual_review_2026(*,tenant,worker,employment_start,service_ye
         credited=sum(r["credited_days"] for r in rows.values())
         if 5*credited>=4*scheduled:
             grants.append({"date":boundary(12).isoformat(),"days":min(25,15+(service_year-1)//2),"kind":"ANNUAL"})
-        elif service_year>1:
+        elif service_year==1:
+            # Avoid overlapping first-year monthly grants and the below-80%
+            # annual calculation until that exact transition is independently settled.
+            raise PayrollBlocked("KR_LEAVE_FIRST_YEAR_LOW_ATTENDANCE_REVIEW_REQUIRED")
+        else:
             days=sum(r["scheduled_days"]==r["credited_days"] for r in rows.values())
             if days:grants.append({"date":boundary(12).isoformat(),"days":days,"kind":"LOW_ATTENDANCE_MONTHLY_REFERENCE"})
     total=sum(g["days"] for g in grants)

@@ -642,6 +642,10 @@ class AnnualLeaveAccrualAndCompensation(unittest.TestCase):
         for year,expected in ((3,16),(5,17),(21,25),(25,25)):
             a=self.args(hire=f"{2026-year}-01-01",year=year)
             self.assertEqual(review(**a)["earned_days_in_review"],expected)
+        low=self.args()
+        for r in low["months"]:r["credited_days"]=10
+        with self.assertRaisesRegex(PayrollBlocked,"KR_LEAVE_FIRST_YEAR_LOW_ATTENDANCE_REVIEW_REQUIRED"):
+            review(**low)
         a=self.args(hire="2024-01-01",year=2)
         for r in a["months"]:r["credited_days"]=16
         self.assertEqual(review(**a)["earned_days_in_review"],15)
