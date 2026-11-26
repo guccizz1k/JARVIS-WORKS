@@ -235,7 +235,9 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 settlement=assessed_settlement_components_2026(tenant=org,worker=worker,period=period,
                     components=data["settlement_components"])
                 proof.update(v="KR_CI_MANUAL_API_V3",settlement=settlement["review_sha256"])
-                details["settlement_reference"]=settlement
+                details["settlement_reference"]=dict(settlement,annual_source_authenticity_verified=False,
+                    confirmed_month_gross_estimate_krw=review["wage"]["gross_estimate_krw"],
+                    settlement_included_in_monthly_gross=False)
             if "paid_holiday_review" in data:
                 holiday=approved_paid_holiday_review_2026(tenant=org,worker=worker,period=period,
                     ordinary_hourly=data["ordinary_hourly"],**data["paid_holiday_review"])
