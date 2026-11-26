@@ -1820,10 +1820,11 @@ def isolated_wage_statement_print_html(result):
     require(type(result) is dict and result.get("status")=="MANUAL_SUBMISSION_REFERENCE_ONLY"
         and all(result.get(k) is False for k in ("evidence_authenticity_verified","persisted","statutory_validated","payment_authorized","production_authorized")),"KR_PRINT_SCOPE")
     a=result["wage_statement_reference"];rows=_statement_print_rows(a)
+    note="<p>추가 수당의 통상임금 산입 여부와 세금·보험료는 별도 확인이 필요합니다.</p>" if a["status"]=="ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY" else ""
     table="".join("<tr><th scope=\"row\">"+escape(k)+"</th><td>"+escape(f)+"</td><td>"+format(n,",")+" 원</td></tr>" for k,f,n in rows)
     return ("<!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><title>임금명세서 검토용 초안</title>"
         "<main><h1>임금명세서 검토용 초안 — 교부 금지</h1><p>법정 적합성, 실제 지급일 및 공제 검증 미확정. 실제 지급 및 교부 금지.</p>"
-        "<p>근로자 식별자: "+escape(a["worker"])+" / 대상월: "+escape(a["period"])+" / 지급 예정일: "+escape(a["proposed_payment_date"])+"</p>"
+        +note+"<p>근로자 식별자: "+escape(a["worker"])+" / 대상월: "+escape(a["period"])+" / 지급 예정일: "+escape(a["proposed_payment_date"])+"</p>"
         "<table><caption>급여 및 공제 참고 내역</caption><thead><tr><th>항목</th><th>계산 기준</th><th>금액</th></tr></thead><tbody>"
         +table+"</tbody></table><p>총액: "+format(a["gross_krw"],",")+" 원 / 공제: "+format(a["deductions_krw"],",")+" 원</p>"
         "<p>실수령 참고액: "+format(a["net_krw"],",")+" 원</p></main></html>")
@@ -1859,8 +1860,9 @@ def isolated_payroll_review_html(result):
         if a["status"]=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY" or a.get("base_statement_status")=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY":
             require(a.get("alternative_gross") is True and a.get("add_to_basic_gross") is False,"KR_VIEW_STATEMENT_ALTERNATIVE")
             labels={"work_base":"근로 기본액","weekly_rest":"주휴수당","annual_leave":"유급 연차수당"}
-            line("명세서 대체 급여 총액 (기본 급여 미합산)",a["gross_krw"])
-            line("명세서 대체 실수령 참고액",a["net_krw"])
+            if a["status"]=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY":
+                line("명세서 대체 급여 총액 (기본 급여 미합산)",a["gross_krw"])
+                line("명세서 대체 실수령 참고액",a["net_krw"])
         require(type(a["components"]) is list and [r["kind"] for r in a["components"]]==list(labels),"KR_VIEW_STATEMENT_COMPONENTS")
         for r in a["components"]:
             require(all(_whole(r[k],0,10**12) for k in ("minutes","hourly_krw","multiplier_bps")),"KR_VIEW_STATEMENT_NUMBERS")
