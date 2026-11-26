@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "fe810fcf701e0da74fc5c699e007a0db289f2291",
+      "sha": "5aec01e5a364323883c5b9249d04f0d062c3fb66",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8654,11 +8654,11 @@
       "mode": "100644"
     },
     "db/review/naruv_employee_session_store_ci.sql": {
-      "sha": "78d00237a53c356e89fa7b75d078aa8aa635c332",
+      "sha": "c7c524093343ecbdf0ef1d4faefa35e010b2a0b8",
       "mode": "100644"
     },
     "scripts/naruv_employee_session_store_ci.py": {
-      "sha": "592e7c749d85e44514eb23da5275882408b4c9fe",
+      "sha": "5442eb3166eafce54c8f30a983975206d292f512",
       "mode": "100644"
     }
   },
@@ -9189,6 +9189,15 @@
     "scope": "rollback-only PostgreSQL session persistence review; no real identity, production auth or release",
     "paths": [
       "app/naruv_employee_session_store_review.py",
+      "db/review/naruv_employee_session_store_ci.sql",
+      "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "employee_session_broker_scope_review": {
+    "base": "07abcb8d2585f6c2cf1b028e5c068412b31de217",
+    "scope": "isolated NOLOGIN roles, RLS, denial tests; no production auth",
+    "paths": [
       "db/review/naruv_employee_session_store_ci.sql",
       "scripts/naruv_employee_session_store_ci.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"

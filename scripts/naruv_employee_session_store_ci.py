@@ -42,6 +42,35 @@ class EmployeeStore(unittest.TestCase):
                 conn.execute(update)
                 with self.assertRaises(AccessDenied):store.access(conn,**args)
                 conn.execute(undo)
+            conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
+            self.assertEqual(conn.execute("SELECT current_user").fetchone()[0],"naruv_employee_ci_a")
+            self.assertEqual(conn.execute("SELECT tenant,principal FROM naruv_employee_ci.identities").fetchall(),[("ci-a","e1")])
+            self.assertEqual(conn.execute("SELECT tenant,worker FROM naruv_employee_ci.entitlements").fetchall(),[("ci-a","w1")])
+            self.assertEqual(store.access(conn,**args)["status"],"CI_POSTGRES_EMPLOYEE_SCOPE_MATCH_ONLY")
+            role_token=store.issue(conn,**issue)
+            self.assertTrue(store.access(conn,**dict(args,token=role_token))["session_store_verified"])
+            for wrong in (dict(trusted_tenant="ci-b"),dict(trusted_principal="e2")):
+                with self.assertRaises(AccessDenied):store.issue(conn,**dict(issue,**wrong))
+            for forbidden in (
+                "UPDATE naruv_employee_ci.identities SET active=false",
+                "UPDATE naruv_employee_ci.entitlements SET active=false",
+                "UPDATE naruv_employee_ci.sessions SET revoked=true",
+                "DELETE FROM naruv_employee_ci.sessions",
+                "TRUNCATE naruv_employee_ci.sessions",
+                "INSERT INTO naruv_employee_ci.identities VALUES ('ci-a','evil','w3',1,true)",
+                "INSERT INTO naruv_employee_ci.sessions SELECT audience,'ci-b',principal,worker,auth_epoch,receipt,review_sha256,render_sha256,repeat('f',64),issued_at,expires_at,revoked FROM naruv_employee_ci.sessions LIMIT 1"):
+                with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                    with conn.transaction():conn.execute(forbidden)
+            conn.execute("SET LOCAL ROLE naruv_employee_ci_b")
+            self.assertEqual(conn.execute("SELECT tenant,principal FROM naruv_employee_ci.identities").fetchall(),[("ci-b","e1")])
+            self.assertEqual(conn.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone()[0],0)
+            with self.assertRaises(AccessDenied):store.access(conn,**args)
+            b_issue=dict(issue,trusted_tenant="ci-b")
+            b_token=store.issue(conn,**b_issue)
+            self.assertTrue(store.access(conn,**dict(args,trusted_tenant="ci-b",token=b_token))["session_store_verified"])
+            conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
+            self.assertEqual(conn.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone()[0],2)
+            conn.execute("RESET ROLE")
             conn.execute("SET LOCAL naruv.employee_store_ci='OFF'")
             with self.assertRaises(AccessDenied):store.access(conn,**args)
         finally:

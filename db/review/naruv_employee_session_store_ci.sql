@@ -26,3 +26,25 @@ CREATE TABLE naruv_employee_ci.sessions(
  FOREIGN KEY(tenant,principal,worker) REFERENCES naruv_employee_ci.identities(tenant,principal,worker),
  FOREIGN KEY(tenant,worker,receipt) REFERENCES naruv_employee_ci.entitlements(tenant,worker,receipt));
 REVOKE ALL ON ALL TABLES IN SCHEMA naruv_employee_ci FROM PUBLIC;
+
+-- CI-only broker roles; FOR SHARE requires a column UPDATE grant.
+CREATE ROLE naruv_employee_ci_a NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE naruv_employee_ci_b NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+GRANT USAGE ON SCHEMA naruv_employee_ci TO naruv_employee_ci_a,naruv_employee_ci_b;
+GRANT SELECT ON ALL TABLES IN SCHEMA naruv_employee_ci TO naruv_employee_ci_a,naruv_employee_ci_b;
+GRANT UPDATE (active) ON naruv_employee_ci.identities,naruv_employee_ci.entitlements TO naruv_employee_ci_a,naruv_employee_ci_b;
+GRANT UPDATE (revoked) ON naruv_employee_ci.sessions TO naruv_employee_ci_a,naruv_employee_ci_b;
+GRANT INSERT ON naruv_employee_ci.sessions TO naruv_employee_ci_a,naruv_employee_ci_b;
+ALTER TABLE naruv_employee_ci.identities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_employee_ci.identities FORCE ROW LEVEL SECURITY;
+CREATE POLICY broker_read ON naruv_employee_ci.identities FOR SELECT TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1');
+CREATE POLICY broker_lock ON naruv_employee_ci.identities FOR UPDATE TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1') WITH CHECK (false);
+ALTER TABLE naruv_employee_ci.entitlements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_employee_ci.entitlements FORCE ROW LEVEL SECURITY;
+CREATE POLICY broker_read ON naruv_employee_ci.entitlements FOR SELECT TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND worker='w1');
+CREATE POLICY broker_lock ON naruv_employee_ci.entitlements FOR UPDATE TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND worker='w1') WITH CHECK (false);
+ALTER TABLE naruv_employee_ci.sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE naruv_employee_ci.sessions FORCE ROW LEVEL SECURITY;
+CREATE POLICY broker_read ON naruv_employee_ci.sessions FOR SELECT TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1');
+CREATE POLICY broker_lock ON naruv_employee_ci.sessions FOR UPDATE TO naruv_employee_ci_a,naruv_employee_ci_b USING (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1') WITH CHECK (false);
+CREATE POLICY broker_insert ON naruv_employee_ci.sessions FOR INSERT TO naruv_employee_ci_a,naruv_employee_ci_b WITH CHECK (((current_user='naruv_employee_ci_a' AND tenant='ci-a') OR (current_user='naruv_employee_ci_b' AND tenant='ci-b')) AND principal='e1' AND worker='w1' AND NOT revoked AND EXISTS (SELECT 1 FROM naruv_employee_ci.identities i WHERE (i.tenant,i.principal,i.worker,i.auth_epoch)=(sessions.tenant,sessions.principal,sessions.worker,sessions.auth_epoch) AND i.active) AND EXISTS (SELECT 1 FROM naruv_employee_ci.entitlements e WHERE (e.tenant,e.worker,e.receipt,e.review_sha256,e.render_sha256)=(sessions.tenant,sessions.worker,sessions.receipt,sessions.review_sha256,sessions.render_sha256) AND e.active));

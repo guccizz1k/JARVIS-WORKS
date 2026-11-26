@@ -148,3 +148,6 @@ Prior 4be6d9b5 carrier c549076a Actions 45773070527/45773070494/45773070509 comp
 
 ## Employee session PostgreSQL review candidate (2026-11-26)
 Prior detached CI 45808723608, migration 45808723763 and main required 45808723619 success; 404 tests and 14616 subtests. Added rollback-only isolated PG17 storage adapter with hashed tokens, DB clock, trusted principal/tenant/receipt binding and live identity/entitlement/session row locks; tests for wrong scopes, expiry and revocation. No production migration, real employee identity proofing, dedicated least-privilege service role or cross-connection concurrency acceptance. No legal delivery or payment authorization. New CI pending.
+
+## Employee broker scoped DB role review
+Add synthetic NOLOGIN roles per worker scope, FORCE RLS, read and session insertion only; row-share-lock UPDATE column grants with false write checks. Direct identity/entitlement/session mutation, cross-tenant scope and alternate worker tests; no real identity mapping, endpoint, service role credentials, cross-connection concurrency or production migration. Pending actual PG17 CI.
