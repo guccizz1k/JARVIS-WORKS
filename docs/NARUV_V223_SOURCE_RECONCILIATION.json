@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "2b1a43324426b61929641955abca9e7b7fd11975",
+      "sha": "ffb7a8cf9c994c400ecd140007d3560df1493911",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "d60ae6de6ab5296eee066ad4d7e2c0896c67dace",
+      "sha": "47381e81826d69e1111ec902993e1564ee315b87",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8568,6 +8568,14 @@
     "tests/test_naruv_b2_retention_journal.py": {
       "sha": "84dc731fe57c4fdff8f0cc6e0f445ba88ea3f153",
       "mode": "100644"
+    },
+    "scripts/naruv_owner_retention_evidence.py": {
+      "sha": "8138b19f4ea47c4c361653914acf5095acc0a24c",
+      "mode": "100644"
+    },
+    "tests/test_naruv_owner_retention_evidence.py": {
+      "sha": "6fcce5a403bf458af7e0607870db855d7b77d26e",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8864,6 +8872,16 @@
       "tests/test_naruv_hr_profile_envelope.py",
       "app/naruv_b2_retention_journal.py",
       "tests/test_naruv_b2_retention_journal.py"
+    ]
+  },
+  "p1_p2_owner_evidence": {
+    "base": "c7266e76b8934b0385d237dba475bfad210ccf98",
+    "scope": "Explicit assessed first-year low attendance anniversary reference only; offline owner retention journal reconciliation using pinned original receipts and prior verified module; no statutory/production/remote acceptance",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_owner_retention_evidence.py",
+      "tests/test_naruv_owner_retention_evidence.py"
     ]
   }
 }
