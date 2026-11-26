@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "5efc0e7bb925f82003a9081fa48529009ee788c2",
+      "sha": "01c4e7d4bd8072b45eba2143fd03199ab6f2d3af",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8634,7 +8634,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md": {
-      "sha": "1a6da8d6fd7332498b30b275d3b06aed3ad61c09",
+      "sha": "f9a5e7c56261904038e4878f7a7faab0f8006357",
       "mode": "100644"
     },
     "scripts/naruv_b2_offline_stage.py": {
@@ -8658,11 +8658,15 @@
       "mode": "100644"
     },
     "scripts/naruv_employee_session_store_ci.py": {
-      "sha": "88b268dcfce1315b3279655355a5bd04c794740b",
+      "sha": "eb0e9c6d360d299ac8b20a160e6b5a72578913d8",
       "mode": "100644"
     },
     "app/naruv_employee_statement_binding_review.py": {
       "sha": "4849739208877339658a24e7ac0aecfa820a7d1a",
+      "mode": "100644"
+    },
+    "app/naruv_employee_proof_review.py": {
+      "sha": "333ed5c8d0b31fca3c9c398419de5b327c459b0f",
       "mode": "100644"
     }
   },
@@ -9232,6 +9236,16 @@
       "scripts/naruv_employee_session_store_ci.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md",
       "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md"
+    ]
+  },
+  "employee_synthetic_proof_review": {
+    "base": "98058c378568780e3982badc60abfd3e4500e09e",
+    "scope": "CI-only one-time proof handoff; no real provider, enrollment or delivery",
+    "paths": [
+      "app/naruv_employee_proof_review.py",
+      "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INDEPENDENT_RECOVERY_PLAN.md",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }
 }

@@ -121,6 +121,59 @@ class EmployeeStore(unittest.TestCase):
             conn.rollback()
             self.assertIsNone(conn.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
             conn.close()
+    def test_synthetic_provider_proof_one_time_binding(self):
+        from dataclasses import replace
+        from app import naruv_employee_proof_review as proof
+        dsn=os.environ["JW_PG_CI_ROOT_DSN"]
+        cfg=conninfo_to_dict(dsn)
+        self.assertEqual((cfg.get("host"),cfg.get("port"),cfg.get("dbname"),cfg.get("user")),("127.0.0.1","5432","postgres","postgres"))
+        self.assertEqual(os.environ.get("GITHUB_ACTIONS"),"true")
+        conn=psycopg.connect(dsn)
+        try:
+            conn.execute("SET LOCAL naruv.employee_store_ci='DISPOSABLE_ONLY'")
+            conn.execute(Path("db/review/naruv_employee_session_store_ci.sql").read_text())
+            conn.execute(proof.DDL)
+            for tenant in ("ci-a","ci-b"):
+                conn.execute("INSERT INTO naruv_employee_ci.identities VALUES (%s,'e1','w1',1,true)",(tenant,))
+                conn.execute("INSERT INTO naruv_employee_ci.entitlements VALUES (%s,'w1','r1',%s,%s,true)",(tenant,"a"*64,"b"*64))
+                tag=proof.synthetic_tag(b"x"*32,tenant,"fixture-person")
+                conn.execute("INSERT INTO naruv_employee_ci.proof_enrollment VALUES (%s,'e1','w1',%s,true)",(tenant,tag))
+            bind=dict(tenant="ci-a",principal="e1",receipt="r1")
+            tag=proof.synthetic_tag(b"x"*32,"ci-a","fixture-person")
+            challenge=proof.begin(conn,**bind)
+            result=proof.SyntheticServerResult(challenge,"VERIFIED",tag)
+            opts=dict(**bind,challenge=challenge,result=result)
+            for changes in (dict(tenant="ci-b"),dict(receipt="r2"),dict(challenge="x"*43),
+                            dict(result=replace(result,status="FAILED")),dict(result=replace(result,subject_tag="a"*64)),
+                            dict(result=replace(result,provider="UNTRUSTED")),dict(result={"status":"VERIFIED"})):
+                with self.assertRaises(AccessDenied):proof.finish(conn,**dict(opts,**changes))
+            conn.execute("UPDATE naruv_employee_ci.identities SET auth_epoch=2 WHERE tenant='ci-a'")
+            with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
+            conn.execute("UPDATE naruv_employee_ci.identities SET auth_epoch=1 WHERE tenant='ci-a'")
+            conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=false WHERE tenant='ci-a'")
+            with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
+            conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=true WHERE tenant='ci-a'")
+            conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
+            with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
+            with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                with conn.transaction():conn.execute("SELECT * FROM naruv_employee_ci.proof_enrollment")
+            conn.execute("RESET ROLE")
+            token,receipt=proof.finish(conn,**opts)
+            self.assertTrue(receipt["synthetic_proof_binding_verified"])
+            self.assertFalse(receipt["provider_identity_verified"])
+            self.assertFalse(receipt["delivery_authorized"])
+            self.assertTrue(store.access(conn,trusted_tenant="ci-a",trusted_principal="e1",receipt="r1",review_sha256="a"*64,render_sha256="b"*64,token=token)["session_store_verified"])
+            with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
+            self.assertEqual(conn.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone()[0],1)
+            challenge=proof.begin(conn,**bind)
+            conn.execute("UPDATE naruv_employee_ci.proof_challenges SET issued_at=1,expires_at=2 WHERE id=%s",(challenge,))
+            with self.assertRaises(AccessDenied):proof.finish(conn,**bind,challenge=challenge,result=proof.SyntheticServerResult(challenge,"VERIFIED",tag))
+            print("EMPLOYEE_SYNTHETIC_PROOF_ONE_TIME_BINDING=PASS")
+        finally:
+            conn.rollback()
+            self.assertIsNone(conn.execute("SELECT to_regnamespace('naruv_employee_ci')").fetchone()[0])
+            conn.close()
+
     def test_committed_access_serializes_with_revocation(self):
         # A separate committed fixture is necessary for real independent transactions.
         dsn=os.environ["JW_PG_CI_ROOT_DSN"]
