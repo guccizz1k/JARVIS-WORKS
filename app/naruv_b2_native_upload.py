@@ -9,6 +9,9 @@ from email.utils import parsedate_to_datetime
 from urllib import request, parse
 from .naruv_b2_upload_policy import upload_policy_plan, verify_uploaded_metadata
 from .naruv_b2_retention_journal import need, legal_hold_state
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import struct
 
 AUDIT_CAPS={"listBuckets","listFiles","readFiles","readFileRetentions",
     "readBucketRetentions","readBucketEncryption","readFileLegalHolds"}
@@ -30,10 +33,39 @@ def _scope(scope,pin,raw):
     need(all(type(scope[k]) is str and ID.fullmatch(scope[k]) for k in ("account_id","bucket_id")),"NATIVE_SCOPE")
     need(all(type(scope[k]) is str and HEX.fullmatch(scope[k]) for k in ("sha256","bucket_name_sha256")),"NATIVE_SCOPE")
     need(type(scope["name"]) is str and re.fullmatch(r"naruv-one/new-backup/[0-9a-f]{32}/"+scope["sha256"]+r"\.jwpgbk",scope["name"]),"NATIVE_NEW_PREFIX")
-    need(type(raw) is bytes and 8<len(raw)<=MAX_BYTES and raw[:8] in (b"JWPGBK1\n",b"JWPGBK2\n")
+    need(type(raw) is bytes and 8<len(raw)<=MAX_BYTES and raw[:8]==b"JWPGBK2\n"
         and type(scope["size"]) is int and len(raw)==scope["size"] and hmac.compare_digest(sha(raw),scope["sha256"]),"NATIVE_CIPHERTEXT_PIN")
     need(type(scope["approval_expires_ms"]) is int and now_ms()<scope["approval_expires_ms"],"NATIVE_APPROVAL_EXPIRED")
     return _plan(scope)
+
+def authenticate_new_archive(raw, key):
+    """Check all existing V2 AES-GCM chunk tags locally before any network call.
+    This authenticates a PG custom archive prefix, not actual DB restore.
+    No plaintext output or file writes. Python cannot guarantee memory erasure.
+    V1 historical archives are intentionally excluded from NEW upload.
+    """
+    need(type(raw) is bytes and 36<=len(raw)<=MAX_BYTES and raw[:8]==b"JWPGBK2\n","NATIVE_ARCHIVE_FORMAT")
+    need(type(key) is bytes and len(key)==32,"NATIVE_ARCHIVE_KEY")
+    aes=AESGCM(key);prefix=raw[8:16];pos=16;count=0;total=0
+    while pos<len(raw):
+        need(len(raw)-pos>=4 and count<2**32,"NATIVE_ARCHIVE_TRUNCATED")
+        n=int.from_bytes(raw[pos:pos+4],"big");start=pos+4;end=start+n
+        need(16<=n<=1048576+16 and end<=len(raw),"NATIVE_ARCHIVE_RECORD")
+        final=end==len(raw)
+        try:
+            plain=aes.decrypt(prefix+struct.pack(">I",count),raw[start:end],
+                b"JWPGBK2\n"+struct.pack(">QB",count,int(final)))
+        except InvalidTag:
+            raise ValueError("NATIVE_ARCHIVE_AUTH") from None
+        try:
+            need((count!=0 or plain.startswith(b"PGDMP")) and (final or len(plain)==1048576),"NATIVE_ARCHIVE_CONTENT")
+            total+=len(plain)
+            need(total<=MAX_BYTES,"NATIVE_ARCHIVE_SIZE")
+        finally:del plain
+        pos=end;count+=1
+    need(count>0 and total>=5,"NATIVE_ARCHIVE_CONTENT")
+    return {"archive_format":"JWPGBK2","authenticated_chunks":count,"ciphertext_sha256":sha(raw),
+        "restore_verified":False}
 
 def _plan(s):
     return upload_policy_plan(planned_at_ms=now_ms(),max_upload_ms=s["max_upload_ms"],
@@ -118,9 +150,11 @@ def _download(a,s,fid,length):
     url=_base(s["downloadUrl"],True)+"/b2api/v4/b2_download_file_by_id?"+parse.urlencode({"fileId":fid})
     return _request(url,a["authorizationToken"],limit=length)
 
-def execute_approved_upload(*,scope,approved_scope_sha256,raw,writer_credentials,audit_credentials,journal_dir):
+def execute_approved_upload(*,scope,approved_scope_sha256,raw,archive_key,writer_credentials,audit_credentials,journal_dir):
     """Requires separately authorized single-object operation; never called by CI against B2."""
     _scope(scope,approved_scope_sha256,raw)
+    verified_archive=authenticate_new_archive(raw,archive_key)
+    del archive_key
     name=scope["name"];bid=scope["bucket_id"]
     need(writer_credentials[0]!=audit_credentials[0],"NATIVE_DISTINCT_KEYS")
     wa,ws=_auth(writer_credentials);aa,rs=_auth(audit_credentials)
@@ -141,7 +175,7 @@ def execute_approved_upload(*,scope,approved_scope_sha256,raw,writer_credentials
             def log(stage,**data):
                 f.write(json.dumps(dict(stage=stage,**data),sort_keys=True)+"\n");f.flush();os.fsync(f.fileno())
             plan=_plan(scope)
-            log("attempt",approval_sha256=approved_scope_sha256,scope=scope,plan=plan);os.fsync(d)
+            log("attempt",approval_sha256=approved_scope_sha256,scope=scope,plan=plan,archive_authentication=verified_archive);os.fsync(d)
             u=_api(wa,ws,"b2_get_upload_url",{"bucketId":bid})
             need(u["bucketId"]==bid,"NATIVE_UPLOAD_BUCKET")
             url=_upload_url(u["uploadUrl"],bid)
@@ -167,5 +201,5 @@ def execute_approved_upload(*,scope,approved_scope_sha256,raw,writer_credentials
             log("verified",file_id=fid,sha256=scope["sha256"],retain_until_ms=plan["retain_until_ms"])
             log("complete",verified=1)
         return dict(review,status="NATIVE_UPLOAD_READBACK_VERIFIED",ciphertext_verified=True,
-            remote_write=True,key_retirement_authorized=False,production_authorized=False)
+            remote_write=True,archive_authenticated=True,restore_verified=False,key_retirement_authorized=False,production_authorized=False)
     finally:os.close(d)
