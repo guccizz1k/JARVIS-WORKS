@@ -1180,3 +1180,12 @@ class BonusTableSettlement(unittest.TestCase):
             with self.subTest(change=change),self.assertRaises(PayrollBlocked):review(dict(a,**change))
         with self.assertRaises(PayrollBlocked):assessed_settlement_components_2026(tenant="a",worker="w",period="2026-11",
             components={"bonus":{},"bonus_table_calculated":a})
+
+class MinimumWageOfficialReference(unittest.TestCase):
+    def test_2026_official_209_hour_arithmetic_and_exact_boundary(self):
+        from fractions import Fraction
+        # Official MOEL notice: 10,320 * 209 = 2,156,880, no eligibility claim.
+        self.assertEqual(Fraction(10320*209*60,60),2156880)
+        for n in (1,59,60,61,209*60):
+            exact=Fraction(10320*n,60)
+            self.assertEqual(exact,172*n)

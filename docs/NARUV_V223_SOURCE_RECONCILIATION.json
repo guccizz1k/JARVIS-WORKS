@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "c933f493ec1c476ac88dd20c1cdf06464c6c5ac1",
+      "sha": "2718df7c7bb8a96c6703075f558f9063fcf116fa",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "4f8cf443d669fc843a66b97555378478fc050225",
+      "sha": "826556c0a14c2bf5a64d6f0cb019245d5cba486c",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "043ba77897de6a6faa1b8a368b19f8733dee4cbf",
+      "sha": "4742dcaccd1288ef43f8f34ee4d5469191a48a96",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "f0b4979c71d5b11297da8968d043dd0d8434ee13",
+      "sha": "f8fd6588f6e90a718918af5fd13809e941cec893",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "a2c681e78164eee5cad0c0c83835f495d59cd0e1",
+      "sha": "0d226ae04e5b5f7a76387e1f81ae463b639901c8",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -9089,5 +9089,11 @@
     "base": "3349c790d624ee4cba2e51b54867c4115148bb9a",
     "scope": "Isolated append-only review and rendered HTML digest receipt; no safe delivery or statutory acceptance",
     "paths": ["app/naruv_draft_review.py","db/review/naruv_hr_ci.sql","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
+  }
+,
+  "p1_p2_minimum_wage_and_populated_audit_restore": {
+    "base": "51d78128b7af3f6b1206d84867fbd99f73717712",
+    "scope": "Assessed fixed-week minimum wage comparison; synthetic populated audit receipt restore in distinct clusters; no statutory or independent key acceptance",
+    "paths": ["app/naruv_kr_payroll_review.py","app/naruv_draft_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
   }
 }

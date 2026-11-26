@@ -1947,6 +1947,48 @@ def cash_statement_deduction_review_2026(*,tenant,statement,deductions,pension_a
         review_sha256=hash_input(base))
 
 
+def assessed_fixed_week_minimum_wage_reference_2026(*,tenant,statement,submission):
+    """Conservative arithmetic reference only for assessed fixed-week hourly pay.
+    2026 MOEL notice 2025-47, Minimum Wage Act art.6 and rules art.2.
+    https://www.moel.go.kr/info/lawinfo/instruction/view.do?bbs_seq=20250800121
+    Paid time and includable cash remain manual legal assessments. Do not use
+    actual work minutes as a universal legal denominator or infer eligibility.
+    """
+    require(type(tenant) is str and ID.fullmatch(tenant),"KR_MINIMUM_SCOPE")
+    _statement_print_rows(statement)
+    status=statement["status"]
+    require(status=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY" or
+        (status=="ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY" and statement["base_statement_status"]=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY"),"KR_MINIMUM_SCOPE")
+    require(type(submission) is dict and set(submission)=={"scope","assessed_basis_minutes","included_base_krw","included_cash","assessment_sha256"}
+        and submission["scope"]=="ASSESSED_FIXED_WEEK_HOURLY_BASIS_ONLY"
+        and type(submission["assessment_sha256"]) is str and HEX.fullmatch(submission["assessment_sha256"]),"KR_MINIMUM_ASSESSMENT")
+    rows=statement["components"];minutes=sum(r["minutes"] for r in rows);base=sum(r["amount_krw"] for r in rows)
+    require(_whole(submission["assessed_basis_minutes"],1,31*1440)
+        and submission["assessed_basis_minutes"]>=minutes
+        and _whole(submission["included_base_krw"],0,base),"KR_MINIMUM_BASIS")
+    items={r["component_id"]:r for r in statement.get("additional_cash_wages",[])}
+    cash=submission["included_cash"];seen=set();included=0
+    require(type(cash) is list and len(cash)<=len(items),"KR_MINIMUM_CASH")
+    for r in cash:
+        require(type(r) is dict and set(r)=={"component_id","included_krw","assessment_sha256"}
+            and type(r["component_id"]) is str and r["component_id"] in items and r["component_id"] not in seen
+            and _whole(r["included_krw"],0,items[r["component_id"]]["amount_krw"])
+            and type(r["assessment_sha256"]) is str and HEX.fullmatch(r["assessment_sha256"]),"KR_MINIMUM_CASH")
+        seen.add(r["component_id"]);included+=r["included_krw"]
+    require(seen==set(items),"KR_MINIMUM_CASH_COMPLETENESS")
+    total=submission["included_base_krw"]+included
+    required=Fraction(10320*submission["assessed_basis_minutes"],60)
+    difference=Fraction(total)-required
+    return {"status":"ASSESSED_REFERENCE_BELOW_FLOOR" if difference<0 else "ASSESSED_REFERENCE_AT_OR_ABOVE_FLOOR",
+        "floor_hourly_krw":10320,"assessed_included_krw":total,"assessed_basis_minutes":submission["assessed_basis_minutes"],
+        "required_exact":_money(required),"signed_difference_exact":_money(difference),
+        "statement_review_sha256":statement["review_sha256"],"basis_authenticity_verified":False,
+        "eligibility_verified":False,"statutory_validated":False,"payment_authorized":False,"delivery_authorized":False,"production_authorized":False,
+        "requires_human_review":True,"review_sha256":hash_input({"v":"KR_MINIMUM_FIXED_WEEK_ASSESSED_2026_V1","tenant":tenant,
+            "statement":statement["review_sha256"],"submission":dict(submission,included_cash=sorted(cash,key=lambda r:r["component_id"])),
+            "floor":10320})}
+
+
 def isolated_wage_statement_print_html(result):
     """Authenticated isolated POST result, no script, external content or delivery."""
     from html import escape
@@ -1967,6 +2009,12 @@ def isolated_wage_statement_print_html(result):
         else:
             require(c.get("status")=="CASH_DEDUCTION_EXCEPTION_REVIEW_REQUIRED" and c.get("ordinary_comparison_performed") is False,"KR_PRINT_CASH_DEDUCTION_SCOPE")
             note+="<p>별도 공제 특례 검토 필요. 일반 공제 비교 미실행.</p>"
+    if "minimum_wage_reference" in result:
+        m=result["minimum_wage_reference"]
+        require(type(m) is dict and m.get("statement_review_sha256")==a["review_sha256"]
+            and m.get("status") in ("ASSESSED_REFERENCE_BELOW_FLOOR","ASSESSED_REFERENCE_AT_OR_ABOVE_FLOOR")
+            and all(m.get(k) is False for k in ("statutory_validated","payment_authorized","delivery_authorized","production_authorized","basis_authenticity_verified")),"KR_PRINT_MINIMUM_SCOPE")
+        note+="<p>최저임금 산입 기준 수동 검토: "+("참고액 기준 미달" if m["status"]=="ASSESSED_REFERENCE_BELOW_FLOOR" else "참고액 기준 이상")+" — 법정 적합성 미확정.</p>"
     table="".join("<tr><th scope=\"row\">"+escape(k)+"</th><td>"+escape(f)+"</td><td>"+format(n,",")+" 원</td></tr>" for k,f,n in rows)
     return ("<!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><title>임금명세서 검토용 초안</title>"
         "<main><h1>임금명세서 검토용 초안 — 교부 금지</h1><p>법정 적합성, 실제 지급일 및 공제 검증 미확정. 실제 지급 및 교부 금지.</p>"

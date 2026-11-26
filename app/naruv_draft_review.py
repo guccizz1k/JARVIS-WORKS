@@ -71,7 +71,7 @@ def _decode_kr_body(raw):
         if "wage_statement_review" in d:
             a=d["wage_statement_review"]
             fields={"payment_date","scope","completeness_assessment_sha256"}
-            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages","cash_deduction_review","draft_audit"}
+            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages","cash_deduction_review","draft_audit","minimum_wage_review"}
                 or any(type(a[k]) is not str for k in fields)):
                 raise ValueError("statement scope")
             if "additional_cash_wages" in a:
@@ -95,6 +95,14 @@ def _decode_kr_body(raw):
                         or type(c["monthly_tax"]) is not dict or type(c["insurance_assessed_bases"]) is not dict):
                         raise ValueError("cash deduction shape")
                 else:raise ValueError("cash deduction scope")
+            if "minimum_wage_review" in a:
+                m=a["minimum_wage_review"]
+                if (a["scope"]!="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE" or type(m) is not dict
+                    or set(m)!={"scope","assessed_basis_minutes","included_base_krw","included_cash","assessment_sha256"}
+                    or type(m["scope"]) is not str or type(m["assessment_sha256"]) is not str
+                    or type(m["assessed_basis_minutes"]) is not int or type(m["included_base_krw"]) is not int
+                    or type(m["included_cash"]) is not list or len(m["included_cash"])>8):
+                    raise ValueError("minimum wage shape")
             if "draft_audit" in a:
                 audit=a["draft_audit"]
                 if (type(audit) is not dict or set(audit)!={"request_id","expected_review_sha256"}
@@ -363,7 +371,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 proof.update(v="KR_CI_MANUAL_API_V8",part_time_rest=rest["review_sha256"])
                 details["part_time_rest_reference"]=rest
             if "wage_statement_review" in data:
-                statement_args={k:v for k,v in data["wage_statement_review"].items() if k not in ("additional_cash_wages","cash_deduction_review","draft_audit")}
+                statement_args={k:v for k,v in data["wage_statement_review"].items() if k not in ("additional_cash_wages","cash_deduction_review","draft_audit","minimum_wage_review")}
                 if "fixed_week_paid_review" in data:
                     statement=fixed_week_wage_statement_2026(tenant=org,worker=worker,period=period,
                         base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],minutes_by_day=days,
@@ -379,6 +387,12 @@ def _kr_review(token,csrf,prior,worker,period,data):
                         additional_cash_wages=data["wage_statement_review"]["additional_cash_wages"])
                 proof["wage_statement"]=statement["review_sha256"]
                 details["wage_statement_reference"]=statement
+                if "minimum_wage_review" in data["wage_statement_review"]:
+                    from .naruv_kr_payroll_review import assessed_fixed_week_minimum_wage_reference_2026
+                    m=assessed_fixed_week_minimum_wage_reference_2026(tenant=org,statement=statement,
+                        submission=data["wage_statement_review"]["minimum_wage_review"])
+                    proof["minimum_wage_reference"]=m["review_sha256"]
+                    details["minimum_wage_reference"]=m
                 if "cash_deduction_review" in data["wage_statement_review"]:
                     cash_deduction=cash_statement_deduction_review_2026(tenant=org,statement=statement,
                         deductions=data["deductions"],pension_assessed_base_krw=pension,

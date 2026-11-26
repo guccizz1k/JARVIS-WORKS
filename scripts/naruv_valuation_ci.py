@@ -489,7 +489,17 @@ def run_valuation(base):
             self.seed_cost("B");self.receive("opening","0001",1,25,"B")
             self.assertEqual(self.audit_ledger()["inventory_krw"],"453")
             self.assertEqual(self.audit_ledger("B")["inventory_krw"],"25")
+            # A synthetic receipt row exercises actual populated archival equivalence.
+            # The independent API test proves admission separately; this is not a real payroll receipt.
+            with psycopg.connect(fixture.root_dsn) as c:
+                org,worker,period=c.execute("SELECT org_id,worker_id,period FROM naruv_draft.pay_periods WHERE confirmed ORDER BY 1,2,3 LIMIT 1").fetchone()
+                c.execute("""INSERT INTO naruv_draft.statement_review_receipts(org_id,request_id,actor_id,worker_id,period,review_sha256,statement_sha256,render_sha256)
+                    VALUES(%s,'restore-audit-fixture','restore-fixture',%s,%s,repeat('a',64),repeat('b',64),repeat('c',64))""",(org,worker,period))
             proof=prove_restore(fixture.root_dsn)
+            from scripts.naruv_erp_restore_ci import DEST_DSN
+            with psycopg.connect(DEST_DSN) as dest:
+                self.assertEqual(dest.execute("SELECT review_sha256,statement_sha256,render_sha256 FROM naruv_draft.statement_review_receipts WHERE request_id='restore-audit-fixture'").fetchone(),("a"*64,"b"*64,"c"*64))
+            print("NARUV_POPULATED_AUDIT_RESTORE_PASS synthetic receipt in distinct PG17 cluster",flush=True)
             self.assertGreater(proof["tables"],10)
             self.assertEqual(proof["distinct_clusters"],True)
             self.assertEqual(self.audit_ledger()["inventory_krw"],"453")
@@ -1061,6 +1071,25 @@ def run_valuation(base):
                         with c.transaction():
                             c.execute("UPDATE naruv_draft.statement_review_receipts SET render_sha256=repeat('0',64) WHERE org_id='ci-a' AND worker_id='tax-worker'")
                 print("NARUV_STATEMENT_REVIEW_AUDIT_PASS exact review and render hash, idempotence, RLS, no delivery",flush=True)
+                minimum=dict(scope="ASSESSED_FIXED_WEEK_HOURLY_BASIS_ONLY",assessed_basis_minutes=1920,
+                    included_base_krw=280240,included_cash=[dict(component_id="allowance-1",included_krw=50000,assessment_sha256="d"*64)],
+                    assessment_sha256="e"*64)
+                # 1920 minutes = 32 hours; reference threshold = 330240.
+                m_spec=dict(spec,minimum_wage_review=minimum)
+                m_req=dict(fa,wage_statement_review=m_spec)
+                m_result=self.check(self.call(taxpath,m_req),200)
+                mr=m_result["minimum_wage_reference"]
+                self.assertEqual(mr["required_exact"],{"numerator":330240,"denominator":1})
+                self.assertEqual(mr["status"],"ASSESSED_REFERENCE_AT_OR_ABOVE_FLOOR")
+                self.assertFalse(mr["statutory_validated"]);self.assertFalse(mr["basis_authenticity_verified"])
+                below=dict(minimum,included_base_krw=280239)
+                self.assertEqual(self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(m_spec,minimum_wage_review=below))),200)["minimum_wage_reference"]["status"],"ASSESSED_REFERENCE_BELOW_FLOOR")
+                self.assertIn("최저임금 산입 기준 수동 검토",self.call(taxpath,m_req,extra=print_accept).text)
+                self.check(self.call(taxpath,m_req,who="B"),404)
+                for bad in (dict(minimum,assessed_basis_minutes=1919),dict(minimum,included_base_krw=3200001),
+                            dict(minimum,included_cash=[]),dict(minimum,included_cash=[dict(minimum["included_cash"][0],included_krw=50001)])):
+                    self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(m_spec,minimum_wage_review=bad))),409)
+                print("NARUV_MINIMUM_WAGE_ASSESSED_API_PASS official floor exact boundary, allocation and tenant denial",flush=True)
                 ptweeks=[]
                 for w in range(4):
                     mon=date(2026,6,8)+timedelta(days=7*w);entries=[]
