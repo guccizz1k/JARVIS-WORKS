@@ -1596,6 +1596,37 @@ def approved_paid_holiday_review_2026(*,tenant,worker,period,ordinary_hourly,cal
         "statutory_validated":False,"payment_authorized":False,"production_authorized":False}
 
 
+def ordinary_comparison_coverage_2026(*,source_review_sha256,pension,insurance,tax):
+    """Consolidate already computed, same-request ordinary references only.
+    Coverage is not agreement; unresolved agency rounding is never accepted.
+    """
+    require(type(source_review_sha256) is str and HEX.fullmatch(source_review_sha256),"KR_COVERAGE_SOURCE")
+    for r in (pension,insurance,tax):
+        require(type(r) is dict and type(r.get("review_sha256")) is str and HEX.fullmatch(r["review_sha256"])
+            and all(r.get(k) is False for k in ("statutory_validated","payment_authorized","production_authorized")),"KR_COVERAGE_SCOPE")
+    require(pension.get("status") in ("REFERENCE_MATCH_ONLY","AGENCY_AMOUNT_DIFFERENCE_REVIEW_REQUIRED")
+        and insurance.get("status")=="REFERENCE_COMPARISON_ONLY"
+        and tax.get("status") in ("REFERENCE_MATCH_ONLY","ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED"),"KR_COVERAGE_STATUS")
+    tm=tax.get("mismatches");flags=insurance.get("flags")
+    allowed={"HEALTH_REFERENCE_DIFFERENCE","LTC_SEQUENCE_REQUIRES_AGENCY_CONFIRMATION","LTC_REFERENCE_DIFFERENCE","EMPLOYMENT_ASSESSMENT_DIFFERENCE"}
+    require(type(tm) is list and all(type(x) is str and x in ("income_tax","local_income_tax") for x in tm)
+        and len(set(tm))==len(tm) and bool(tm)==(tax["status"]=="ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED")
+        and type(flags) is list and all(type(x) is str and x in allowed for x in flags)
+        and len(set(flags))==len(flags) and insurance.get("employment_rounding_status")=="AGENCY_ASSESSMENT_REQUIRED","KR_COVERAGE_FLAGS")
+    items={k:"REFERENCE_MATCH_ONLY" for k in DEDUCTIONS}
+    for k in tm:items[k]="DIFFERENCE_REVIEW_REQUIRED"
+    if pension["status"]!="REFERENCE_MATCH_ONLY":items["pension"]="DIFFERENCE_REVIEW_REQUIRED"
+    if "HEALTH_REFERENCE_DIFFERENCE" in flags:items["health"]="DIFFERENCE_REVIEW_REQUIRED"
+    if "LTC_REFERENCE_DIFFERENCE" in flags:items["long_term_care"]="DIFFERENCE_REVIEW_REQUIRED"
+    elif "LTC_SEQUENCE_REQUIRES_AGENCY_CONFIRMATION" in flags:items["long_term_care"]="AGENCY_CONFIRMATION_REQUIRED"
+    items["employment_insurance"]="DIFFERENCE_REVIEW_REQUIRED" if "EMPLOYMENT_ASSESSMENT_DIFFERENCE" in flags else "AGENCY_CONFIRMATION_REQUIRED"
+    return {"status":"ALL_SIX_REFERENCES_COMPARED_REVIEW_ONLY","items":items,
+        "reference_count":len(items),"difference_count":sum(x=="DIFFERENCE_REVIEW_REQUIRED" for x in items.values()),
+        "agency_confirmation_count":sum(x=="AGENCY_CONFIRMATION_REQUIRED" for x in items.values()),
+        "review_sha256":hash_input({"v":"KR_ORDINARY_COVERAGE_2026_V1","source":source_review_sha256,
+            "pension":pension["review_sha256"],"insurance":insurance["review_sha256"],"tax":tax["review_sha256"],"items":items}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
 def isolated_payroll_review_html(result):
     """CI-only no-script read-only representation; not the approved WORKS UI.
     Render only a fixed schema of numeric results; never embed client evidence.
@@ -1651,6 +1682,15 @@ def isolated_payroll_review_html(result):
         days=accrual["earned_days_in_review"]
         require(_whole(days,0,36) and accrual.get("historical_attendance_authenticity_verified") is False,"KR_VIEW_LEAVE_DAYS")
         rows.append("<tr><th scope=\"row\">연차 발생 참고일수 (과거 근태 수동 제출)</th><td>"+str(days)+" 일</td></tr>")
+    if "ordinary_comparison_coverage" in result:
+        c=result["ordinary_comparison_coverage"]
+        require(c.get("status")=="ALL_SIX_REFERENCES_COMPARED_REVIEW_ONLY"
+            and all(c.get(k) is False for k in ("statutory_validated","payment_authorized","production_authorized"))
+            and c.get("reference_count")==6 and _whole(c.get("difference_count"),0,6)
+            and _whole(c.get("agency_confirmation_count"),0,6)
+            and c["difference_count"]+c["agency_confirmation_count"]<=6,"KR_VIEW_COVERAGE")
+        rows.append("<tr><th scope=\"row\">6개 공제 항목 대조 (법정 확정 아님)</th><td>차이 "+
+            str(c["difference_count"])+"개 / 기관 확인 "+str(c["agency_confirmation_count"])+"개</td></tr>")
     if "monthly_tax_reference" in result:
         tax=result["monthly_tax_reference"]
         line("월 소득세 계산 참고액",tax["national_reference_krw"])
