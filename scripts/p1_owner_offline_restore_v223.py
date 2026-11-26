@@ -396,7 +396,7 @@ def _focus_probe(container: str, db: str, table: str) -> tuple[int, str, str] | 
 
 
 
-def _restore_one(container: str, original: bytearray, index: int, focus: tuple[str, int, str, str] | None = None, schema_salt: str | None = None) -> tuple[str, int, str | None, str | None, int | None, str | None, tuple[int, str, str] | None, tuple[str, str, int, str, str] | None]:
+def _restore_one(container: str, original: bytearray, index: int, focus: tuple[str, int, str, str] | None = None, schema_salt: str | None = None, *, catalog_probe=None) -> tuple[str, int, str | None, str | None, int | None, str | None, tuple[int, str, str] | None, tuple[str, str, int, str, str] | None]:
     """Fresh disposable DB per archive. Auto-create NOLOGIN roles ONLY in
     this networkless throwaway cluster, only when pg_restore reports one.
     """
@@ -477,6 +477,8 @@ def _restore_one(container: str, original: bytearray, index: int, focus: tuple[s
                 return "POST_RESTORE_ROW_MANIFEST_UNAVAILABLE", 0, None, None, None, None, None, None
             probe = _focus_probe(container, db, focus[0]) if focus else None
             schema_probe = _schema_delta_probe(container, db, schema_salt) if schema_salt else None
+            if catalog_probe is not None:
+                catalog_probe(container, db)
             return "LOCAL_DISPOSABLE_RESTORED", total, digest, rows[2], rows[1], sha, probe, (rows[3],rows[4],rows[5],rows[6],rows[7],rows[8],rows[9],rows[10],schema_probe)
         finally:
             # Always discard this database before moving to the next archive.
