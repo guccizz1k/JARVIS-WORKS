@@ -67,7 +67,11 @@ def _decode_kr_body(raw):
             parse_constant=inventory._reject_constant)
         required={"expected_draft_sha256","ordinary_hourly","classification_sha256",
                 "classified_days","deductions","pension_assessed_base_krw"}
-        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review"}:raise ValueError("shape")
+        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review"}:raise ValueError("shape")
+        if "monthly_tax_review" in d:
+            tax=d["monthly_tax_review"]
+            if type(tax) is not dict or set(tax)!={"withholding_date","taxable_monthly_krw","eligible_family_count","eligible_children_8_20","selection_percent","assessment_sha256"}:
+                raise ValueError("monthly tax shape")
         if "part_time_leave_review" in d:
             pt=d["part_time_leave_review"]
             if type(pt) is not dict or set(pt)!={"comparator_grant_days","contracted_week_minutes","contract_sha256","grant_assessment_sha256"}:
@@ -132,7 +136,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -196,6 +200,11 @@ def _kr_review(token,csrf,prior,worker,period,data):
                     classified_days=data["classified_days"],**data["shift_review"])
                 proof.update(v="KR_CI_MANUAL_API_V4" if "part_time_leave_review" in data else "KR_CI_MANUAL_API_V3",shift=shift["review_sha256"])
                 details["shift_reference"]=shift
+            if "monthly_tax_review" in data:
+                tax=assessed_monthly_tax_comparison_2026(tenant=org,worker=worker,period=period,
+                    gross_krw=review["wage"]["gross_estimate_krw"],deductions=data["deductions"],**data["monthly_tax_review"])
+                proof.update(v="KR_CI_MANUAL_API_V5",monthly_tax=tax["review_sha256"])
+                details["monthly_tax_reference"]=tax
             return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
