@@ -163,3 +163,31 @@ def test_b2_scope_mismatch_never_calls_provider_or_starts_container(monkeypatch)
     assert receipt["blocker"]=="B2_OFFLINE_OWNER_MANIFEST_MISMATCH"
     assert receipt["b2_staged_scope_bound"] is False
     assert receipt["overall"]=="BLOCKED"
+
+def test_owner_site_requires_separate_approval_and_no_external_ack():
+    env={"JW_PG_OWNER_SITE_ACK":e.OWNER_ACK}
+    assert e.preflight({},owner_controlled=True)=="OWNER_SITE_APPROVAL_REQUIRED"
+    assert e.preflight(dict(env,JW_PG_SECOND_SITE_ACK=e.ACK),owner_controlled=True)=="OWNER_SITE_EXTERNAL_ACK_CONFLICT"
+    assert e.preflight(env,owner_controlled=True)=="OWNER_SITE_ISOLATION_ACK_REQUIRED"
+
+def test_owner_key_pipe_strict_and_bounded(monkeypatch):
+    r,w=os.pipe()
+    try:
+        os.write(w,base64.urlsafe_b64encode(b"K"*32))
+        os.close(w);w=None
+        monkeypatch.setenv("JW_PG_OWNER_KEY_FD",str(r))
+        assert e._owner_key()==b"K"*32
+    finally:
+        os.close(r)
+        if w is not None:os.close(w)
+    monkeypatch.setenv("JW_PG_OWNER_KEY_FD","1")
+    with pytest.raises(e.Blocked,match="OWNER_KEY_PIPE_INVALID"):e._owner_key()
+
+def test_owner_scope_requires_staged_before_key(monkeypatch):
+    monkeypatch.setattr(e,"preflight",lambda **kw:"PASS")
+    monkeypatch.setattr(e,"_owner_key",lambda:pytest.fail("key read before gate"))
+    monkeypatch.setattr(clean,"_inputs",lambda:pytest.fail("external inputs forbidden"))
+    r=e.run(owner_controlled=True)
+    assert r["blocker"]=="OWNER_SITE_STAGED_INPUT_REQUIRED"
+    assert r["owner_site_restore"]=="BLOCKED"
+    assert r["external_pg17_restore"]=="NOT_APPLICABLE_OWNER_SITE"

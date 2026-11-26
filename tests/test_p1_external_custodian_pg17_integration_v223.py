@@ -71,7 +71,8 @@ def test_eleven_synthetic_external_ciphers_really_restore_pg17(monkeypatch):
 import pytest
 
 @pytest.mark.parametrize("selected_scope",["legacy","staged"])
-def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path,selected_scope):
+@pytest.mark.parametrize("owner_controlled",[False,True])
+def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path,selected_scope,owner_controlled):
     import hashlib,json
     from scripts import naruv_b2_offline_stage as stage
     from tests.test_p1_external_custodian_pg17_v223 import cipher
@@ -111,17 +112,28 @@ def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path
             data_reference=dict(format=ext.equivalence.FORMAT,algorithm=ext.equivalence.ALGORITHM,
                                 vault_commit_sha1="c"*40,archives=refs),
             catalog_archives=[dict(git_blob_sha1=b,cipher_sha256=h,sections=catalog) for b,h in pairs]))
-        monkeypatch.setattr(ext,"preflight",lambda:"PASS")
+        monkeypatch.setattr(ext,"preflight",lambda **kwargs:"PASS")
         monkeypatch.setenv("JW_PG_B2_OFFLINE_ACK",ext.B2_ACK)
         monkeypatch.setenv("JW_WORM_OWNER_SCOPE_SHA256",scope)
         for k in ("GH_TOKEN","GITHUB_TOKEN","B2_APPLICATION_KEY","B2_APPLICATION_KEY_ID","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY"):
             monkeypatch.delenv(k,raising=False)
-        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key if selected_scope=="legacy" else b"T"*32,pairs))
+        monkeypatch.setenv("JW_PG_CLEANROOM_VAULT_SHA","c"*40)
+        chosen_key=key if selected_scope=="legacy" else b"T"*32
+        if owner_controlled:
+            monkeypatch.setattr(clean,"_inputs",lambda:pytest.fail("external input forbidden"))
+            monkeypatch.setattr(ext,"_owner_key",lambda:chosen_key)
+        else:
+            monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,chosen_key,pairs))
         def forbid(*args):raise AssertionError("GitHub access forbidden")
         monkeypatch.setattr(clean,"_head_tree",forbid)
         monkeypatch.setattr(clean,"_download",forbid)
         report=ext.run(reference,hashlib.sha256(reference).hexdigest(),catalog_required=True,
-                       staged=(raw,pin,directory,selected_scope))
+                       staged=(raw,pin,directory,selected_scope),owner_controlled=owner_controlled)
+        if owner_controlled:
+            assert report["owner_site_restore"]=="PASS_ELEVEN_OWNER_SITE_CIPHERS",report
+            assert report["external_pg17_restore"]=="NOT_APPLICABLE_OWNER_SITE"
+            assert report["independent_key_custody"]=="DEFERRED_NOT_ATTESTED"
+            assert report["icloud_custody_verified"] is False
         assert report["b2_staged_scope_bound"] is True,report
         assert report["restored_pg17_archive_count"]==11,report
         assert report["normalized_catalog_comparison"]=="PASS_11_SCOPED_CATALOG_CHECKPOINTS",report

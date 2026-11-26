@@ -34,6 +34,7 @@ from scripts import jw_independent_catalog_v223 as catalog
 from scripts import naruv_b2_offline_stage as b2stage
 
 B2_ACK = "OWNER_APPROVES_PINNED_B2_OFFLINE_CATALOG_RESTORE"
+OWNER_ACK = "OWNER_APPROVES_SELF_CUSTODY_SECOND_SITE_RESTORE_V1"
 B2_PUBLIC_CODES = frozenset(["B2_OFFLINE_APPROVAL_REQUIRED","B2_OFFLINE_PROVIDER_CREDENTIAL_PRESENT","B2_OFFLINE_INPUTS_REQUIRED","B2_OFFLINE_CIPHERTEXT_SET_INVALID","B2_OFFLINE_SCOPE_COUNT","B2_OFFLINE_CATALOG_REFERENCE_REQUIRED","B2_OFFLINE_OWNER_MANIFEST_MISMATCH","B2_OFFLINE_PREFLIGHT_FAILED","B2_OFFLINE_MANIFEST_FILE"])
 
 ACK = "OWNER_APPROVES_EXTERNAL_CUSTODIAN_NETWORKLESS_PG17_RESTORE"
@@ -53,15 +54,22 @@ class Blocked(RuntimeError):
     pass
 
 
-def preflight(env=None):
+def preflight(env=None, *, owner_controlled=False):
     env=os.environ if env is None else env
-    if env.get("JW_PG_SECOND_SITE_ACK") != ACK:
+    if owner_controlled:
+        if env.get("JW_PG_OWNER_SITE_ACK") != OWNER_ACK:
+            return "OWNER_SITE_APPROVAL_REQUIRED"
+        if env.get("JW_PG_SECOND_SITE_ACK") or env.get("JW_PG_CLEANROOM_ACK"):
+            return "OWNER_SITE_EXTERNAL_ACK_CONFLICT"
+        if env.get("JW_PG_OWNER_SITE_ISOLATION_ACK") != "OWNER_VERIFIED_ISOLATED_HOST_NO_PROVIDER_CREDENTIALS":
+            return "OWNER_SITE_ISOLATION_ACK_REQUIRED"
+    elif env.get("JW_PG_SECOND_SITE_ACK") != ACK:
         return "EXPLICIT_SECOND_SITE_APPROVAL_REQUIRED"
     if env.get("CODESPACES","").lower() == "true":
         return "SOURCE_CODESPACE_IS_NOT_AN_INDEPENDENT_SITE"
     if any(env.get(s) for s in SOURCE_SECRETS):
         return "SOURCE_OR_PRODUCTION_CREDENTIAL_PRESENT"
-    if env.get("JW_PG_CLEANROOM_ACK") != clean.ACK:
+    if not owner_controlled and env.get("JW_PG_CLEANROOM_ACK") != clean.ACK:
         return "EXTERNAL_KEY_PIPE_APPROVAL_REQUIRED"
     if not clean.SHA1.fullmatch(env.get("JW_PG_CLEANROOM_VAULT_SHA","")):
         return "EXACT_PRIVATE_VAULT_COMMIT_REQUIRED"
@@ -175,9 +183,40 @@ def _staged_inputs(staged):
         raise Blocked("B2_OFFLINE_SCOPE_COUNT")
     return known
 
-def run(reference_raw=None, reference_pin=None, *, catalog_required=False, staged=None) -> dict[str, object]:
+def _owner_key():
+    """Local hidden-input pipe; no argv/env key, bounded read until EOF."""
+    import base64, select, stat
+    raw=bytearray()
+    try:
+        fd=int(os.environ.get("JW_PG_OWNER_KEY_FD","-1"))
+        if fd<3 or not stat.S_ISFIFO(os.fstat(fd).st_mode):
+            raise ValueError()
+        deadline=time.monotonic()+30
+        while True:
+            remaining=deadline-time.monotonic()
+            if remaining<=0 or not select.select([fd],[],[],remaining)[0]:
+                raise ValueError()
+            chunk=os.read(fd,129-len(raw))
+            if not chunk:break
+            raw.extend(chunk)
+            if len(raw)>128:raise ValueError()
+        encoded=bytes(raw).strip()
+        key=base64.b64decode(encoded,altchars=b"-_",validate=True)
+        if len(key)!=32 or not hmac.compare_digest(base64.urlsafe_b64encode(key),encoded):
+            raise ValueError()
+        return key
+    except (OSError,ValueError,TypeError):
+        raise Blocked("OWNER_KEY_PIPE_INVALID") from None
+    finally:
+        raw[:]=b"\\0"*len(raw)
+
+def run(reference_raw=None, reference_pin=None, *, catalog_required=False, staged=None, owner_controlled=False) -> dict[str, object]:
     result={
         "external_pg17_restore":"BLOCKED",
+        "custody_model":"OWNER_SELF_CUSTODY" if owner_controlled else "EXTERNAL_CUSTODIAN",
+        "owner_site_restore":"BLOCKED" if owner_controlled else "NOT_APPLICABLE",
+        "icloud_custody_verified":False,
+        "offline_key_copy_verified":False,
         "ciphertext_path":"B2_STAGED_OFFLINE" if staged is not None else "GITHUB_PRIVATE_VAULT",
         "b2_staged_scope_bound":False,
         "owner_scope_pin_checked":False,
@@ -199,7 +238,7 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
         result["normalized_catalog_comparison"]="BLOCKED"
     if reference_required:
         result["normalized_archive_comparison"]="BLOCKED"
-    gate=preflight()
+    gate=preflight(owner_controlled=True) if owner_controlled else preflight()
     if gate!="PASS":
         result["blocker"]=gate
         return result
@@ -209,11 +248,17 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
     comparison=None
     try:
         known=None
+        if owner_controlled and staged is None:
+            raise Blocked("OWNER_SITE_STAGED_INPUT_REQUIRED")
         if staged is not None:
             if not catalog_required or reference_raw is None or reference_pin is None:
                 raise Blocked("B2_OFFLINE_CATALOG_REFERENCE_REQUIRED")
             known=_staged_inputs(staged)
-        pin,key,pairs=clean._inputs()
+        if owner_controlled:
+            pin=os.environ["JW_PG_CLEANROOM_VAULT_SHA"]
+            pairs=sorted((blob,hashlib.sha256(cipher).hexdigest()) for blob,cipher in known.items())
+        else:
+            pin,key,pairs=clean._inputs()
         _require_owner_scope(pairs, os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""))
         result["owner_scope_pin_checked"]=True
         if reference_required:
@@ -233,6 +278,8 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
                     for blob,expected in pairs):
                 raise Blocked("B2_OFFLINE_OWNER_MANIFEST_MISMATCH")
             result["b2_staged_scope_bound"]=True
+        if owner_controlled:
+            key=_owner_key()
         name="jw-p1-external-pg17-"+secrets.token_hex(8)
         created=offline._docker([
             "run","--rm","--pull","never","-d","--name",name,
@@ -329,6 +376,14 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
             if catalog_required:
                 result["normalized_catalog_comparison"]="BLOCKED"
                 result["rls_policy_definition_comparison"]="BLOCKED"
+    if owner_controlled:
+        if (result["external_pg17_restore"]=="PASS_ELEVEN_PROVIDER_CIPHERS_NETWORKLESS_PG17"
+                and result.get("normalized_catalog_comparison")=="PASS_11_SCOPED_CATALOG_CHECKPOINTS"
+                and result["disposable_pg17_removed"]=="PASS"):
+            result["owner_site_restore"]="PASS_ELEVEN_OWNER_SITE_CIPHERS"
+        # Do not mislabel an owner-operated restore as external-custodian evidence.
+        result["external_pg17_restore"]="NOT_APPLICABLE_OWNER_SITE"
+        result["independent_key_custody"]="DEFERRED_NOT_ATTESTED"
     # All necessary raw data and credentials are local to the external custodian.
     # This receipt is *not* an independent signature or source-era provenance.
     return result
@@ -336,13 +391,14 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
 
 def main(argv=None):
     argv=sys.argv[1:] if argv is None else argv
-    if argv==["restore-b2-offline-catalog"]:
+    if argv in (["restore-b2-offline-catalog"],["restore-owner-b2-offline-catalog"]):
+        owner_controlled=argv==["restore-owner-b2-offline-catalog"]
         # No provider calls in this mode. The custodian supplies independently
         # pinned ciphertext manifest, legacy vault identity/reference and key pipe.
         try:
             if os.environ.get("JW_PG_B2_OFFLINE_ACK") != B2_ACK:
                 raise Blocked("B2_OFFLINE_APPROVAL_REQUIRED")
-            if preflight()!="PASS":
+            if (preflight(owner_controlled=True) if owner_controlled else preflight())!="PASS":
                 raise Blocked("B2_OFFLINE_PREFLIGHT_FAILED")
             import stat
             fd=os.open(os.environ["JW_PG_B2_MANIFEST_PATH"],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -354,12 +410,13 @@ def main(argv=None):
             raw=equivalence.read_reference_pipe(os.environ)
             receipt=run(raw,os.environ.get("JW_PG_RESTORE_REFERENCE_SHA256",""),catalog_required=True,
                         staged=(manifest,os.environ.get("JW_PG_B2_MANIFEST_SHA256",""),
-                                os.environ["JW_PG_B2_STAGE_DIRECTORY"],os.environ.get("JW_PG_B2_SCOPE","")))
+                                os.environ["JW_PG_B2_STAGE_DIRECTORY"],os.environ.get("JW_PG_B2_SCOPE","")),owner_controlled=owner_controlled)
         except Exception:
-            receipt={"ciphertext_path":"B2_STAGED_OFFLINE","external_pg17_restore":"BLOCKED",
+            receipt={"ciphertext_path":"B2_STAGED_OFFLINE","external_pg17_restore":"NOT_APPLICABLE_OWNER_SITE" if owner_controlled else "BLOCKED",
+                     "custody_model":"OWNER_SELF_CUSTODY" if owner_controlled else "EXTERNAL_CUSTODIAN","owner_site_restore":"BLOCKED",
                      "blocker":"B2_OFFLINE_INPUT_OR_APPROVAL_FAILED","overall":"BLOCKED"}
         print(json.dumps(receipt,sort_keys=True,separators=(",",":")))
-        return 0 if (receipt.get("b2_staged_scope_bound") is True and
+        return 0 if ((not owner_controlled or receipt.get("owner_site_restore")=="PASS_ELEVEN_OWNER_SITE_CIPHERS") and receipt.get("b2_staged_scope_bound") is True and
                      receipt.get("normalized_catalog_comparison")=="PASS_11_SCOPED_CATALOG_CHECKPOINTS" and
                      receipt.get("disposable_pg17_removed")=="PASS") else 1
     if argv in (["restore-external-equivalence"],["restore-external-catalog"]):
