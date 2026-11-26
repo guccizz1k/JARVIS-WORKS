@@ -483,6 +483,23 @@ class KRRequestParser(unittest.TestCase):
                 _decode_kr_body(v)
             self.assertEqual(ex.exception.status_code,422)
 
+    def test_agency_exception_shape_and_conflicts(self):
+        import json
+        from fastapi import HTTPException
+        from app.naruv_draft_review import _decode_kr_body
+        d=deductions()
+        cases={k:dict(tenant="a",worker="w",period="2026-11",case="ORDINARY",
+            amount_krw=d[k]["amount_krw"],evidence_sha256=d[k]["evidence_sha256"])
+            for k in ("pension","health","long_term_care","employment_insurance")}
+        a=dict(agency_cases=cases,expected_agency_snapshot_sha256="a"*64)
+        base=dict(expected_draft_sha256="a"*64,ordinary_hourly=12000,
+            classification_sha256="b"*64,classified_days=[day()],deductions=d,pension_assessed_base_krw=0,agency_exception_review=a)
+        self.assertEqual(_decode_kr_body(json.dumps(base).encode()),base)
+        for change in (dict(pension_assessed_base_krw=410000),dict(monthly_tax_review={}),
+            dict(insurance_assessed_bases={}),dict(agency_exception_review=dict(a,agency_cases={})),
+            dict(agency_exception_review=dict(a,agency_cases=dict(cases,pension=dict(cases["pension"],amount_krw=True))))):
+            with self.subTest(change=change),self.assertRaises(HTTPException) as ex:_decode_kr_body(json.dumps(dict(base,**change)).encode())
+            self.assertEqual(ex.exception.status_code,422)
     def test_annual_leave_optional_shape_and_conflicts(self):
         import json
         from fastapi import HTTPException
