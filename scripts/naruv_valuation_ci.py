@@ -849,6 +849,33 @@ def run_valuation(base):
                 self.assertEqual(th.status_code,200)
                 self.assertIn("월 소득세 계산 참고액",th.text)
                 print("NARUV_MONTHLY_TAX_API_PASS confirmed gross bound, evidence, HTML and tenant denial",flush=True)
+                from datetime import date,timedelta
+                weeks=[]
+                for w in range(5):
+                    monday=date(2026,6,29)+timedelta(days=7*w)
+                    entries=[]
+                    for j in range(7):
+                        d=monday+timedelta(days=j)
+                        worked=d.isoformat() in ("2026-07-01","2026-07-02") or d.month==6
+                        state=("PRESENT" if worked else "APPROVED_FULL_DAY_ANNUAL_LEAVE" if d.isoformat()=="2026-07-03" else "ABSENT") if j<5 else ("WEEKLY_REST" if j==6 else "NON_WORK_DAY")
+                        entries.append(dict(date=d.isoformat(),status=state,actual_minutes=480 if state=="PRESENT" else 0,evidence_sha256="a"*64))
+                    weeks.append(dict(monday=monday.isoformat(),employed_full_week=True,days=entries))
+                paid=dict(schedule_sha256="b"*64,attendance_sha256="c"*64,weeks=weeks,scope="HOURLY_MON_FRI_40H_SUNDAY_REST_ORDINARY_LEAVE_RATE")
+                fixed={k:v for k,v in tm.items() if k!="monthly_tax_review"}
+                fr=self.check(self.call(taxpath,dict(fixed,fixed_week_paid_review=paid)),200)
+                self.assertEqual(fr["fixed_week_paid_reference"]["paid_days"]["weekly_rest_krw"],800000)
+                self.assertEqual(fr["fixed_week_paid_reference"]["paid_days"]["annual_leave_krw"],800000)
+                self.assertEqual(fr["fixed_week_paid_reference"]["gross_estimate_krw"],3200000)
+                self.assertFalse(fr["fixed_week_paid_reference"]["classification_authenticity_verified"])
+                self.assertFalse(fr["payment_authorized"])
+                self.check(self.call(taxpath,dict(tm,fixed_week_paid_review=paid)),422)
+                self.check(self.call(taxpath,dict(fixed,fixed_week_paid_review=paid),who="B"),404)
+                import copy
+                mismatch=copy.deepcopy(paid);mismatch["weeks"][0]["days"][2]["actual_minutes"]=479
+                self.check(self.call(taxpath,dict(fixed,fixed_week_paid_review=mismatch)),409)
+                fh=self.call(taxpath,dict(fixed,fixed_week_paid_review=paid),extra={"accept":"text/html"})
+                self.assertEqual(fh.status_code,200);self.assertIn("3,200,000",fh.text)
+                print("NARUV_FIXED_WEEK_PAID_API_PASS alternative gross, confirmed work match, HTML, tenant and conflict denial",flush=True)
                 shift=dict(shift_sha256="e"*64,segments=[dict(start="2026-07-01T14:00+09:00",end="2026-07-01T23:00+09:00",evidence_sha256="f"*64)])
                 shift_result=self.check(self.call(krpath,dict(manual,shift_review=shift)),200)
                 self.assertEqual(shift_result["shift_reference"]["days"],[{"date":"2026-07-01","work_minutes":540,"night_minutes":60}])
