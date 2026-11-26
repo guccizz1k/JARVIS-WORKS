@@ -27,7 +27,7 @@ def sha(b):return hashlib.sha256(b).hexdigest()
 def scope_digest(scope):
     return sha(json.dumps(scope,sort_keys=True,separators=(",",":"),ensure_ascii=True).encode("ascii"))
 
-def _scope(scope,pin,raw):
+def _scope(scope,pin,raw,*,check_expiry=True):
     need(type(scope) is dict and set(scope)==SCOPE_FIELDS,"NATIVE_SCOPE")
     need(type(pin) is str and HEX.fullmatch(pin) and hmac.compare_digest(scope_digest(scope),pin),"NATIVE_APPROVAL_PIN")
     need(all(type(scope[k]) is str and ID.fullmatch(scope[k]) for k in ("account_id","bucket_id")),"NATIVE_SCOPE")
@@ -35,8 +35,10 @@ def _scope(scope,pin,raw):
     need(type(scope["name"]) is str and re.fullmatch(r"naruv-one/new-backup/[0-9a-f]{32}/"+scope["sha256"]+r"\.jwpgbk",scope["name"]),"NATIVE_NEW_PREFIX")
     need(type(raw) is bytes and 8<len(raw)<=MAX_BYTES and raw[:8]==b"JWPGBK2\n"
         and type(scope["size"]) is int and len(raw)==scope["size"] and hmac.compare_digest(sha(raw),scope["sha256"]),"NATIVE_CIPHERTEXT_PIN")
-    need(type(scope["approval_expires_ms"]) is int and now_ms()<scope["approval_expires_ms"],"NATIVE_APPROVAL_EXPIRED")
-    return _plan(scope)
+    need(type(scope["approval_expires_ms"]) is int and scope["approval_expires_ms"]>0,"NATIVE_APPROVAL_EXPIRY_FORMAT")
+    if check_expiry:
+        need(now_ms()<scope["approval_expires_ms"],"NATIVE_APPROVAL_EXPIRED")
+        return _plan(scope)
 
 def authenticate_new_archive(raw, key):
     """Check all existing V2 AES-GCM chunk tags locally before any network call.
@@ -203,3 +205,85 @@ def execute_approved_upload(*,scope,approved_scope_sha256,raw,archive_key,writer
         return dict(review,status="NATIVE_UPLOAD_READBACK_VERIFIED",ciphertext_verified=True,
             remote_write=True,archive_authenticated=True,restore_verified=False,key_retirement_authorized=False,production_authorized=False)
     finally:os.close(d)
+
+
+def _journal_pairs(pairs):
+    d={}
+    for k,v in pairs:
+        need(k not in d,"NATIVE_RECOVERY_DUPLICATE_JSON")
+        d[k]=v
+    return d
+
+def recovery_plan(*,scope,approved_scope_sha256,raw,journal_raw,journal_sha256):
+    """Offline validation of an interrupted upload receipt. Separate owner
+    approval is required for any subsequent remote read. No retry authority.
+    The caller must independently trust both pins and read protected local bytes.
+    """
+    _scope(scope,approved_scope_sha256,raw,check_expiry=False)
+    need(type(journal_raw) is bytes and 0<len(journal_raw)<=65536 and journal_raw.endswith(b"\n")
+        and type(journal_sha256) is str and HEX.fullmatch(journal_sha256)
+        and hmac.compare_digest(sha(journal_raw),journal_sha256),"NATIVE_RECOVERY_JOURNAL_PIN")
+    try:
+        lines=[json.loads(x,object_pairs_hook=_journal_pairs) for x in journal_raw.splitlines()]
+    except (UnicodeError,json.JSONDecodeError):raise ValueError("NATIVE_RECOVERY_JOURNAL_JSON") from None
+    need(1<=len(lines)<=4 and all(type(x) is dict for x in lines),"NATIVE_RECOVERY_JOURNAL_SHAPE")
+    a=lines[0]
+    need(set(a)=={"stage","approval_sha256","scope","plan","archive_authentication"}
+        and a["stage"]=="attempt" and a["approval_sha256"]==approved_scope_sha256 and a["scope"]==scope,"NATIVE_RECOVERY_JOURNAL_SCOPE")
+    p=a["plan"]
+    need(type(p) is dict and type(p.get("planned_at_ms")) is int
+        and p["planned_at_ms"]+scope["max_upload_ms"]<scope["approval_expires_ms"],"NATIVE_RECOVERY_PLAN")
+    expected_plan=upload_policy_plan(planned_at_ms=p["planned_at_ms"],max_upload_ms=scope["max_upload_ms"],
+        max_clock_skew_ms=scope["max_clock_skew_ms"],approved_until_ms=scope["approved_until_ms"])
+    need(p==expected_plan and all(type(p[k]) is type(v) for k,v in expected_plan.items()),"NATIVE_RECOVERY_PLAN")
+    auth=a["archive_authentication"]
+    need(type(auth) is dict and set(auth)=={"archive_format","authenticated_chunks","ciphertext_sha256","restore_verified"}
+        and auth["archive_format"]=="JWPGBK2" and auth["ciphertext_sha256"]==scope["sha256"]
+        and type(auth["authenticated_chunks"]) is int and 1<=auth["authenticated_chunks"]<=32
+        and auth["restore_verified"] is False,"NATIVE_RECOVERY_ARCHIVE_RECORD")
+    fid=None
+    if len(lines)>=2:
+        ack=lines[1];fid=ack.get("file_id")
+        need(set(ack)=={"stage","file_id"} and ack["stage"]=="ack" and type(fid) is str and 0<len(fid)<=1024,"NATIVE_RECOVERY_ACK")
+    if len(lines)>=3:
+        need(lines[2]=={"stage":"verified","file_id":fid,"sha256":scope["sha256"],"retain_until_ms":p["retain_until_ms"]},"NATIVE_RECOVERY_VERIFIED")
+    if len(lines)==4:
+        need(lines[3]=={"stage":"complete","verified":1},"NATIVE_RECOVERY_COMPLETE")
+    return {"plan":p,"file_id":fid,"already_complete":len(lines)==4,"prior_stage":lines[-1]["stage"]}
+
+def reconcile_interrupted_upload(*,scope,approved_scope_sha256,raw,journal_raw,journal_sha256,audit_credentials):
+    """Owner-approved read-only reconciliation of an uncertain write outcome.
+    Never creates, retries, updates, deletes, or modifies the original journal.
+    Remote absence is not proof that another attempt is safe.
+    """
+    j=recovery_plan(scope=scope,approved_scope_sha256=approved_scope_sha256,raw=raw,
+        journal_raw=journal_raw,journal_sha256=journal_sha256)
+    common={"journal_sha256":journal_sha256,"retry_authorized":False,"remote_write":False,
+        "restore_verified":False,"archive_authentication_reverified":False,"production_authorized":False}
+    if j["already_complete"]:
+        return dict(common,status="NATIVE_RECOVERY_ALREADY_COMPLETE_NO_REMOTE_READ",remote_read=False,ciphertext_reverified=False)
+    aa,rs=_auth(audit_credentials);_scope_session(aa,rs,scope,False)
+    rows=_versions(aa,rs,scope)
+    if not rows:
+        return dict(common,status="NATIVE_RECOVERY_REMOTE_ABSENT_UNCERTAIN",remote_read=True,ciphertext_reverified=False)
+    need(len(rows)==1,"NATIVE_RECOVERY_MULTIPLE_VERSIONS")
+    row=rows[0];fid=row.get("fileId")
+    need(type(fid) is str and 0<len(fid)<=1024 and (j["file_id"] is None or fid==j["file_id"]),"NATIVE_RECOVERY_FILE_ID")
+    expected=dict(bucketId=scope["bucket_id"],fileName=scope["name"],fileId=fid,
+        contentLength=len(raw),contentSha1=hashlib.sha1(raw).hexdigest())
+    plan=j["plan"]
+    verify_uploaded_metadata(plan=plan,expected=expected,info=row,now_ms=now_ms())
+    info=_api(aa,rs,"b2_get_file_info",{"fileId":fid})
+    verify_uploaded_metadata(plan=plan,expected=expected,info=info,now_ms=now_ms())
+    hold=legal_hold_state(info)
+    need(legal_hold_state(row)==hold and row["uploadTimestamp"]==info["uploadTimestamp"],"NATIVE_RECOVERY_METADATA_DRIFT")
+    got,h=_download(aa,rs,fid,len(raw))
+    need(got==raw and h.get("X-Bz-File-Id")==fid and h.get("X-Bz-Content-Sha1")==expected["contentSha1"]
+        and h.get("X-Bz-File-Retention-Mode")=="compliance"
+        and h.get("X-Bz-File-Retention-Retain-Until-Timestamp")==str(plan["retain_until_ms"]),"NATIVE_RECOVERY_READBACK")
+    final=_versions(aa,rs,scope)
+    need(len(final)==1,"NATIVE_RECOVERY_FINAL_VERSION_COUNT")
+    verify_uploaded_metadata(plan=plan,expected=expected,info=final[0],now_ms=now_ms())
+    need(legal_hold_state(final[0])==hold and final[0]["uploadTimestamp"]==info["uploadTimestamp"],"NATIVE_RECOVERY_METADATA_DRIFT")
+    return dict(common,status="NATIVE_RECOVERY_REMOTE_MATCH_READ_ONLY",remote_read=True,ciphertext_reverified=True,
+        file_id=fid,ciphertext_sha256=scope["sha256"],retain_until_ms=plan["retain_until_ms"])
