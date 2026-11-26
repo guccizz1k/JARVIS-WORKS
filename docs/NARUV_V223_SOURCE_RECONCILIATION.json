@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "37ed3f4cf2fdf85f364454db1d5b6d98e21e0f66",
+      "sha": "56df63cbf315de5d2d5421b41a23a8e6a61d836d",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "8f0539296f497763d37c7c117b284b2fa3251381",
+      "sha": "02c3e768f6af47657dfe148151dc647e2e373510",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "959743f939dbccea314c24be5753cf4eff6c5cf9",
+      "sha": "b4cac75b162a351f9ee10bad47125b5ffc1c4236",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "7377ef3ff8f867bf41ce95d5ef8e0db39841ca1e",
+      "sha": "c665e2266e3fc2243af6b0f68ca1294c752b6388",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8602,11 +8602,11 @@
       "mode": "100644"
     },
     "app/naruv_b2_native_upload.py": {
-      "sha": "1bb6b505363cda425986b31a699f609b790e44ac",
+      "sha": "5147fe77491f06fa0466e0473fce567b3a8069bc",
       "mode": "100644"
     },
     "tests/test_naruv_b2_native_upload.py": {
-      "sha": "647a94ed4f5559a23fa756e42ca48f91f8eb1065",
+      "sha": "c47471c876ccb53d177cc51db6f097425399e74b",
       "mode": "100644"
     }
   },
@@ -8983,6 +8983,18 @@
       "app/naruv_draft_review.py",
       "app/naruv_kr_payroll_review.py",
       "scripts/naruv_valuation_ci.py"
+    ]
+  },
+  "p1_p2_agency_upload_reconcile": {
+    "base": "f7fdf89ffdbbb348c26feb9403fdfc31e51b08d9",
+    "scope": "Manual agency exception alternative API and HTML, explicit not-authoritative scope, no ordinary contribution or payment acceptance; read-only interrupted native upload reconciliation with separate approval, journal and ciphertext pins, no retries or mutations. Mock transport only in CI.",
+    "paths": [
+      "app/naruv_draft_review.py",
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_b2_native_upload.py",
+      "tests/test_naruv_b2_native_upload.py"
     ]
   }
 }
