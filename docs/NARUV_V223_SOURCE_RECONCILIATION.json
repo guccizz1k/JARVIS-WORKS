@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "ac6b69cfcbba0eb23199afbb62594c621369032b",
+      "sha": "ebdc8b4bbb904babd7a067cc031fbdec1499adcc",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "1009ea89b0253d6a7555a394e2082172b74d83a4",
+      "sha": "a99b8d67a924c40bc1a3c7a7d2b225b9581f9393",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -8586,11 +8586,11 @@
       "mode": "100644"
     },
     "app/naruv_recovery_custody_review.py": {
-      "sha": "15cf3d206f468689933854d6706e7e44e6527378",
+      "sha": "6aafed77f21a775cf9b478035d3b77ed2a8b31bd",
       "mode": "100644"
     },
     "tests/test_naruv_recovery_custody_review.py": {
-      "sha": "7aaf9173f456eb9dafeb1898db07db88404bac2f",
+      "sha": "0f745db91527648adeb350ac9ee85886626b8395",
       "mode": "100644"
     }
   },
@@ -8919,6 +8919,16 @@
       "app/naruv_draft_review.py",
       "app/naruv_kr_payroll_review.py",
       "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_recovery_custody_review.py",
+      "tests/test_naruv_recovery_custody_review.py"
+    ]
+  },
+  "p1_p2_premium_custody_bind": {
+    "base": "4a706a6d4714d448525e221facd2844947de0e75",
+    "scope": "Reject premium categories in fixed-week ordinary-only alternative gross; custody assertion V2 binds trusted inventory asset IDs and ciphertext digests. No operational keys, archive mutation or release authorization.",
+    "paths": [
+      "app/naruv_draft_review.py",
       "scripts/naruv_valuation_ci.py",
       "app/naruv_recovery_custody_review.py",
       "tests/test_naruv_recovery_custody_review.py"
