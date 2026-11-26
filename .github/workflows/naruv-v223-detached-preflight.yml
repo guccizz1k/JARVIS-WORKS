@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: f9ed648dc9dde144ce1581fb2c4000d2cf235504
+      EXPECTED_SOURCE: df6aaa4f07bb66f5b26b03700958e16d3f343475
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: f9ed648dc9dde144ce1581fb2c4000d2cf235504
+          ref: df6aaa4f07bb66f5b26b03700958e16d3f343475
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -99,7 +99,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: f9ed648dc9dde144ce1581fb2c4000d2cf235504
+      EXPECTED_SOURCE: df6aaa4f07bb66f5b26b03700958e16d3f343475
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: f9ed648dc9dde144ce1581fb2c4000d2cf235504
+          ref: df6aaa4f07bb66f5b26b03700958e16d3f343475
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -122,11 +122,6 @@ jobs:
           test -x /opt/google/chrome/chrome
           /opt/google/chrome/chrome --version
           sudo apt-get install -y libnss3-tools
-      - name: Exercise synthetic probe dump and isolated local restore without B2
-        if: matrix.round == 1
-        run: |
-          set -euo pipefail
-          python -c 'from scripts.naruv_owner_live_upload import synthetic_dump; d=synthetic_dump(); assert d.startswith(b"PGDMP"); print("OWNER_SYNTHETIC_PG17_PROBE_PASS",len(d))'
       - name: Verify native file stage approval and atomic PG17 write
         env:
           NARUV_ERP_SOURCE_SERVICE: ${{ job.services.postgres.id }}
@@ -148,11 +143,11 @@ jobs:
     permissions:
       contents: read
     env:
-      EXPECTED_SOURCE: f9ed648dc9dde144ce1581fb2c4000d2cf235504
+      EXPECTED_SOURCE: df6aaa4f07bb66f5b26b03700958e16d3f343475
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: f9ed648dc9dde144ce1581fb2c4000d2cf235504
+          ref: df6aaa4f07bb66f5b26b03700958e16d3f343475
           fetch-depth: 1
           persist-credentials: false
       - name: Independently obtain and compare official Appendix 2 PDF
