@@ -828,6 +828,35 @@ def run_valuation(base):
                 self.assertIn("639,000",annual_html.text)
                 self.assertIn("수동 제출 · 월 급여에 미합산",annual_html.text)
                 print("NARUV_ANNUAL_NATIONAL_TAX_API_PASS assessed ordinary calculation, HTML and tenant denial",flush=True)
+                from app.naruv_payroll_draft import hash_input
+                import copy
+                agd=copy.deepcopy(manual["deductions"])
+                agd["pension"].update(amount_krw=0,assessment="NOT_APPLICABLE")
+                acases={k:dict(tenant="ci-a",worker="worker",period="2026-07",case="ORDINARY",
+                    amount_krw=agd[k]["amount_krw"],evidence_sha256=agd[k]["evidence_sha256"])
+                    for k in ("pension","health","long_term_care","employment_insurance")}
+                # Bind the actual existing worker route rather than assume its ID.
+                for row in acases.values():row["worker"]=krpath.split("/")[3]
+                acases["pension"]["case"]="NOT_ENROLLED"
+                acases["health"]["case"]="LEAVE"
+                def agency_submission(cases):
+                    return dict(agency_cases=cases,expected_agency_snapshot_sha256=hash_input({"v":"KR_AGENCY_SNAPSHOT_2026_V1",
+                        "tenant":"ci-a","worker":krpath.split("/")[3],"period":"2026-07","cases":cases}))
+                ar=dict(manual,deductions=agd,pension_assessed_base_krw=0,agency_exception_review=agency_submission(acases))
+                ax=self.check(self.call(krpath,ar),200)
+                self.assertEqual(ax["agency_exception_reference"]["exception_items"],["health","pension"])
+                self.assertFalse(ax["agency_exception_reference"]["agency_source_authenticity_verified"])
+                self.assertFalse(ax["payment_authorized"]);self.assertFalse(ax["statutory_validated"])
+                self.assertFalse(ax["agency_exception_reference"]["ordinary_collection_comparison_performed"])
+                self.check(self.call(krpath,ar,who="B"),404)
+                self.check(self.call(krpath,dict(ar,pension_assessed_base_krw=410000)),422)
+                self.check(self.call(krpath,dict(ar,insurance_assessed_bases={})),422)
+                self.check(self.call(krpath,dict(ar,agency_exception_review=dict(ar["agency_exception_review"],expected_agency_snapshot_sha256="0"*64))),409)
+                wrong=copy.deepcopy(acases);wrong["health"]["tenant"]="ci-b"
+                self.check(self.call(krpath,dict(ar,agency_exception_review=agency_submission(wrong))),409)
+                ah=self.call(krpath,ar,extra={"accept":"text/html"})
+                self.assertEqual(ah.status_code,200);self.assertIn("사회보험 특례 수동 검토",ah.text)
+                print("NARUV_AGENCY_EXCEPTION_API_PASS manual assessment, scope, snapshot, conflict and tenant denial",flush=True)
                 tw="/hr/workers/tax-worker";tp=tw+"/periods/2026-07"
                 self.check(self.call(tw+"/register/tax-reg"),200)
                 self.check(self.call(tp+"/create/tax-policy",{"revision":"tax-v1","hourly_krw":100000,"additional_bps":15000}),200)
