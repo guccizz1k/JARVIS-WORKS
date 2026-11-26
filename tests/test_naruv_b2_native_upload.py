@@ -97,6 +97,13 @@ class NativeUploadTests(unittest.TestCase):
         m._api.side_effect=paged
         with self.assertRaisesRegex(ValueError,"NATIVE_VERSION_PAGINATION"):self.run_upload()
         self.assertEqual(self.upload_count,0)
+    def test_api_and_download_hosts_are_separate(self):
+        self.assertEqual(m._base("https://api001.backblazeb2.com"),"https://api001.backblazeb2.com")
+        self.assertEqual(m._base("https://f001.backblazeb2.com",download=True),"https://f001.backblazeb2.com")
+        for url,download in (("https://f001.backblazeb2.com",False),("https://api001.backblazeb2.com",True),
+                             ("https://f001.backblazeb2.com.evil.example",True),("https://f001.backblazeb2.com:443",True)):
+            with self.subTest(url=url,download=download),self.assertRaisesRegex(ValueError,"NATIVE_BASE_URL"):
+                m._base(url,download=download)
     def test_urls(self):
         for url in ("http://pod-1.backblaze.com/b2api/v4/b2_upload_file/bucket/token",
             "https://pod-1.backblaze.com.evil.example/b2api/v4/b2_upload_file/bucket/token",
