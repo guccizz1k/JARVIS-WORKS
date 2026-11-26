@@ -67,7 +67,27 @@ def _decode_kr_body(raw):
             parse_constant=inventory._reject_constant)
         required={"expected_draft_sha256","ordinary_hourly","classification_sha256",
                 "classified_days","deductions","pension_assessed_base_krw"}
-        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review"}:raise ValueError("shape")
+        if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review","annual_leave_accrual_review"}:raise ValueError("shape")
+        if "annual_leave_accrual_review" in d:
+            a=d["annual_leave_accrual_review"]
+            required_leave={"employment_start","service_year","as_of","last_employed_on","months","attendance_sha256","contract_sha256","scope"}
+            if (type(a) is not dict or not required_leave<=set(a) or not set(a)<=required_leave|{"first_year_low_attendance_assessment"}
+                or "part_time_leave_review" in d or "unused_leave_review" in d
+                or any(type(a[k]) is not str for k in ("employment_start","as_of","attendance_sha256","contract_sha256","scope"))
+                or type(a["service_year"]) is not int
+                or (a["last_employed_on"] is not None and type(a["last_employed_on"]) is not str)
+                or type(a["months"]) is not list or len(a["months"])>12):
+                raise ValueError("annual leave shape")
+            for r in a["months"]:
+                if (type(r) is not dict or set(r)!={"start","scheduled_days","credited_days","evidence_sha256"}
+                    or type(r["start"]) is not str or type(r["evidence_sha256"]) is not str
+                    or any(type(r[k]) is not int for k in ("scheduled_days","credited_days"))):
+                    raise ValueError("annual leave month shape")
+            if "first_year_low_attendance_assessment" in a:
+                q=a["first_year_low_attendance_assessment"]
+                if (type(q) is not dict or set(q)!={"attendance_sha256","contract_sha256","anniversary","assessed_additional_days","assessment_sha256"}
+                    or type(q["assessed_additional_days"]) is not int or any(type(q[k]) is not str for k in set(q)-{"assessed_additional_days"})):
+                    raise ValueError("annual leave assessment shape")
         if "monthly_tax_review" in d:
             tax=d["monthly_tax_review"]
             if type(tax) is not dict or set(tax)!={"withholding_date","taxable_monthly_krw","eligible_family_count","eligible_children_8_20","selection_percent","assessment_sha256"}:
@@ -136,7 +156,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -205,6 +225,13 @@ def _kr_review(token,csrf,prior,worker,period,data):
                     gross_krw=review["wage"]["gross_estimate_krw"],deductions=data["deductions"],**data["monthly_tax_review"])
                 proof.update(v="KR_CI_MANUAL_API_V5",monthly_tax=tax["review_sha256"])
                 details["monthly_tax_reference"]=tax
+            if "annual_leave_accrual_review" in data:
+                a=data["annual_leave_accrual_review"]
+                if a["as_of"][:7]!=period:
+                    raise PayrollBlocked("KR_LEAVE_REVIEW_PERIOD")
+                accrual=annual_leave_accrual_review_2026(tenant=org,worker=worker,**a)
+                proof.update(v="KR_CI_MANUAL_API_V6",annual_leave_accrual=accrual["review_sha256"])
+                details["annual_leave_accrual_reference"]=dict(accrual,historical_attendance_authenticity_verified=False)
             return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
