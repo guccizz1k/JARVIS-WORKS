@@ -96,7 +96,7 @@ def _scope_session(a,s,scope,writer):
     need(type(caps) is list and len(caps)==len(expected) and set(caps)==expected,"NATIVE_SESSION_CAPS")
     need(v["namePrefix"]==(scope["name"] if writer else None),"NATIVE_SESSION_PREFIX")
     _base(s["apiUrl"])
-    if not writer:_base(s["downloadUrl"])
+    if not writer:_base(s["downloadUrl"],download=True)
     else:
         t=a.get("applicationKeyExpirationTimestamp")
         need(type(t) is int and now_ms()+scope["max_upload_ms"]+60000<t<=scope["approval_expires_ms"],"NATIVE_WRITER_EXPIRY")
