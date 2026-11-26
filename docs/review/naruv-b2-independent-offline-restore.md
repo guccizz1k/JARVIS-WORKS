@@ -17,3 +17,6 @@ New synthetic-only CI step downloads binary cryptography wheels before isolation
 
 ## Runtime command correction and both-scope integration
 Run 45810360087 passed prior actual PG17 tests but offline runtime setup failed because the source package build CLI omitted the commit argument. Supply exact HEAD as a separate argument; set writable temporary HOME and disable pip cache in read-only container. Parameterize existing actual staged catalog restoration over legacy and staged synthetic key scopes (11 each). No live archives or keys used. Pending CI.
+
+## Noexec runtime correction
+Run 45811080011 proved the source ZIP generation, wheel download and no-index installation, then failed to map cryptography's Rust shared object from the /tmp mount. Preserve noexec, read-only root, dropped capabilities and no network. Install the verified wheels in a dedicated local image layer using a networkless build, then exercise that exact image ID; run Python source from non-executable tmpfs. This is synthetic CI only; no production security-policy change. Prior 22 synthetic staged restores passed in the same run. Pending CI.
