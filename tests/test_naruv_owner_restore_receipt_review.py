@@ -68,3 +68,31 @@ def test_first_file_replaced_during_second_check(tmp_path,monkeypatch):
         return original(data)
     monkeypatch.setattr(r,'check',swap)
     with pytest.raises(ValueError):r.review(d)
+
+
+def test_ancestor_symlink_denied(tmp_path):
+    parent=tmp_path/'parent';parent.mkdir(mode=0o700);d=parent/'receipts';_pair(d)
+    alias=tmp_path/'alias';alias.symlink_to(parent,target_is_directory=True)
+    with pytest.raises((OSError,ValueError)):r.review(alias/'receipts')
+
+def test_unsafe_writable_parent_denied(tmp_path):
+    parent=tmp_path/'parent';parent.mkdir(mode=0o700);d=parent/'receipts';_pair(d)
+    parent.chmod(0o777)
+    with pytest.raises(ValueError):r.review(d)
+
+def test_ancestor_replacement_same_receipt_directory_denied(tmp_path,monkeypatch):
+    parent=tmp_path/'parent';parent.mkdir(mode=0o700);d=parent/'receipts';_pair(d)
+    original=r.check;calls=0
+    def swap(data):
+        nonlocal calls
+        calls+=1
+        if calls==1:
+            old=tmp_path/'old';parent.rename(old);parent.mkdir(mode=0o700)
+            (old/'receipts').rename(d)
+        return original(data)
+    monkeypatch.setattr(r,'check',swap)
+    with pytest.raises(ValueError):r.review(d)
+
+def test_parent_traversal_denied(tmp_path):
+    d=tmp_path/'receipts';_pair(d)
+    with pytest.raises(ValueError):r.review(d/'..'/'receipts')
