@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "22aaf94ab985452a556e9aba9f9201a4ea313f5a",
+      "sha": "121bf8203898d29dd2335037bb23f20688151a90",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -8668,6 +8668,14 @@
     "app/naruv_employee_proof_review.py": {
       "sha": "0e0d9e7b671321b76533b47927c2b9a19e7491fd",
       "mode": "100644"
+    },
+    "app/naruv_statutory_review_intake.py": {
+      "sha": "658c9188ed93112f58e59e1dadbcffb6f8292394",
+      "mode": "100644"
+    },
+    "tests/test_naruv_statutory_review_intake.py": {
+      "sha": "0c406613b9f81bdcd10d3eb6f7a828f54a92943d",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -9273,6 +9281,15 @@
       "db/review/naruv_employee_session_store_ci.sql",
       "app/naruv_employee_proof_review.py",
       "scripts/naruv_employee_session_store_ci.py",
+      "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
+    ]
+  },
+  "statutory_review_intake": {
+    "base": "a4605964614c7af31f5010ec0492b7439fcd7934",
+    "scope": "Synthetic external review structure and signature verification; no legal acceptance",
+    "paths": [
+      "app/naruv_statutory_review_intake.py",
+      "tests/test_naruv_statutory_review_intake.py",
       "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"
     ]
   }
