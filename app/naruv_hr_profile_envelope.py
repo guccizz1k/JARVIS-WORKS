@@ -315,6 +315,39 @@ def consume_combined_retirement_ci(cur,**args):
         "key_retirement_authorized":False,"production_authorized":False}
 
 
+
+def _open_trusted_key_directory(directory):
+    """Resolve every absolute component relative to a checked directory fd.
+    Only root/current-user ancestors; writable ancestors allowed solely for
+    root-owned sticky directories (e.g. /tmp), with checked child ownership.
+    """
+    import os,stat
+    _require(type(directory) is str and directory.startswith("/") and len(directory)<=4096)
+    parts=directory.split("/")[1:]
+    _require(1<=len(parts)<=128 and all(x not in ("",".","..") for x in parts))
+    _require(all(hasattr(os,k) for k in ("O_NOFOLLOW","O_DIRECTORY","O_CLOEXEC","geteuid","supports_dir_fd"))
+        and os.open in os.supports_dir_fd)
+    flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
+    fd=None
+    try:
+        fd=os.open("/",flags)
+        for i,name in enumerate(parts):
+            parent=os.fstat(fd)
+            mode=stat.S_IMODE(parent.st_mode)
+            _require(stat.S_ISDIR(parent.st_mode) and parent.st_uid in (0,os.geteuid())
+                and (not mode&0o022 or (parent.st_uid==0 and mode&stat.S_ISVTX)))
+            child=os.open(name,flags,dir_fd=fd)
+            os.close(fd);fd=child
+            current=os.fstat(fd)
+            _require(stat.S_ISDIR(current.st_mode) and current.st_uid in (0,os.geteuid()))
+        leaf=os.fstat(fd)
+        _require(leaf.st_uid==os.geteuid() and stat.S_IMODE(leaf.st_mode)==0o700)
+        result=fd;fd=None
+        return result
+    except (OSError,NotImplementedError):raise ProfileBlocked("HR_PROFILE_INVALID") from None
+    finally:
+        if fd is not None:os.close(fd)
+
 class MountedProfileKeyStore:
     """Read-only adapter for an externally provisioned POSIX secret directory.
     Deployment must own the directory and its ancestors; no key generation,
@@ -348,7 +381,7 @@ class MountedProfileKeyStore:
         _require(all(hasattr(os,k) for k in ("O_NOFOLLOW","O_DIRECTORY","O_NONBLOCK","O_CLOEXEC","geteuid")))
         directory_fd=None;fd=None
         try:
-            directory_fd=os.open(self._directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+            directory_fd=_open_trusted_key_directory(self._directory)
             ds=os.fstat(directory_fd)
             _require(stat.S_ISDIR(ds.st_mode) and ds.st_uid==os.geteuid() and stat.S_IMODE(ds.st_mode)==0o700)
             fd=os.open(entry["file"],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,dir_fd=directory_fd)
