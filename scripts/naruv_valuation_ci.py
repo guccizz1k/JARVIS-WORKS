@@ -976,7 +976,7 @@ def run_valuation(base):
                     from playwright.sync_api import sync_playwright
                     import io,pdfplumber
                     with sync_playwright() as pw:
-                        browser=pw.chromium.launch(headless=True)
+                        browser=pw.chromium.launch(executable_path="/opt/google/chrome/chrome",headless=True)
                         try:
                             context=browser.new_context(offline=True)
                             page=context.new_page()
