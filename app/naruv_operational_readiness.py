@@ -14,7 +14,7 @@ def prepare_upload_scope(*,account_id,bucket_id,bucket_name,operation_id,raw,arc
     need(type(operation_id) is str and re.fullmatch("[a-f0-9]{32}",operation_id)
         and type(bucket_name) is str and 1<=len(bucket_name)<=128,"READINESS_SCOPE")
     auth=authenticate_new_archive(raw,archive_key)
-    need(type(planned_at_ms) is int and type(approval_expires_ms) is int
+    need(type(planned_at_ms) is int and type(approval_expires_ms) is int and type(max_upload_ms) is int
         and planned_at_ms+max_upload_ms<approval_expires_ms<=planned_at_ms+5*3600000,"READINESS_EXPIRY")
     plan=upload_policy_plan(planned_at_ms=planned_at_ms,max_upload_ms=max_upload_ms,
         max_clock_skew_ms=max_clock_skew_ms,approved_until_ms=approved_until_ms)
@@ -55,5 +55,5 @@ def review_and_consume_local_challenge(*,journal_dir,expected_trust_pin,expected
             f.write(canonical(record)+b"\n");f.flush();os.fsync(f.fileno())
         os.fsync(d)
     finally:os.close(d)
-    return dict(result,local_challenge_consumed=True,requires_atomic_challenge_consumption=False,
+    return dict(result,local_challenge_consumed=True,
         distributed_challenge_consumption_verified=False)
