@@ -66,3 +66,63 @@ def test_eleven_synthetic_external_ciphers_really_restore_pg17(monkeypatch):
         assert report["overall"]=="BLOCKED"
     finally:
         docker("exec",SOURCE_CONTAINER,"dropdb","-U","postgres","--force",SOURCE_DB)
+
+
+def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path):
+    import hashlib,json
+    from scripts import naruv_b2_offline_stage as stage
+    from tests.test_p1_external_custodian_pg17_v223 import cipher
+    db="jw_b2_stage_source"
+    docker("exec",SOURCE_CONTAINER,"createdb","-U","postgres",db)
+    try:
+        sql="CREATE SCHEMA jw_dev;"+"""
+        DO $$ DECLARE i int; BEGIN
+          FOR i IN 0..64 LOOP
+            EXECUTE format('CREATE TABLE jw_dev.test_%s (id int PRIMARY KEY, value text NOT NULL)',i);
+            EXECUTE format('INSERT INTO jw_dev.test_%s VALUES (1, %L)',i,'b2-synthetic-only');
+          END LOOP;
+        END $$;
+        """
+        docker("exec","-i",SOURCE_CONTAINER,"psql","-X","-q","-v","ON_ERROR_STOP=1","-U","postgres","-d",db,data=sql.encode())
+        dump=docker("exec",SOURCE_CONTAINER,"pg_dump","-Fc","-U","postgres","--dbname",db,"--schema=jw_dev").stdout
+        key=b"S"*32
+        data=[cipher(key if i<11 else b"T"*32,dump,legacy=(i<11),nonce_seed=i+1) for i in range(22)]
+        rows=[dict(scope="legacy" if i<11 else "staged",file_id=str(i),size=len(x),
+                   sha256=stage.hash256(x),git_blob_sha1=stage.git_blob(x)) for i,x in enumerate(data)]
+        raw=json.dumps(dict(version=1,archives=rows)).encode()
+        pin=stage.hash256(raw)
+        directory=stage.stage(raw,pin,tmp_path,lambda r:data[int(r["file_id"])])
+        pairs=[(r["git_blob_sha1"],r["sha256"]) for r in rows[:11]]
+        scope=ext.equivalence.owner_scope([b for b,_ in pairs])
+        # Independently query the synthetic source, not the restored target.
+        manifest=ext.offline._audit_restored_row_manifest(SOURCE_CONTAINER,db)
+        assert manifest is not None and manifest[:2]==(65,65)
+        q="""SELECT encode(sha256(convert_to(coalesce(string_agg(c.relname||'.'||k.conname||'='||pg_get_constraintdef(k.oid,true),E'\\n' ORDER BY c.relname,k.conname),''),'UTF8')),'hex') FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='jw_dev';"""
+        constraint=docker("exec",SOURCE_CONTAINER,"psql","-X","-qAt","-U","postgres","-d",db,"-c",q).stdout.decode().strip()
+        catalog=json.loads(docker("exec",SOURCE_CONTAINER,"psql","-X","-qAt","-U","postgres","-d",db,"-v","ON_ERROR_STOP=1","-c",ext.catalog.SQL).stdout)
+        refs=[dict(git_blob_sha1=b,cipher_sha256=h,table_count=65,row_count=65,
+                   constraint_sha256=constraint,row_manifest_c_sha256=manifest[10],
+                   table_names_c_sha256=manifest[8],empty_table_names_c_sha256=manifest[9],
+                   populated_tables=65) for b,h in pairs]
+        reference=ext.equivalence.canonical(dict(format=ext.catalog.FORMAT,algorithm=ext.catalog.ALGORITHM,
+            data_reference=dict(format=ext.equivalence.FORMAT,algorithm=ext.equivalence.ALGORITHM,
+                                vault_commit_sha1="c"*40,archives=refs),
+            catalog_archives=[dict(git_blob_sha1=b,cipher_sha256=h,sections=catalog) for b,h in pairs]))
+        monkeypatch.setattr(ext,"preflight",lambda:"PASS")
+        monkeypatch.setenv("JW_PG_B2_OFFLINE_ACK",ext.B2_ACK)
+        monkeypatch.setenv("JW_WORM_OWNER_SCOPE_SHA256",scope)
+        for k in ("GH_TOKEN","GITHUB_TOKEN","B2_APPLICATION_KEY","B2_APPLICATION_KEY_ID","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY"):
+            monkeypatch.delenv(k,raising=False)
+        monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,key,pairs))
+        def forbid(*args):raise AssertionError("GitHub access forbidden")
+        monkeypatch.setattr(clean,"_head_tree",forbid)
+        monkeypatch.setattr(clean,"_download",forbid)
+        report=ext.run(reference,hashlib.sha256(reference).hexdigest(),catalog_required=True,
+                       staged=(raw,pin,directory,"legacy"))
+        assert report["b2_staged_scope_bound"] is True,report
+        assert report["restored_pg17_archive_count"]==11,report
+        assert report["normalized_catalog_comparison"]=="PASS_11_SCOPED_CATALOG_CHECKPOINTS",report
+        assert report["disposable_pg17_removed"]=="PASS"
+        assert report["overall"]=="BLOCKED"
+    finally:
+        docker("exec",SOURCE_CONTAINER,"dropdb","-U","postgres","--force",db)

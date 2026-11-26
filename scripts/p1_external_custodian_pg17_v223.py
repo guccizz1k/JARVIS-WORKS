@@ -31,6 +31,9 @@ from scripts import p1_owner_offline_restore_v223 as offline
 from scripts import pg_backup_v223 as backup
 from scripts import jw_independent_equivalence_v223 as equivalence
 from scripts import jw_independent_catalog_v223 as catalog
+from scripts import naruv_b2_offline_stage as b2stage
+
+B2_ACK = "OWNER_APPROVES_PINNED_B2_OFFLINE_CATALOG_RESTORE"
 
 ACK = "OWNER_APPROVES_EXTERNAL_CUSTODIAN_NETWORKLESS_PG17_RESTORE"
 MAX_ARCHIVES = 11
@@ -153,9 +156,29 @@ def decrypt_verified(cipher: bytes, key: bytes) -> bytearray:
         raise
 
 
-def run(reference_raw=None, reference_pin=None, *, catalog_required=False) -> dict[str, object]:
+def _staged_inputs(staged):
+    """Read the pinned local encrypted set only, before opening a key pipe."""
+    if os.environ.get("JW_PG_B2_OFFLINE_ACK") != B2_ACK:
+        raise Blocked("B2_OFFLINE_APPROVAL_REQUIRED")
+    if any(os.environ.get(k) for k in ("GH_TOKEN","GITHUB_TOKEN","B2_APPLICATION_KEY",
+                                      "B2_APPLICATION_KEY_ID","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY")):
+        raise Blocked("B2_OFFLINE_PROVIDER_CREDENTIAL_PRESENT")
+    if type(staged) is not tuple or len(staged)!=4:
+        raise Blocked("B2_OFFLINE_INPUTS_REQUIRED")
+    raw,pin,directory,scope=staged
+    try:
+        known=b2stage.read_staged(raw,pin,directory,scope)
+    except (ValueError,OSError,TypeError):
+        raise Blocked("B2_OFFLINE_CIPHERTEXT_SET_INVALID") from None
+    if len(known)!=MAX_ARCHIVES:
+        raise Blocked("B2_OFFLINE_SCOPE_COUNT")
+    return known
+
+def run(reference_raw=None, reference_pin=None, *, catalog_required=False, staged=None) -> dict[str, object]:
     result={
         "external_pg17_restore":"BLOCKED",
+        "ciphertext_path":"B2_STAGED_OFFLINE" if staged is not None else "GITHUB_PRIVATE_VAULT",
+        "b2_staged_scope_bound":False,
         "owner_scope_pin_checked":False,
         "verified_provider_cipher_count":0,
         "restored_pg17_archive_count":0,
@@ -184,6 +207,11 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False) -> di
     key=None
     comparison=None
     try:
+        known=None
+        if staged is not None:
+            if not catalog_required or reference_raw is None or reference_pin is None:
+                raise Blocked("B2_OFFLINE_CATALOG_REFERENCE_REQUIRED")
+            known=_staged_inputs(staged)
         pin,key,pairs=clean._inputs()
         _require_owner_scope(pairs, os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""))
         result["owner_scope_pin_checked"]=True
@@ -195,8 +223,15 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False) -> di
                 expected_scope=os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""),
                 provider_pairs=pairs)
             comparison=catalog.CatalogComparison(*rows) if catalog_required else equivalence.Equivalence(rows)
-        if not set(x[0] for x in pairs)<=clean._head_tree(pin):
-            raise Blocked("PINNED_PRIVATE_VAULT_OBJECT_SET_INVALID")
+        if known is None:
+            if not set(x[0] for x in pairs)<=clean._head_tree(pin):
+                raise Blocked("PINNED_PRIVATE_VAULT_OBJECT_SET_INVALID")
+        else:
+            if set(known)!={blob for blob,_ in pairs} or any(
+                    not hmac.compare_digest(hashlib.sha256(known[blob]).hexdigest(),expected)
+                    for blob,expected in pairs):
+                raise Blocked("B2_OFFLINE_OWNER_MANIFEST_MISMATCH")
+            result["b2_staged_scope_bound"]=True
         name="jw-p1-external-pg17-"+secrets.token_hex(8)
         created=offline._docker([
             "run","--rm","--pull","never","-d","--name",name,
@@ -228,7 +263,7 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False) -> di
         for i,(blob,expected) in enumerate(pairs):
             if time.monotonic()-begun > MAX_RUNTIME_SECONDS:
                 raise Blocked("SECOND_SITE_TIME_BUDGET_EXCEEDED")
-            cipher=clean._download(blob,expected)
+            cipher=clean._download(blob,expected) if known is None else known[blob]
             spent_cipher+=len(cipher)
             if spent_cipher>MAX_TOTAL_CIPHER:
                 raise Blocked("SECOND_SITE_CIPHERTEXT_BUDGET_EXCEEDED")
@@ -300,6 +335,32 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False) -> di
 
 def main(argv=None):
     argv=sys.argv[1:] if argv is None else argv
+    if argv==["restore-b2-offline-catalog"]:
+        # No provider calls in this mode. The custodian supplies independently
+        # pinned ciphertext manifest, legacy vault identity/reference and key pipe.
+        try:
+            if os.environ.get("JW_PG_B2_OFFLINE_ACK") != B2_ACK:
+                raise Blocked("B2_OFFLINE_APPROVAL_REQUIRED")
+            if preflight()!="PASS":
+                raise Blocked("B2_OFFLINE_PREFLIGHT_FAILED")
+            import stat
+            fd=os.open(os.environ["JW_PG_B2_MANIFEST_PATH"],os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            with os.fdopen(fd,"rb") as f:
+                info=os.fstat(f.fileno())
+                if not stat.S_ISREG(info.st_mode) or not 0<info.st_size<=65536:
+                    raise Blocked("B2_OFFLINE_MANIFEST_FILE")
+                manifest=f.read(65537)
+            raw=equivalence.read_reference_pipe(os.environ)
+            receipt=run(raw,os.environ.get("JW_PG_RESTORE_REFERENCE_SHA256",""),catalog_required=True,
+                        staged=(manifest,os.environ.get("JW_PG_B2_MANIFEST_SHA256",""),
+                                os.environ["JW_PG_B2_STAGE_DIRECTORY"],os.environ.get("JW_PG_B2_SCOPE","")))
+        except Exception:
+            receipt={"ciphertext_path":"B2_STAGED_OFFLINE","external_pg17_restore":"BLOCKED",
+                     "blocker":"B2_OFFLINE_INPUT_OR_APPROVAL_FAILED","overall":"BLOCKED"}
+        print(json.dumps(receipt,sort_keys=True,separators=(",",":")))
+        return 0 if (receipt.get("b2_staged_scope_bound") is True and
+                     receipt.get("normalized_catalog_comparison")=="PASS_11_SCOPED_CATALOG_CHECKPOINTS" and
+                     receipt.get("disposable_pg17_removed")=="PASS") else 1
     if argv in (["restore-external-equivalence"],["restore-external-catalog"]):
         catalog_required=argv==["restore-external-catalog"]
         try:

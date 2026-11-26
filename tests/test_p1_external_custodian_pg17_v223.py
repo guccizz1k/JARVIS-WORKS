@@ -126,3 +126,40 @@ def test_no_unknown_cli_commands_cause_restore(monkeypatch):
     monkeypatch.setattr(e,"run",lambda:(_ for _ in ()).throw(
         AssertionError("unexpected restore")))
     assert e.main(["upload-key"])==2
+
+
+def test_b2_offline_requires_reference_and_approval_before_key(monkeypatch):
+    monkeypatch.setattr(e,"preflight",lambda:"PASS")
+    monkeypatch.setattr(clean,"_inputs",lambda:pytest.fail("key read before staged gate"))
+    monkeypatch.delenv("JW_PG_B2_OFFLINE_ACK",raising=False)
+    staged=(b"{}", "0"*64, "/missing", "legacy")
+    assert e.run(staged=staged)["blocker"]=="B2_OFFLINE_CATALOG_REFERENCE_REQUIRED"
+    assert e.run(b"{}", "0"*64,catalog_required=True,staged=staged)["blocker"]=="B2_OFFLINE_APPROVAL_REQUIRED"
+    monkeypatch.setenv("JW_PG_B2_OFFLINE_ACK",e.B2_ACK)
+    monkeypatch.setenv("GH_TOKEN","synthetic")
+    assert e.run(b"{}", "0"*64,catalog_required=True,staged=staged)["blocker"]=="B2_OFFLINE_PROVIDER_CREDENTIAL_PRESENT"
+    monkeypatch.delenv("GH_TOKEN")
+    for k in ("GITHUB_TOKEN","B2_APPLICATION_KEY","B2_APPLICATION_KEY_ID","AWS_ACCESS_KEY_ID","AWS_SECRET_ACCESS_KEY"):
+        monkeypatch.delenv(k,raising=False)
+    assert e.run(b"{}", "0"*64,catalog_required=True,staged=staged)["blocker"]=="B2_OFFLINE_CIPHERTEXT_SET_INVALID"
+
+def test_b2_scope_mismatch_never_calls_provider_or_starts_container(monkeypatch):
+    import hashlib
+    monkeypatch.setattr(e,"preflight",lambda:"PASS")
+    ids=[f"{i:040x}" for i in range(11)]
+    pairs=[(i,"b"*64) for i in ids]
+    monkeypatch.setenv("JW_WORM_OWNER_SCOPE_SHA256",e.equivalence.owner_scope(ids))
+    monkeypatch.setattr(e,"_staged_inputs",lambda _:dict.fromkeys(ids,b"wrong"))
+    monkeypatch.setattr(clean,"_inputs",lambda:("c"*40,b"K"*32,pairs))
+    monkeypatch.setattr(e.catalog,"load_reference",lambda *a,**k:(None,None))
+    class FakeComparison:
+        def __init__(self,*args):pass
+        def receipt(self,**kwargs):return {"normalized_archive_comparison":"BLOCKED"}
+    monkeypatch.setattr(e.catalog,"CatalogComparison",FakeComparison)
+    monkeypatch.setattr(clean,"_head_tree",lambda *_:pytest.fail("GitHub called"))
+    monkeypatch.setattr(clean,"_download",lambda *_:pytest.fail("GitHub called"))
+    monkeypatch.setattr(e.offline,"_docker",lambda *a,**kw:pytest.fail("Docker reached before binding"))
+    receipt=e.run(b"{}", "0"*64,catalog_required=True,staged=(None,)*4)
+    assert receipt["blocker"]=="B2_OFFLINE_OWNER_MANIFEST_MISMATCH"
+    assert receipt["b2_staged_scope_bound"] is False
+    assert receipt["overall"]=="BLOCKED"
