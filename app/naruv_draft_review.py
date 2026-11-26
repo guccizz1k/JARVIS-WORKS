@@ -70,9 +70,17 @@ def _decode_kr_body(raw):
         if type(d) is not dict or not required<=set(d) or not set(d)<=required|{"insurance_assessed_bases","settlement_components","paid_holiday_review","unused_leave_review","shift_review","part_time_leave_review","monthly_tax_review","annual_leave_accrual_review","fixed_week_paid_review","part_time_rest_review","agency_exception_review","wage_statement_review"}:raise ValueError("shape")
         if "wage_statement_review" in d:
             a=d["wage_statement_review"]
-            if (type(a) is not dict or set(a)!={"payment_date","scope","completeness_assessment_sha256"}
-                or any(type(v) is not str for v in a.values())):
+            fields={"payment_date","scope","completeness_assessment_sha256"}
+            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages"}
+                or any(type(a[k]) is not str for k in fields)):
                 raise ValueError("statement scope")
+            if "additional_cash_wages" in a:
+                extra=a["additional_cash_wages"]
+                if type(extra) is not list or not 1<=len(extra)<=8:raise ValueError("cash wages")
+                for r in extra:
+                    if (type(r) is not dict or set(r)!={"kind","component_id","amount_krw","assessment_sha256"}
+                        or type(r["amount_krw"]) is not int or any(type(r[k]) is not str for k in set(r)-{"amount_krw"})):
+                        raise ValueError("cash wage shape")
             optional={"wage_statement_review"}
             if a["scope"]=="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE":
                 optional.add("fixed_week_paid_review")
@@ -220,7 +228,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     import psycopg
     from .naruv_kr_payroll_review import (source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026,
         assessed_settlement_components_2026,approved_paid_holiday_review_2026,unused_leave_compensation_review_2026,
-        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026,ordinary_comparison_coverage_2026,restricted_wage_statement_2026,fixed_week_wage_statement_2026)
+        shift_night_source_review_2026,fixed_part_time_annual_leave_reference_2026,assessed_monthly_tax_comparison_2026,annual_leave_accrual_review_2026,fixed_week_monthly_payroll_review_2026,source_bound_part_time_rest_2026,source_bound_agency_deduction_review_2026,ordinary_comparison_coverage_2026,restricted_wage_statement_2026,fixed_week_wage_statement_2026,extend_assessed_cash_statement_2026)
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -335,16 +343,20 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 proof.update(v="KR_CI_MANUAL_API_V8",part_time_rest=rest["review_sha256"])
                 details["part_time_rest_reference"]=rest
             if "wage_statement_review" in data:
+                statement_args={k:v for k,v in data["wage_statement_review"].items() if k!="additional_cash_wages"}
                 if "fixed_week_paid_review" in data:
                     statement=fixed_week_wage_statement_2026(tenant=org,worker=worker,period=period,
                         base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],minutes_by_day=days,
                         deductions=data["deductions"],fixed_review=fixed,source_review=review,
-                        **data["wage_statement_review"])
+                        **statement_args)
                 else:
                     statement=restricted_wage_statement_2026(tenant=org,worker=worker,period=period,
                         base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],classification_sha256=data["classification_sha256"],
                         classified_days=data["classified_days"],deductions=data["deductions"],bound_review=review,
-                        **data["wage_statement_review"])
+                        **statement_args)
+                if "additional_cash_wages" in data["wage_statement_review"]:
+                    statement=extend_assessed_cash_statement_2026(tenant=org,statement=statement,
+                        additional_cash_wages=data["wage_statement_review"]["additional_cash_wages"])
                 proof["wage_statement"]=statement["review_sha256"]
                 details["wage_statement_reference"]=statement
             if "insurance_reference" in details and "monthly_tax_reference" in details:
@@ -447,10 +459,15 @@ def create_router():
             prior=await run_in_threadpool(write._auth,token,csrf)
             data=await _kr_body(request)
             result=await run_in_threadpool(_kr_review,token,csrf,prior,worker,period,data)
-            if preview._one_header(request,"accept","")=="text/html":
+            accept=preview._one_header(request,"accept","")
+            if accept in ("text/html","text/html;profile=naruv-wage-statement-draft"):
                 from fastapi.responses import HTMLResponse
-                from .naruv_kr_payroll_review import isolated_payroll_review_html
-                return HTMLResponse(isolated_payroll_review_html(result),headers={
+                from .naruv_kr_payroll_review import isolated_payroll_review_html,isolated_wage_statement_print_html
+                if accept=="text/html;profile=naruv-wage-statement-draft":
+                    if "wage_statement_reference" not in result:raise HTTPException(409,"KR_STATEMENT_REQUIRED")
+                    body=isolated_wage_statement_print_html(result)
+                else:body=isolated_payroll_review_html(result)
+                return HTMLResponse(body,headers={
                     "Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY",
                     "Referrer-Policy":"no-referrer","Content-Security-Policy":"default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"})
             response.headers["Cache-Control"]="no-store"
