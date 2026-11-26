@@ -12,5 +12,7 @@ This engineering-only record supplements AGENTS.md, approved J1–J6 and existin
 
 - Owner direction 2026-11-26: each next-development command means the complete latest highest-priority integrated list, all safely executable items in one batch, fix failures at root and preserve valid prior evidence. If one item is blocked, continue independent work. Always obtain explicit approval BEFORE any paid service, subscription, resource creation or charge; do not interpret ordinary development approval as spending approval. No changes to existing release, security or own-AI authorization boundaries.
 
+- Owner priority override 2026-11-26: resolve outstanding P1 full statutory payroll and P2 operational key lifecycle before subsequent unrelated development. Supporting isolated environment work only when directly needed for these two stages. Both must meet actual scoped acceptance and all mandatory conditions before resuming later stages; do not relabel partial as PASS. Existing key retirement, production, cost and own-AI approval boundaries remain unchanged.
+
 ## Resume
 Open draft PR #164 and read docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md. Determine actual detached source from .github/workflows/naruv-v223-detached-preflight.yml, verify inventory in docs/NARUV_V223_SOURCE_RECONCILIATION.json. Read latest workflow runs, jobs, logs; current state is deliberately not frozen here. Preserve existing governance, review branch and production protection.
