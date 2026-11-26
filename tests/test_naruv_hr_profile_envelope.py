@@ -71,6 +71,8 @@ class HRProfileEnvelope(unittest.TestCase):
         for change,expected in (({},"PURGE_CANDIDATE_ONLY"),({"purpose_closed":False},"ACTIVE_PURPOSE"),
                 ({"legal_review_complete":False},"REVIEW_REQUIRED"),({"approval_sha256":None},"REVIEW_REQUIRED"),
                 ({"legal_hold":True},"LEGAL_HOLD_SEPARATE_STORAGE_REQUIRED"),
+                ({"legal_hold":True,"legal_review_complete":False},"LEGAL_HOLD_SEPARATE_STORAGE_REQUIRED"),
+                ({"retain_until":None},"REVIEW_REQUIRED"),
                 ({"retain_until":now+timedelta(microseconds=1)},"RETAIN_SEPARATELY")):
             r=retention_decision(**dict(args,**change))
             self.assertEqual(r["status"],expected)
@@ -161,3 +163,40 @@ class HRProfileEnvelope(unittest.TestCase):
         self.assertEqual(r["status"],"EVIDENCE_REVIEW_ONLY")
         self.assertFalse(r["key_retirement_authorized"])
         self.assertFalse(r["production_authorized"])
+
+
+    def test_combined_evidence_uses_pinned_signers_and_recomputed_reviews(self):
+        from datetime import datetime,timezone,timedelta
+        import hashlib
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
+        from app.naruv_hr_profile_envelope import (_canonical,retirement_inventory_digest,key_retirement_review,
+            archive_lifecycle_review,verify_combined_retirement_evidence)
+        now=datetime(2026,11,26,tzinfo=timezone.utc)
+        scope=dict(tenant="ci-a",old_key_id="old",new_key_id="new",expected_assets=["live","archive"])
+        inventory=retirement_inventory_digest(**scope)
+        observations=[dict(asset=x,tenant="ci-a",key_id="new",restore_sha256="a"*64,old_key_denied=True) for x in scope["expected_assets"]]
+        review=key_retirement_review(**scope,inventory_sha256=inventory,observations=observations)
+        rows=[dict(asset="archive",tenant="ci-a",archive_sha256="b"*64,retain_until=now,legal_hold=False,old_key_required=False)]
+        archive=hashlib.sha256(_canonical(["NARUV_ARCHIVE_LIFECYCLE_V1","ci-a",["archive"],[["archive","b"*64,now.isoformat(),False,False]]])).hexdigest()
+        life=archive_lifecycle_review(tenant="ci-a",as_of=now,expected_assets=["archive"],inventory_sha256=archive,records=rows)
+        a,b=Ed25519PrivateKey.generate(),Ed25519PrivateKey.generate()
+        ap,bp=(k.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw) for k in (a,b))
+        trust={"inventory":hashlib.sha256(ap).hexdigest(),"recovery":hashlib.sha256(bp).hexdigest()}
+        challenge="c"*64
+        msg=_canonical(["NARUV_COMBINED_RETIREMENT_V2","ci-a","old","new",inventory,
+            review["review_sha256"],archive,life["review_sha256"],trust,challenge,now.isoformat()])
+        args=dict(scope,inventory_sha256=inventory,observations=observations,expected_archive_assets=["archive"],
+            archive_inventory_sha256=archive,archive_records=rows,inventory_public_key=ap,recovery_public_key=bp,
+            trust_fingerprints=trust,inventory_signature=a.sign(b"inventory:"+msg),recovery_signature=b.sign(b"recovery:"+msg),
+            challenge=challenge,issued_at=now,as_of=now)
+        r=verify_combined_retirement_evidence(**args)
+        self.assertTrue(r["requires_atomic_challenge_consumption"])
+        self.assertFalse(r["key_retirement_authorized"])
+        for change in (dict(observations=observations[:1]),dict(archive_records=[]),
+            dict(archive_records=[dict(rows[0],legal_hold=True)]),
+            dict(expected_archive_assets=["unknown"]),dict(trust_fingerprints=dict(trust,inventory="d"*64)),
+            dict(challenge="e"*64),dict(as_of=now+timedelta(minutes=11)),
+            dict(recovery_signature=args["inventory_signature"])):
+            with self.subTest(change=list(change)),self.assertRaises(ProfileBlocked):
+                verify_combined_retirement_evidence(**dict(args,**change))

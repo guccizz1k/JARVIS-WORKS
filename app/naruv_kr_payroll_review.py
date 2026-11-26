@@ -1194,3 +1194,66 @@ def insurance_collection_review_2026(*,tenant,worker,period,health_base_krw,empl
         "review_sha256":hash_input({"v":"KR_INSURANCE_COLLECTION_COMPARE_2026_V1",
             "reference":ref["reference_sha256"],"assessed":assessed_employee_krw,"candidates":candidates}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def fixed_week_paid_rest_leave_review_2026(*,tenant,worker,period,ordinary_hourly,
+        schedule_sha256,attendance_sha256,weeks,scope):
+    """Restricted Mon-Fri 40h hourly contract, Sunday rest, continuous employment.
+    Labor Standards Act 55, 60; MOEL 1000324133, 1000325598, 1000325778.
+    Complete boundary weeks required. Approved full-day annual leave paid at
+    ordinary rate only in this contractual scope, not accrual/unused leave.
+    Public holidays, partial weeks, all-leave weeks, other shifts and wage
+    bases need separate review. This function is not a payment authorization.
+    """
+    from datetime import timedelta
+    from calendar import monthrange
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker)),"KR_PAID_SCOPE")
+    require(scope=="HOURLY_MON_FRI_40H_SUNDAY_REST_ORDINARY_LEAVE_RATE","KR_PAID_SCOPE")
+    require(type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period),"KR_PAID_PERIOD")
+    require(_whole(ordinary_hourly,1,10**8),"KR_PAID_RATE")
+    require(all(type(x) is str and HEX.fullmatch(x) for x in (schedule_sha256,attendance_sha256)),"KR_PAID_EVIDENCE")
+    first=date.fromisoformat(period+"-01")
+    last=first.replace(day=monthrange(first.year,first.month)[1])
+    begin=first-timedelta(days=first.weekday())
+    end=last-timedelta(days=last.weekday())
+    expected={begin+timedelta(days=i*7) for i in range((end-begin).days//7+1)}
+    require(type(weeks) in (tuple,list) and len(weeks)==len(expected),"KR_PAID_WEEK_COVERAGE")
+    seen=set(); normalized=[]; rest=[]; leave=[]
+    for w in weeks:
+        require(type(w) is dict and set(w)=={"monday","employed_full_week","days"},"KR_PAID_WEEK_SHAPE")
+        require(type(w["monday"]) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",w["monday"]),"KR_PAID_WEEK_DATE")
+        try: monday=date.fromisoformat(w["monday"])
+        except ValueError:raise PayrollBlocked("KR_PAID_WEEK_DATE") from None
+        require(monday in expected and monday not in seen and w["employed_full_week"] is True,"KR_PAID_WEEK_SCOPE")
+        seen.add(monday)
+        days=w["days"]
+        require(type(days) in (tuple,list) and len(days)==7,"KR_PAID_DAY_COVERAGE")
+        rowmap={}
+        for row in days:
+            require(type(row) is dict and set(row)=={"date","status","actual_minutes","evidence_sha256"},"KR_PAID_DAY_SHAPE")
+            d=row["date"]; status=row["status"]; minutes=row["actual_minutes"]
+            require(type(d) is str and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",d),"KR_PAID_DAY_DATE")
+            try:dt=date.fromisoformat(d)
+            except ValueError:raise PayrollBlocked("KR_PAID_DAY_DATE") from None
+            require(monday<=dt<=monday+timedelta(days=6) and dt not in rowmap,"KR_PAID_DAY_SCOPE")
+            require(type(status) is str and type(row["evidence_sha256"]) is str and HEX.fullmatch(row["evidence_sha256"]),"KR_PAID_DAY_EVIDENCE")
+            if dt.weekday()<5:
+                require(status in ("PRESENT","ABSENT","APPROVED_FULL_DAY_ANNUAL_LEAVE"),"KR_PAID_UNSUPPORTED_DAY")
+                require(_whole(minutes,1,480) if status=="PRESENT" else type(minutes) is int and minutes==0,"KR_PAID_DAY_MINUTES")
+                if status=="APPROVED_FULL_DAY_ANNUAL_LEAVE" and first<=dt<=last:leave.append(d)
+            else:
+                require(status==("WEEKLY_REST" if dt.weekday()==6 else "NON_WORK_DAY") and type(minutes) is int and minutes==0,"KR_PAID_WEEKEND_SCOPE")
+            rowmap[dt]=dict(row)
+        statuses=[rowmap[monday+timedelta(days=i)]["status"] for i in range(5)]
+        sunday=monday+timedelta(days=6)
+        if first<=sunday<=last:
+            require(not all(x=="APPROVED_FULL_DAY_ANNUAL_LEAVE" for x in statuses),"KR_PAID_ALL_LEAVE_WEEK_REVIEW_REQUIRED")
+            if "ABSENT" not in statuses:rest.append(sunday.isoformat())
+        normalized.append({"monday":monday.isoformat(),"employed_full_week":True,"days":[rowmap[x] for x in sorted(rowmap)]})
+    rest.sort();leave.sort()
+    return {"status":"FIXED_WEEK_PAID_REST_LEAVE_REFERENCE_ONLY","weekly_rest_dates":rest,"annual_leave_dates":leave,
+        "weekly_rest_krw":len(rest)*8*ordinary_hourly,"annual_leave_krw":len(leave)*8*ordinary_hourly,
+        "review_sha256":hash_input({"v":"KR_FIXED_WEEK_PAID_REST_LEAVE_2026_V1","tenant":tenant,"worker":worker,
+            "period":period,"scope":scope,"ordinary_hourly":ordinary_hourly,"schedule":schedule_sha256,
+            "attendance":attendance_sha256,"weeks":sorted(normalized,key=lambda x:x["monday"])}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}

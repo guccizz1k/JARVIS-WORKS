@@ -221,4 +221,28 @@ def verify_archive_lifecycle_fixture(archive_digest):
     need(result["status"]=="BLOCKED" and result["retained_assets"]==[assets[0]] and result["old_key_assets"]==[assets[0]]
          and result["key_retirement_authorized"] is False and result["deletion_authorized"] is False,
          "ARCHIVE_LIFECYCLE_UNSAFE_RELEASE")
-    print("NARUV_ARCHIVE_LIFECYCLE_FIXTURE_PASS actual synthetic archive digest, simulated retained prior copy, no key or deletion authorization",flush=True)
+    # An old key cannot be retired merely by signing a valid recovery proof.
+    # The combined decision recomputes retention from the same asset scope.
+    from app.naruv_hr_profile_envelope import verify_combined_retirement_evidence,retirement_inventory_digest
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding,PublicFormat
+    from app.naruv_hr_profile_envelope import key_retirement_review
+    scope=dict(tenant="ci-a",old_key_id="old",new_key_id="new",expected_assets=assets)
+    inventory=retirement_inventory_digest(**scope)
+    observations=[dict(asset=x,tenant="ci-a",key_id="new",restore_sha256=archive_digest,old_key_denied=True) for x in assets]
+    review=key_retirement_review(**scope,inventory_sha256=inventory,observations=observations)
+    a,b=Ed25519PrivateKey.generate(),Ed25519PrivateKey.generate()
+    ap,bp=(k.public_key().public_bytes(Encoding.Raw,PublicFormat.Raw) for k in (a,b))
+    trust={"inventory":hashlib.sha256(ap).hexdigest(),"recovery":hashlib.sha256(bp).hexdigest()}
+    challenge="d"*64
+    msg=_canonical(["NARUV_COMBINED_RETIREMENT_V2","ci-a","old","new",inventory,
+        review["review_sha256"],proof,result["review_sha256"],trust,challenge,now.isoformat()])
+    try:
+        verify_combined_retirement_evidence(**scope,inventory_sha256=inventory,observations=observations,
+            expected_archive_assets=assets,archive_inventory_sha256=proof,archive_records=rows,
+            inventory_public_key=ap,recovery_public_key=bp,trust_fingerprints=trust,
+            inventory_signature=a.sign(b"inventory:"+msg),recovery_signature=b.sign(b"recovery:"+msg),
+            challenge=challenge,issued_at=now,as_of=now)
+    except ProfileBlocked:pass
+    else:raise RuntimeError("ARCHIVE_COMBINED_HOLD_BYPASS")
+    print("NARUV_ARCHIVE_LIFECYCLE_FIXTURE_PASS actual synthetic archive digest, simulated retained prior copy, combined signed hold denial, no key or deletion authorization",flush=True)

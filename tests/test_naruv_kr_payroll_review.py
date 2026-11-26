@@ -517,3 +517,52 @@ class InsuranceCollectionComparison(unittest.TestCase):
         self.assertEqual(r["candidates"]["ltc_exact_base_10won"],4730)
         self.assertEqual(r["candidates"]["ltc_truncated_health_base_10won"],4720)
         self.assertFalse(r["production_authorized"])
+
+
+class FixedWeekPaidRestLeave(unittest.TestCase):
+    def fixture(self):
+        from datetime import date,timedelta
+        weeks=[]
+        for i in range(6):
+            monday=date(2026,10,26)+timedelta(days=7*i)
+            days=[]
+            for j in range(7):
+                d=monday+timedelta(days=j)
+                status="PRESENT" if j<5 else ("NON_WORK_DAY" if j==5 else "WEEKLY_REST")
+                days.append(dict(date=d.isoformat(),status=status,actual_minutes=480 if j<5 else 0,evidence_sha256="a"*64))
+            weeks.append(dict(monday=monday.isoformat(),employed_full_week=True,days=days))
+        return dict(tenant="a",worker="w",period="2026-11",ordinary_hourly=12000,
+            schedule_sha256="b"*64,attendance_sha256="c"*64,weeks=weeks,
+            scope="HOURLY_MON_FRI_40H_SUNDAY_REST_ORDINARY_LEAVE_RATE")
+    def test_complete_boundary_and_leave(self):
+        from app.naruv_kr_payroll_review import fixed_week_paid_rest_leave_review_2026 as review
+        a=self.fixture()
+        r=review(**a)
+        self.assertEqual(r["weekly_rest_dates"],["2026-11-01","2026-11-08","2026-11-15","2026-11-22","2026-11-29"])
+        self.assertEqual(r["weekly_rest_krw"],480000)
+        self.assertEqual(r["annual_leave_krw"],0)
+        a["weeks"][0]["days"][0].update(status="ABSENT",actual_minutes=0)
+        a["weeks"][1]["days"][1].update(status="APPROVED_FULL_DAY_ANNUAL_LEAVE",actual_minutes=0)
+        a["weeks"][2]["days"][0]["actual_minutes"]=420
+        r2=review(**a)
+        self.assertEqual(r2["weekly_rest_krw"],384000)
+        self.assertEqual(r2["annual_leave_dates"],["2026-11-03"])
+        self.assertEqual(r2["annual_leave_krw"],96000)
+        self.assertNotEqual(r["review_sha256"],r2["review_sha256"])
+        self.assertFalse(r2["payment_authorized"])
+        self.assertEqual(r2,review(**dict(a,weeks=a["weeks"][::-1])))
+    def test_fail_closed_unsupported_cases(self):
+        from app.naruv_kr_payroll_review import fixed_week_paid_rest_leave_review_2026 as review
+        for change in (dict(scope="MONTHLY_SALARY"),dict(schedule_sha256="bad"),dict(ordinary_hourly=True)):
+            with self.assertRaises(PayrollBlocked):review(**dict(self.fixture(),**change))
+        for kind in ("missing","duplicate","partial","holiday","all_leave","worked_leave"):
+            a=self.fixture()
+            w=a["weeks"][1]
+            if kind=="missing":a["weeks"].pop()
+            elif kind=="duplicate":a["weeks"][0]=w
+            elif kind=="partial":w["employed_full_week"]=False
+            elif kind=="holiday":w["days"][0].update(status="PUBLIC_HOLIDAY",actual_minutes=0)
+            elif kind=="all_leave":
+                for row in w["days"][:5]:row.update(status="APPROVED_FULL_DAY_ANNUAL_LEAVE",actual_minutes=0)
+            else:w["days"][0]["status"]="APPROVED_FULL_DAY_ANNUAL_LEAVE"
+            with self.subTest(kind=kind),self.assertRaises(PayrollBlocked):review(**a)

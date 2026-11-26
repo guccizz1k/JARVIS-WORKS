@@ -97,8 +97,8 @@ def retention_decision(*,tenant,worker,revision,as_of,purpose_closed,legal_revie
     _require(retain_until is None or (type(retain_until) is datetime and retain_until.utcoffset()==timedelta(0)))
     _require(approval_sha256 is None or (type(approval_sha256) is str and re.fullmatch(r"[0-9a-f]{64}",approval_sha256)))
     if not purpose_closed:status="ACTIVE_PURPOSE"
-    elif not legal_review_complete or approval_sha256 is None:status="REVIEW_REQUIRED"
     elif legal_hold:status="LEGAL_HOLD_SEPARATE_STORAGE_REQUIRED"
+    elif not legal_review_complete or approval_sha256 is None or retain_until is None:status="REVIEW_REQUIRED"
     elif retain_until is not None and as_of<retain_until:status="RETAIN_SEPARATELY"
     else:status="PURGE_CANDIDATE_ONLY"
     return {"status":status,"tenant":tenant,"worker":worker,"revision":revision,
@@ -242,3 +242,47 @@ def archive_lifecycle_review(*,tenant,as_of,expected_assets,inventory_sha256,rec
         "unknown_retention_assets":sorted(unknown),"old_key_assets":sorted(old_keys),
         "review_sha256":hashlib.sha256(_canonical(["NARUV_ARCHIVE_LIFECYCLE_REVIEW_V1",digest,as_of.isoformat()])).hexdigest(),
         "deletion_authorized":False,"key_retirement_authorized":False,"production_authorized":False}
+
+
+def verify_combined_retirement_evidence(*,tenant,old_key_id,new_key_id,expected_assets,
+        inventory_sha256,observations,expected_archive_assets,archive_inventory_sha256,
+        archive_records,inventory_public_key,recovery_public_key,trust_fingerprints,
+        inventory_signature,recovery_signature,challenge,issued_at,as_of):
+    """Recompute both reviews from server-owned inventories, bind pinned signers
+    to the same scope and challenge. No client-provided precomputed review.
+    Caller must obtain inventory and trust fingerprints independently, and
+    consume the challenge atomically. No KMS operation or retirement authority.
+    """
+    import hashlib
+    from datetime import datetime,timedelta
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from cryptography.exceptions import InvalidSignature
+    review=key_retirement_review(tenant=tenant,old_key_id=old_key_id,new_key_id=new_key_id,
+        inventory_sha256=inventory_sha256,expected_assets=expected_assets,observations=observations)
+    _require(review["status"]=="EVIDENCE_REVIEW_ONLY")
+    _require(type(expected_archive_assets) in (list,tuple) and all(type(a) is str for a in expected_archive_assets)
+        and set(expected_archive_assets)<=set(expected_assets))
+    _require(type(issued_at) is datetime and type(as_of) is datetime
+        and issued_at.utcoffset()==timedelta(0) and as_of.utcoffset()==timedelta(0)
+        and timedelta(0)<=as_of-issued_at<=timedelta(minutes=10))
+    lifecycle=archive_lifecycle_review(tenant=tenant,as_of=issued_at,expected_assets=expected_archive_assets,
+        inventory_sha256=archive_inventory_sha256,records=archive_records)
+    _require(lifecycle["status"]=="EVIDENCE_REVIEW_ONLY")
+    _require(type(challenge) is str and re.fullmatch(r"[0-9a-f]{64}",challenge))
+    _require(type(trust_fingerprints) is dict and set(trust_fingerprints)=={"inventory","recovery"})
+    _require(type(inventory_public_key) is bytes and type(recovery_public_key) is bytes
+        and len(inventory_public_key)==len(recovery_public_key)==32 and inventory_public_key!=recovery_public_key)
+    _require(all(type(trust_fingerprints[k]) is str and re.fullmatch(r"[0-9a-f]{64}",trust_fingerprints[k])
+        and secrets.compare_digest(trust_fingerprints[k],hashlib.sha256(key).hexdigest())
+        for k,key in (("inventory",inventory_public_key),("recovery",recovery_public_key))))
+    _require(type(inventory_signature) is bytes and type(recovery_signature) is bytes
+        and len(inventory_signature)==len(recovery_signature)==64)
+    msg=_canonical(["NARUV_COMBINED_RETIREMENT_V2",tenant,old_key_id,new_key_id,inventory_sha256,
+        review["review_sha256"],archive_inventory_sha256,lifecycle["review_sha256"],trust_fingerprints,challenge,issued_at.isoformat()])
+    try:
+        Ed25519PublicKey.from_public_bytes(inventory_public_key).verify(inventory_signature,b"inventory:"+msg)
+        Ed25519PublicKey.from_public_bytes(recovery_public_key).verify(recovery_signature,b"recovery:"+msg)
+    except (InvalidSignature,ValueError):raise ProfileBlocked("HR_PROFILE_INVALID") from None
+    return {"status":"COMBINED_SIGNED_EVIDENCE_REVIEW_ONLY","combined_sha256":hashlib.sha256(msg).hexdigest(),
+        "requires_atomic_challenge_consumption":True,"key_retirement_authorized":False,
+        "deletion_authorized":False,"production_authorized":False}

@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "2f2deeae4ff6c717d2b3e029bbe3acfbc2eea5d9",
+      "sha": "40757d63cfe0521c8da54e151cd5c2cbc22e1abe",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "390d5c8439212380f9b5c38d448251c60d5f68cd",
+      "sha": "3967ec89572b5b912edb9813ffe5d262dac2b817",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "d5325f640a6d3eb93b2fdbdbe4f1f5b05b9714af",
+      "sha": "ad58d880eefb03d72fafb856c353053b9d9c8b04",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "9f56edcb554e7db9e04162cefab4149964cda9cc",
+      "sha": "64d4d3096f3c77e766135f66aa85a56bc1507657",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8542,7 +8542,7 @@
       "mode": "100644"
     },
     "scripts/naruv_hr_archive_ci.py": {
-      "sha": "ce07d632703952514e8b688a6fbfbfbd17010d6c",
+      "sha": "374e909c87d51a3732fe0c651a2049eb3e15ee07",
       "mode": "100644"
     },
     "scripts/naruv_tax_source_audit.py": {
@@ -8760,5 +8760,9 @@
   "supabase_managed_role_rehearsal": {
     "parent": "e79540abeb0c5d67615e9439a31f0f6e219cf547",
     "reason": "Record actual hosted transactional role/RPC and rollback proof; provider-specific preflight excludes old project, migration drift, role conflicts and raw CI fixture SQL. No full hosted schema or runtime acceptance."
+  },
+  "p1_p2_priority_paid_rest_and_combined_custody": {
+    "parent": "85c14ea96cfd22ab0b5cc2729d84264adbee69bc",
+    "reason": "Owner priority P1/P2 before other feature expansion. Restricted complete fixed 40h week rest/approved full-day leave arithmetic based on MOEL, boundary coverage, unsupported cases blocked. Unknown retention fails closed and legal hold takes priority after purpose closure. Recompute inventory+archive reviews with pinned signers, combined signed hold denial in synthetic archive CI. No operational key action or full statutory acceptance."
   }
 }
