@@ -656,6 +656,24 @@ class AnnualLeaveAccrualAndCompensation(unittest.TestCase):
         self.assertEqual(review(**a)["earned_days_in_review"],1)
         for change in (dict(months=a["months"][:-1]),dict(scope="UNSUPPORTED"),dict(service_year=True)):
             with self.assertRaises(PayrollBlocked):review(**dict(a,**change))
+    def test_first_year_low_attendance_explicit_assessment(self):
+        from app.naruv_kr_payroll_review import annual_leave_accrual_review_2026 as review
+        a=self.args()
+        for r in a["months"][4:]:r["credited_days"]=10
+        evidence=dict(attendance_sha256=a["attendance_sha256"],contract_sha256=a["contract_sha256"],
+            anniversary="2026-01-01",assessed_additional_days=4,assessment_sha256="d"*64)
+        with self.assertRaises(PayrollBlocked):review(**a)
+        out=review(**a,first_year_low_attendance_assessment=evidence)
+        self.assertEqual(out["earned_days_in_review"],8)
+        self.assertEqual(out["grants"][-1]["kind"],"FIRST_YEAR_LOW_ATTENDANCE_ASSESSED_REFERENCE")
+        self.assertFalse(out["statutory_validated"])
+        self.assertFalse(out["payment_authorized"])
+        self.assertNotEqual(out["review_sha256"],review(**a,first_year_low_attendance_assessment=dict(evidence,assessment_sha256="e"*64))["review_sha256"])
+        for bad in (dict(evidence,assessed_additional_days=5),dict(evidence,assessed_additional_days=True),
+            dict(evidence,anniversary="2025-12-31"),dict(evidence,attendance_sha256="f"*64),dict(evidence,contract_sha256="f"*64)):
+            with self.subTest(bad=bad),self.assertRaises(PayrollBlocked):review(**a,first_year_low_attendance_assessment=bad)
+        with self.assertRaises(PayrollBlocked):review(**self.args(),first_year_low_attendance_assessment=evidence)
+        with self.assertRaises(PayrollBlocked):review(**self.args(stop="2025-12-31",n=11),first_year_low_attendance_assessment=evidence)
     def test_calendar_month_actual_length(self):
         from calendar import monthrange
         from datetime import date
