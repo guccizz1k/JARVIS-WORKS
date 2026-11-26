@@ -34,6 +34,7 @@ from scripts import jw_independent_catalog_v223 as catalog
 from scripts import naruv_b2_offline_stage as b2stage
 
 B2_ACK = "OWNER_APPROVES_PINNED_B2_OFFLINE_CATALOG_RESTORE"
+B2_PUBLIC_CODES = frozenset(["B2_OFFLINE_APPROVAL_REQUIRED","B2_OFFLINE_PROVIDER_CREDENTIAL_PRESENT","B2_OFFLINE_INPUTS_REQUIRED","B2_OFFLINE_CIPHERTEXT_SET_INVALID","B2_OFFLINE_SCOPE_COUNT","B2_OFFLINE_CATALOG_REFERENCE_REQUIRED","B2_OFFLINE_OWNER_MANIFEST_MISMATCH","B2_OFFLINE_PREFLIGHT_FAILED","B2_OFFLINE_MANIFEST_FILE"])
 
 ACK = "OWNER_APPROVES_EXTERNAL_CUSTODIAN_NETWORKLESS_PG17_RESTORE"
 MAX_ARCHIVES = 11
@@ -303,7 +304,7 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
         result["external_pg17_restore"]="PASS_ELEVEN_PROVIDER_CIPHERS_NETWORKLESS_PG17"
     except (clean.Blocked,Blocked,backup.BackupError,equivalence.Blocked) as exc:
         safe=str(exc)
-        result["blocker"]=safe if re.fullmatch(r"[A-Z_]{3,100}",safe) else "SECOND_SITE_RESTORE_FAIL_CLOSED"
+        result["blocker"]=safe if (re.fullmatch(r"[A-Z_]{3,100}",safe) or (type(exc) is Blocked and safe in B2_PUBLIC_CODES)) else "SECOND_SITE_RESTORE_FAIL_CLOSED"
         result["restore_failures"]+=1
     except Exception:
         result["blocker"]="SECOND_SITE_RESTORE_FAIL_CLOSED"

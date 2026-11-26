@@ -45,7 +45,7 @@ jobs:
       - name: Run isolated synthetic candidate rekey tests
         run: PYTHONPATH=scripts python -m pytest --noconftest -q tests/test_jw_rekey_candidate_v223.py
       - name: Run independent recovery review regression in separate Python process
-        run: python -m pytest --noconftest -q tests/jw_independent_review tests/test_naruv_b2_offline_stage.py
+        run: python -m pytest --noconftest -q tests/jw_independent_review tests/test_naruv_b2_offline_stage.py tests/test_naruv_offline_recovery_package.py
 
   synthetic-pg17-restore:
     name: PG17 synthetic backup and isolated restore (no production data)
