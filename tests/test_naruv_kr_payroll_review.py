@@ -656,6 +656,22 @@ class AnnualLeaveAccrualAndCompensation(unittest.TestCase):
         self.assertEqual(review(**a)["earned_days_in_review"],1)
         for change in (dict(months=a["months"][:-1]),dict(scope="UNSUPPORTED"),dict(service_year=True)):
             with self.assertRaises(PayrollBlocked):review(**dict(a,**change))
+    def test_calendar_month_actual_length(self):
+        from calendar import monthrange
+        from datetime import date
+        from app.naruv_kr_payroll_review import annual_leave_accrual_review_2026 as review
+        for hire,year in (("2024-01-01",1),("2025-01-01",1),("2025-10-01",1)):
+            h=date.fromisoformat(hire)
+            stop=date(h.year+1,h.month,1).isoformat()
+            for i in range(12):
+                a=self.args(hire=hire,year=year,stop=stop)
+                d=date.fromisoformat(a["months"][i]["start"])
+                days=monthrange(d.year,d.month)[1]
+                a["months"][i].update(scheduled_days=days,credited_days=days)
+                with self.subTest(hire=hire,month=d.isoformat()):
+                    self.assertEqual(review(**a)["earned_days_in_review"],26)
+                    a["months"][i].update(scheduled_days=days+1,credited_days=days+1)
+                    with self.assertRaisesRegex(PayrollBlocked,"KR_LEAVE_ATTENDANCE"):review(**a)
     def test_settlement_pending_and_duplicate_payment(self):
         from app.naruv_kr_payroll_review import unused_leave_compensation_review_2026 as review
         from app.naruv_payroll_draft import hash_input
