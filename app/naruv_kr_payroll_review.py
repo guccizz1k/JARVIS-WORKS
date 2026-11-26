@@ -1380,7 +1380,8 @@ def annual_leave_accrual_review_2026(*,tenant,worker,employment_start,service_ye
         require(type(r) is dict and set(r)=={"start","scheduled_days","credited_days","evidence_sha256"},"KR_LEAVE_MONTH")
         d=dt(r["start"])
         require(d in {boundary(i) for i in required} and d not in rows,"KR_LEAVE_MONTH")
-        require(_whole(r["scheduled_days"],1,31) and _whole(r["credited_days"],0,r["scheduled_days"])
+        month_days=(boundary((d.year-start.year)*12+d.month-start.month+1)-d).days
+        require(_whole(r["scheduled_days"],1,month_days) and _whole(r["credited_days"],0,r["scheduled_days"])
             and type(r["evidence_sha256"]) is str and HEX.fullmatch(r["evidence_sha256"]),"KR_LEAVE_ATTENDANCE")
         rows[d]=dict(r)
     grants=[]
