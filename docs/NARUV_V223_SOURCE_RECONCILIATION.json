@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "1a7a6cd200e394191d97aa68fcfcebab27a1158d",
+      "sha": "4d89b6ee2e626e02ee589ec77d22b2cf36e05577",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "7cf08be8d0fd7f2e96468936aca754b5944234f9",
+      "sha": "d2972d9ac2af405c74b283b29674f6e631c55ef3",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "f0cf9265db4f988a982315a6d08c4bfe14ce6293",
+      "sha": "0cd01d7e6dbfe5a0588a268a469f24b2b2d30819",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "52014055651d1d91f56283d307dfb2d21eacfd11",
+      "sha": "2175feb001e89419540bb976e38b4420c27111a4",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8792,5 +8792,15 @@
   "shift_night_boundary": {
     "parent": "ab935b9d9ddf67c4dd4d6a92367f1c14e7b6c94c",
     "reason": "KST exact nonoverlapping shift segments cross midnight and count 22-06 night; bind to authenticated classified daily work totals via optional existing CI API. Not statutory shift classification."
+  },
+  "p1_p2_independent_integrity_review": {
+    "base": "80c753c2b648ccdc74cd3829307aa19a01bf1cc0",
+    "scope": "Review-only; enforce all shift dates and original backup manifest; no operational or legal acceptance",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "app/naruv_hr_profile_envelope.py",
+      "tests/test_naruv_hr_profile_envelope.py"
+    ]
   }
 }
