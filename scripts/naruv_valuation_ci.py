@@ -882,6 +882,19 @@ def run_valuation(base):
                 self.assertEqual(th.status_code,200)
                 self.assertIn("월 소득세 계산 참고액",th.text)
                 print("NARUV_MONTHLY_TAX_API_PASS confirmed gross bound, evidence, HTML and tenant denial",flush=True)
+                allrefs=dict(tm,insurance_assessed_bases=insurance)
+                cr=self.check(self.call(taxpath,allrefs),200)
+                cov=cr["ordinary_comparison_coverage"]
+                self.assertEqual(cov["reference_count"],6)
+                self.assertEqual(set(cov["items"]),set(DEDUCTIONS))
+                self.assertGreater(cov["difference_count"],0)
+                self.assertFalse(cov["statutory_validated"]);self.assertFalse(cov["payment_authorized"])
+                self.assertNotEqual(cr["review_sha256"],taxout["review_sha256"])
+                self.assertNotIn("ordinary_comparison_coverage",taxout)
+                self.check(self.call(taxpath,allrefs,who="B"),404)
+                ch=self.call(taxpath,allrefs,extra={"accept":"text/html"})
+                self.assertEqual(ch.status_code,200);self.assertIn("6개 공제 항목 대조",ch.text)
+                print("NARUV_ORDINARY_SIX_REFERENCE_COVERAGE_PASS combined comparison without statutory approval",flush=True)
                 from datetime import date,timedelta
                 weeks=[]
                 for w in range(5):
