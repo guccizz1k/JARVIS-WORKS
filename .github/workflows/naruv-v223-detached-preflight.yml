@@ -19,11 +19,11 @@ jobs:
       JW_NO_EXTERNAL_DATABASE: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      EXPECTED_SOURCE: b0efde6a5f32019d86eae6b1c7247d598b9a9a14
+      EXPECTED_SOURCE: 4a706a6d4714d448525e221facd2844947de0e75
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: b0efde6a5f32019d86eae6b1c7247d598b9a9a14
+          ref: 4a706a6d4714d448525e221facd2844947de0e75
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -54,7 +54,7 @@ jobs:
             tests/test_v223_owner_approved_ui_pin.py tests/test_v223_owner_visual_server.py \
             tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_v223_cookie_boundary.py \
             tests/test_naruv_integrated_review.py tests/test_naruv_document_payroll.py \
-            tests/test_naruv_kr_payroll_review.py tests/test_naruv_v223_read_bridge.py tests/test_naruv_hr_profile_envelope.py tests/test_naruv_hosted_qa_admission.py tests/test_naruv_b2_retention_journal.py tests/test_naruv_owner_retention_evidence.py tests/test_naruv_b2_upload_policy.py
+            tests/test_naruv_kr_payroll_review.py tests/test_naruv_v223_read_bridge.py tests/test_naruv_hr_profile_envelope.py tests/test_naruv_hosted_qa_admission.py tests/test_naruv_b2_retention_journal.py tests/test_naruv_owner_retention_evidence.py tests/test_naruv_b2_upload_policy.py tests/test_naruv_recovery_custody_review.py
           python - <<'PY'
           from pathlib import Path
           import os,xml.etree.ElementTree as ET
@@ -99,7 +99,7 @@ jobs:
           --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      EXPECTED_SOURCE: b0efde6a5f32019d86eae6b1c7247d598b9a9a14
+      EXPECTED_SOURCE: 4a706a6d4714d448525e221facd2844947de0e75
       NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
       JW_ENV: review
       JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: b0efde6a5f32019d86eae6b1c7247d598b9a9a14
+          ref: 4a706a6d4714d448525e221facd2844947de0e75
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -143,11 +143,11 @@ jobs:
     permissions:
       contents: read
     env:
-      EXPECTED_SOURCE: b0efde6a5f32019d86eae6b1c7247d598b9a9a14
+      EXPECTED_SOURCE: 4a706a6d4714d448525e221facd2844947de0e75
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: b0efde6a5f32019d86eae6b1c7247d598b9a9a14
+          ref: 4a706a6d4714d448525e221facd2844947de0e75
           fetch-depth: 1
           persist-credentials: false
       - name: Independently obtain and compare official Appendix 2 PDF
