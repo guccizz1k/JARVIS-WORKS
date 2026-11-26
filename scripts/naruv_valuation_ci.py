@@ -943,6 +943,20 @@ def run_valuation(base):
                 fh=self.call(taxpath,dict(fixed,fixed_week_paid_review=paid),extra={"accept":"text/html"})
                 self.assertEqual(fh.status_code,200);self.assertIn("3,200,000",fh.text)
                 print("NARUV_FIXED_WEEK_PAID_API_PASS alternative gross, confirmed work match, HTML, tenant and conflict denial",flush=True)
+                fspec=dict(payment_date="2026-08-10",scope="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE",
+                    completeness_assessment_sha256="e"*64)
+                fa=dict(fixed,fixed_week_paid_review=paid,wage_statement_review=fspec)
+                fst=self.check(self.call(taxpath,fa),200)["wage_statement_reference"]
+                self.assertEqual(fst["gross_krw"],3200000)
+                self.assertEqual([r["amount_krw"] for r in fst["components"]],[1600000,800000,800000])
+                self.assertFalse(fst["add_to_basic_gross"]);self.assertFalse(fst["delivery_authorized"])
+                self.check(self.call(taxpath,fa,who="B"),404)
+                self.check(self.call(taxpath,dict(night_fixed,fixed_week_paid_review=paid,wage_statement_review=fspec)),409)
+                self.check(self.call(taxpath,dict(fixed,wage_statement_review=fspec)),422)
+                self.check(self.call(taxpath,dict(fa,monthly_tax_review=tm["monthly_tax_review"])),422)
+                fxh=self.call(taxpath,fa,extra={"accept":"text/html"})
+                self.assertEqual(fxh.status_code,200);self.assertIn("명세서 대체 급여 총액",fxh.text)
+                print("NARUV_FIXED_WEEK_WAGE_STATEMENT_API_PASS paid rest and leave breakdown without double counting",flush=True)
                 ptweeks=[]
                 for w in range(4):
                     mon=date(2026,6,8)+timedelta(days=7*w);entries=[]
