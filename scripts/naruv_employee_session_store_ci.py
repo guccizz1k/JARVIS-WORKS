@@ -39,9 +39,10 @@ class EmployeeStore(unittest.TestCase):
                 ("UPDATE naruv_employee_ci.entitlements SET active=false WHERE tenant='ci-a' AND worker='w1'","UPDATE naruv_employee_ci.entitlements SET active=true WHERE tenant='ci-a' AND worker='w1'"),
                 ("UPDATE naruv_employee_ci.sessions SET revoked=true","UPDATE naruv_employee_ci.sessions SET revoked=false"),
                 ("UPDATE naruv_employee_ci.sessions SET issued_at=1,expires_at=2","UPDATE naruv_employee_ci.sessions SET issued_at=floor(extract(epoch FROM clock_timestamp()))::bigint,expires_at=floor(extract(epoch FROM clock_timestamp()))::bigint+299")):
-                conn.execute(update)
-                with self.assertRaises(AccessDenied):store.access(conn,**args)
-                conn.execute(undo)
+                with self.assertRaises(AccessDenied):
+                    with conn.transaction():
+                        conn.execute(update)
+                        store.access(conn,**args)
             conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
             self.assertEqual(conn.execute("SELECT current_user").fetchone()[0],"naruv_employee_ci_a")
             self.assertEqual(conn.execute("SELECT tenant,principal FROM naruv_employee_ci.identities").fetchall(),[("ci-a","e1")])
@@ -147,21 +148,31 @@ class EmployeeStore(unittest.TestCase):
                             dict(result=replace(result,status="FAILED")),dict(result=replace(result,subject_tag="a"*64)),
                             dict(result=replace(result,provider="UNTRUSTED")),dict(result={"status":"VERIFIED"})):
                 with self.assertRaises(AccessDenied):proof.finish(conn,**dict(opts,**changes))
-            conn.execute("UPDATE naruv_employee_ci.identities SET auth_epoch=2 WHERE tenant='ci-a'")
-            with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
-            conn.execute("UPDATE naruv_employee_ci.identities SET auth_epoch=1 WHERE tenant='ci-a'")
-            conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=false WHERE tenant='ci-a'")
-            with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
-            conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=true WHERE tenant='ci-a'")
-            # A proof issued for one rendered statement cannot grant a changed statement.
-            for column,old,new in (("review_sha256","a"*64,"c"*64),
-                                   ("render_sha256","b"*64,"d"*64)):
-                conn.execute(f"UPDATE naruv_employee_ci.entitlements SET {column}=%s WHERE tenant='ci-a' AND receipt='r1'",(new,))
+            other=dict(tenant="ci-b",principal="e1",receipt="r1")
+            other_challenge=proof.begin(conn,**other)
+            for update,undo in (
+                ("UPDATE naruv_employee_ci.identities SET auth_epoch=2 WHERE tenant='ci-a'","UPDATE naruv_employee_ci.identities SET auth_epoch=1 WHERE tenant='ci-a'"),
+                ("UPDATE naruv_employee_ci.identities SET active=false WHERE tenant='ci-a'","UPDATE naruv_employee_ci.identities SET active=true WHERE tenant='ci-a'"),
+                ("UPDATE naruv_employee_ci.proof_enrollment SET active=false WHERE tenant='ci-a'","UPDATE naruv_employee_ci.proof_enrollment SET active=true WHERE tenant='ci-a'"),
+                ("UPDATE naruv_employee_ci.entitlements SET active=false WHERE tenant='ci-a'","UPDATE naruv_employee_ci.entitlements SET active=true WHERE tenant='ci-a'"),
+                ("UPDATE naruv_employee_ci.entitlements SET review_sha256=repeat('c',64) WHERE tenant='ci-a'","UPDATE naruv_employee_ci.entitlements SET review_sha256=repeat('a',64) WHERE tenant='ci-a'"),
+                ("UPDATE naruv_employee_ci.entitlements SET render_sha256=repeat('d',64) WHERE tenant='ci-a'","UPDATE naruv_employee_ci.entitlements SET render_sha256=repeat('b',64) WHERE tenant='ci-a'")):
+                conn.execute(update)
                 with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
-                self.assertEqual(conn.execute("SELECT consumed FROM naruv_employee_ci.proof_challenges WHERE id=%s",(challenge,)).fetchone(),(False,))
+                conn.execute(undo)
+                with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
+                self.assertEqual(conn.execute("SELECT consumed,invalidated FROM naruv_employee_ci.proof_challenges WHERE id=%s",(challenge,)).fetchone(),(False,True))
                 self.assertEqual(conn.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone()[0],0)
-                conn.execute(f"UPDATE naruv_employee_ci.entitlements SET {column}=%s WHERE tenant='ci-a' AND receipt='r1'",(old,))
+                with self.assertRaises(psycopg.errors.CheckViolation):
+                    with conn.transaction():conn.execute("UPDATE naruv_employee_ci.proof_challenges SET invalidated=false WHERE id=%s",(challenge,))
+                challenge=proof.begin(conn,**bind)
+                result=proof.SyntheticServerResult(challenge,"VERIFIED",tag)
+                opts=dict(**bind,challenge=challenge,result=result)
+            self.assertEqual(conn.execute("SELECT invalidated FROM naruv_employee_ci.proof_challenges WHERE id=%s",(other_challenge,)).fetchone(),(False,))
+            conn.execute("UPDATE naruv_employee_ci.entitlements SET active=active WHERE tenant='ci-a'")
+            self.assertEqual(conn.execute("SELECT invalidated FROM naruv_employee_ci.proof_challenges WHERE id=%s",(challenge,)).fetchone(),(False,))
             print("EMPLOYEE_PROOF_SNAPSHOT_DRIFT_DENIAL=PASS")
+            print("EMPLOYEE_PROOF_HISTORICAL_REVOCATION=PASS")
             conn.execute("SET LOCAL ROLE naruv_employee_ci_a")
             with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):
@@ -174,6 +185,10 @@ class EmployeeStore(unittest.TestCase):
             self.assertTrue(store.access(conn,trusted_tenant="ci-a",trusted_principal="e1",receipt="r1",review_sha256="a"*64,render_sha256="b"*64,token=token)["session_store_verified"])
             with self.assertRaises(AccessDenied):proof.finish(conn,**opts)
             self.assertEqual(conn.execute("SELECT count(*) FROM naruv_employee_ci.sessions").fetchone()[0],1)
+            conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=false WHERE tenant='ci-a'")
+            conn.execute("UPDATE naruv_employee_ci.proof_enrollment SET active=true WHERE tenant='ci-a'")
+            with self.assertRaises(AccessDenied):
+                store.access(conn,trusted_tenant="ci-a",trusted_principal="e1",receipt="r1",review_sha256="a"*64,render_sha256="b"*64,token=token)
             challenge=proof.begin(conn,**bind)
             conn.execute("UPDATE naruv_employee_ci.proof_challenges SET issued_at=1,expires_at=2 WHERE id=%s",(challenge,))
             with self.assertRaises(AccessDenied):proof.finish(conn,**bind,challenge=challenge,result=proof.SyntheticServerResult(challenge,"VERIFIED",tag))
@@ -279,7 +294,7 @@ class EmployeeStore(unittest.TestCase):
             for revoke,restore in (
                 ("UPDATE naruv_employee_ci.identities SET auth_epoch=2","UPDATE naruv_employee_ci.identities SET auth_epoch=1"),
                 ("UPDATE naruv_employee_ci.entitlements SET active=false","UPDATE naruv_employee_ci.entitlements SET active=true"),
-                ("UPDATE naruv_employee_ci.sessions SET revoked=true","UPDATE naruv_employee_ci.sessions SET revoked=false")):
+                ("UPDATE naruv_employee_ci.sessions SET revoked=true",None)):
                 begin()
                 token=store.issue(reader,**issue)
                 reader.commit()
@@ -298,11 +313,17 @@ class EmployeeStore(unittest.TestCase):
                 with self.assertRaises(AccessDenied):store.access(reader,**args)
                 reader.rollback()
                 # Restore only synthetic fixture state for the next independent case.
-                owner.execute(restore)
-                owner.commit()
+                if restore is not None:
+                    owner.execute(restore)
+                    owner.commit()
+                with self.assertRaises(psycopg.errors.CheckViolation):
+                    with owner.transaction():owner.execute("UPDATE naruv_employee_ci.sessions SET revoked=false WHERE revoked")
+                owner.rollback()
                 begin()
+                with self.assertRaises(AccessDenied):store.access(reader,**args)
                 with self.assertRaises(AccessDenied):store.access(reader,**dict(args,token="x"*43))
                 reader.rollback()
+            print("EMPLOYEE_SESSION_HISTORICAL_REVOCATION=PASS")
             print("EMPLOYEE_ACCESS_REVOCATION_SERIALIZATION=PASS")
         finally:
             if reader is not None:reader.close()
