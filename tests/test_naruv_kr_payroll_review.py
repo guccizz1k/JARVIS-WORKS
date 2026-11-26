@@ -503,6 +503,25 @@ class KRRequestParser(unittest.TestCase):
         for key in ("part_time_leave_review","unused_leave_review"):
             with self.assertRaises(HTTPException):_decode_kr_body(json.dumps(dict(data,**{key:{}})).encode())
 
+    def test_fixed_week_shape_and_alternative_gross_conflicts(self):
+        import json
+        from fastapi import HTTPException
+        from app.naruv_draft_review import _decode_kr_body
+        a=dict(schedule_sha256="b"*64,attendance_sha256="c"*64,
+            scope="HOURLY_MON_FRI_40H_SUNDAY_REST_ORDINARY_LEAVE_RATE",
+            weeks=[dict(monday="2026-06-29",employed_full_week=True,
+                days=[dict(date=f"2026-07-{i:02}",status="PRESENT",actual_minutes=480,evidence_sha256="a"*64) for i in range(1,8)])])
+        base=dict(expected_draft_sha256="a"*64,ordinary_hourly=12000,
+            classification_sha256="b"*64,classified_days=[day()],deductions=deductions(),pension_assessed_base_krw=410000)
+        data=dict(base,fixed_week_paid_review=a)
+        self.assertEqual(_decode_kr_body(json.dumps(data).encode()),data)
+        for key in ("paid_holiday_review","unused_leave_review","part_time_leave_review","shift_review","monthly_tax_review","annual_leave_accrual_review","settlement_components","insurance_assessed_bases"):
+            with self.subTest(key=key),self.assertRaises(HTTPException):
+                _decode_kr_body(json.dumps(dict(data,**{key:{}})).encode())
+        for bad in (dict(a,tenant="ci-b"),dict(a,weeks=[]),dict(a,weeks=[dict(a["weeks"][0],employed_full_week=1)])):
+            with self.subTest(bad=bad),self.assertRaises(HTTPException):
+                _decode_kr_body(json.dumps(dict(base,fixed_week_paid_review=bad)).encode())
+
 
 class InsuranceCollectionComparison(unittest.TestCase):
     def test_reference_sequences_no_automatic_selection(self):
