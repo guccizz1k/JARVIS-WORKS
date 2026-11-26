@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "02becb87519fb71aacf33b1bc1bf2e9b1f5d0c3d",
+      "sha": "817cba3bb7e7f559f58f718f33ee4f97f0a0622f",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "ffb7a8cf9c994c400ecd140007d3560df1493911",
+      "sha": "74b183f960f7221bdb7072b44182aa66c760a297",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "294865b9ea563496e15b6014fd3a0b2ecd6d9f60",
+      "sha": "f6a781daa88fc42a08d446521ab5befe693e926e",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "47381e81826d69e1111ec902993e1564ee315b87",
+      "sha": "c1095814d16ac667b1cdbca12f5c3c80ba6fec6d",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8576,6 +8576,14 @@
     "tests/test_naruv_owner_retention_evidence.py": {
       "sha": "6fcce5a403bf458af7e0607870db855d7b77d26e",
       "mode": "100644"
+    },
+    "app/naruv_b2_upload_policy.py": {
+      "sha": "a1d619e7dd8034638f69f9b1fd50a44e60f67f7b",
+      "mode": "100644"
+    },
+    "tests/test_naruv_b2_upload_policy.py": {
+      "sha": "8fb5402ee04f85c5a1cdd8f0c52e5c13756c5798",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8882,6 +8890,18 @@
       "tests/test_naruv_kr_payroll_review.py",
       "scripts/naruv_owner_retention_evidence.py",
       "tests/test_naruv_owner_retention_evidence.py"
+    ]
+  },
+  "p1_p2_api_upload_fence": {
+    "base": "79a91e4e5644046590c15c0fd7ca5b488e6f8424",
+    "scope": "Isolated annual leave API and no-script HTML with manual historical source, mutually exclusive part-time/settlement scopes; future upload policy metadata review only, explicit approval ceiling, no real upload or storage changes",
+    "paths": [
+      "app/naruv_draft_review.py",
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "scripts/naruv_valuation_ci.py",
+      "app/naruv_b2_upload_policy.py",
+      "tests/test_naruv_b2_upload_policy.py"
     ]
   }
 }
