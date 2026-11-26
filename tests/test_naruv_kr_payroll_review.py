@@ -491,7 +491,7 @@ class KRRequestParser(unittest.TestCase):
         d=dict(expected_draft_sha256="a"*64,ordinary_hourly=12000,classification_sha256="b"*64,
             classified_days=[day()],deductions=deductions(),pension_assessed_base_krw=410000,wage_statement_review=a)
         self.assertEqual(_decode_kr_body(json.dumps(d).encode()),d)
-        for bad in (dict(d,paid_holiday_review={}),dict(d,wage_statement_review=dict(a,worker="other")),
+        for bad in (dict(d,paid_holiday_review={}),dict(d,wage_statement_review=dict(a,scope="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE")),dict(d,wage_statement_review=dict(a,worker="other")),
                     dict(d,wage_statement_review=dict(a,payment_date=True))):
             with self.assertRaises(HTTPException):_decode_kr_body(json.dumps(bad).encode())
     def test_agency_exception_shape_and_conflicts(self):
