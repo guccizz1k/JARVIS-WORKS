@@ -17,6 +17,8 @@ CREATE TABLE naruv_employee_ci.proof_challenges(
  id text PRIMARY KEY CHECK(id ~ '^[A-Za-z0-9_-]{43}$'),
  tenant text NOT NULL,principal text NOT NULL,worker text NOT NULL,receipt text NOT NULL,
  auth_epoch bigint NOT NULL, subject_tag text NOT NULL CHECK(subject_tag ~ '^[0-9a-f]{64}$'),
+ review_sha256 text NOT NULL CHECK(review_sha256 ~ '^[0-9a-f]{64}$'),
+ render_sha256 text NOT NULL CHECK(render_sha256 ~ '^[0-9a-f]{64}$'),
  issued_at bigint NOT NULL,expires_at bigint NOT NULL CHECK(expires_at>issued_at AND expires_at-issued_at<=300),
  consumed boolean NOT NULL DEFAULT false,
  FOREIGN KEY(tenant,principal,worker) REFERENCES naruv_employee_ci.identities(tenant,principal,worker),
@@ -43,7 +45,7 @@ def synthetic_tag(pepper,tenant,subject):
 
 def _binding(conn,tenant,principal,receipt):
     i,e=store._live(conn,tenant,principal,receipt)
-    need(i.active is True and e.active is True)
+    need(i.active is True and e.active is True and digest(e.review_sha256) and digest(e.render_sha256))
     row=conn.execute("SELECT worker,subject_tag,active FROM naruv_employee_ci.proof_enrollment WHERE tenant=%s AND principal=%s FOR SHARE",(tenant,principal)).fetchone()
     need(row is not None and row[0]==i.worker and digest(row[1]) and row[2] is True)
     return i,e,row[1]
@@ -53,8 +55,8 @@ def begin(conn,*,tenant,principal,receipt):
     i,e,tag=_binding(conn,tenant,principal,receipt)
     now=store._now(conn)
     challenge=secrets.token_urlsafe(32)
-    conn.execute("INSERT INTO naruv_employee_ci.proof_challenges (id,tenant,principal,worker,receipt,auth_epoch,subject_tag,issued_at,expires_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                 (challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag,now,now+300))
+    conn.execute("INSERT INTO naruv_employee_ci.proof_challenges (id,tenant,principal,worker,receipt,auth_epoch,subject_tag,review_sha256,render_sha256,issued_at,expires_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                 (challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag,e.review_sha256,e.render_sha256,now,now+300))
     return challenge
 
 def finish(conn,*,tenant,principal,receipt,challenge,result):
@@ -74,14 +76,14 @@ def finish(conn,*,tenant,principal,receipt,challenge,result):
         # timestamp to consume a challenge that has expired while waiting.
         locked=conn.execute("""SELECT id FROM naruv_employee_ci.proof_challenges
              WHERE id=%s AND tenant=%s AND principal=%s AND worker=%s AND receipt=%s
-             AND auth_epoch=%s AND subject_tag=%s AND NOT consumed FOR UPDATE""",
-             (challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag)).fetchone()
+             AND auth_epoch=%s AND subject_tag=%s AND review_sha256=%s AND render_sha256=%s AND NOT consumed FOR UPDATE""",
+             (challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag,e.review_sha256,e.render_sha256)).fetchone()
         need(locked==(challenge,))
         now=store._now(conn)
         row=conn.execute("""UPDATE naruv_employee_ci.proof_challenges SET consumed=true
              WHERE id=%s AND tenant=%s AND principal=%s AND worker=%s AND receipt=%s
-             AND auth_epoch=%s AND subject_tag=%s AND NOT consumed AND issued_at<=%s AND expires_at>%s
-             RETURNING id""",(challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag,now,now)).fetchone()
+             AND auth_epoch=%s AND subject_tag=%s AND review_sha256=%s AND render_sha256=%s AND NOT consumed AND issued_at<=%s AND expires_at>%s
+             RETURNING id""",(challenge,tenant,principal,i.worker,receipt,i.auth_epoch,tag,e.review_sha256,e.render_sha256,now,now)).fetchone()
         need(row==(challenge,))
         token=store.issue(conn,trusted_tenant=tenant,trusted_principal=principal,receipt=receipt)
     return token,{"synthetic_proof_binding_verified":True,"provider_identity_verified":False,
