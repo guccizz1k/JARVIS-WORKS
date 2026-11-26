@@ -1161,3 +1161,36 @@ def pension_collection_reference_2026(*,tenant,worker,period,assessed_base_krw,
         "assessed_employee_krw":assessed_employee_krw,"review_sha256":hash_input({"v":"KR_NPS_COLLECTION_2026_V1",
             "ref":ref["reference_sha256"],"scope":scope,"assessed_employee":assessed_employee_krw,"collection":collected}),
         "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}
+
+
+def insurance_collection_review_2026(*,tenant,worker,period,health_base_krw,employment_base_krw,
+        assessment_sha256,assessed_employee_krw,scope):
+    """Restricted comparison, not statutory payroll. Health Act Art.107 and
+    LTC Act Art.64 apply the Treasury Act's truncation; the worker allocation
+    and LTC sequencing require independent agency confirmation. Keep both
+    candidate LTC sequences visible when they differ. Employment stays exact.
+    """
+    ref=insurance_reference_2026(tenant=tenant,worker=worker,period=period,
+        health_base_krw=health_base_krw,employment_base_krw=employment_base_krw,
+        assessment_sha256=assessment_sha256,scope=scope)
+    exact={k:Fraction(**v) for k,v in ref["employee_exact"].items()}
+    require(type(assessed_employee_krw) is dict and set(assessed_employee_krw)==set(exact)
+        and all(_whole(x,0,10**9) for x in assessed_employee_krw.values()),"KR_INSURANCE_COLLECTION_AMOUNT")
+    health=(exact["health"]//10)*10
+    ltc_exact=(exact["long_term_care"]//10)*10
+    ltc_from_truncated=(Fraction(health*9448,71900)//10)*10
+    candidates={"health_10won":health,"ltc_exact_base_10won":ltc_exact,
+        "ltc_truncated_health_base_10won":ltc_from_truncated,
+        "employment_exact":ref["employee_exact"]["employment_insurance"]}
+    flags=[]
+    if assessed_employee_krw["health"]!=health:flags.append("HEALTH_REFERENCE_DIFFERENCE")
+    if ltc_exact!=ltc_from_truncated:flags.append("LTC_SEQUENCE_REQUIRES_AGENCY_CONFIRMATION")
+    if assessed_employee_krw["long_term_care"] not in (ltc_exact,ltc_from_truncated):flags.append("LTC_REFERENCE_DIFFERENCE")
+    if Fraction(assessed_employee_krw["employment_insurance"])!=exact["employment_insurance"]:
+        flags.append("EMPLOYMENT_ASSESSMENT_DIFFERENCE")
+    return {"status":"REFERENCE_COMPARISON_ONLY","candidates":candidates,"flags":flags,
+        "employment_rounding_status":"AGENCY_ASSESSMENT_REQUIRED",
+        "assessed_employee_krw":dict(assessed_employee_krw),
+        "review_sha256":hash_input({"v":"KR_INSURANCE_COLLECTION_COMPARE_2026_V1",
+            "reference":ref["reference_sha256"],"assessed":assessed_employee_krw,"candidates":candidates}),
+        "requires_human_review":True,"statutory_validated":False,"payment_authorized":False,"production_authorized":False}

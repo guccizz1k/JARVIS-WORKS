@@ -65,8 +65,15 @@ def _decode_kr_body(raw):
         if type(raw) is not bytes or len(raw)>KR_BODY_LIMIT:raise ValueError("size")
         d=json.loads(raw.decode("utf-8"),object_pairs_hook=inventory._pairs,
             parse_constant=inventory._reject_constant)
-        if type(d) is not dict or set(d)!={"expected_draft_sha256","ordinary_hourly","classification_sha256",
-                "classified_days","deductions","pension_assessed_base_krw"}:raise ValueError("shape")
+        required={"expected_draft_sha256","ordinary_hourly","classification_sha256",
+                "classified_days","deductions","pension_assessed_base_krw"}
+        if type(d) is not dict or set(d) not in (required,required|{"insurance_assessed_bases"}):raise ValueError("shape")
+        if "insurance_assessed_bases" in d:
+            bases=d["insurance_assessed_bases"]
+            if type(bases) is not dict or set(bases)!={"health_base_krw","employment_base_krw","assessment_sha256"}:
+                raise ValueError("insurance shape")
+            if any(type(bases[k]) is not int for k in ("health_base_krw","employment_base_krw")) or type(bases["assessment_sha256"]) is not str or not HEX.fullmatch(bases["assessment_sha256"]):
+                raise ValueError("insurance shape")
         if any(type(d[k]) is not str or not HEX.fullmatch(d[k]) for k in ("expected_draft_sha256","classification_sha256")):
             raise ValueError("digest")
         if any(type(d[k]) is not int for k in ("ordinary_hourly","pension_assessed_base_krw")):raise ValueError("number")
@@ -108,7 +115,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
     Classification and assessments are manual submissions, not agency truth.
     """
     import psycopg
-    from .naruv_kr_payroll_review import source_bound_review,pension_collection_reference_2026
+    from .naruv_kr_payroll_review import source_bound_review,pension_collection_reference_2026,insurance_collection_review_2026
     if not kr_enabled():raise HTTPException(404,"KR_REVIEW_DISABLED")
     try:
         with v90._pg_validated_cursor(token) as (cur,identity):
@@ -131,11 +138,22 @@ def _kr_review(token,csrf,prior,worker,period,data):
             pension_ref=pension_collection_reference_2026(tenant=org,worker=worker,period=period,
                 assessed_base_krw=pension,assessment_sha256=item["evidence_sha256"],
                 assessed_employee_krw=item["amount_krw"],scope="ORDINARY_SINGLE_WORKPLACE_NO_RELIEF")
-            return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,
+            proof={"v":"KR_CI_MANUAL_API_V1","source":review["review_binding_sha256"],
+                "pension":pension_ref["review_sha256"]}
+            details={}
+            if "insurance_assessed_bases" in data:
+                keys=("health","long_term_care","employment_insurance")
+                if any(data["deductions"][k]["assessment"]!="ASSESSED" for k in keys):
+                    raise PayrollBlocked("KR_INSURANCE_ASSESSMENT_REQUIRED")
+                insurance=insurance_collection_review_2026(tenant=org,worker=worker,period=period,
+                    **data["insurance_assessed_bases"],
+                    assessed_employee_krw={k:data["deductions"][k]["amount_krw"] for k in keys},
+                    scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES")
+                proof.update(v="KR_CI_MANUAL_API_V2",insurance=insurance["review_sha256"])
+                details={"insurance_reference":insurance}
+            return {"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
-                "payment_authorized":False,"production_authorized":False,
-                "review_sha256":digest({"v":"KR_CI_MANUAL_API_V1","source":review["review_binding_sha256"],
-                    "pension":pension_ref["review_sha256"]})}
+                "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
     except PayrollBlocked:
         raise HTTPException(409,"KR_REVIEW_INPUT_OR_SOURCE_CHANGED") from None
     except psycopg.Error as exc:

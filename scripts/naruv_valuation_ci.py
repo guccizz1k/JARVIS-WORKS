@@ -753,6 +753,13 @@ def run_valuation(base):
                 self.assertEqual(response["review"],result)
                 self.assertEqual(response["pension_reference"]["employee_collection_reference_krw"],19470)
                 self.assertEqual(response["pension_reference"]["status"],"AGENCY_AMOUNT_DIFFERENCE_REVIEW_REQUIRED")
+                insurance=dict(health_base_krw=1000000,employment_base_krw=120000,assessment_sha256="c"*64)
+                expanded=self.check(self.call(krpath,dict(manual,insurance_assessed_bases=insurance)),200)
+                self.assertEqual(expanded["insurance_reference"]["candidates"]["health_10won"],35950)
+                self.assertIn("HEALTH_REFERENCE_DIFFERENCE",expanded["insurance_reference"]["flags"])
+                self.assertNotEqual(expanded["review_sha256"],response["review_sha256"])
+                self.assertFalse(expanded["payment_authorized"])
+                self.check(self.call(krpath,dict(manual,insurance_assessed_bases=dict(insurance,health_base_krw=True))),422)
                 for k in ("evidence_authenticity_verified","persisted","payment_authorized","production_authorized","statutory_validated"):
                     self.assertIs(response[k],False)
                 self.check(self.call(krpath,manual,who="B"),404)

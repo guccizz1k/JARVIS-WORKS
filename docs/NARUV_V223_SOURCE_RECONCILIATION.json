@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "5d5daccb09d05fb0a658b38e40b71de62d659f23",
+      "sha": "0f4da5ad4dce6cea95999c9634230ad64f17ca80",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "b31b6f29fd851ab6df5b3a3acc62300311b8ce8d",
+      "sha": "2f2deeae4ff6c717d2b3e029bbe3acfbc2eea5d9",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "5be8e6351481426c96189ac7d136dbd09a75c336",
+      "sha": "eba092adbb7a38e5f6b8d2cfbfdbf80e61d4710b",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "a0f41ae0f028728eda216a568f4d721a3a097a85",
+      "sha": "6b7cb1266cc12881d671e5ba22dc8055b53d24d1",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8548,6 +8548,10 @@
     "scripts/naruv_tax_source_audit.py": {
       "sha": "71041e7c4246cc1942cf849e248df80896783f94",
       "mode": "100644"
+    },
+    "db/review/naruv_supabase_qa_probe.sql": {
+      "sha": "62d23f55e9caf94957947e601220e0cdec195c51",
+      "mode": "100644"
     }
   },
   "notes": [
@@ -8740,5 +8744,9 @@
   "kr_nested_parser_regression_repair": {
     "parent": "97b2f989bc1e296ebcefe862b199bf5b924bb07b",
     "reason": "Fix actual syntax error and flat finance decoder rejection; dedicated 32KiB bounded 5s nested payroll parser, strict types/keys and duplicate refusal, existing finance parser unchanged."
+  },
+  "supabase_private_probe_and_insurance_comparison": {
+    "parent": "4b7a452eee2f955dc107984b11550482420086e1",
+    "reason": "Record already applied dedicated QA migration; compare health/LTC truncation candidates without assuming allocation sequence; employment exact remains agency-confirmed; optional CI API input preserves legacy result and proof. No automatic payment or production authorization."
   }
 }

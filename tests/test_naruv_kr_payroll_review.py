@@ -482,3 +482,37 @@ class KRRequestParser(unittest.TestCase):
             with self.subTest(prefix=v[:30]),self.assertRaises(HTTPException) as ex:
                 _decode_kr_body(v)
             self.assertEqual(ex.exception.status_code,422)
+
+
+class InsuranceCollectionComparison(unittest.TestCase):
+    def test_reference_sequences_no_automatic_selection(self):
+        from app.naruv_kr_payroll_review import insurance_collection_review_2026
+        args=dict(tenant="a",worker="w",period="2026-11",health_base_krw=3000000,
+            employment_base_krw=3000000,assessment_sha256="b"*64,
+            scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES",
+            assessed_employee_krw={"health":107850,"long_term_care":14170,"employment_insurance":27000})
+        out=insurance_collection_review_2026(**args)
+        self.assertEqual(out["candidates"]["health_10won"],107850)
+        self.assertEqual(out["candidates"]["ltc_exact_base_10won"],14170)
+        self.assertEqual(out["flags"],[])
+        self.assertFalse(out["statutory_validated"])
+        self.assertFalse(out["payment_authorized"])
+        mismatch=insurance_collection_review_2026(**dict(args,assessed_employee_krw=dict(args["assessed_employee_krw"],health=107840,employment_insurance=26999)))
+        self.assertIn("HEALTH_REFERENCE_DIFFERENCE",mismatch["flags"])
+        self.assertIn("EMPLOYMENT_ASSESSMENT_DIFFERENCE",mismatch["flags"])
+        for change in (dict(scope="RELIEF"),dict(health_base_krw=999999),dict(assessed_employee_krw={}),
+            dict(assessed_employee_krw=dict(args["assessed_employee_krw"],health=True))):
+            with self.assertRaises(PayrollBlocked):insurance_collection_review_2026(**dict(args,**change))
+
+    def test_ambiguous_ltc_sequence_is_never_selected(self):
+        from app.naruv_kr_payroll_review import insurance_collection_review_2026
+        from fractions import Fraction
+        base=next(b for b in range(1000000,1001000)
+            if (Fraction(b*9448,2000000)//10)!=(Fraction((Fraction(b*719,20000)//10)*10*9448,71900)//10))
+        r=insurance_collection_review_2026(tenant="a",worker="w",period="2026-11",
+            health_base_krw=base,employment_base_krw=base,assessment_sha256="c"*64,
+            scope="ORDINARY_FULL_MONTH_NO_RELIEF_ASSESSED_BASES",
+            assessed_employee_krw={"health":0,"long_term_care":0,"employment_insurance":0})
+        self.assertIn("LTC_SEQUENCE_REQUIRES_AGENCY_CONFIRMATION",r["flags"])
+        self.assertNotEqual(r["candidates"]["ltc_exact_base_10won"],r["candidates"]["ltc_truncated_health_base_10won"])
+        self.assertFalse(r["production_authorized"])
