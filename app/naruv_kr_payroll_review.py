@@ -1738,6 +1738,96 @@ def fixed_week_wage_statement_2026(*,tenant,worker,period,base_hourly,ordinary_h
         completeness_verified=False,payment_date_verified=False,statutory_validated=False,
         payment_authorized=False,delivery_authorized=False,production_authorized=False)
 
+_CASH_STATEMENT_LABELS={"ASSESSED_BONUS":"상여금 (수동 산정)","ASSESSED_FIXED_ALLOWANCE":"기타 정액수당 (수동 산정)"}
+_STATEMENT_BASE_LABELS={"work_base":"근로 기본액","overtime_premium":"연장 가산","holiday_first8_premium":"휴일 8시간 이내 가산",
+    "holiday_after8_premium":"휴일 8시간 초과 가산","night_premium":"야간 가산"}
+_STATEMENT_PAID_LABELS={"work_base":"근로 기본액","weekly_rest":"주휴수당","annual_leave":"유급 연차수당"}
+_STATEMENT_DEDUCTION_LABELS={"income_tax":"소득세","local_income_tax":"지방소득세","pension":"국민연금","health":"건강보험",
+    "long_term_care":"장기요양보험","employment_insurance":"고용보험"}
+_STATEMENT_DENIALS=("completeness_verified","payment_date_verified","statutory_validated","payment_authorized","delivery_authorized","production_authorized")
+
+def _cash_statement_items(items):
+    require(type(items) is list and 1<=len(items)<=8,"KR_CASH_STATEMENT_ITEMS")
+    seen=set();clean=[]
+    for r in items:
+        require(type(r) is dict and set(r)=={"kind","component_id","amount_krw","assessment_sha256"},"KR_CASH_STATEMENT_SHAPE")
+        require(type(r["kind"]) is str and r["kind"] in _CASH_STATEMENT_LABELS
+            and type(r["component_id"]) is str and re.fullmatch("[a-zA-Z0-9_-]{1,40}",r["component_id"])
+            and r["component_id"] not in seen and _whole(r["amount_krw"],1,10**10)
+            and type(r["assessment_sha256"]) is str and HEX.fullmatch(r["assessment_sha256"]),"KR_CASH_STATEMENT_VALUE")
+        seen.add(r["component_id"]);clean.append(dict(r))
+    return sorted(clean,key=lambda r:r["component_id"])
+
+def extend_assessed_cash_statement_2026(*,tenant,statement,additional_cash_wages):
+    """Only same-request server-created statement; assessed fixed cash amounts.
+    Not a determination of ordinary wages, eligibility, tax base or withholding.
+    No settlement refunds, severance, in-kind payments or additional work hours.
+    """
+    require(type(tenant) is str and ID.fullmatch(tenant) and type(statement) is dict
+        and statement.get("status") in ("RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY","FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY")
+        and all(statement.get(k) is False for k in _STATEMENT_DENIALS)
+        and type(statement.get("review_sha256")) is str and HEX.fullmatch(statement["review_sha256"])
+        and "additional_cash_wages" not in statement,"KR_CASH_STATEMENT_SOURCE")
+    items=_cash_statement_items(additional_cash_wages)
+    amount=sum(r["amount_krw"] for r in items)
+    gross=statement["gross_krw"]+amount
+    require(_whole(gross,0,10**12) and _whole(statement["deductions_krw"],0,statement["gross_krw"])
+        and statement["gross_krw"]-statement["deductions_krw"]==statement["net_krw"],"KR_CASH_STATEMENT_TOTAL")
+    return dict(statement,status="ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY",
+        base_statement_status=statement["status"],base_statement_review_sha256=statement["review_sha256"],
+        base_statement_gross_krw=statement["gross_krw"],additional_cash_wages=items,additional_cash_total_krw=amount,
+        gross_krw=gross,net_krw=gross-statement["deductions_krw"],
+        additional_cash_ordinary_wage_treatment_verified=False,additional_cash_tax_and_insurance_verified=False,
+        additional_cash_authenticity_verified=False,requires_human_review=True,
+        review_sha256=hash_input({"v":"KR_CASH_STATEMENT_2026_V1","tenant":tenant,"base":statement["review_sha256"],"items":items,"gross":gross}))
+
+def _statement_print_rows(a):
+    """Validate the complete presentation arithmetic, even on an internal result."""
+    require(type(a) is dict and all(a.get(k) is False for k in _STATEMENT_DENIALS)
+        and type(a.get("worker")) is str and ID.fullmatch(a["worker"])
+        and type(a.get("period")) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",a["period"])
+        and type(a.get("proposed_payment_date")) is str and re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}",a["proposed_payment_date"]),"KR_PRINT_STATEMENT_SCOPE")
+    kind=a.get("status")
+    cash=kind=="ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY"
+    base_kind=a.get("base_statement_status") if cash else kind
+    require(base_kind in ("RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY","FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY"),"KR_PRINT_STATEMENT_SCOPE")
+    labels=_STATEMENT_BASE_LABELS if base_kind=="RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY" else _STATEMENT_PAID_LABELS
+    require(type(a.get("components")) is list and [r["kind"] for r in a["components"]]==list(labels),"KR_PRINT_COMPONENTS")
+    rows=[];base=0
+    for r in a["components"]:
+        require(all(_whole(r[k],0,10**12) for k in ("minutes","hourly_krw","multiplier_bps","amount_krw")),"KR_PRINT_NUMBERS")
+        rows.append((labels[r["kind"]],str(r["minutes"])+"분 ÷ 60 × "+str(r["hourly_krw"])+"원/시간 × "+str(r["multiplier_bps"])+"/10000",r["amount_krw"]))
+        base+=r["amount_krw"]
+    extra=0
+    if cash:
+        require(all(a.get(k) is False for k in ("additional_cash_ordinary_wage_treatment_verified","additional_cash_tax_and_insurance_verified","additional_cash_authenticity_verified")),"KR_PRINT_CASH_SCOPE")
+        items=_cash_statement_items(a["additional_cash_wages"])
+        extra=sum(r["amount_krw"] for r in items)
+        require(a["base_statement_gross_krw"]==base and a["additional_cash_total_krw"]==extra,"KR_PRINT_CASH_TOTAL")
+        for r in items:rows.append((_CASH_STATEMENT_LABELS[r["kind"]],"수동 산정 정액",r["amount_krw"]))
+    require(type(a.get("deductions")) is list and [r["kind"] for r in a["deductions"]]==list(_STATEMENT_DEDUCTION_LABELS),"KR_PRINT_DEDUCTIONS")
+    require(all(_whole(r["amount_krw"],0,10**12) for r in a["deductions"]),"KR_PRINT_DEDUCTIONS")
+    withheld=sum(r["amount_krw"] for r in a["deductions"])
+    require(all(_whole(a[k],0,10**12) for k in ("gross_krw","deductions_krw","net_krw"))
+        and a["gross_krw"]==base+extra and a["deductions_krw"]==withheld
+        and a["net_krw"]==base+extra-withheld,"KR_PRINT_TOTAL")
+    for r in a["deductions"]:rows.append((_STATEMENT_DEDUCTION_LABELS[r["kind"]],"수동 공제",r["amount_krw"]))
+    return rows
+
+def isolated_wage_statement_print_html(result):
+    """Authenticated isolated POST result, no script, external content or delivery."""
+    from html import escape
+    require(type(result) is dict and result.get("status")=="MANUAL_SUBMISSION_REFERENCE_ONLY"
+        and all(result.get(k) is False for k in ("evidence_authenticity_verified","persisted","statutory_validated","payment_authorized","production_authorized")),"KR_PRINT_SCOPE")
+    a=result["wage_statement_reference"];rows=_statement_print_rows(a)
+    table="".join("<tr><th scope=\"row\">"+escape(k)+"</th><td>"+escape(f)+"</td><td>"+format(n,",")+" 원</td></tr>" for k,f,n in rows)
+    return ("<!doctype html><html lang=\"ko\"><meta charset=\"utf-8\"><title>임금명세서 검토용 초안</title>"
+        "<main><h1>임금명세서 검토용 초안 — 교부 금지</h1><p>법정 적합성, 실제 지급일 및 공제 검증 미확정. 실제 지급 및 교부 금지.</p>"
+        "<p>근로자 식별자: "+escape(a["worker"])+" / 대상월: "+escape(a["period"])+" / 지급 예정일: "+escape(a["proposed_payment_date"])+"</p>"
+        "<table><caption>급여 및 공제 참고 내역</caption><thead><tr><th>항목</th><th>계산 기준</th><th>금액</th></tr></thead><tbody>"
+        +table+"</tbody></table><p>총액: "+format(a["gross_krw"],",")+" 원 / 공제: "+format(a["deductions_krw"],",")+" 원</p>"
+        "<p>실수령 참고액: "+format(a["net_krw"],",")+" 원</p></main></html>")
+
 def isolated_payroll_review_html(result):
     """CI-only no-script read-only representation; not the approved WORKS UI.
     Render only a fixed schema of numeric results; never embed client evidence.
@@ -1755,13 +1845,18 @@ def isolated_payroll_review_html(result):
     line("기본 급여 실수령 참고액",d["net_estimate_krw"])
     if "wage_statement_reference" in result:
         a=result["wage_statement_reference"]
-        require(a.get("status") in ("RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY","FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY")
+        require(a.get("status") in ("RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY","FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY","ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY")
             and all(a.get(k) is False for k in ("completeness_verified","payment_date_verified","statutory_validated","payment_authorized","delivery_authorized","production_authorized")),"KR_VIEW_STATEMENT")
         require(type(a["worker"]) is str and ID.fullmatch(a["worker"])
             and type(a["proposed_payment_date"]) is str and re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}",a["proposed_payment_date"]),"KR_VIEW_STATEMENT_SCOPE")
         rows.append("<tr><th scope=\"row\">임금명세서 초안 (교부 금지)</th><td>"+escape(a["worker"])+" / 지급 예정일 "+escape(a["proposed_payment_date"])+"</td></tr>")
         labels={"work_base":"근로 기본액","overtime_premium":"연장 가산","holiday_first8_premium":"휴일 8시간 이내 가산","holiday_after8_premium":"휴일 8시간 초과 가산","night_premium":"야간 가산"}
-        if a["status"]=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY":
+        if a["status"]=="ASSESSED_CASH_WAGE_STATEMENT_DRAFT_ONLY":
+            _statement_print_rows(a)
+            for r in a["additional_cash_wages"]:line(_CASH_STATEMENT_LABELS[r["kind"]],r["amount_krw"])
+            line("추가 수당 포함 명세서 총액 (기본 급여 미합산)",a["gross_krw"])
+            line("추가 수당 포함 실수령 참고액",a["net_krw"])
+        if a["status"]=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY" or a.get("base_statement_status")=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY":
             require(a.get("alternative_gross") is True and a.get("add_to_basic_gross") is False,"KR_VIEW_STATEMENT_ALTERNATIVE")
             labels={"work_base":"근로 기본액","weekly_rest":"주휴수당","annual_leave":"유급 연차수당"}
             line("명세서 대체 급여 총액 (기본 급여 미합산)",a["gross_krw"])
