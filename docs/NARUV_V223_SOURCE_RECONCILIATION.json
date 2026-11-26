@@ -4458,7 +4458,7 @@
       "mode": "100644"
     },
     "app/naruv_kr_payroll_review.py": {
-      "sha": "4d89b6ee2e626e02ee589ec77d22b2cf36e05577",
+      "sha": "4db39ce819400656997fbfa53e63cb52ffc748bb",
       "mode": "100644"
     },
     "app/naruv_native_file_preview.py": {
@@ -6134,7 +6134,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_kr_payroll_review.py": {
-      "sha": "d2972d9ac2af405c74b283b29674f6e631c55ef3",
+      "sha": "f697f5f7cd25848048ffe058d5aa60d525672057",
       "mode": "100644"
     },
     "tests/test_naruv_workflow_context.py": {
@@ -8502,11 +8502,11 @@
       "mode": "100644"
     },
     "app/naruv_hr_profile_envelope.py": {
-      "sha": "0cd01d7e6dbfe5a0588a268a469f24b2b2d30819",
+      "sha": "7dc35ca8a715361ead7d4fed75fced2740d4e548",
       "mode": "100644"
     },
     "tests/test_naruv_hr_profile_envelope.py": {
-      "sha": "2175feb001e89419540bb976e38b4420c27111a4",
+      "sha": "f6c3f229bb29825e5f98e443b463b26bba63932a",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_admission.py": {
@@ -8796,6 +8796,16 @@
   "p1_p2_independent_integrity_review": {
     "base": "80c753c2b648ccdc74cd3829307aa19a01bf1cc0",
     "scope": "Review-only; enforce all shift dates and original backup manifest; no operational or legal acceptance",
+    "paths": [
+      "app/naruv_kr_payroll_review.py",
+      "tests/test_naruv_kr_payroll_review.py",
+      "app/naruv_hr_profile_envelope.py",
+      "tests/test_naruv_hr_profile_envelope.py"
+    ]
+  },
+  "p1_p2_exclusions_retention": {
+    "base": "0c5a7555423b360e3a107b568596329a4cb54f9c",
+    "scope": "Assessed severance exclusions and offline B2 version metadata only; no production authorization; tests pending",
     "paths": [
       "app/naruv_kr_payroll_review.py",
       "tests/test_naruv_kr_payroll_review.py",
