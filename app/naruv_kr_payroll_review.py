@@ -1588,10 +1588,14 @@ def shift_night_source_review_2026(*,tenant,worker,period,segments,shift_sha256,
                 totals[d]=(work+1,night+int(a.hour>=22 or a.hour<6))
             a+=timedelta(minutes=1)
     require(type(classified_days) is list and 1<=len(classified_days)<=31,"KR_SHIFT_CLASSIFIED")
-    expected={}
+    expected={}; seen=set()
     for r in classified_days:
         require(type(r) is dict and set(r)=={"date",*KINDS} and type(r["date"]) is str
-            and r["date"] not in expected and all(_whole(r[k],0,1440) for k in KINDS),"KR_SHIFT_CLASSIFIED")
+            and r["date"] not in seen and all(_whole(r[k],0,1440) for k in KINDS),"KR_SHIFT_CLASSIFIED")
+        require(re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",r["date"]) and r["date"].startswith(period+"-"),"KR_SHIFT_CLASSIFIED")
+        try:date.fromisoformat(r["date"])
+        except ValueError:raise PayrollBlocked("KR_SHIFT_CLASSIFIED") from None
+        seen.add(r["date"])
         work=sum(r[k] for k in KINDS[:-1])
         if work:expected[r["date"]]=(work,r["night"])
         else:require(r["night"]==0,"KR_SHIFT_CLASSIFIED")
