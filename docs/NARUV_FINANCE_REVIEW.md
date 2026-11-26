@@ -1,0 +1,7 @@
+# NARUV internal finance review
+
+Baseline 1514d09bad698d9366cd44d998cd9d6db87fd762: 21 CI jobs successful. Extend the existing five-service matrix with ten actual PG17 cases. This is a synthetic internal billing/payment ledger, not actual money movement or statutory tax issuance.
+
+Bill binds one immutable fulfillment event and its actual stock movement; order of billing follows fulfillment cumulative quantity. Integer KRW; taxable VAT calculated as cumulative half-up difference, exempt zero. One bill per fulfillment, no client pricing. Payments and reversals are immutable events; one tenant-wide reference, one reversal per payment, exact actor-bound request retry, no overpayment. Reversal is internal correction only, not bank refund. Shared tenant inventory lock and auth fence serialize finance with fulfillment and cancellation. No deletion of originals; no direct application table rights. Existing V83 payment RPC uses a different invoice schema; inspected but not called or modified. Actual integration remains open.
+
+Ten tests include rounding, cancellation, duplicate billing and concurrent payments, reversal/retry, tenant isolation, failure rollback, exempt/zero and sale, permission and transport. Single-line integer documents only. No multi-line bills, statutory invoices, bank matching, general ledger/debit-credit posting, accounting periods, tax/legal acceptance or real ERP data; no real TLS or production UI. No new paid service, existing CI matrix unchanged, billing unmeasured. Main/production DB/deployment/UI/backups protected. Release BLOCKED.

@@ -1,0 +1,30 @@
+# Warehouse moving-average inventory valuation — disposable review
+
+Baseline c35436b2642968ef030db88dc38bcfd0a7cf7567: 21/21 CI and 530/530 repeated cases. Add ten PG17 cases to existing five-service matrix. Install only on empty disposable quantity ledger; no backfill or migration of persistent stock.
+
+Quantity and cost use the same transaction and tenant lock. Opening/adjustment receipts require explicit confirmed integer KRW unit cost; unpriced manual inbound denied. Purchase receipt uses order unit price excluding VAT. Transfer/issue uses warehouse moving-average cost with exact integer half-up allocation and final quantity drain; sales cost is recorded separately from invoice price. Production transfers actual material issue amounts into finished goods; no labor, overhead, scrap or WIP costing. Deferred constraint requires every inventory movement to have a cost entry and matched final quantities. Immutable entries, RLS, no direct table grants. Monetary API values returned as decimal strings for client precision. Exact retries preserve original movement and cost.
+
+This is an internal inventory subledger, not a statutory accounting method selection or production GL posting. Existing finance journals untouched; purchase clearing/COGS reconciliation and inventory accounting, invoice cost differences, freight, impairments, currency, stock opening approval, returns, actual ERP migration, UI/recovery/performance, independent review remain open. Same source/warehouse and whole units are synthetic assumptions. No main/live DB/UI/deployment/backups/new paid service or AI; CI charges unmeasured. Release BLOCKED.
+
+## Internal cost journal candidate
+Adds one immutable balanced debit/credit pair per nonzero cost entry, and a zero posting marker for transfers and zero cost. Purchase: inventory/purchase clearing; sale: COGS/inventory; material/output: WIP/inventory and inventory/WIP; opening and adjustments use synthetic accounts. All entries are bound to the existing Seoul period and transaction; missing/closed period rejects new stock movements, exact existing retries remain unchanged. Cancellation preserves fulfilled receipts and their cost; not a physical return or credit note. Seven additional PG17 cases; no statutory accounting policy, full returns, credit notes, historical opening balances, labor/overhead, UI or real ERP acceptance claimed. Existing tests and production protection remain. 
+
+## Whole billed fulfillment return candidate
+Unpaid single original fulfillment only; exact original sale cost restoration and purchase return only if current moving-average withdrawal equals original cost. Original warehouse, explicit confirmation, tenant lock, immutable original and credit event, original VAT reversal, no duplicate credit, no new payment after credit. Stock, cost journal, credit and finance journal share a transaction. Six additional PG17 cases. No partial returns, refund, damaged/serial stock, changed purchase cost variance, actual tax invoice, real ERP or production authorization. 
+
+## Current-state tenant audit candidate
+Reconciles stock quantity, cost entry/journal completeness, expected account pairs, total inventory value, zero material-only WIP and each billed fulfillment (including full credits). Read-only; maximum 1000 bills and existing statement/lock timeout, not a complete historical replay or statutory trial balance. Three added cases, including intentional value corruption detection. Integrated recovery and independent QA remain outstanding. 
+
+The audit also reconstructs signed quantities and amounts for each item/warehouse from immutable movements, detecting offsetting changes that a tenant-wide total would miss. Added return-versus-payment race, retry on fresh HTTP request, and offsetting warehouse corruption tests. This is not a physical backup or independent cluster restore. 
+
+## Partial credit candidate
+Cumulative per-bill quantity, original net/VAT/cost half-up allocation with exact final drain; multiple immutable credit events, each tied to its own reversed movement. Existing full-return endpoint retains full original quantity semantics; explicit quantity endpoint permits partial returns. Paid bills may return only up to unpaid balance; no negative receivable, real refund or cash movement. Purchase moving-average difference still fails closed. Four new PG17 cases, not production or statutory approval.
+
+## Explicit adjusted return candidate
+New opt-in endpoint, legacy exact-cost and no-refund endpoints unchanged. Computes refund required from existing paid/credit balance; records externally confirmed reference and opposite cash clearing journal, never initiates a bank transfer. Purchase cost variance is original allocated cost minus actual moving-average withdrawal; synthetic purchase variance account offsets clearing, capped and immutable. Refund and credit share stock transaction, period guard and idempotency. Ambiguous payment reversals after refund blocked. Four additional PG17 cases. Policy and statutory review pending.
+
+## Integrated recovery candidate
+Native write CI now provisions a second disposable PG17 service per round. The new test seeds a paid purchase with adjusted return/refund and tenant B, dumps the entire synthetic database, restores to a different cluster, and compares application row digests, ownership, ACLs, RLS policies, functions, constraints and triggers. All restored application roles are deliberately NOLOGIN without passwords. No production backup, external storage, real credentials or active failover. Actual CI proof pending.
+
+## Cross-ledger negative assurance
+Audit verifies net VAT, cash clearing, purchase variance and refund-to-credit links in addition to stock and invoice totals. A balanced but deliberately misclassified journal must fail audit. Restore comparator normalizes ACL ordering and checks index definitions. This is engineering QA, not independent reviewer sign-off or production release.

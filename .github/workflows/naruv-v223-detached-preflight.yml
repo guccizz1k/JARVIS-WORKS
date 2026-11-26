@@ -1,0 +1,163 @@
+name: NARUV V22.3 detached source integration preflight
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/naruv-v223-detached-preflight.yml
+permissions:
+  contents: read
+concurrency:
+  group: naruv-v223-detached-preflight-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  detached-source-preflight:
+    if: github.event.pull_request.number == 164 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      EXPECTED_SOURCE: aa8894305dda413127e2994064f456a966d5e3c2
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Verify detached source and protected assets
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          python scripts/naruv_v223_source_custody.py
+          python -m compileall -q app
+          python -m compileall -q tests/test_naruv_kr_payroll_review.py tests/test_naruv_employee_access_review.py tests/test_naruv_b2_offline_stage.py scripts/naruv_valuation_ci.py scripts/naruv_hr_archive_ci.py
+      - name: Install existing isolated dependency sets
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt 'reportlab==4.4.9'
+          sudo apt-get update -qq
+          sudo apt-get install -y fonts-nanum
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+      - name: Targeted original security, governance, UI custody and NARUV composition regression
+        run: |
+          set -euo pipefail
+          python -m scripts.jw_evidence_gate --check-project .
+          python -m pytest -q --strict-markers --junitxml="$RUNNER_TEMP/naruv-v223-detached.xml" \
+            tests/test_security.py tests/test_auth_integrity_v89.py tests/test_naruv_statutory_review_intake.py \
+            tests/test_security_hardening_v17.py tests/test_quote_import.py \
+            tests/test_complex_settlement_v69.py tests/test_pg_rls_gate_v79.py \
+            tests/test_jw_skill_contract.py tests/test_jw_evidence_gate.py \
+            tests/test_v223_owner_approved_ui_pin.py tests/test_v223_owner_visual_server.py \
+            tests/test_cinema_pg_cutover_front_v223.py tests/test_cinema_pg_v223_cookie_boundary.py \
+            tests/test_naruv_integrated_review.py tests/test_naruv_document_payroll.py \
+            tests/test_naruv_kr_payroll_review.py tests/test_naruv_employee_access_review.py tests/test_naruv_b2_offline_stage.py tests/test_naruv_v223_read_bridge.py tests/test_naruv_hr_profile_envelope.py tests/test_naruv_hosted_qa_admission.py tests/test_naruv_b2_retention_journal.py tests/test_naruv_owner_retention_evidence.py tests/test_naruv_b2_upload_policy.py tests/test_naruv_recovery_custody_review.py tests/test_naruv_b2_upload_execution.py tests/test_naruv_b2_native_upload.py tests/test_naruv_operational_readiness.py tests/test_naruv_owner_live_upload.py
+          python - <<'PY'
+          from pathlib import Path
+          import os,xml.etree.ElementTree as ET
+          r=ET.parse(Path(os.environ["RUNNER_TEMP"])/"naruv-v223-detached.xml").getroot()
+          s=[r] if r.tag=="testsuite" else list(r.findall("testsuite"))
+          n=sum(int(x.attrib.get("tests",0)) for x in s)
+          bad=sum(sum(int(x.attrib.get(k,0)) for k in ("failures","errors","skipped")) for x in s)
+          if n<100 or bad:raise SystemExit("DETACHED_PREFLIGHT_INCOMPLETE")
+          print("DETACHED_PREFLIGHT_PASS",n,"targeted cases; no production, browser, real TLS or PG acceptance")
+          PY
+
+  detached-native-pg17:
+    name: Detached V22.3 + NARUV native PG17 (round ${{ matrix.round }})
+    if: github.event.pull_request.number == 164 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        round: [1, 2, 3, 4, 5]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      erp_restore:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: naruv-erp-restore-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      EXPECTED_SOURCE: aa8894305dda413127e2994064f456a966d5e3c2
+      NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing staged API test dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Install isolated Chromium test dependencies
+        if: matrix.round == 1
+        run: |
+          python -m pip install 'playwright==1.56.0'
+          test -x /opt/google/chrome/chrome
+          /opt/google/chrome/chrome --version
+          sudo apt-get install -y libnss3-tools
+      - name: Verify native file stage approval and atomic PG17 write
+        env:
+          NARUV_ERP_SOURCE_SERVICE: ${{ job.services.postgres.id }}
+          NARUV_ERP_DEST_SERVICE: ${{ job.services.erp_restore.id }}
+          NARUV_WORKSPACE_BROWSER: ${{ matrix.round == 1 && 'EPHEMERAL_ONLY' || 'OFF' }}
+          JW_V93_TRUST_LOCAL_CA: ${{ matrix.round == 1 && 'EPHEMERAL_RUNNER_ONLY' || 'OFF' }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          python scripts/naruv_v223_source_custody.py
+          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py app/naruv_production_review.py scripts/naruv_production_ci.py app/naruv_valuation_review.py scripts/naruv_valuation_ci.py scripts/naruv_erp_restore_ci.py
+          python -m unittest tests.test_naruv_workflow_context tests.test_naruv_integrated_review
+          python -m scripts.naruv_employee_session_store_ci
+          python -m scripts.naruv_native_write_review_ci
+
+  independent-official-tax-source:
+    if: github.event.pull_request.number == 164 && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    permissions:
+      contents: read
+    env:
+      EXPECTED_SOURCE: aa8894305dda413127e2994064f456a966d5e3c2
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Independently obtain and compare official Appendix 2 PDF
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          python scripts/naruv_v223_source_custody.py
+          command -v pdftotext || (sudo apt-get update -qq && sudo apt-get install -y poppler-utils)
+          pdf="$(mktemp --suffix=.pdf)"
+          trap 'rm -f "$pdf"' EXIT
+          curl --fail --silent --show-error --location --retry 2 --retry-all-errors --retry-delay 3 --retry-max-time 75 --proto '=https' --proto-redir '=https' --max-redirs 3 --connect-timeout 12 --max-time 60 --max-filesize 10000000 'https://law.go.kr/flDownload.do?bylClsCd=110201&flSeq=163623339&gubun=' --output "$pdf"
+          python -m scripts.naruv_tax_source_audit "$pdf" app/naruv_kr_payroll_review.py
