@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from app.naruv_operational_readiness import prepare_upload_scope,custody_trust_pin,review_and_consume_local_challenge
 from app.naruv_b2_retention_journal import DAY
 from tests.test_naruv_b2_native_upload import encrypted
-from tests.test_naruv_recovery_custody_review import RecoveryCustodyTests
+from tests import test_naruv_recovery_custody_review as custody_fixtures
 
 class OperationalReadinessTests(unittest.TestCase):
     def test_unsigned_upload_proposal(self):
@@ -21,7 +21,7 @@ class OperationalReadinessTests(unittest.TestCase):
             dict(operation_id="old"),dict(archive_key=AESGCM.generate_key(256))):
             with self.subTest(change=list(change)),self.assertRaises(ValueError):prepare_upload_scope(**dict(a,**change))
     def custody(self):
-        fixture=RecoveryCustodyTests();fixture.setUp();a=fixture.signed()
+        fixture=custody_fixtures.RecoveryCustodyTests();fixture.setUp();a=fixture.signed()
         return dict(expected_trust_pin=custody_trust_pin(tenant=a["tenant"],expected_keys=a["expected_keys"],trust=a["trust"]),
             expected_challenge=a["challenge"],**a)
     def test_concurrent_replay_and_no_authority(self):
