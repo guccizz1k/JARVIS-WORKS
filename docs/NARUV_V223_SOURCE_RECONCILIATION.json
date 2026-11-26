@@ -4438,7 +4438,7 @@
       "mode": "100644"
     },
     "app/naruv_draft_review.py": {
-      "sha": "2718df7c7bb8a96c6703075f558f9063fcf116fa",
+      "sha": "a359c579d156f137aab5d4f4d57b0b6b0a5a475a",
       "mode": "100644"
     },
     "app/naruv_finance_review.py": {
@@ -4706,7 +4706,7 @@
       "mode": "100644"
     },
     "db/review/naruv_hr_ci.sql": {
-      "sha": "6c5e4178d9a7d3421b1de9ccb28b22dbb89009ac",
+      "sha": "7c2117c40416e3417cde85d6854b10dc0713f24c",
       "mode": "100644"
     },
     "db/review/naruv_inventory_ci.sql": {
@@ -4810,7 +4810,7 @@
       "mode": "100644"
     },
     "docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md": {
-      "sha": "4742dcaccd1288ef43f8f34ee4d5469191a48a96",
+      "sha": "58fa3f72ec1709de2496f92427bfbedead2bc69c",
       "mode": "100644"
     },
     "docs/NARUV_INVENTORY_REVIEW.md": {
@@ -5578,7 +5578,7 @@
       "mode": "100644"
     },
     "scripts/naruv_valuation_ci.py": {
-      "sha": "f8fd6588f6e90a718918af5fd13809e941cec893",
+      "sha": "f2e254d7a96bfa383e83c9ec15056139ec05761c",
       "mode": "100644"
     },
     "scripts/ocr_quality_gate_v77.py": {
@@ -9095,5 +9095,11 @@
     "base": "51d78128b7af3f6b1206d84867fbd99f73717712",
     "scope": "Assessed fixed-week minimum wage comparison; synthetic populated audit receipt restore in distinct clusters; no statutory or independent key acceptance",
     "paths": ["app/naruv_kr_payroll_review.py","app/naruv_draft_review.py","tests/test_naruv_kr_payroll_review.py","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
+  }
+,
+  "p1_verified_statement_draft_retrieval": {
+    "base": "bedc97b74a147fc3be90a42d63d4c9b9a0e6a341",
+    "scope": "Read-only exact stored review/render receipt verification by same admin; no employee delivery or actual independent key custody",
+    "paths": ["app/naruv_draft_review.py","db/review/naruv_hr_ci.sql","scripts/naruv_valuation_ci.py","docs/NARUV_INTEGRATED_COMPLETION_REGISTER.md"]
   }
 }

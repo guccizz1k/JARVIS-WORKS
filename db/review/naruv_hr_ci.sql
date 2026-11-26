@@ -499,4 +499,36 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION naruv_draft.record_statement_review(text,text,text,text,text,text,boolean,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
 GRANT EXECUTE ON FUNCTION naruv_draft.record_statement_review(text,text,text,text,text,text,boolean,text) TO jw_app_dev;
+-- Read-only verification of existing audit metadata; still not worker delivery.
+CREATE FUNCTION naruv_draft.verify_statement_review(p_worker text,p_period text,p_request text,
+ p_review text,p_statement text,p_render text,p_csrf text)
+ RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE a record; a2 record; r naruv_draft.statement_review_receipts;
+BEGIN
+ SELECT * INTO a FROM naruv_native_review.guard(p_csrf,'business');
+ IF p_worker IS NULL OR p_worker !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_period IS NULL OR p_period !~ '^2026-(0[1-9]|1[0-2])$'
+ OR p_request IS NULL OR p_request !~ '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$'
+ OR p_review IS NULL OR p_review !~ '^[0-9a-f]{64}$'
+ OR p_statement IS NULL OR p_statement !~ '^[0-9a-f]{64}$'
+ OR p_render IS NULL OR p_render !~ '^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'KR_AUDIT_INPUT'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('naruv-attendance-v1:'||a.org_id,0));
+ PERFORM 1 FROM naruv_draft.pay_source(p_worker,p_period,p_csrf);
+ IF NOT FOUND THEN RAISE EXCEPTION 'KR_AUDIT_NOT_FOUND'; END IF;
+ SELECT * INTO r FROM naruv_draft.statement_review_receipts x
+ WHERE (x.org_id,x.request_id,x.actor_id,x.worker_id,x.period)=(a.org_id,p_request,a.actor_id,p_worker,p_period);
+ IF NOT FOUND THEN RAISE EXCEPTION 'KR_AUDIT_NOT_FOUND'; END IF;
+ IF (r.review_sha256,r.statement_sha256,r.render_sha256) IS DISTINCT FROM (p_review,p_statement,p_render)
+ THEN RAISE EXCEPTION 'KR_AUDIT_CONFLICT'; END IF;
+ SELECT * INTO a2 FROM naruv_native_review.guard(p_csrf,'business');
+ IF (a.actor_id,a.org_id,a.auth_epoch,a.session_binding_sha256)
+ IS DISTINCT FROM (a2.actor_id,a2.org_id,a2.auth_epoch,a2.session_binding_sha256)
+ THEN RAISE EXCEPTION 'NARUV_PERMISSION_DENIED' USING ERRCODE='42501'; END IF;
+ RETURN jsonb_build_object('status','ISOLATED_STATEMENT_REVIEW_METADATA_VERIFIED','request_id',r.request_id,
+ 'review_sha256',r.review_sha256,'statement_sha256',r.statement_sha256,'render_sha256',r.render_sha256,
+ 'audit_metadata_persisted',true,'delivery_authorized',false,'payment_authorized',false,
+ 'production_authorized',false,'statutory_validated',false);
+END $$;
+REVOKE ALL ON FUNCTION naruv_draft.verify_statement_review(text,text,text,text,text,text,text) FROM PUBLIC,jw_app_dev,naruv_native_stage;
+GRANT EXECUTE ON FUNCTION naruv_draft.verify_statement_review(text,text,text,text,text,text,text) TO jw_app_dev;
 RESET ROLE;

@@ -1071,6 +1071,30 @@ def run_valuation(base):
                         with c.transaction():
                             c.execute("UPDATE naruv_draft.statement_review_receipts SET render_sha256=repeat('0',64) WHERE org_id='ci-a' AND worker_id='tax-worker'")
                 print("NARUV_STATEMENT_REVIEW_AUDIT_PASS exact review and render hash, idempotence, RLS, no delivery",flush=True)
+                verify_req=dict(fa,wage_statement_review=dict(spec,draft_audit_verify=audit))
+                vresp=self.check(self.call(taxpath,verify_req,extra={"accept":"application/json"}),200)
+                vr=vresp["draft_audit_receipt"]
+                self.assertEqual(vr["status"],"ISOLATED_STATEMENT_REVIEW_METADATA_VERIFIED")
+                self.assertFalse(vr["delivery_authorized"]);self.assertFalse(vr["statutory_validated"])
+                self.assertEqual(vr["render_sha256"],receipt["render_sha256"])
+                verified_html=self.call(taxpath,verify_req,extra=print_accept)
+                self.assertEqual(verified_html.status_code,200)
+                self.assertEqual(sha256(verified_html.content).hexdigest(),receipt["render_sha256"])
+                self.assertEqual(verified_html.headers["cache-control"],"no-store")
+                self.assertIn("교부 금지",verified_html.text)
+                self.check(self.call(taxpath,verify_req,who="B",extra=print_accept),404)
+                self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(spec,draft_audit_verify=dict(audit,request_id="missing-audit")))),404)
+                self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(spec,draft_audit_verify=dict(audit,expected_review_sha256="0"*64)))),409)
+                self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(spec,draft_audit=audit,draft_audit_verify=audit))),422)
+                self.check(self.call(taxpath,verify_req,extra={"accept":"text/html"}),406)
+                # A different fully valid newly computed statement cannot reuse the saved receipt.
+                changed_spec=dict(spec,completeness_assessment_sha256="f"*64)
+                changed=self.check(self.call(taxpath,dict(fa,wage_statement_review=changed_spec)),200)
+                self.check(self.call(taxpath,dict(fa,wage_statement_review=dict(changed_spec,draft_audit_verify=dict(audit,expected_review_sha256=changed["review_sha256"])))),409)
+                with psycopg.connect(fixture.root_dsn) as c:
+                    self.assertEqual(c.execute("SELECT count(*) FROM naruv_draft.statement_review_receipts WHERE org_id='ci-a' AND worker_id='tax-worker'").fetchone()[0],1)
+                    self.assertFalse(c.execute("SELECT has_function_privilege('naruv_native_stage','naruv_draft.verify_statement_review(text,text,text,text,text,text,text)','EXECUTE')").fetchone()[0])
+                print("NARUV_STATEMENT_VERIFIED_DRAFT_RETRIEVAL_PASS exact immutable receipt and output, stale, cross tenant, no delivery",flush=True)
                 minimum=dict(scope="ASSESSED_FIXED_WEEK_HOURLY_BASIS_ONLY",assessed_basis_minutes=1920,
                     included_base_krw=280240,included_cash=[dict(component_id="allowance-1",included_krw=50000,assessment_sha256="d"*64)],
                     assessment_sha256="e"*64)

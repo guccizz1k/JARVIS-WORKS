@@ -71,7 +71,7 @@ def _decode_kr_body(raw):
         if "wage_statement_review" in d:
             a=d["wage_statement_review"]
             fields={"payment_date","scope","completeness_assessment_sha256"}
-            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages","cash_deduction_review","draft_audit","minimum_wage_review"}
+            if (type(a) is not dict or not fields<=set(a) or not set(a)<=fields|{"additional_cash_wages","cash_deduction_review","draft_audit","minimum_wage_review","draft_audit_verify"}
                 or any(type(a[k]) is not str for k in fields)):
                 raise ValueError("statement scope")
             if "additional_cash_wages" in a:
@@ -103,8 +103,10 @@ def _decode_kr_body(raw):
                     or type(m["assessed_basis_minutes"]) is not int or type(m["included_base_krw"]) is not int
                     or type(m["included_cash"]) is not list or len(m["included_cash"])>8):
                     raise ValueError("minimum wage shape")
-            if "draft_audit" in a:
-                audit=a["draft_audit"]
+            if {"draft_audit","draft_audit_verify"}<=set(a):
+                raise ValueError("statement audit mode conflict")
+            if "draft_audit" in a or "draft_audit_verify" in a:
+                audit=a.get("draft_audit",a.get("draft_audit_verify"))
                 if (type(audit) is not dict or set(audit)!={"request_id","expected_review_sha256"}
                     or type(audit["request_id"]) is not str or not preview.IDENT.fullmatch(audit["request_id"])
                     or type(audit["expected_review_sha256"]) is not str or not HEX.fullmatch(audit["expected_review_sha256"])):
@@ -371,7 +373,7 @@ def _kr_review(token,csrf,prior,worker,period,data):
                 proof.update(v="KR_CI_MANUAL_API_V8",part_time_rest=rest["review_sha256"])
                 details["part_time_rest_reference"]=rest
             if "wage_statement_review" in data:
-                statement_args={k:v for k,v in data["wage_statement_review"].items() if k not in ("additional_cash_wages","cash_deduction_review","draft_audit","minimum_wage_review")}
+                statement_args={k:v for k,v in data["wage_statement_review"].items() if k not in ("additional_cash_wages","cash_deduction_review","draft_audit","minimum_wage_review","draft_audit_verify")}
                 if "fixed_week_paid_review" in data:
                     statement=fixed_week_wage_statement_2026(tenant=org,worker=worker,period=period,
                         base_hourly=rate,ordinary_hourly=data["ordinary_hourly"],minutes_by_day=days,
@@ -407,7 +409,9 @@ def _kr_review(token,csrf,prior,worker,period,data):
             result={"status":"MANUAL_SUBMISSION_REFERENCE_ONLY","review":review,"pension_reference":pension_ref,**details,
                 "evidence_authenticity_verified":False,"persisted":False,"statutory_validated":False,
                 "payment_authorized":False,"production_authorized":False,"review_sha256":digest(proof)}
-            audit=data.get("wage_statement_review",{}).get("draft_audit")
+            audit_spec=data.get("wage_statement_review",{})
+            verify_only="draft_audit_verify" in audit_spec
+            audit=audit_spec.get("draft_audit_verify" if verify_only else "draft_audit")
             if audit is not None:
                 from hashlib import sha256
                 from .naruv_kr_payroll_review import isolated_wage_statement_print_html
@@ -415,14 +419,21 @@ def _kr_review(token,csrf,prior,worker,period,data):
                     raise PayrollBlocked("KR_AUDIT_STALE_REVIEW")
                 rendered=isolated_wage_statement_print_html(result)
                 render_sha=sha256(rendered.encode("utf-8")).hexdigest()
-                cur.execute("SELECT naruv_draft.record_statement_review(%s,%s,%s,%s,%s,%s,true,%s)",
-                    (worker,period,audit["request_id"],result["review_sha256"],statement["review_sha256"],render_sha,csrf))
+                if verify_only:
+                    cur.execute("SELECT naruv_draft.verify_statement_review(%s,%s,%s,%s,%s,%s,%s)",
+                        (worker,period,audit["request_id"],result["review_sha256"],statement["review_sha256"],render_sha,csrf))
+                else:
+                    cur.execute("SELECT naruv_draft.record_statement_review(%s,%s,%s,%s,%s,%s,true,%s)",
+                        (worker,period,audit["request_id"],result["review_sha256"],statement["review_sha256"],render_sha,csrf))
                 row=cur.fetchone()
                 receipt=row[0] if row else None
                 if (type(receipt) is not dict or receipt.get("review_sha256")!=result["review_sha256"]
                     or receipt.get("statement_sha256")!=statement["review_sha256"] or receipt.get("render_sha256")!=render_sha
                     or receipt.get("audit_metadata_persisted") is not True
                     or any(receipt.get(k) is not False for k in ("delivery_authorized","payment_authorized","production_authorized","statutory_validated"))):
+                    raise HTTPException(503,"KR_AUDIT_UNAVAILABLE")
+                expected_status="ISOLATED_STATEMENT_REVIEW_METADATA_VERIFIED" if verify_only else "ISOLATED_STATEMENT_REVIEW_METADATA_RECORDED"
+                if receipt.get("status")!=expected_status or receipt.get("request_id")!=audit["request_id"]:
                     raise HTTPException(503,"KR_AUDIT_UNAVAILABLE")
                 result["draft_audit_receipt"]=receipt
             return result
@@ -526,6 +537,9 @@ def create_router():
                     raise HTTPException(422,"KR_AUDIT_CONFIRM_REQUIRED")
                 if accept not in ("","application/json","*/*"):
                     raise HTTPException(406,"KR_AUDIT_JSON_ONLY")
+            verify_only="draft_audit_verify" in data.get("wage_statement_review",{})
+            if verify_only and accept not in ("","application/json","*/*","text/html;profile=naruv-wage-statement-draft"):
+                raise HTTPException(406,"KR_AUDIT_VERIFY_ACCEPT")
             result=await run_in_threadpool(_kr_review,token,csrf,prior,worker,period,data)
             if accept in ("text/html","text/html;profile=naruv-wage-statement-draft"):
                 from fastapi.responses import HTMLResponse
@@ -533,6 +547,10 @@ def create_router():
                 if accept=="text/html;profile=naruv-wage-statement-draft":
                     if "wage_statement_reference" not in result:raise HTTPException(409,"KR_STATEMENT_REQUIRED")
                     body=isolated_wage_statement_print_html(result)
+                    if verify_only:
+                        from hashlib import sha256
+                        if sha256(body.encode("utf-8")).hexdigest()!=result["draft_audit_receipt"]["render_sha256"]:
+                            raise HTTPException(409,"KR_AUDIT_RENDER_CHANGED")
                 else:body=isolated_payroll_review_html(result)
                 return HTMLResponse(body,headers={
                     "Cache-Control":"no-store","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY",
