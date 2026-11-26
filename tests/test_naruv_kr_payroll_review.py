@@ -979,3 +979,17 @@ class AssessedMonthlyTaxComparison(unittest.TestCase):
                 dict(deductions=dict(rows,income_tax=dict(rows["income_tax"],assessment="NOT_APPLICABLE")))):
             with self.subTest(change=change),self.assertRaises(PayrollBlocked):
                 compare(**dict(a,**change))
+
+
+class OrdinaryComparisonCoverage(unittest.TestCase):
+    def test_six_references_never_statutory_acceptance(self):
+        from app.naruv_kr_payroll_review import ordinary_comparison_coverage_2026 as review
+        common=dict(review_sha256="a"*64,statutory_validated=False,payment_authorized=False,production_authorized=False)
+        a=dict(source_review_sha256="b"*64,pension=dict(common,status="REFERENCE_MATCH_ONLY"),
+            insurance=dict(common,status="REFERENCE_COMPARISON_ONLY",flags=["LTC_SEQUENCE_REQUIRES_AGENCY_CONFIRMATION"],employment_rounding_status="AGENCY_ASSESSMENT_REQUIRED"),
+            tax=dict(common,status="ASSESSMENT_DIFFERENCE_REVIEW_REQUIRED",mismatches=["income_tax"]))
+        r=review(**a)
+        self.assertEqual(r["reference_count"],6);self.assertEqual(r["difference_count"],1);self.assertEqual(r["agency_confirmation_count"],2)
+        self.assertFalse(r["statutory_validated"]);self.assertFalse(r["payment_authorized"])
+        for changes in (dict(tax=dict(a["tax"],mismatches=[])),dict(insurance=dict(a["insurance"],flags=["unknown"])),dict(pension=dict(a["pension"],payment_authorized=True))):
+            with self.subTest(changes=changes),self.assertRaises(PayrollBlocked):review(**dict(a,**changes))
