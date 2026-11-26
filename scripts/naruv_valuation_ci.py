@@ -897,6 +897,9 @@ def run_valuation(base):
                 self.assertEqual(pr["part_time_rest_reference"]["rest_pay_estimate_krw"],320000)
                 self.assertFalse(pr["part_time_rest_reference"]["included_in_gross"])
                 self.assertEqual(pr["part_time_rest_reference"]["confirmed_month_overlap_days"],5)
+                self.assertEqual(pr["part_time_rest_reference"]["matched_confirmed_positive_work_days"],2)
+                self.assertEqual(pr["part_time_rest_reference"]["manual_zero_work_status_days"],3)
+                self.assertFalse(pr["part_time_rest_reference"]["zero_minutes_attendance_status_verified"])
                 self.check(self.call(taxpath,dict(fixed,part_time_rest_review=ptr),who="B"),404)
                 self.check(self.call(taxpath,dict(tm,part_time_rest_review=ptr)),422)
                 bad=copy.deepcopy(ptr);bad["weeks"][-1]["days"][2]["actual_minutes"]=479
@@ -904,6 +907,7 @@ def run_valuation(base):
                 self.check(self.call(taxpath,dict(night_fixed,part_time_rest_review=ptr)),409)
                 ph=self.call(taxpath,dict(fixed,part_time_rest_review=ptr),extra={"accept":"text/html"})
                 self.assertEqual(ph.status_code,200);self.assertIn("320,000",ph.text)
+                self.assertIn("실근로 확인 2일 / 0분 근태 분류 수동 제출 3일",ph.text)
                 print("NARUV_PART_TIME_REST_API_PASS confirmed overlapping work, manual history, separate reference and tenant denial",flush=True)
                 shift=dict(shift_sha256="e"*64,segments=[dict(start="2026-07-01T14:00+09:00",end="2026-07-01T23:00+09:00",evidence_sha256="f"*64)])
                 shift_result=self.check(self.call(krpath,dict(manual,shift_review=shift)),200)
