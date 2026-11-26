@@ -1680,6 +1680,64 @@ def restricted_wage_statement_2026(*,tenant,worker,period,base_hourly,ordinary_h
         completeness_verified=False,payment_date_verified=False,statutory_validated=False,
         payment_authorized=False,delivery_authorized=False,production_authorized=False)
 
+def fixed_week_wage_statement_2026(*,tenant,worker,period,base_hourly,ordinary_hourly,minutes_by_day,
+        deductions,fixed_review,source_review,payment_date,scope,completeness_assessment_sha256):
+    """Same-request server-computed alternative gross; do not add to base gross.
+    No proof of statutory eligibility, wage completeness or actual payment.
+    """
+    require(all(type(x) is str and ID.fullmatch(x) for x in (tenant,worker))
+        and type(period) is str and re.fullmatch(r"2026-(0[1-9]|1[0-2])",period)
+        and _whole(base_hourly,1,10**8) and _whole(ordinary_hourly,base_hourly,10**8)
+        and scope=="MANUALLY_ASSESSED_FIXED_WEEK_PAID_REST_LEAVE"
+        and type(completeness_assessment_sha256) is str and HEX.fullmatch(completeness_assessment_sha256),"KR_PAID_STATEMENT_SCOPE")
+    require(type(payment_date) is str and re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}",payment_date),"KR_STATEMENT_DATE")
+    try:pd=date.fromisoformat(payment_date)
+    except ValueError:raise PayrollBlocked("KR_STATEMENT_DATE") from None
+    y,m=map(int,period.split("-"));next_month=f"{y+(m==12):04}-{m%12+1:02}"
+    require(pd.isoformat()[:7] in (period,next_month),"KR_STATEMENT_DATE")
+    for r,status,field in ((fixed_review,"FIXED_WEEK_MONTHLY_REVIEW_ONLY","review_sha256"),
+                           (source_review,"SOURCE_BOUND_MANUAL_REVIEW_ONLY","review_binding_sha256")):
+        require(type(r) is dict and r.get("status")==status and type(r.get(field)) is str and HEX.fullmatch(r[field])
+            and all(r.get(k) is False for k in ("statutory_validated","payment_authorized","production_authorized")),"KR_PAID_STATEMENT_SOURCE")
+    require(type(minutes_by_day) in (list,tuple) and 1<=len(minutes_by_day)<=31,"KR_PAID_STATEMENT_MINUTES")
+    require(all(type(r) is dict and set(r)=={"date","regular","additional"} and type(r["date"]) is str
+        and r["date"].startswith(period+"-") and _whole(r["regular"],0,480) and type(r["additional"]) is int and r["additional"]==0
+        for r in minutes_by_day) and len({r["date"] for r in minutes_by_day})==len(minutes_by_day),"KR_PAID_STATEMENT_MINUTES")
+    paid=fixed_review["paid_days"]
+    require(type(paid) is dict and paid.get("status")=="FIXED_WEEK_PAID_REST_LEAVE_REFERENCE_ONLY","KR_PAID_STATEMENT_PAID")
+    used={r["date"] for r in minutes_by_day if r["regular"]>0}
+    for k in ("weekly_rest_dates","annual_leave_dates"):
+        dates=paid[k]
+        require(type(dates) is list and len(dates)<=31 and all(type(d) is str and d.startswith(period+"-") for d in dates)
+            and len(set(dates))==len(dates) and not set(dates)&used,"KR_PAID_STATEMENT_OVERLAP")
+        used.update(dates)
+    specs=[("work_base",sum(r["regular"] for r in minutes_by_day),base_hourly),
+        ("weekly_rest",480*len(paid["weekly_rest_dates"]),ordinary_hourly),
+        ("annual_leave",480*len(paid["annual_leave_dates"]),ordinary_hourly)]
+    rows=[]
+    for k,n,rate in specs:
+        exact=Fraction(rate*n,60)
+        rows.append(dict(kind=k,minutes=n,hourly_krw=rate,multiplier_bps=10000,exact=_money(exact),amount_krw=_round(exact)))
+    gross=sum((Fraction(**r["exact"]) for r in rows),Fraction(0))
+    net=fixed_review["deductions"]
+    require(rows[1]["amount_krw"]==paid["weekly_rest_krw"] and rows[2]["amount_krw"]==paid["annual_leave_krw"]
+        and source_review["wage"]["gross_exact"]==rows[0]["exact"]
+        and _money(gross)==fixed_review["gross_exact"]
+        and _round(gross)==fixed_review["gross_estimate_krw"]==net["gross_estimate_krw"]==sum(r["amount_krw"] for r in rows),"KR_PAID_STATEMENT_TOTAL")
+    require(type(deductions) is dict and set(deductions)==set(DEDUCTIONS),"KR_PAID_STATEMENT_DEDUCTIONS")
+    d=[dict(kind=k,amount_krw=deductions[k]["amount_krw"]) for k in DEDUCTIONS]
+    require(all(_whole(r["amount_krw"],0,10**12) for r in d)
+        and sum(r["amount_krw"] for r in d)==net["deductions_krw"]
+        and net["gross_estimate_krw"]-net["deductions_krw"]==net["net_estimate_krw"],"KR_PAID_STATEMENT_DEDUCTIONS")
+    core=dict(worker=worker,period=period,proposed_payment_date=payment_date,components=rows,deductions=d,
+        gross_krw=net["gross_estimate_krw"],deductions_krw=net["deductions_krw"],net_krw=net["net_estimate_krw"],
+        source_review_sha256=source_review["review_binding_sha256"],fixed_review_sha256=fixed_review["review_sha256"],
+        rounding="DISPLAY_ALLOCATION_ONLY",alternative_gross=True,add_to_basic_gross=False)
+    return dict(core,status="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY",
+        review_sha256=hash_input({"v":"KR_PAID_STATEMENT_2026_V1","tenant":tenant,"core":core,"assessment":completeness_assessment_sha256}),
+        completeness_verified=False,payment_date_verified=False,statutory_validated=False,
+        payment_authorized=False,delivery_authorized=False,production_authorized=False)
+
 def isolated_payroll_review_html(result):
     """CI-only no-script read-only representation; not the approved WORKS UI.
     Render only a fixed schema of numeric results; never embed client evidence.
@@ -1697,12 +1755,17 @@ def isolated_payroll_review_html(result):
     line("기본 급여 실수령 참고액",d["net_estimate_krw"])
     if "wage_statement_reference" in result:
         a=result["wage_statement_reference"]
-        require(a.get("status")=="RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY"
+        require(a.get("status") in ("RESTRICTED_WAGE_STATEMENT_DRAFT_ONLY","FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY")
             and all(a.get(k) is False for k in ("completeness_verified","payment_date_verified","statutory_validated","payment_authorized","delivery_authorized","production_authorized")),"KR_VIEW_STATEMENT")
         require(type(a["worker"]) is str and ID.fullmatch(a["worker"])
             and type(a["proposed_payment_date"]) is str and re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}",a["proposed_payment_date"]),"KR_VIEW_STATEMENT_SCOPE")
         rows.append("<tr><th scope=\"row\">임금명세서 초안 (교부 금지)</th><td>"+escape(a["worker"])+" / 지급 예정일 "+escape(a["proposed_payment_date"])+"</td></tr>")
         labels={"work_base":"근로 기본액","overtime_premium":"연장 가산","holiday_first8_premium":"휴일 8시간 이내 가산","holiday_after8_premium":"휴일 8시간 초과 가산","night_premium":"야간 가산"}
+        if a["status"]=="FIXED_WEEK_WAGE_STATEMENT_DRAFT_ONLY":
+            require(a.get("alternative_gross") is True and a.get("add_to_basic_gross") is False,"KR_VIEW_STATEMENT_ALTERNATIVE")
+            labels={"work_base":"근로 기본액","weekly_rest":"주휴수당","annual_leave":"유급 연차수당"}
+            line("명세서 대체 급여 총액 (기본 급여 미합산)",a["gross_krw"])
+            line("명세서 대체 실수령 참고액",a["net_krw"])
         require(type(a["components"]) is list and [r["kind"] for r in a["components"]]==list(labels),"KR_VIEW_STATEMENT_COMPONENTS")
         for r in a["components"]:
             require(all(_whole(r[k],0,10**12) for k in ("minutes","hourly_krw","multiplier_bps")),"KR_VIEW_STATEMENT_NUMBERS")
