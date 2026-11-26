@@ -8514,7 +8514,7 @@
       "mode": "100644"
     },
     "tests/test_naruv_hosted_qa_admission.py": {
-      "sha": "fc9f8e6b9966381034dc320ea9d5c908dc325132",
+      "sha": "bf25ce8828e4173d0c1bb0d77c498cdc3076e5d2",
       "mode": "100644"
     },
     "app/naruv_hosted_qa_boundary.py": {
@@ -8551,6 +8551,14 @@
     },
     "db/review/naruv_supabase_qa_probe.sql": {
       "sha": "62d23f55e9caf94957947e601220e0cdec195c51",
+      "mode": "100644"
+    },
+    "app/naruv_supabase_qa_admission.py": {
+      "sha": "e97da02874d7b9dbe60e08c4c22ee512e6fdda54",
+      "mode": "100644"
+    },
+    "db/review/naruv_supabase_qa_role_rehearsal.sql": {
+      "sha": "1ca23b2fef5ad670e37c1b8cce168862f5ad72bc",
       "mode": "100644"
     }
   },
@@ -8748,5 +8756,9 @@
   "supabase_private_probe_and_insurance_comparison": {
     "parent": "4b7a452eee2f955dc107984b11550482420086e1",
     "reason": "Record already applied dedicated QA migration; compare health/LTC truncation candidates without assuming allocation sequence; employment exact remains agency-confirmed; optional CI API input preserves legacy result and proof. No automatic payment or production authorization."
+  },
+  "supabase_managed_role_rehearsal": {
+    "parent": "e79540abeb0c5d67615e9439a31f0f6e219cf547",
+    "reason": "Record actual hosted transactional role/RPC and rollback proof; provider-specific preflight excludes old project, migration drift, role conflicts and raw CI fixture SQL. No full hosted schema or runtime acceptance."
   }
 }

@@ -90,3 +90,37 @@ class HostedQAAdmission(unittest.TestCase):
                         {"service":dict(service,serviceDetails=None)},
                         {"expected_repo":"https://other.example/project"}, {"expected_workspace_id":"tea-other"}):
             with self.assertRaises(AdmissionBlocked):verify_deployment_metadata(**dict(args,**changes))
+
+
+class SupabaseManagedAdmission(unittest.TestCase):
+    def test_exact_new_project_and_catalog_no_authority(self):
+        from app.naruv_supabase_qa_admission import verify_provider_project,QA_REF,QA_ORG,QA_NAME,PROBE_VERSION,PROBE_NAME
+        p=dict(id=QA_REF,ref=QA_REF,organization_id=QA_ORG,name=QA_NAME,region="ap-northeast-2",
+            status="ACTIVE_HEALTHY",database=dict(host="db."+QA_REF+".supabase.co",postgres_engine="17"))
+        migrations=[dict(version=PROBE_VERSION,name=PROBE_NAME)]
+        catalog=dict(current_user="postgres",session_user="postgres",current_database="postgres",version_num=170012,
+            superuser=False,createrole=True,bypassrls=True,existing_erp_schemas=0,conflicting_roles=0)
+        rollback=dict(schema_rolled_back=True,roles_rolled_back=True,original_fixture_intact=True)
+        args=dict(project=p,expected_sha="a"*40,migrations=migrations,catalog=catalog,rollback=rollback)
+        result=verify_provider_project(**args)
+        self.assertEqual(result["status"],"DEDICATED_MANAGED_DB_PREFLIGHT_ONLY")
+        for k in ("migration_authorized","deployment_authorized","production_authorized","runtime_credentials_verified"):
+            self.assertIs(result[k],False)
+        for change in (dict(project=dict(p,id="other")),dict(project=dict(p,ref="other")),dict(project=dict(p,status="INACTIVE")),
+            dict(project=dict(p,database=dict(p["database"],postgres_engine="18"))),dict(migrations=[]),
+            dict(migrations=migrations+[dict(version="new",name="unexpected")]),
+            dict(catalog=dict(catalog,superuser=True)),dict(catalog=dict(catalog,existing_erp_schemas=1)),
+            dict(catalog=dict(catalog,conflicting_roles=False)),dict(rollback=dict(rollback,roles_rolled_back=False)),
+            dict(expected_sha="main")):
+            with self.subTest(change=list(change)),self.assertRaises(AdmissionBlocked):
+                verify_provider_project(**dict(args,**change))
+
+    def test_raw_ci_sources_cannot_be_promoted_by_renaming(self):
+        from app.naruv_supabase_qa_admission import require_hosted_sql_source
+        for path,sql in (("db/review/ci_v92_quote_ephemeral.sql","SELECT 1"),
+            ("db/review/naruv_supabase_hosted_test.sql","-- NEVER migrate onto Supabase"),
+            ("db/review/naruv_supabase_hosted_test.sql","SELECT set_config('naruv.foo','DISPOSABLE_ONLY',true)"),
+            ("db/review/naruv_supabase_hosted_test.sql","ALTER SYSTEM SET ssl='off'"),
+            ("db/review/naruv_supabase_hosted_../test.sql","SELECT 1")):
+            with self.assertRaises(AdmissionBlocked):require_hosted_sql_source(path,sql)
+        self.assertFalse(require_hosted_sql_source("db/review/naruv_supabase_hosted_test.sql","SELECT 1")["migration_authorized"])
