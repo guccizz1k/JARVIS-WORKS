@@ -294,3 +294,32 @@ class HRProfileEnvelope(unittest.TestCase):
         for change in (dict(expected_manifest_sha256="0"*64),
             dict(expected_manifest={"archive":{"sha256":"c"*64,"key_id":"old"}})):
             with self.assertRaises(ProfileBlocked):call([a,b],**change)
+
+
+    def test_b2_compliance_metadata_fail_closed(self):
+        from app.naruv_hr_profile_envelope import review_b2_compliance_version_metadata as review
+        upload=1800000000000
+        e={"fileId":"v1","contentLength":123,"contentSha1":"a"*40}
+        row=dict(e,bucketId="b",fileName="synthetic/a",action="upload",uploadTimestamp=upload,
+            fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"compliance","retainUntilTimestamp":upload+30*86400000}},
+            legalHold={"isClientAuthorizedToRead":True,"value":"off"})
+        def page(rows,n=None,f=None,s=None,i=None):
+            return {"startFileName":s,"startFileId":i,"response":{"files":rows,"nextFileName":n,"nextFileId":f}}
+        def call(pages,now=upload+1):
+            return review(bucket_id="b",expected={"synthetic/a":e},pages=pages,as_of_ms=now)
+        good=call([page([row])])
+        self.assertEqual(good["status"],"B2_COMPLIANCE_METADATA_MATCH_ONLY")
+        self.assertFalse(good["sha256_verified"])
+        self.assertFalse(good["restore_verified"])
+        self.assertFalse(good["deletion_authorized"])
+        for bad in (dict(row,action="hide"),dict(row,fileId="v2"),dict(row,contentSha1="b"*40),
+                dict(row,fileRetention={"isClientAuthorizedToRead":False,"value":None}),
+                dict(row,fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"governance","retainUntilTimestamp":upload+30*86400000}}),
+                dict(row,fileRetention={"isClientAuthorizedToRead":True,"value":{"mode":"compliance","retainUntilTimestamp":upload+29*86400000}}),
+                dict(row,legalHold={"isClientAuthorizedToRead":False,"value":None})):
+            with self.subTest(bad=bad):self.assertEqual(call([page([bad])])["status"],"BLOCKED")
+        self.assertEqual(call([page([])])["status"],"BLOCKED")
+        self.assertEqual(call([page([row])],upload+30*86400000)["status"],"BLOCKED")
+        self.assertEqual(call([page([row,dict(row,fileId="v2")])])["status"],"BLOCKED")
+        with self.assertRaises(ProfileBlocked):call([page([row],"next","v2")])
+        with self.assertRaises(ProfileBlocked):call([page([row],"next","v2"),page([dict(row,fileId="v2")],s="wrong",i="v2")])
