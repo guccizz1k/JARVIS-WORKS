@@ -66,9 +66,26 @@ def _read_at(directory_fd,name):
         require(len(raw)==a.st_size and _stamp(a)==_stamp(b),"RECEIPT_CHANGED")
         return raw,_stamp(a)
 
-def review(directory):
+def _open_path(directory):
     d=Path(directory)
-    fd=os.open(d,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    require(".." not in d.parts and d.anchor in ("","/"),"UNSAFE_DIRECTORY_PATH")
+    if not d.is_absolute():d=Path.cwd()/d
+    flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW
+    fd=os.open("/",flags);chain=[]
+    try:
+        for name in (None,*d.parts[1:]):
+            if name is not None:
+                new=os.open(name,flags,dir_fd=fd);os.close(fd);fd=new
+            s=os.fstat(fd)
+            require(stat.S_ISDIR(s.st_mode) and s.st_uid in (0,os.geteuid())
+                    and (s.st_mode&0o022==0 or (s.st_uid==0 and s.st_mode&stat.S_ISVTX)),"UNTRUSTED_ANCESTOR")
+            chain.append((s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid))
+        return fd,tuple(chain)
+    except BaseException:
+        os.close(fd);raise
+
+def review(directory):
+    fd,chain=_open_path(directory)
     try:
         s=os.fstat(fd)
         require(stat.S_ISDIR(s.st_mode) and s.st_uid==os.geteuid() and s.st_mode&0o077==0,"PRIVATE_DIRECTORY")
@@ -81,8 +98,12 @@ def review(directory):
             pins[scope]=check(raw)
         for name in names:
             require(_stamp(os.stat(name,dir_fd=fd,follow_symlinks=False))==stamps[name],"RECEIPT_CHANGED")
-        require(set(os.listdir(fd))==names and _stamp(os.fstat(fd))==_stamp(s)
-                and _stamp(d.lstat())==_stamp(s),"DIRECTORY_CHANGED")
+        end_fd,end_chain=_open_path(directory)
+        try:
+            require(set(os.listdir(fd))==names and _stamp(os.fstat(fd))==_stamp(s)
+                    and end_chain==chain and _stamp(os.fstat(end_fd))==_stamp(s),"DIRECTORY_CHANGED")
+        finally:
+            os.close(end_fd)
     finally:
         os.close(fd)
     return {"receipt_consistency":"PASS_TWO_11_COUNT_RECEIPTS",
