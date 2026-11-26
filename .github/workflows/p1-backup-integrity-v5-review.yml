@@ -113,6 +113,10 @@ jobs:
         env:
           JW_ROLE_GRAPH_SYNTHETIC_CI: '1'
         run: python -m pytest --noconftest -q -s tests/test_jw_pg17_role_graph_integration_v223.py
+      - name: Verify full ACL restore and effective RLS in separate synthetic PG17 clusters
+        env:
+          JW_SYNTHETIC_ACL_RESTORE_CI: '1'
+        run: python -m pytest --noconftest -q -s tests/test_naruv_pg17_acl_restore_integration.py
       - name: Verify source package with offline Python wheels and cached PG17
         run: bash scripts/naruv_offline_runtime_ci.sh
       - name: Remove disposable PostgreSQL 17 instances
