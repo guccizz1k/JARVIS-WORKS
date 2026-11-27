@@ -79,8 +79,16 @@ def run(pw,src):
     passwords={k:secrets.token_urlsafe(40) for k in logins}
     tenants={k:('qa-'+k,'qa-u'+k,'source-'+k,p,secrets.token_hex(32),secrets.token_hex(32)) for k,p in [('a',105),('b',205)]}
     def userconn(k): return connect(db,logins[k],passwords[k])
+    def role_baseline(c):
+        # Non-secret role flags and grants only; password values never returned.
+        flags=one(c,"SELECT md5(string_agg(to_jsonb(r)::text,',' ORDER BY rolname)) FROM (SELECT rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolbypassrls,rolconnlimit,rolvaliduntil,rolpassword IS NULL AS password_absent FROM pg_authid WHERE rolname=ANY(%s)) r",(list(names.keys()),))[0]
+        edges=one(c,"SELECT md5(coalesce(string_agg(to_jsonb(m)::text,',' ORDER BY m.roleid,m.member,m.grantor),'')) FROM pg_auth_members m WHERE roleid IN (SELECT oid FROM pg_roles WHERE rolname=ANY(%s)) OR member IN (SELECT oid FROM pg_roles WHERE rolname=ANY(%s))",(list(names.keys()),list(names.keys())))[0]
+        return flags,edges
     with closing(connect('postgres')) as admin:
         baseline(admin)
+        need(one(admin,"SELECT pg_try_advisory_lock(hashtextextended('naruv-isolated-qa-disposable-workload-v1',0))")== (True,),'OTHER_REVIEW_RUNNING')
+        saved_roles=role_baseline(admin)
+        need(one(admin,"SELECT count(*) FROM pg_roles WHERE left(rolname,3)='nq_'")== (0,),'OLD_WORKLOAD_ROLES')
         need(one(admin,"SELECT count(*) FROM pg_database WHERE datname LIKE 'naruv_qa_workload_%'")== (0,),'OLD_WORKLOAD_DB')
         need(one(admin,"SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s)",(list(names.values()),))==(0,),'ROLE_COLLISION')
         phase='CREATE_DB'
@@ -214,6 +222,8 @@ def run(pw,src):
                     need(one(admin,"SELECT count(*) FROM pg_database WHERE datname=%s",(db,))==(0,),'RESIDUAL_DB')
                     need(one(admin,"SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s)",(list(names.values()),))==(0,),'RESIDUAL_ROLES')
                     baseline(admin)
+                    need(role_baseline(admin)==saved_roles,'ORIGINAL_ROLE_DRIFT')
+                    print('ORIGINAL_QA_DATA_POLICY_ROLES_PASS',flush=True)
                     print('TEMP_DB_AND_ROLES_CLEANUP_PASS',flush=True)
                 except BaseException as e:
                     print('CLEANUP_BLOCKED',db,oid,type(e).__name__,getattr(e,'sqlstate',None),flush=True)
