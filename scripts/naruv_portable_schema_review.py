@@ -77,7 +77,9 @@ def catalog(c):
     # a production security baseline. The source is a pinned disposable candidate.
     c.execute('SET LOCAL search_path=pg_catalog')
     queries={
-      'schemas':"""SELECT nspname,pg_get_userbyid(nspowner),coalesce(nspacl::text,'') FROM pg_namespace WHERE nspname=ANY(%s)""",
+      'schemas':"""SELECT nspname,pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname=ANY(%s)""",
+      'schema_acl':"""SELECT n.nspname,pg_get_userbyid(a.grantor),CASE WHEN a.grantee=0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END,a.privilege_type,a.is_grantable
+       FROM pg_namespace n CROSS JOIN LATERAL aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) a WHERE n.nspname=ANY(%s)""",
       'relations':"""SELECT n.nspname,t.relname,t.relkind,pg_get_userbyid(t.relowner),t.relrowsecurity,t.relforcerowsecurity,t.relpersistence
        FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=ANY(%s)""",
       'columns':"""SELECT n.nspname,t.relname,a.attnum,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.attidentity,a.attgenerated,
@@ -148,7 +150,12 @@ def create_package(fixture):
     execute_container(TARGET_CONTAINER,'pg_restore','-U','postgres','-d','postgres','--exit-on-error','--single-transaction',input=archive.read_bytes())
     with psycopg.connect(TARGET) as c:
         target=catalog(c)
-        for k,rows in source.items():need(rows==target[k],'PACKAGE_CATALOG_DIFF:'+k)
+        for k,rows in source.items():
+            if rows!=target[k]:
+                left={repr(x) for x in rows};right={repr(x) for x in target[k]}
+                # Definitions/ACL only; no row content or credentials.
+                print('PACKAGE_DIFF_SECTION='+k+' missing='+repr(sorted(left-right)[:4])+' extra='+repr(sorted(right-left)[:4]),flush=True)
+                raise RuntimeError('PACKAGE_CATALOG_DIFF:'+k)
         need(graph(c)==(roles,members),'PACKAGE_ROLE_GRAPH')
         tables=c.execute("""SELECT n.nspname,t.relname FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=ANY(%s) AND t.relkind IN ('r','p')""",(SCHEMAS,)).fetchall()
         for sch,table in tables:
