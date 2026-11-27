@@ -1,0 +1,107 @@
+# INACTIVE; one isolated CI requires separate owner approval.
+name: NARUV P0-P3 targeted hardening
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths: ['.github/workflows/naruv-p0-p3-targeted-review.yml']
+permissions:
+  contents: read
+jobs:
+  targeted:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - "127.0.0.1:5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 5fd47961bab8bfdc61da085f61a0d58b6752f4e8
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ba65b8dddcf2678fd570b8893ff86b9f1e76b1b3
+          path: external
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install source dependencies
+        run: |
+          set -euo pipefail
+          cd source
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+          python -m pip check
+      - name: Exact pinned source, targeted tests, rollback
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C source rev-parse HEAD)" = 5fd47961bab8bfdc61da085f61a0d58b6752f4e8
+          test "$(git -C external rev-parse HEAD)" = ba65b8dddcf2678fd570b8893ff86b9f1e76b1b3
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          p="$PWD/review/docs/review/p0-p3-hardening"
+          test "$(git hash-object source/app/naruv_native_file_preview.py)" = cc3e4901c8190a6950866126407ee5ddb16910bb
+          test "$(git hash-object "$p/preview-candidate.py")" = 0d16f392f8c96de14715283cb8f54ef57815d8ae
+          test "$(git hash-object source/app/naruv_kr_payroll_review.py)" = 75201bc9c121057391aa1237a8c4f58222f557d6
+          test "$(git hash-object "$p/payroll-candidate.py")" = 975d18358b050aaf0703599bed3a36e9592e3370
+          test "$(git hash-object external/scripts/p1_external_custodian_pg17_v223.py)" = 840cf08dbe9b79ce793ab7f887e3046643f75f25
+          test "$(git hash-object "$p/external-restore-candidate.py")" = a785e03b459f2bf26fb75ebe5e02123c373e0011
+          test "$(git hash-object "$p/test_preview_pg.py")" = 2bc29d3908e369be69195c15d749405bfb524b09
+          test "$(git hash-object "$p/test_payroll_shift.py")" = 13b19fd10071ee491b0d1166dcba3b522c9ebe73
+          test "$(git hash-object "$p/test_external_deadline.py")" = 54949db9eaef6e97612854a38b55dc78b4cdc5a7
+          git -C source diff --exit-code
+          git -C external diff --exit-code
+          restore() {
+            git -C source restore --source=HEAD -- app/naruv_native_file_preview.py app/naruv_kr_payroll_review.py
+            git -C external restore --source=HEAD -- scripts/p1_external_custodian_pg17_v223.py
+            git -C source diff --exit-code
+            git -C external diff --exit-code
+          }
+          trap restore EXIT
+          cp "$p/preview-candidate.py" source/app/naruv_native_file_preview.py
+          test "$(git hash-object source/app/naruv_native_file_preview.py)" = 0d16f392f8c96de14715283cb8f54ef57815d8ae
+          cp "$p/payroll-candidate.py" source/app/naruv_kr_payroll_review.py
+          test "$(git hash-object source/app/naruv_kr_payroll_review.py)" = 975d18358b050aaf0703599bed3a36e9592e3370
+          cp "$p/external-restore-candidate.py" external/scripts/p1_external_custodian_pg17_v223.py
+          test "$(git hash-object external/scripts/p1_external_custodian_pg17_v223.py)" = a785e03b459f2bf26fb75ebe5e02123c373e0011
+          (
+            cd source
+            export PYTHONPATH="$PWD"
+            python -m py_compile app/naruv_native_file_preview.py app/naruv_kr_payroll_review.py
+            python "$p/test_payroll_shift.py" -v
+            python "$p/test_preview_pg.py"
+          )
+          (
+            cd external
+            export PYTHONPATH="$PWD"
+            python -m py_compile scripts/p1_external_custodian_pg17_v223.py
+            python -m pytest -q --strict-markers tests/test_p1_external_custodian_pg17_v223.py "$p/test_external_deadline.py"
+          )
+          restore
+          trap - EXIT
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          echo P0_P3_TARGETED_HARDENING_PASS
