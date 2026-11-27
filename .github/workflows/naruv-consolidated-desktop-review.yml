@@ -1,0 +1,83 @@
+# Owner approved one isolated desktop CI, maximum 12 minutes. No merge or deployment.
+name: NARUV consolidated desktop browser acceptance
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths: ['.github/workflows/naruv-consolidated-desktop-review.yml']
+permissions:
+  contents: read
+jobs:
+  desktop:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - "127.0.0.1:5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      erp_restore:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: naruv-erp-restore-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - "127.0.0.1:5433:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      EXPECTED_SOURCE: 5fd47961bab8bfdc61da085f61a0d58b6752f4e8
+      NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 5fd47961bab8bfdc61da085f61a0d58b6752f4e8
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing staged API test dependencies
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Install isolated Chromium test dependencies
+        run: |
+          python -m pip install 'playwright==1.56.0'
+          test -x /opt/google/chrome/chrome
+          /opt/google/chrome/chrome --version
+          sudo apt-get install -y libnss3-tools
+      - name: Verify native file stage approval and atomic PG17 write
+        env:
+          NARUV_ERP_SOURCE_SERVICE: ${{ job.services.postgres.id }}
+          NARUV_ERP_DEST_SERVICE: ${{ job.services.erp_restore.id }}
+          NARUV_WORKSPACE_BROWSER: 'EPHEMERAL_ONLY'
+          JW_V93_TRUST_LOCAL_CA: 'EPHEMERAL_RUNNER_ONLY'
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          python scripts/naruv_v223_source_custody.py
+          python -m py_compile app/naruv_native_file_preview.py app/naruv_native_write_review.py scripts/naruv_native_write_review_ci.py scripts/naruv_customer_bridge_ci.py app/naruv_inventory_review.py scripts/naruv_inventory_ci.py app/naruv_trade_review.py scripts/naruv_trade_ci.py app/naruv_finance_review.py scripts/naruv_finance_ci.py app/naruv_accounting_review.py scripts/naruv_accounting_ci.py app/naruv_bundle_review.py scripts/naruv_bundle_ci.py app/naruv_quote_bundle_review.py scripts/naruv_quote_bundle_ci.py app/naruv_production_review.py scripts/naruv_production_ci.py app/naruv_valuation_review.py scripts/naruv_valuation_ci.py scripts/naruv_erp_restore_ci.py
+          python -m unittest tests.test_naruv_workflow_context tests.test_naruv_integrated_review
+          python -m pip check
+          log="$(mktemp)"
+          trap 'rm -f "$log"' EXIT
+          python -m scripts.naruv_native_write_review_ci | tee "$log"
+          grep -q '^NARUV_WORKSPACE_REAL_HTTPS_BROWSER_PASS ' "$log"
+          grep -q '^NARUV_HR_PILOT_REAL_BROWSER_PASS ' "$log"
+          grep -q '^NARUV_REAL_HTTPS_READ_PASS ' "$log"
+          python scripts/naruv_v223_source_custody.py
+          git diff --exit-code
+          echo CONSOLIDATED_DESKTOP_GATE_PASS
+
