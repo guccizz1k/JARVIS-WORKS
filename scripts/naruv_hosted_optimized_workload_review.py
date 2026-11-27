@@ -47,8 +47,8 @@ def baseline(c):
 def candidate_body(src):
     marker='FUNCTION naruv_valuation.reconcile_bill('
     need(src.count(marker)==1,'RECONCILE_BODY_BOUNDARY')
-    start=src.index('AS $',src.index(marker))+5
-    end=src.index('$;',start)
+    start=src.index('AS $$',src.index(marker))+5
+    end=src.index('$$;',start)
     return src[start:end]
 def optimized_source(src):
     old=candidate_body(src)
