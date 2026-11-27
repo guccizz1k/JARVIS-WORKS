@@ -1,0 +1,43 @@
+name: NARUV Gate 5 verified QA package handoff
+on:
+  pull_request:
+    branches: [review/naruv-gate5-managed-portable-20261127]
+    paths: ['.github/workflows/naruv-gate5-hosted-package-transfer.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  pinned-package:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read exact private schema-only artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          gh api repos/guccizz1k/JARVIS-WORKS/actions/artifacts/15176298202/zip > "$RUNNER_TEMP/naruv-source.zip"
+          echo "8aad377a48c3cb92e0f0fd6ff5d3b854059bd7da8984bd38f5c934bb4941752f  $RUNNER_TEMP/naruv-source.zip" | sha256sum -c -
+          python - <<'PY'
+          import base64,hashlib,json,os,zipfile
+          from pathlib import Path
+          f=Path(os.environ['RUNNER_TEMP'])/'naruv-source.zip'
+          with zipfile.ZipFile(f) as z:
+              assert set(z.namelist())=={'managed-review-only.sql','manifest.json','schema-only.toc.txt'}
+              m=json.loads(z.read('manifest.json'))
+              d=z.read('managed-review-only.sql')
+              assert m['review']=='5ca36e6fb5ffa8ca385247a61f7e69bd5e8f335c'
+              assert m['source']=='aa8894305dda413127e2994064f456a966d5e3c2'
+              assert m['kind']=='LOCAL_MANAGED_ROLE_REHEARSAL_ONLY' and m['production_authorized'] is False and m['hosted_install'] is False
+              assert len(d)==561892 and hashlib.sha256(d).hexdigest()==m['sha256']['managed-review-only.sql']=='3fb429a2c5f4e3cc32289aad8a9c9d1cb67460f9021dc2ce93388d239b22acd0'
+              toc=z.read('schema-only.toc.txt')
+              assert hashlib.sha256(toc).hexdigest()==m['sha256']['schema-only.toc.txt']
+              assert all(x not in toc for x in (b' TABLE DATA ',b' SEQUENCE SET ',b' BLOB DATA ',b' LARGE OBJECT '))
+              # Private review-only SQL definitions, no credentials or source rows.
+              for i in range(0,len(d),3072):
+                  print(f'NARUV_QA_SQL_CHUNK:{i//3072:04d}:'+base64.b64encode(d[i:i+3072]).decode('ascii'))
+              print('NARUV_QA_HANDOFF_PASS bytes='+str(len(d))+' sha256='+hashlib.sha256(d).hexdigest())
+          f.unlink()
+          PY
