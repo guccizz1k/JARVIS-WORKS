@@ -1,0 +1,92 @@
+# Owner approved one isolated CI job, max 6 minutes; review only.
+name: NARUV P0-P3 wave2 focused regressions
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths: ['.github/workflows/naruv-p0-p3-wave2-review.yml']
+permissions:
+  contents: read
+jobs:
+  focused:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 386077c311f23d313f60678d3e23692b0e070fbf
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: d0b27be62555988942ebbd7dcfdd8a8fd54c6c55
+          path: external
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing staged test dependencies
+        run: |
+          set -euo pipefail
+          cd source
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+          python -m pip check
+      - name: Pinned candidate tests and exact restoration
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C source rev-parse HEAD)" = 386077c311f23d313f60678d3e23692b0e070fbf
+          test "$(git -C external rev-parse HEAD)" = d0b27be62555988942ebbd7dcfdd8a8fd54c6c55
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          p="$PWD/review/docs/review/p0-p3-wave2"
+          test "$(git hash-object source/app/naruv_kr_payroll_review.py)" = 975d18358b050aaf0703599bed3a36e9592e3370
+          test "$(git hash-object "$p/payroll-statement-candidate.py")" = ea4199c46f1e4704d19765f9c32124a407dd3ae4
+          test "$(git hash-object source/app/erp_migration_xlsx.py)" = f96b84e4759cdc8274c2e7098691df3488038ec2
+          test "$(git hash-object "$p/xlsx-candidate.py")" = cbf4b43ba75f9d5d52ef1442e68199741728a895
+          test "$(git hash-object external/scripts/p1_cleanroom_key_recovery_v223.py)" = 4adbe97b6fa742e0ddc23fd2bdc8d109c67ef70f
+          test "$(git hash-object "$p/cleanroom-pipe-candidate.py")" = a2162cec7e00bffe85cf341e73639423b91a74c4
+          test "$(git hash-object "$p/test_paid_statement.py")" = d88ef34c3360c3cf794ea2beaa6c8058ed5e3e24
+          test "$(git hash-object "$p/test_xlsx_mixed.py")" = 03c0ee598d805597a28185b41441d80530ec6bd8
+          test "$(git hash-object "$p/test_cleanroom_pipe.py")" = 2706e13574526c7dd30317e66fc34c88dcf9de44
+          git -C source diff --exit-code
+          git -C external diff --exit-code
+          restore() {
+            git -C source restore --source=HEAD -- app/naruv_kr_payroll_review.py app/erp_migration_xlsx.py
+            git -C external restore --source=HEAD -- scripts/p1_cleanroom_key_recovery_v223.py
+            git -C source diff --exit-code
+            git -C external diff --exit-code
+          }
+          trap restore EXIT
+          cp "$p/payroll-statement-candidate.py" source/app/naruv_kr_payroll_review.py
+          test "$(git hash-object source/app/naruv_kr_payroll_review.py)" = ea4199c46f1e4704d19765f9c32124a407dd3ae4
+          cp "$p/xlsx-candidate.py" source/app/erp_migration_xlsx.py
+          test "$(git hash-object source/app/erp_migration_xlsx.py)" = cbf4b43ba75f9d5d52ef1442e68199741728a895
+          cp "$p/cleanroom-pipe-candidate.py" external/scripts/p1_cleanroom_key_recovery_v223.py
+          test "$(git hash-object external/scripts/p1_cleanroom_key_recovery_v223.py)" = a2162cec7e00bffe85cf341e73639423b91a74c4
+          (
+            cd source
+            export PYTHONPATH="$PWD"
+            python -m py_compile app/naruv_kr_payroll_review.py app/erp_migration_xlsx.py
+            python -m pytest -q --strict-markers "$p/test_paid_statement.py" "$p/test_xlsx_mixed.py" tests/test_naruv_kr_payroll_review.py tests/test_erp_migration_file_stage.py
+          )
+          (
+            cd external
+            export PYTHONPATH="$PWD"
+            python -m py_compile scripts/p1_cleanroom_key_recovery_v223.py
+            python -m pytest -q --strict-markers "$p/test_cleanroom_pipe.py" tests/test_p1_cleanroom_key_recovery_v223.py
+          )
+          restore
+          trap - EXIT
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          echo P0_P3_WAVE2_FOCUSED_PASS
