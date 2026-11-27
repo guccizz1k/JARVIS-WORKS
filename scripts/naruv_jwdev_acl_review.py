@@ -119,7 +119,7 @@ def verify_behavior(fixture,ingest):
                     except psycopg.errors.InsufficientPrivilege as e:need(e.sqlstate=='42501','JWDEV_HELPER_DENIAL_CODE');count+=1
                     else:raise RuntimeError('JWDEV_HELPER_DIRECT_EXECUTE')
     # Existing messenger path still works after reducing helper grants.
-    chat=fixture.PgGateway().query(base.session_hash(fixture,'A'),"SELECT * FROM jw_dev.v90_start_chat(%s)",('ci-b',))[0]['connection_id']
+    chat=fixture.PgGateway().query(base.session_hash(fixture,'A'),"SELECT jw_dev.v90_start_chat(%s) AS connection_id",('ci-b',))[0]['connection_id']
     fixture.PgGateway().query(base.session_hash(fixture,'A'),"SELECT * FROM jw_dev.v90_send_text(%s,%s,%s)",(chat,'jwdev-acl-probe','synthetic'))
     for who in ('A','B'):
         rows=fixture.PgGateway().query(base.session_hash(fixture,who),"SELECT * FROM jw_dev.v90_sync_messages(%s,%s,%s)",(chat,0,100))
