@@ -51,7 +51,11 @@ GRANT INSERT ON naruv_witness_ledger_ci.evidence TO naruv_witness_verifier_ci;
 
 def guard(c,role):
     v.need(os.environ.get('NARUV_WITNESS_LEDGER_CI')=='1','WITNESS_LEDGER_CI_ONLY')
-    old.guard(c,role)
+    if os.environ.get('NARUV_WITNESS_DIRECT_LOGIN_CI')=='1':
+        from scripts.naruv_witness_login_acl_review import guard_login
+        guard_login(c,role)
+    else:
+        old.guard(c,role)
 
 def _policy(raw,policy,policy_pin):
     pin,doc=old.parse_approval(raw)
