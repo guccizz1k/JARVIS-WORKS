@@ -21,7 +21,9 @@ class OperationalReadinessTests(unittest.TestCase):
             dict(operation_id="old"),dict(archive_key=AESGCM.generate_key(256))):
             with self.subTest(change=list(change)),self.assertRaises(ValueError):prepare_upload_scope(**dict(a,**change))
     def custody(self):
-        fixture=custody_fixtures.RecoveryCustodyTests();fixture.setUp();a=fixture.signed()
+        from datetime import datetime,timezone
+        fixture=custody_fixtures.RecoveryCustodyTests();fixture.setUp()
+        a=fixture.signed(dict(fixture.a,issued_at=datetime.now(timezone.utc)))
         return dict(expected_trust_pin=custody_trust_pin(tenant=a["tenant"],expected_keys=a["expected_keys"],trust=a["trust"]),
             expected_challenge=a["challenge"],**a)
     def test_concurrent_replay_and_no_authority(self):
