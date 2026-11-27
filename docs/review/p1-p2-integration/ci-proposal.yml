@@ -1,0 +1,102 @@
+# Inactive proposal; separate one-job CI approval required.
+name: NARUV P1 P2 statement and custody integration
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths:
+      - '.github/workflows/naruv-p1-p2-integration-review.yml'
+permissions:
+  contents: read
+jobs:
+  p1-p2:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - "127.0.0.1:5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      erp_restore:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: naruv-erp-restore-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - "127.0.0.1:5433:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      EXPECTED_SOURCE: df6aaa4f07bb66f5b26b03700958e16d3f343475
+      NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: df6aaa4f07bb66f5b26b03700958e16d3f343475
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing stage dependency sets
+        working-directory: source
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Verify exact source and integrate candidate only in disposable checkout
+        working-directory: source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          NARUV_ERP_SOURCE_SERVICE: ${{ job.services.postgres.id }}
+          NARUV_ERP_DEST_SERVICE: ${{ job.services.erp_restore.id }}
+          NARUV_WORKSPACE_BROWSER: 'OFF'
+          JW_V93_TRUST_LOCAL_CA: 'OFF'
+        run: |
+          set -euo pipefail
+          test "$(git -C ../review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          python scripts/naruv_v223_source_custody.py
+          test "$(git hash-object app/naruv_kr_payroll_review.py)" = 75201bc9c121057391aa1237a8c4f58222f557d6
+          test "$(git hash-object tests/test_naruv_kr_payroll_review.py)" = fbf9520f4514e526cad4866bcf464d12964303a9
+          test "$(git hash-object app/naruv_hr_profile_envelope.py)" = f85ca2a553432044421781f51eae16f8a7b86794
+          test "$(git hash-object app/naruv_operational_readiness.py)" = e05f1f5b6107a6e8318147ef3ca17229bffdb0e0
+          test "$(git hash-object ../review/docs/review/custody-journal-path/candidate.py)" = a71cbc980cd5f7528ed3378f8f5d0a716905fc90
+          test "$(git hash-object ../review/docs/review/custody-journal-path/test_candidate.py)" = 095c5a6ed2be215fa5f22d1ca4b4241d2d652f63
+          test "$(git hash-object ../review/docs/review/p1-p2-integration/statement_probe.py)" = b7230d2070dd59470fe6201e68a395f09a49a9b2
+          git diff --exit-code
+          original="$(mktemp)"
+          cp app/naruv_operational_readiness.py "$original"
+          restore() {
+            cp "$original" app/naruv_operational_readiness.py
+            rm -f -- "$original"
+            git diff --exit-code -- app/naruv_operational_readiness.py
+          }
+          trap restore EXIT
+          cp ../review/docs/review/custody-journal-path/candidate.py app/naruv_operational_readiness.py
+          test "$(git hash-object app/naruv_operational_readiness.py)" = a71cbc980cd5f7528ed3378f8f5d0a716905fc90
+          export PYTHONPATH="$PWD"
+          python -m py_compile app/naruv_operational_readiness.py app/naruv_kr_payroll_review.py scripts/naruv_valuation_ci.py
+          python -m pytest -q --strict-markers tests/test_naruv_kr_payroll_review.py::RestrictedStatementTests tests/test_naruv_operational_readiness.py ../review/docs/review/custody-journal-path/test_candidate.py::CustodyJournalPathTests::test_ancestor_path_rejection_and_no_consumption
+          python -m scripts.naruv_native_write_review_ci
+          restore
+          trap - EXIT
+          python scripts/naruv_v223_source_custody.py
+          git diff --exit-code
+          echo P1_P2_INTEGRATION_REVIEW_PASS
