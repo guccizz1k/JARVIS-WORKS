@@ -1,0 +1,51 @@
+name: NARUV Gate 5 signed PostgreSQL review
+on:
+  pull_request:
+    branches: [review/naruv-gate5-pg17-concurrency-20261127]
+    paths:
+      - 'scripts/naruv_future_receipt_review.py'
+      - 'scripts/naruv_pg_signed_receipt_review.py'
+      - 'tests/test_naruv_pg_signed_receipt_review.py'
+      - '.github/workflows/naruv-gate5-signed-pg17-review.yml'
+permissions:
+  contents: read
+jobs:
+  signed-pg17:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      NARUV_SIGNED_PG17_CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact source and previously tested signature verifier
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git hash-object scripts/naruv_future_receipt_review.py)" = 65b60d9560a9556ca5f4c8b479a0123e39381536
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pytest>=8,<10' 'psycopg[binary]>=3.2,<4' 'cryptography>=43,<47'
+      - name: Start disposable loopback PostgreSQL 17
+        run: |
+          set -euo pipefail
+          docker run --rm -d --name naruv-gate5-signed-ci -p 127.0.0.1:55439:5432 --tmpfs /var/lib/postgresql/data:rw,size=536870912 -e POSTGRES_PASSWORD=synthetic_review_only postgres:17
+          for i in $(seq 1 45); do
+            if docker exec naruv-gate5-signed-ci pg_isready -U postgres -h 127.0.0.1 -q; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Verify signed input to durable ledger, permissions and failures
+        run: |
+          python -m py_compile scripts/naruv_future_receipt_review.py scripts/naruv_pg_signed_receipt_review.py tests/test_naruv_pg_signed_receipt_review.py
+          python -m pytest --noconftest -q -v tests/test_naruv_pg_signed_receipt_review.py
+      - name: Remove disposable database
+        if: always()
+        run: |
+          if docker inspect naruv-gate5-signed-ci >/dev/null 2>&1; then docker rm -f naruv-gate5-signed-ci; fi
+          ! docker inspect naruv-gate5-signed-ci >/dev/null 2>&1
