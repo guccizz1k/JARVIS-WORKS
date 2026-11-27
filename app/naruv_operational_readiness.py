@@ -40,12 +40,17 @@ def review_and_consume_local_challenge(*,journal_dir,expected_trust_pin,expected
         and evidence.get("challenge")==expected_challenge,"CUSTODY_LOCAL_CHALLENGE")
     pin=custody_trust_pin(tenant=evidence["tenant"],expected_keys=evidence["expected_keys"],trust=evidence["trust"])
     need(pin==expected_trust_pin,"CUSTODY_LOCAL_TRUST_PIN")
-    result=review_custody_evidence(**evidence)
-    d=os.open(journal_dir,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+    # A caller-supplied historical as_of cannot authorize current consumption.
+    from datetime import datetime,timezone,timedelta
+    result=review_custody_evidence(**dict(evidence,as_of=datetime.now(timezone.utc)))
+    from .naruv_hr_profile_envelope import _open_trusted_key_directory,ProfileBlocked
+    try:d=_open_trusted_key_directory(journal_dir)
+    except ProfileBlocked:raise ValueError("CUSTODY_LOCAL_DIRECTORY") from None
     try:
         st=os.fstat(d)
         need(st.st_uid==os.getuid() and stat.S_IMODE(st.st_mode)==0o700,"CUSTODY_LOCAL_DIRECTORY")
         # Keyed solely by challenge, so changes to tenant or trust cannot reuse it.
+        need(timedelta(0)<=datetime.now(timezone.utc)-evidence["issued_at"]<=timedelta(minutes=10),"CUSTODY_FRESHNESS")
         name=expected_challenge+".json"
         try:fd=os.open(name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=d)
         except FileExistsError:raise ValueError("CUSTODY_LOCAL_REPLAY") from None
