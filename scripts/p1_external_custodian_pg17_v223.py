@@ -262,6 +262,10 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False) -> di
                 result["restored_65_table_archive_count"]+=1
             finally:
                 plain.clear()
+        # The final archive must also finish within the observation budget.
+        # Per-call timeouts remain unchanged; this is not a hard process kill.
+        if time.monotonic()-begun > MAX_RUNTIME_SECONDS:
+            raise Blocked("SECOND_SITE_TIME_BUDGET_EXCEEDED")
         if (result["verified_provider_cipher_count"]!=MAX_ARCHIVES
                 or result["restored_pg17_archive_count"]!=MAX_ARCHIVES):
             raise Blocked("SECOND_SITE_ELEVEN_ARCHIVES_NOT_FULLY_RESTORED")
