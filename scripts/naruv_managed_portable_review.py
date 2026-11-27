@@ -28,7 +28,7 @@ def relation(s,n):return ident(s)+'.'+ident(n)
 def target_platform():
     root=make_conninfo(p.TARGET,user=ROOT)
     with psycopg.connect(root) as c:
-        need(c.execute("SELECT count(*) FROM pg_roles WHERE rolname<>%s AND rolname NOT LIKE 'pg\\_%' ESCAPE '\\'",(ROOT,)).fetchone()==(0,),'MANAGED_TARGET_NOT_FRESH')
+        need(c.execute("SELECT count(*) FROM pg_roles WHERE rolname<>%s AND left(rolname,3)<>'pg_'",(ROOT,)).fetchone()==(0,),'MANAGED_TARGET_NOT_FRESH')
         c.execute("CREATE ROLE postgres LOGIN PASSWORD 'ci-only-ephemeral-test-password' NOSUPERUSER CREATEROLE CREATEDB BYPASSRLS INHERIT")
         c.execute('ALTER DATABASE postgres OWNER TO postgres')
         c.execute('CREATE ROLE anon NOLOGIN INHERIT; CREATE ROLE authenticated NOLOGIN INHERIT; CREATE ROLE service_role NOLOGIN INHERIT BYPASSRLS; CREATE ROLE authenticator LOGIN NOINHERIT')
