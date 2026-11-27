@@ -1,0 +1,108 @@
+# Owner approved one isolated consolidated integration CI, maximum 12 minutes. No merge or deployment.
+name: NARUV consolidated review integration
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths:
+      - '.github/workflows/naruv-consolidated-release-review.yml'
+permissions:
+  contents: read
+jobs:
+  p1-p2:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - "127.0.0.1:5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      erp_restore:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: naruv-erp-restore-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - "127.0.0.1:5433:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      EXPECTED_SOURCE: df6aaa4f07bb66f5b26b03700958e16d3f343475
+      NARUV_ERP_RESTORE_ALLOW: TWO_DISPOSABLE_SERVICES_ONLY
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: df6aaa4f07bb66f5b26b03700958e16d3f343475
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing stage dependency sets
+        working-directory: source
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Verify exact source and apply four pinned overlays in disposable checkout
+        working-directory: source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          NARUV_ERP_SOURCE_SERVICE: ${{ job.services.postgres.id }}
+          NARUV_ERP_DEST_SERVICE: ${{ job.services.erp_restore.id }}
+          NARUV_WORKSPACE_BROWSER: 'OFF'
+          JW_V93_TRUST_LOCAL_CA: 'OFF'
+        run: |
+          set -euo pipefail
+          test "$(git -C ../review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE"
+          python scripts/naruv_v223_source_custody.py
+          test "$(git hash-object ../review/docs/review/consolidated-release-candidate/manifest.json)" = 8f7e52a7f08d86d54a42caa4d8288d8b789130fe
+          test "$(git hash-object app/naruv_native_write_review.py)" = 6ee3164ea1101cf318ed7769942c82ebee7c8240
+          test "$(git hash-object ../review/docs/review/consolidated-release-candidate/app/naruv_native_write_review.py)" = a7c9ef6302d2fa69b487c4e440620de4f6fde918
+          test "$(git hash-object db/review/naruv_valuation_ci.sql)" = 0351c73151be51612d563afd7c4e8e8af7bbdf36
+          test "$(git hash-object ../review/docs/review/consolidated-release-candidate/db/review/naruv_valuation_ci.sql)" = 53dda66945c6901f7924ec34cecb37ce223d76f9
+          test "$(git hash-object app/naruv_operational_readiness.py)" = e05f1f5b6107a6e8318147ef3ca17229bffdb0e0
+          test "$(git hash-object ../review/docs/review/consolidated-release-candidate/app/naruv_operational_readiness.py)" = e3119dba5423ad50947b62a5d112472b2b4ce59f
+          test "$(git hash-object tests/test_naruv_operational_readiness.py)" = 66cd962ad24a8f570ac5011d591573cdba87245b
+          test "$(git hash-object ../review/docs/review/consolidated-release-candidate/tests/test_naruv_operational_readiness.py)" = 38a9e257c41dce9cf8fa5bcffa18d5bb46983890
+          git diff --exit-code
+          restore() {
+            git restore --source=HEAD -- app/naruv_native_write_review.py db/review/naruv_valuation_ci.sql app/naruv_operational_readiness.py tests/test_naruv_operational_readiness.py
+            git diff --exit-code
+          }
+          trap restore EXIT
+          cp ../review/docs/review/consolidated-release-candidate/app/naruv_native_write_review.py app/naruv_native_write_review.py
+          test "$(git hash-object app/naruv_native_write_review.py)" = a7c9ef6302d2fa69b487c4e440620de4f6fde918
+          cp ../review/docs/review/consolidated-release-candidate/db/review/naruv_valuation_ci.sql db/review/naruv_valuation_ci.sql
+          test "$(git hash-object db/review/naruv_valuation_ci.sql)" = 53dda66945c6901f7924ec34cecb37ce223d76f9
+          cp ../review/docs/review/consolidated-release-candidate/app/naruv_operational_readiness.py app/naruv_operational_readiness.py
+          test "$(git hash-object app/naruv_operational_readiness.py)" = e3119dba5423ad50947b62a5d112472b2b4ce59f
+          cp ../review/docs/review/consolidated-release-candidate/tests/test_naruv_operational_readiness.py tests/test_naruv_operational_readiness.py
+          test "$(git hash-object tests/test_naruv_operational_readiness.py)" = 38a9e257c41dce9cf8fa5bcffa18d5bb46983890
+          export PYTHONPATH="$PWD"
+          python -m pip check
+          python -m py_compile app/naruv_native_write_review.py app/naruv_operational_readiness.py tests/test_naruv_operational_readiness.py
+          python -m pytest -q --strict-markers tests/test_naruv_kr_payroll_review.py::RestrictedStatementTests tests/test_naruv_operational_readiness.py ../review/docs/review/custody-journal-path/test_candidate.py::CustodyJournalPathTests::test_ancestor_path_rejection_and_no_consumption ../review/docs/review/custody-journal-clock/test_clock_deterministic.py
+          python -m scripts.naruv_native_write_review_ci
+          restore
+          trap - EXIT
+          python scripts/naruv_v223_source_custody.py
+          git diff --exit-code
+          echo NARUV_CONSOLIDATED_REVIEW_INTEGRATION_PASS
