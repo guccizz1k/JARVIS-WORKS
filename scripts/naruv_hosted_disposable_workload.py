@@ -31,8 +31,8 @@ def rpc(c,name,*args):
     return c.execute(sql.SQL('SELECT {}({})').format(sql.Identifier(*name.split('.')),sql.SQL(',').join(sql.Placeholder()*len(args))),args).fetchone()[0]
 def cmd(c,schema,k,r,a,p,csrf):
     return rpc(c,schema+'.command',k,r,a,Jsonb(p),True,csrf)
-def one(c,q,args=()):
-    return c.execute(q,args).fetchone()
+def one(c,q,args=None):
+    return (c.execute(q) if args is None else c.execute(q,args)).fetchone()
 def setrole(c,r):
     c.execute(sql.SQL('SET LOCAL ROLE {}').format(sql.Identifier(r)))
 def bind(c,r,t):
@@ -40,7 +40,7 @@ def bind(c,r,t):
 def baseline(c):
     need(one(c,"SELECT current_database(),session_user,current_setting('server_version_num')::int") == ('postgres','postgres',170012),'ORIGINAL_SCOPE')
     need(one(c,"SELECT count(*),md5(coalesce(string_agg(to_jsonb(f)::text,',' ORDER BY to_jsonb(f)::text),'')) FROM naruv_qa_probe.fixture f")== (2,MARKER),'MARKER_DRIFT')
-    need(one(c,"SELECT md5(string_agg(to_jsonb(p)::text,',' ORDER BY schemaname,tablename,policyname)) FROM pg_policies p WHERE schemaname LIKE 'naruv\\_%' ESCAPE '\\' OR schemaname='jw_dev'")== (POLICY,),'POLICY_DRIFT')
+    need(one(c,"SELECT md5(string_agg(to_jsonb(p)::text,',' ORDER BY schemaname,tablename,policyname)) FROM pg_policies p WHERE left(schemaname,6)='naruv_' OR schemaname='jw_dev'")== (POLICY,),'POLICY_DRIFT')
 def transform(src,db,prefix):
     roles=re.findall(r'^CREATE ROLE "([a-z_0-9]+)" NOLOGIN ',src,re.M)
     need(len(set(roles))==len(roles)==21,'ROLE_SOURCE_COUNT')
@@ -89,7 +89,7 @@ def run(pw,src):
         need(one(admin,"SELECT pg_try_advisory_lock(hashtextextended('naruv-isolated-qa-disposable-workload-v1',0))")== (True,),'OTHER_REVIEW_RUNNING')
         saved_roles=role_baseline(admin)
         need(one(admin,"SELECT count(*) FROM pg_roles WHERE left(rolname,3)='nq_'")== (0,),'OLD_WORKLOAD_ROLES')
-        need(one(admin,"SELECT count(*) FROM pg_database WHERE datname LIKE 'naruv_qa_workload_%'")== (0,),'OLD_WORKLOAD_DB')
+        need(one(admin,"SELECT count(*) FROM pg_database WHERE left(datname,18)='naruv_qa_workload_'")== (0,),'OLD_WORKLOAD_DB')
         need(one(admin,"SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s)",(list(names.values()),))==(0,),'ROLE_COLLISION')
         phase='CREATE_DB'
         try:
@@ -105,20 +105,20 @@ def run(pw,src):
                 phase='INSTALL'
                 a.execute("CREATE SCHEMA naruv_qa_probe; CREATE TABLE naruv_qa_probe.fixture(id integer PRIMARY KEY); INSERT INTO naruv_qa_probe.fixture VALUES(1),(2); ALTER TABLE naruv_qa_probe.fixture ENABLE ROW LEVEL SECURITY; ALTER TABLE naruv_qa_probe.fixture FORCE ROW LEVEL SECURITY",prepare=False)
                 a.execute(install,prepare=False)
-                need(one(a,"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE (n.nspname LIKE 'naruv\\_%' ESCAPE '\\' OR n.nspname='jw_dev' OR n.nspname=%s) AND c.relkind IN ('r','p') AND c.relrowsecurity AND c.relforcerowsecurity",(role('naruv_quote_fence'),))==(66,),'INSTALLED_RLS')
+                need(one(a,"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE (left(n.nspname,6)='naruv_' OR n.nspname='jw_dev' OR n.nspname=%s) AND c.relkind IN ('r','p') AND c.relrowsecurity AND c.relforcerowsecurity",(role('naruv_quote_fence'),))==(66,),'INSTALLED_RLS')
                 print('TEMP_SCHEMA_INSTALL_PASS',flush=True)
                 phase='LOGIN_SETUP'
                 # The original roles are not granted to any new login.
                 # The package created exclusively namespaced NOLOGIN roles.
+                # Verify no application-schema access in original DB, even through new roles.
+                for n in logins.values():
+                    need(one(admin,"SELECT count(*) FROM pg_namespace WHERE (left(nspname,6)='naruv_' OR nspname='jw_dev') AND has_schema_privilege(%s,oid,'USAGE')",(n,))==(0,),'ORIGINAL_SCHEMA_ACCESS')
+                    need(one(admin,"SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s) AND pg_has_role(%s,oid,'MEMBER')",(list(names.keys()),n))==(0,),'ORIGINAL_ROLE_MEMBERSHIP')
                 with a.transaction():
                     expiry=one(a,"SELECT clock_timestamp()+interval '20 minutes'")[0].isoformat()
                     for k,n in logins.items():
                         a.execute(sql.SQL('ALTER ROLE {} LOGIN CONNECTION LIMIT 4 PASSWORD {} VALID UNTIL {}').format(sql.Identifier(n),sql.Literal(verifier(passwords[k])),sql.Literal(expiry)))
                         a.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(sql.Identifier(db),sql.Identifier(n)))
-                # Verify no application-schema access in original DB, even through new roles.
-                for n in logins.values():
-                    need(one(admin,"SELECT count(*) FROM pg_namespace WHERE (nspname LIKE 'naruv\\_%' ESCAPE '\\' OR nspname='jw_dev') AND has_schema_privilege(%s,oid,'USAGE')",(n,))==(0,),'ORIGINAL_SCHEMA_ACCESS')
-                    need(one(admin,"SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s) AND pg_has_role(%s,oid,'MEMBER')",(list(names.keys()),n))==(0,),'ORIGINAL_ROLE_MEMBERSHIP')
                 phase='SEED'
                 with a.transaction():
                     for org,actor,source,price,token,csrf in tenants.values():
@@ -205,7 +205,7 @@ def run(pw,src):
                         need(one(a,sql.SQL('SELECT count(*) FROM {} WHERE org_id=%s').format(sql.Identifier(*table.split('.'))),(org,))==(20,),'PERSISTED_COUNT')
             result=dict(workers=4,tenants=2,batches=40,rpc=280,replays=40,journals=40,stocks=6,ledgers=2,elapsed_s=round(elapsed,3),p95_ms=round(times[37],3))
         except BaseException as e:
-            print('HOSTED_WORKLOAD_BLOCKED',phase,type(e).__name__,getattr(e,'sqlstate',None),str(e) if type(e) is RuntimeError else '',flush=True)
+            print('HOSTED_WORKLOAD_BLOCKED',phase,type(e).__name__,getattr(e,'sqlstate',None),str(e) if type(e) is RuntimeError else safe_reason(e),flush=True)
         finally:
             if created:
                 phase='CLEANUP'
@@ -231,7 +231,32 @@ def run(pw,src):
     if result is None:return 1
     print('HOSTED_DISPOSABLE_ERP_WORKLOAD_PASS',json.dumps(result),flush=True)
     return 0
+def safe_reason(e):
+    msg=str(e).lower()
+    for needle,code in [('placeholder','PARAMETER_ERROR'),('econnrefused','BACKEND_REFUSED'),('password authentication failed','PASSWORD_ERROR'),('tenant or user not found','ROUTE_OR_USER_ERROR'),('certificate','TLS_ERROR'),('circuit breaker','PROTECTION_ACTIVE'),('timeout','TIMEOUT')]:
+        if needle in msg:return code
+    return 'UNCLASSIFIED'
+def selftest():
+    class Cursor:
+        def fetchone(self): return (1,)
+    class Fake:
+        def execute(self,*a):
+            self.args=a
+            return Cursor()
+    f=Fake()
+    need(one(f,"SELECT 'x%'")== (1,) and len(f.args)==1,'SELFTEST_NO_BIND')
+    need(one(f,"SELECT %s",(1,))==(1,) and len(f.args)==2,'SELFTEST_BIND')
+    src=pinned(ROOT/'hosted-schema.sql',SCHEMA_PIN).decode()
+    out,names=transform(src,'naruv_qa_workload_0123456789ab','nq_0123456789ab_')
+    need(len(names)==21 and out.count('ON DATABASE naruv_qa_workload_0123456789ab ')==10,'SELFTEST_TRANSFORM')
+    need("current_database()<>'naruv_qa_workload_0123456789ab'" in out,'SELFTEST_DB_GUARD')
+    pinned(ROOT/'ca.crt',CA_PIN)
+    print('OFFLINE_PREFLIGHT_SELFTEST_PASS 5/5',flush=True)
 def main():
+    if sys.argv[1:]==['--self-test']:
+        selftest()
+        return 0
+    need(not sys.argv[1:],'UNEXPECTED_ARGUMENT')
     pinned(ROOT/'ca.crt',CA_PIN)
     src=pinned(ROOT/'hosted-schema.sql',SCHEMA_PIN).decode()
     for k in list(os.environ):
@@ -244,5 +269,5 @@ if __name__=='__main__':
     signal.signal(signal.SIGTERM,stop)
     try:sys.exit(main())
     except Exception as e:
-        print('PREFLIGHT_BLOCKED',type(e).__name__,getattr(e,'sqlstate',None),str(e) if type(e) is RuntimeError else '')
+        print('PREFLIGHT_BLOCKED',type(e).__name__,getattr(e,'sqlstate',None),str(e) if type(e) is RuntimeError else safe_reason(e))
         sys.exit(1)
