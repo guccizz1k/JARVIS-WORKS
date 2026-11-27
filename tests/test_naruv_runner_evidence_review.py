@@ -24,7 +24,7 @@ def report():
     return dict(owner_site_restore='PASS_ELEVEN_OWNER_SITE_CIPHERS',
                 normalized_catalog_comparison='PASS_11_SCOPED_CATALOG_CHECKPOINTS',
                 normalized_archive_comparison='PASS_11_ARCHIVE_CHECKPOINTS',
-                disposable_pg17_removed='PASS',b2_staged_scope_bound=True,
+                disposable_pg17_removed='PASS',review_cleanup_absence_verified=True,b2_staged_scope_bound=True,
                 owner_scope_pin_checked=True,decrypted_dump_written_to_host=False,
                 verified_provider_cipher_count=11,restored_pg17_archive_count=11,
                 restored_65_table_archive_count=11,restore_failures=0)
@@ -47,11 +47,11 @@ def test_exact_archive_binding(binding):
     m.check_archive_set(cap,pairs)
     with pytest.raises(ValueError,match='REVIEW_ARCHIVE_SET_MISMATCH'):m.check_archive_set(cap,pairs[:-1]+[pairs[0]])
 
-@pytest.mark.parametrize('bad',['cleanup','catalog','archive','count','failures','owner','scope','plaintext','missing','duplicate','wrong'])
+@pytest.mark.parametrize('bad',['cleanup','absence','catalog','archive','count','failures','owner','scope','plaintext','missing','duplicate','wrong'])
 def test_no_partial_success(binding,bad):
     doc,ref,staged=binding;cap=start(doc,ref,staged)
     r=report();observed=list(doc['archives'])
-    changes={'cleanup':('disposable_pg17_removed','BLOCKED'),'catalog':('normalized_catalog_comparison','BLOCKED'),
+    changes={'absence':('review_cleanup_absence_verified',False),'cleanup':('disposable_pg17_removed','BLOCKED'),'catalog':('normalized_catalog_comparison','BLOCKED'),
              'archive':('normalized_archive_comparison','BLOCKED'),'count':('restored_pg17_archive_count',10),
              'failures':('restore_failures',1),'owner':('owner_site_restore','BLOCKED'),
              'scope':('owner_scope_pin_checked',False),'plaintext':('decrypted_dump_written_to_host',True)}
