@@ -1821,9 +1821,13 @@ def shift_night_source_review_2026(*,tenant,worker,period,segments,shift_sha256,
         try:date.fromisoformat(r["date"])
         except ValueError:raise PayrollBlocked("KR_SHIFT_CLASSIFIED") from None
         seen.add(r["date"])
-        work=sum(r[k] for k in KINDS[:-1])
-        if work:expected[r["date"]]=(work,r["night"])
-        else:require(r["night"]==0,"KR_SHIFT_CLASSIFIED")
+        regular,over,first,after,night=(r[k] for k in KINDS)
+        work=regular+over+first+after
+        # Same structural limits as wage_review; not a legal classification.
+        require(work<=1440 and regular<=480 and first<=480 and night<=work
+            and not ((regular or over) and (first or after))
+            and (not after or first==480),"KR_SHIFT_CLASSIFIED")
+        if work:expected[r["date"]]=(work,night)
     require(totals==expected,"KR_SHIFT_SOURCE_MISMATCH")
     return {"status":"SHIFT_NIGHT_RECONCILIATION_ONLY","days":[{"date":d,"work_minutes":v[0],"night_minutes":v[1]} for d,v in sorted(totals.items())],
         "review_sha256":hash_input({"v":"KR_SHIFT_NIGHT_2026_V1","tenant":tenant,"worker":worker,"period":period,
