@@ -1,12 +1,15 @@
 # Inactive review artifact; not in .github/workflows. Do not activate without budget confirmation.
 name: NARUV candidate reconciliation regression
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths:
+      - '.github/workflows/naruv-reconcile-candidate-review.yml'
 permissions:
   contents: read
 jobs:
   erp-acl:
-    if: github.repository == 'guccizz1k/JARVIS-WORKS'
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
@@ -18,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           path: review
           persist-credentials: false
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -28,7 +31,7 @@ jobs:
           persist-credentials: false
       - name: Verify exact source and review SHAs
         env:
-          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           test "$(git -C review rev-parse HEAD)" = "$EXPECTED_SHA"
