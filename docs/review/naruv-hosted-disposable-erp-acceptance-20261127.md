@@ -1,0 +1,11 @@
+# Hosted disposable ERP workload acceptance — 2026-11-27
+
+Evidence: owner Codespaces screenshot 19:22 KST. Runner commit 863cd69bc32a9849206c501d40412b7f1623c103, blob 1baa7f9307e21cdc4bb9872f84d4608ed57d57a9; source schema commit f6c562e31d923079d594eb5b09ab7edf17653446, blob 0bc7e5d525faaaefdf1fbe3ef3efb9b9e080e206. Isolated QA project only. Namespaced roles; synthetic fixtures; separate database; verified client TLS. No production SLA or production authorization.
+
+Observed output: OFFLINE_PREFLIGHT_SELFTEST_PASS 5/5; TEMP_DB_CREATED naruv_qa_workload_522c82544af7 24594; TEMP_DB_ROUTE_PASS; POST_INSTALL_SESSION_SECURITY_PASS; TEMP_SCHEMA_INSTALL_PASS; INDEPENDENT_AUTH_INGEST_TRADE_SEED_PASS; ORIGINAL_QA_DATA_POLICY_ROLES_PASS; TEMP_DB_AND_ROLES_CLEANUP_PASS; HOSTED_DISPOSABLE_ERP_WORKLOAD_PASS {"workers":4,"tenants":2,"batches":40,"rpc":280,"replays":40,"journals":40,"stocks":6,"ledgers":2,"elapsed_s":21.271,"p95_ms":2211.33}.
+
+Independent management SQL readback at 2026-11-27 10:22:41.960539 UTC: residual DBs/roles/sessions 0/0/0; original marker count 2, MD5 631b6ff1423ad473138e8a2eb75ddf4b; policy digest afdf015a5917727d12817a8b4107d16f; original service roles 3 intact; FORCE RLS count 66. Scope of preserved data is checked markers, policies and role metadata, not a complete backup comparison.
+
+Root cause of prior seed failure: PostgreSQL log 10:17:41 UTC reported query affected by row-level security policy for epochs (42501). Installer session-level row_security=off persisted after transaction-local restore. Read-only rollback test reproduced and verified row_security=on. Runner now restores row_security and check_function_bodies before fixture DML. Prior psycopg literal percent/empty parameter issue also fixed.
+
+Verdict: hosted committed synthetic ERP workload PASS; cleanup PASS; original checked baseline PASS. p95 is per workload batch, not individual RPC or production SLA. Exact prior expired credential post-drop denial remains unproven; do not intentionally repeat failed logins solely for evidence. Production deployment, external identity proof, offline recovery custody and statutory expert signoff remain separate, not attested here. Gate5 overall not ALL PASS. Preserve valid prior results; no repeat of this workload without change/invalidating evidence.
