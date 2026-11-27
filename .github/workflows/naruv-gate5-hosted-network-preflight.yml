@@ -1,0 +1,44 @@
+name: NARUV Gate 5 actual hosted network preflight
+on:
+  pull_request:
+    branches: [review/naruv-gate5-managed-portable-20261127]
+    paths: ['.github/workflows/naruv-gate5-hosted-network-preflight.yml']
+permissions:
+  contents: read
+jobs:
+  direct-tls:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Actual QA PostgreSQL network and hostname verification without credentials
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import socket,ssl,struct
+          host='db.scvqtsyxkqddoorcaiqr.supabase.co'
+          try:
+              records=socket.getaddrinfo(host,5432,type=socket.SOCK_STREAM)
+          except OSError as e:
+              print('HOSTED_DIRECT_DNS_BLOCKED '+type(e).__name__,flush=True)
+              raise SystemExit(1)
+          families=sorted({x[0].name for x in records})
+          print('HOSTED_DIRECT_DNS_PASS families='+','.join(families),flush=True)
+          for af,typ,proto,_,addr in records:
+              try:
+                  with socket.socket(af,typ,proto) as raw:
+                      raw.settimeout(4)
+                      raw.connect(addr)
+                      raw.sendall(struct.pack('!II',8,80877103))
+                      if raw.recv(1)!=b'S':
+                          raise RuntimeError('POSTGRES_TLS_REFUSED')
+                      ctx=ssl.create_default_context()
+                      ctx.minimum_version=ssl.TLSVersion.TLSv1_2
+                      with ctx.wrap_socket(raw,server_hostname=host) as tls:
+                          print('HOSTED_DIRECT_TLS_TRANSPORT_PASS protocol='+tls.version()+' hostname_verified=true login_tested=false',flush=True)
+                          raise SystemExit(0)
+              except (OSError,RuntimeError) as e:
+                  print('HOSTED_DIRECT_PATH_BLOCKED family='+af.name+' error='+type(e).__name__+' errno='+str(getattr(e,'errno',None)),flush=True)
+          print('HOSTED_DIRECT_TLS_BLOCKED no_verified_transport=true no_credentials_used=true',flush=True)
+          raise SystemExit(1)
+          PY
