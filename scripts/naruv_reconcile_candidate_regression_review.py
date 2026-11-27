@@ -54,6 +54,47 @@ def review_candidate(fixture,trade_dsn,tokens):
         except psycopg.Error as e:
             need(e.diag.message_primary==message and (state is None or e.sqlstate==state),'EXPECTED_DENIAL')
         else: raise AssertionError('DENIAL_NOT_ENFORCED')
+    # Seed only draft quote fixtures in the already bootstrapped local database.
+    # The actual sale, settlement and credit operations below use business RPCs.
+    base.preflight()
+    with psycopg.connect(fixture.root_dsn) as c:
+        need(c.info.host=='127.0.0.1' and c.info.port==5432,'QUOTE_FIXTURE_LOCAL')
+        for who,(org,actor,source,price) in TENANTS.items():
+            qid='candidate-sale-quote-'+who.lower()
+            c.execute("""INSERT INTO jw_dev.quotes
+                (id,org_id,customer_id,customer_name_snapshot,doc_no,title,status,vat_mode,created_at,updated_at)
+                VALUES (%s,%s,%s,'Synthetic customer',%s,'Reconciliation fixture','draft','taxable',
+                clock_timestamp()::text,clock_timestamp()::text)""",(qid,org,'ci-customer-'+who.lower(),qid))
+            c.execute("""INSERT INTO jw_dev.quote_items(id,quote_id,name,quantity,unit_price,position)
+                VALUES(%s,%s,'Assembly',2,100,0)""",(qid+'-line',qid))
+    def sale_snapshot(who):
+        org,actor,source,price=TENANTS[who]
+        csrf=fixture.CSRF[who]
+        bill='candidate-sale-bill'
+        with closing(psycopg.connect(trade_dsn)) as c:
+            b.bind(c,tokens[who])
+            b.cmd(c,'naruv_trade','candidate-sale','candidate-sale-open','open',
+                dict(kind='sale',quote_id='candidate-sale-quote-'+who.lower(),source_id=source,
+                     item_id='003',warehouse_id='W1'),csrf)
+            b.cmd(c,'naruv_trade','candidate-sale','candidate-sale-fulfill','fulfill',dict(quantity=2),csrf)
+            b.cmd(c,'naruv_finance',bill,'candidate-sale-invoice','bill',
+                dict(doc_id='candidate-sale',fulfillment_id='candidate-sale-fulfill'),csrf)
+            vals=[reconcile(c,bill,csrf)]
+            need(Decimal(vals[0]['sales_margin_krw'])==200-4*price,'SALE_NEGATIVE_MARGIN')
+            need(Decimal(vals[0]['inventory_cost_krw'])==4*price,'SALE_ORIGINAL_COST')
+            b.cmd(c,'naruv_finance',bill,'candidate-sale-pay','pay',dict(amount=220,reference='candidate-sale-payment'),csrf)
+            vals.append(reconcile(c,bill,csrf))
+            for j in (1,2):
+                req='candidate-sale-return-'+str(j); ref='candidate-sale-refund-'+str(j)
+                receipt=b.rpc(c,'naruv_valuation.return_adjusted',bill,req,1,True,ref,True,csrf)
+                need(Decimal(receipt['refund_recorded_krw'])==110 and receipt['external_transfer_executed'] is False,'SALE_REFUND')
+                need(b.rpc(c,'naruv_valuation.return_adjusted',bill,req,1,True,ref,True,csrf)==receipt,'SALE_RETURN_REPLAY')
+                vals.append(reconcile(c,bill,csrf))
+                need(vals[-1]['returned_quantity']==j and Decimal(vals[-1]['sales_margin_krw'])==(2-j)*(100-2*price),'SALE_MARGIN_AFTER_RETURN')
+                need(Decimal(vals[-1]['outstanding_krw'])==0,'SALE_OUTSTANDING')
+            need(vals[-1]['credited'] is True,'SALE_FULL_CREDIT')
+            c.rollback()
+            return vals
     def snapshot():
         result={}
         for who in TENANTS:
@@ -77,6 +118,7 @@ def review_candidate(fixture,trade_dsn,tokens):
                 need(vals[-1]['credited'] is True and vals[-1]['returned_quantity']==2 and vals[-1]['outstanding_krw']=='0','FULL_RETURN')
                 c.rollback()
                 result[who]=vals
+            result[who+'-sale']=sale_snapshot(who)
         return result
     def contention(expected,label):
         a_bill='load-0-0-bill'; z_bill='load-1-0-bill'
@@ -128,7 +170,7 @@ def review_candidate(fixture,trade_dsn,tokens):
         need(snapshot()==baseline,'RECONCILE_JSON_DRIFT')
         contention(baseline,'candidate')
         need(snapshot()==baseline,'POST_CONTENTION_DRIFT')
-        print('RECONCILE_CANDIDATE_LOCAL_PASS lifecycle_receipts=8 denials_per_arm=6 rollback_and_tenant_lock=true',flush=True)
+        print('RECONCILE_CANDIDATE_LOCAL_PASS lifecycle_receipts=16 denials_per_arm=6 rollback_and_tenant_lock=true',flush=True)
     finally:
         apply(after,before)
 
