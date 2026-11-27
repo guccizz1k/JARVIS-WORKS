@@ -1,0 +1,113 @@
+# Inactive review artifact; not in .github/workflows. Do not activate without budget confirmation.
+name: NARUV local index ABBA comparison
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths:
+      - '.github/workflows/naruv-local-index-ab-review.yml'
+permissions:
+  contents: read
+jobs:
+  erp-acl:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      NARUV_ERP_ACL_CI: SOURCE_PINNED_DISPOSABLE_ONLY
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
+          path: source
+          persist-credentials: false
+      - name: Verify exact source and review SHAs
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C source rev-parse HEAD)" = aa8894305dda413127e2994064f456a966d5e3c2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install exact source dependency sets
+        working-directory: source
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Execute four fresh balanced A/B arms
+        working-directory: source
+        run: |
+          set -euo pipefail
+          export NARUV_ERP_SOURCE_ROOT="$PWD"
+          export PYTHONPATH="$PWD"
+          script=../review/scripts/naruv_local_fk_index_ab_review.py
+          test "$(git hash-object "$script")" = d1aad99c0e2493eb7a3820ba980b227815d38c02
+          python -m py_compile "$script"
+          dir="$(mktemp -d)"
+          trap 'docker rm -f naruv-erp-acl-ci >/dev/null 2>&1 || true; rm -rf -- "$dir"' EXIT
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=naruv-ci-ca' -keyout "$dir/ca.key" -out "$dir/ca.crt" -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign'
+          openssl req -new -newkey rsa:2048 -nodes -subj '/CN=127.0.0.1' -keyout "$dir/server.key" -out "$dir/server.csr"
+          printf 'subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' > "$dir/ext"
+          openssl x509 -req -in "$dir/server.csr" -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial -days 1 -extfile "$dir/ext" -out "$dir/server.crt"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=unrelated-ci-ca' -keyout "$dir/bad.key" -out "$dir/bad.crt"
+          export NARUV_TLS_CA="$dir/ca.crt"
+          export NARUV_TLS_BAD_CA="$dir/bad.crt"
+          docker pull postgres:17
+          image="$(docker image inspect postgres:17 --format '{{.Id}}')"
+          n=0
+          for arm in baseline indexed indexed baseline; do
+            n=$((n+1))
+            ! docker inspect naruv-erp-acl-ci >/dev/null 2>&1
+            docker run --rm -d --name naruv-erp-acl-ci -p 127.0.0.1:5432:5432 --tmpfs /var/lib/postgresql/data:rw,size=1073741824 -e POSTGRES_PASSWORD=ci-only-ephemeral-test-password "$image"
+            ready=false
+            for i in $(seq 1 60); do
+              if docker exec naruv-erp-acl-ci sh -c 'test "$(cat /proc/1/comm)" = postgres && pg_isready -U postgres -q'; then ready=true; break; fi
+              sleep 1
+            done
+            test "$ready" = true
+            docker cp "$dir/server.key" naruv-erp-acl-ci:/tmp/server.key
+            docker cp "$dir/server.crt" naruv-erp-acl-ci:/tmp/server.crt
+            docker exec naruv-erp-acl-ci chown postgres:postgres /tmp/server.key /tmp/server.crt
+            docker exec naruv-erp-acl-ci chmod 600 /tmp/server.key
+            docker exec naruv-erp-acl-ci psql -U postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='/tmp/server.crt'" -c "ALTER SYSTEM SET ssl_key_file='/tmp/server.key'" -c "ALTER SYSTEM SET ssl=on" -c 'SELECT pg_reload_conf()'
+            for i in $(seq 1 20); do
+              if [ "$(docker exec naruv-erp-acl-ci psql -U postgres -Atc 'SHOW ssl')" = on ]; then break; fi
+              sleep 1
+            done
+            test "$(docker exec naruv-erp-acl-ci psql -U postgres -Atc 'SHOW ssl')" = on
+            NARUV_INDEX_AB_ARM="$arm" python "$script" | tee "$dir/arm-$n.log"
+            docker rm -f naruv-erp-acl-ci
+            ! docker inspect naruv-erp-acl-ci >/dev/null 2>&1
+          done
+          python - "$dir" <<'PY'
+          import json, sys
+          from pathlib import Path
+          from statistics import median
+          rows=[]
+          for n in range(1,5):
+              found=[json.loads(x.split(' ',1)[1]) for x in (Path(sys.argv[1])/f'arm-{n}.log').read_text().splitlines() if x.startswith('LOCAL_INDEX_ARM_PASS ')]
+              assert len(found)==1
+              rows.extend(found)
+          assert [r['arm'] for r in rows]==['baseline','indexed','indexed','baseline']
+          assert all(r['committed_batches']==40 and r['business_rpc_calls']==280 and r['read_samples']==10 for r in rows)
+          assert all(r['final']==rows[0]['final'] for r in rows)
+          keys=('p95_ms','median_read_ms','elapsed_s','candidate_index_bytes')
+          summary={arm:{k:median([r[k] for r in rows if r['arm']==arm]) for k in keys} for arm in ('baseline','indexed')}
+          print('LOCAL_INDEX_AB_MEASURED',json.dumps(summary,sort_keys=True))
+          print('LOCAL_INDEX_AB_FUNCTIONAL_PASS 160_BATCHES_1120_RPC')
+          print('INDEX_ADOPTION_REVIEW_REQUIRED')
+          PY
+      - name: Confirm disposable database removed
+        if: always()
+        run: |
+          set -euo pipefail
+          if docker inspect naruv-erp-acl-ci >/dev/null 2>&1; then docker rm -f naruv-erp-acl-ci; fi
+          ! docker inspect naruv-erp-acl-ci >/dev/null 2>&1
