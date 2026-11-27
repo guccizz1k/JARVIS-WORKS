@@ -54,7 +54,7 @@ def _authorize(token_hash, csrf):
     with v90._pg_validated_cursor(token_hash) as (_, identity):
         return _verify_identity(identity, csrf)
 
-def _preview(token_hash, csrf, prior, source_id, entity, file_format, raw):
+def _preview_snapshot(token_hash, csrf, prior, source_id, entity):
     if not enabled():
         raise HTTPException(404, "PREVIEW_DISABLED")
     with v90._pg_validated_cursor(token_hash) as (cur, identity):
@@ -67,24 +67,32 @@ def _preview(token_hash, csrf, prior, source_id, entity, file_format, raw):
         row = cur.fetchone()
         if row is None:
             raise HTTPException(404, "SOURCE_NOT_FOUND")
-        try:
-            target = make_target_snapshot(org, source_id, entity, row[0], row[1])
-            stage = prepare_file_stage(raw, format=file_format, organization_id=org,
-                         source_id=source_id, entity=entity, target=target)
-        except MappingBlocked as exc:
-            # Existing parser errors are safe reason codes. Never reflect cells.
-            reason = str(exc)
-            if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,95}", reason):
-                reason = "FILE_REJECTED"
-            raise HTTPException(422, reason) from None
+        return make_target_snapshot(org, source_id, entity, row[0], row[1])
+
+def _preview(token_hash, csrf, prior, source_id, entity, file_format, raw):
+    # Parsing can be CPU intensive; never retain the identity transaction.
+    try:
+        target = _preview_snapshot(token_hash, csrf, prior, source_id, entity)
+        stage = prepare_file_stage(raw, format=file_format, organization_id=target.organization_id,
+                     source_id=source_id, entity=entity, target=target)
         rows = [dict(row) for row in stage.canonical_rows]
         canonical = hashlib.sha256(json.dumps(rows,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode('utf-8')).hexdigest()
-        return {"source_id": source_id, "entity": entity, "format": file_format,
-                "raw_sha256": stage.raw_sha256, "byte_count": stage.byte_count,
-                "stage_sha256": stage.stage_sha256, "row_count": stage.preflight.row_count,
-                "target_snapshot_sha256": stage.preflight.target_snapshot_sha256,
-                "canonical_rows_sha256": canonical, "rows": rows,
-                "row_import_authorized": False, "persisted": False}
+        # Fresh authorization and full source snapshot before releasing any rows.
+        current = _preview_snapshot(token_hash, csrf, prior, source_id, entity)
+        if current != target:
+            raise HTTPException(409, "NARUV_PREVIEW_CHANGED")
+    except MappingBlocked as exc:
+        reason = str(exc)
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,95}", reason):
+            reason = "FILE_REJECTED"
+        raise HTTPException(422, reason) from None
+    return {"source_id": source_id, "entity": entity, "format": file_format,
+            "raw_sha256": stage.raw_sha256, "byte_count": stage.byte_count,
+            "stage_sha256": stage.stage_sha256, "row_count": stage.preflight.row_count,
+            "target_snapshot_sha256": stage.preflight.target_snapshot_sha256,
+            "canonical_rows_sha256": canonical, "rows": rows,
+            "row_import_authorized": False, "persisted": False}
+
 
 async def _bounded_body(request):
     length = _one_header(request, "content-length")
