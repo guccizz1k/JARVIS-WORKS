@@ -26,15 +26,13 @@ ROLE_FLAGS="rolsuper,rolcreaterole,rolcreatedb,rolbypassrls,rolinherit,rolcanlog
 def ident(x):return '"'+x.replace('"','""')+'"'
 def relation(s,n):return ident(s)+'.'+ident(n)
 def target_platform():
-    secret=secrets.token_urlsafe(32)
-    with psycopg.connect(p.TARGET) as c:
-        need(c.execute("SELECT count(*) FROM pg_roles WHERE rolname<>'postgres' AND rolname NOT LIKE 'pg\\_%' ESCAPE '\\'").fetchone()==(0,),'MANAGED_TARGET_NOT_FRESH')
-        c.execute(sql.SQL('CREATE ROLE {} SUPERUSER LOGIN PASSWORD {}').format(sql.Identifier(ROOT),sql.Literal(secret)))
+    root=make_conninfo(p.TARGET,user=ROOT)
+    with psycopg.connect(root) as c:
+        need(c.execute("SELECT count(*) FROM pg_roles WHERE rolname<>%s AND rolname NOT LIKE 'pg\\_%' ESCAPE '\\'",(ROOT,)).fetchone()==(0,),'MANAGED_TARGET_NOT_FRESH')
+        c.execute("CREATE ROLE postgres LOGIN PASSWORD 'ci-only-ephemeral-test-password' NOSUPERUSER CREATEROLE CREATEDB BYPASSRLS INHERIT")
+        c.execute('ALTER DATABASE postgres OWNER TO postgres')
         c.execute('CREATE ROLE anon NOLOGIN INHERIT; CREATE ROLE authenticated NOLOGIN INHERIT; CREATE ROLE service_role NOLOGIN INHERIT BYPASSRLS; CREATE ROLE authenticator LOGIN NOINHERIT')
         c.execute('GRANT anon,authenticated,service_role TO authenticator WITH INHERIT FALSE, SET TRUE')
-    root=make_conninfo(p.TARGET,user=ROOT,password=secret)
-    with psycopg.connect(root) as c:
-        c.execute('ALTER ROLE postgres NOSUPERUSER CREATEROLE CREATEDB BYPASSRLS INHERIT')
     with psycopg.connect(p.TARGET) as c:
         need(c.execute('SELECT '+ROLE_FLAGS+' FROM pg_roles WHERE rolname=current_user').fetchone()==(False,True,True,True,True,True),'MANAGED_ADMIN_FLAGS')
         return root,platform_snapshot(c)
@@ -91,7 +89,7 @@ def owner_commands(source):
         add('FUNCTION '+relation(schema,name)+'('+args+')',funcs[schema,name,args],grantor,grantee,priv,option)
     # Owner implicit ACL defaults must be preserved, including objects with
     # no nonowner grants. Remove PUBLIC defaults before any commit.
-    for (owner,obj),entries in sorted(groups.items()):
+    for (owner,obj),entries in sorted(groups.items(),key=lambda item:(not item[0][1].startswith('SCHEMA '),item[0])):
         q.append('SET ROLE '+ident(owner)+';')
         q.append('REVOKE ALL ON '+obj+' FROM PUBLIC;')
         q.append('REVOKE ALL ON '+obj+' FROM '+ident(owner)+';')
