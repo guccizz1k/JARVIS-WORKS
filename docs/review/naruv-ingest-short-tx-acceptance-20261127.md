@@ -1,0 +1,7 @@
+# Ingest short transaction acceptance — 2026-11-27
+Draft PR #194 head 2325bc7c24369b371e679a7e5ca43d842f7dc7f0; run 45990403221 job 140476463108, 15/15 successful steps including disposable cleanup. Source aa8894305dda413127e2994064f456a966d5e3c2, original app blob 6ee3164ea1101cf318ed7769942c82ebee7c8240, candidate d631b1ef84a7307c91006ca6f9f6e04dcaccb29b, integration runner 1964b217e15e07951ff7af0dc0604d0e90a0eacd.
+Actual logs 11:26:21 UTC:
+INGEST_SPLIT_RACE_PASS baseline_blocked=true split_released=true snapshot_drift_denied=true revoked_denied=true
+INGEST_SPLIT_HTTP_PASS csv=true xlsx=true replay=true tenant_denial=true exact_receipt=true
+INGEST_SPLIT_REVIEW_PASS production_authorized=false hosted_load=false
+The controlled parser pause proves an independent restricted stage RPC is blocked by the original transaction and succeeds with candidate. Dual-store revocation and changed source revision during parsing prevent persistence; checked stage snapshots equal. Real HTTP handlers via ASGI TestClient, independent PG17 TLS sessions. This is staging, not full commit of both file formats, browser or hosted performance acceptance. No throughput percentage measured; artificial pause is not actual parse latency. Retain as local validated review candidate. No production changes, main merge, lock relaxation, deployment or additional CI. Existing reconciliation optimization remains separate. Quantitative realistic workload and combined acceptance remain NOT RUN. Actual CI charge unverified. Do not repeat these passing race cases unless invalidated.
