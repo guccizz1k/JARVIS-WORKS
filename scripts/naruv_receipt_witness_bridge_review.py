@@ -22,18 +22,17 @@ def read_canonical(raw):
     v.need(v.canonical(doc)==raw,'NONCANONICAL_EVIDENCE')
     return doc
 
-def build_pair(approval_raw,policy_raw,observations,witnesses,signer):
+def _verified_payloads(approval_raw,policy_raw,observations,witnesses,*,expected_policy_pin):
     v.need(os.environ.get('GITHUB_ACTIONS')=='true' and
            os.environ.get('GITHUB_REPOSITORY')=='guccizz1k/JARVIS-WORKS' and
            os.environ.get('NARUV_WITNESS_BRIDGE_CI')=='1','WITNESS_BRIDGE_CI_ONLY')
     pin,approval=ledger.parse_approval(approval_raw)
     policy=read_canonical(policy_raw)
     v.exact(policy,{'approval_pin','witness_public_key'},'WITNESS_POLICY_FIELDS')
-    v.need(os.environ.get('NARUV_EXPECTED_WITNESS_POLICY_SHA256')==digest(policy_raw),'WITNESS_POLICY_PIN')
+    v.need(expected_policy_pin==digest(policy_raw),'WITNESS_POLICY_PIN')
     v.need(policy['approval_pin']==pin,'WITNESS_APPROVAL_PIN')
     wk=policy['witness_public_key']
     v.need(v.hexval(wk) and wk!=approval['public_key'],'WITNESS_KEY_SEPARATION')
-    v.need(isinstance(signer,Ed25519PrivateKey) and signer.public_key().public_bytes_raw().hex()==approval['public_key'],'RECEIPT_SIGNER_KEY')
     v.exact(observations,set(v.SCOPES),'OBSERVATION_SCOPES')
     v.exact(witnesses,set(v.SCOPES),'WITNESS_SCOPES')
     # Capture immutable byte references for both scopes before any signing.
@@ -66,10 +65,28 @@ def build_pair(approval_raw,policy_raw,observations,witnesses,signer):
             v.need(all(x is True for x in w[k].values()),'WITNESS_STATUS_NOT_PASS')
         payloads[s]=dict(binding,version=4,started_at=w['started_at'],ended_at=w['ended_at'],
                          results=expected,environment=w['environment'],cleanup=w['cleanup'])
-    # Only after BOTH inputs validate; no external publication by this helper.
-    reports={s:v.canonical(dict(payload=p,signature_hex=signer.sign(v.DOMAIN+v.canonical(p)).hex())) for s,p in payloads.items()}
-    result=v.verify_pair(reports,approval['expected'],bytes.fromhex(approval['public_key']),window_start=approval['start'],window_end=approval['end'])
-    return reports,dict(result,witness_sha256={s:digest(wit_raw[s]) for s in v.SCOPES},
+    return approval,payloads,dict(witness_sha256={s:digest(wit_raw[s]) for s in v.SCOPES},
                         observation_sha256={s:digest(obs_raw[s]) for s in v.SCOPES},
                         witness_policy_sha256=digest(policy_raw),witness_claims='PASS_SIGNATURE_AND_BINDING_ONLY',
                         independent_witness_control='NOT_ATTESTED',actual_host_isolation='NOT_ATTESTED')
+
+def verify_existing_pair(approval_raw,policy_raw,observations,witnesses,reports,*,expected_policy_pin):
+    approval,payloads,proof=_verified_payloads(approval_raw,policy_raw,observations,witnesses,expected_policy_pin=expected_policy_pin)
+    v.exact(reports,set(v.SCOPES),'REPORT_SCOPES')
+    reports={s:reports[s] for s in v.SCOPES}
+    result=v.verify_pair(reports,approval['expected'],bytes.fromhex(approval['public_key']),window_start=approval['start'],window_end=approval['end'])
+    for s in v.SCOPES:
+        doc=read_canonical(reports[s])
+        v.need(v.canonical(doc['payload'])==v.canonical(payloads[s]),'RECEIPT_WITNESS_PAYLOAD_MISMATCH')
+    return dict(result,**proof)
+
+def build_pair(approval_raw,policy_raw,observations,witnesses,signer):
+    # Preserve the early signing-key rejection in the old entrypoint.
+    v.need(os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('GITHUB_REPOSITORY')=='guccizz1k/JARVIS-WORKS' and os.environ.get('NARUV_WITNESS_BRIDGE_CI')=='1','WITNESS_BRIDGE_CI_ONLY')
+    _,approval=ledger.parse_approval(approval_raw)
+    v.need(isinstance(signer,Ed25519PrivateKey) and signer.public_key().public_bytes_raw().hex()==approval['public_key'],'RECEIPT_SIGNER_KEY')
+    approval,payloads,proof=_verified_payloads(approval_raw,policy_raw,observations,witnesses,expected_policy_pin=os.environ.get('NARUV_EXPECTED_WITNESS_POLICY_SHA256'))
+    # Only after BOTH inputs validate; no external publication by this helper.
+    reports={s:v.canonical(dict(payload=p,signature_hex=signer.sign(v.DOMAIN+v.canonical(p)).hex())) for s,p in payloads.items()}
+    result=v.verify_pair(reports,approval['expected'],bytes.fromhex(approval['public_key']),window_start=approval['start'],window_end=approval['end'])
+    return reports,dict(result,**proof)
