@@ -1,0 +1,44 @@
+{
+  "schema": "NARUV_CONSOLIDATED_REVIEW_OVERLAY_V1",
+  "source_commit": "df6aaa4f07bb66f5b26b03700958e16d3f343475",
+  "source_manifest_blob": "836f3afefcc9ed5659b46e379c1bb2444bf380b1",
+  "status": "STAGED_NOT_RUNTIME_VERIFIED",
+  "entries": [
+    {
+      "path": "app/naruv_native_write_review.py",
+      "original_blob": "6ee3164ea1101cf318ed7769942c82ebee7c8240",
+      "candidate_blob": "a7c9ef6302d2fa69b487c4e440620de4f6fde918",
+      "review_path": "docs/review/consolidated-release-candidate/app/naruv_native_write_review.py",
+      "commit": "4c9d70fffe7398347d6c4ea85061a3106835b06b"
+    },
+    {
+      "path": "db/review/naruv_valuation_ci.sql",
+      "original_blob": "0351c73151be51612d563afd7c4e8e8af7bbdf36",
+      "candidate_blob": "53dda66945c6901f7924ec34cecb37ce223d76f9",
+      "review_path": "docs/review/consolidated-release-candidate/db/review/naruv_valuation_ci.sql",
+      "commit": "ad18ed7915cfcc0c037f8d649612385a8fa382f0"
+    },
+    {
+      "path": "app/naruv_operational_readiness.py",
+      "original_blob": "e05f1f5b6107a6e8318147ef3ca17229bffdb0e0",
+      "candidate_blob": "e3119dba5423ad50947b62a5d112472b2b4ce59f",
+      "review_path": "docs/review/consolidated-release-candidate/app/naruv_operational_readiness.py",
+      "commit": "67dbfbb15f01ed4591c37215cfabd959e7a529e7"
+    },
+    {
+      "path": "tests/test_naruv_operational_readiness.py",
+      "original_blob": "66cd962ad24a8f570ac5011d591573cdba87245b",
+      "candidate_blob": "38a9e257c41dce9cf8fa5bcffa18d5bb46983890",
+      "review_path": "docs/review/consolidated-release-candidate/tests/test_naruv_operational_readiness.py",
+      "commit": "5b8930773c13631e71b62e1ebe3cf634c77f6d10"
+    }
+  ],
+  "protected": [
+    "main",
+    "production database",
+    "approved UI",
+    "backup objects",
+    "recovery keys"
+  ],
+  "production_authorized": false
+}
