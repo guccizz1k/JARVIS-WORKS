@@ -237,7 +237,15 @@ def _owner_key():
     finally:
         raw[:]=bytes(len(raw))
 
-def run(reference_raw=None, reference_pin=None, *, catalog_required=False, staged=None, owner_controlled=False) -> dict[str, object]:
+def run(reference_raw=None, reference_pin=None, *, catalog_required=False, staged=None, owner_controlled=False,
+        review_binding=None) -> dict[str, object]:
+    # Default execution/receipt format is unchanged. Future evidence capture is CI-only.
+    capture=None
+    observed_hashes=[]
+    if review_binding is not None:
+        from scripts import naruv_runner_evidence_review as evidence
+        capture=evidence.prepare(review_binding,reference_raw,reference_pin,staged,
+                                 catalog_required=catalog_required,owner_controlled=owner_controlled)
     result={
         "external_pg17_restore":"BLOCKED",
         "custody_model":"OWNER_SELF_CUSTODY" if owner_controlled else "EXTERNAL_CUSTODIAN",
@@ -287,6 +295,8 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
         else:
             pin,key,pairs=clean._inputs()
         _require_owner_scope(pairs, os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""))
+        if capture is not None:
+            evidence.check_archive_set(capture,pairs)
         result["owner_scope_pin_checked"]=True
         if reference_required:
             loader=catalog.load_reference if catalog_required else equivalence.load_reference
@@ -372,6 +382,8 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
                 result["restored_65_table_archive_count"]+=1
             finally:
                 plain.clear()
+            if capture is not None:
+                observed_hashes.append(hashlib.sha256(cipher).hexdigest())
         if (result["verified_provider_cipher_count"]!=MAX_ARCHIVES
                 or result["restored_pg17_archive_count"]!=MAX_ARCHIVES):
             raise Blocked("SECOND_SITE_ELEVEN_ARCHIVES_NOT_FULLY_RESTORED")
@@ -411,6 +423,9 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
         # Do not mislabel an owner-operated restore as external-custodian evidence.
         result["external_pg17_restore"]="NOT_APPLICABLE_OWNER_SITE"
         result["independent_key_custody"]="DEFERRED_NOT_ATTESTED"
+    if capture is not None:
+        # No partial evidence is published. No signing key or environment claims are generated.
+        result["future_archive_evidence"]=evidence.finish(capture,observed_hashes,result)
     # All necessary raw data and credentials are local to the external custodian.
     # This receipt is *not* an independent signature or source-era provenance.
     return result
