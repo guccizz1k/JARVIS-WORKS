@@ -161,3 +161,95 @@ def test_inconsistent_pair_and_policy_tamper():
         c.execute("UPDATE naruv_signed_receipt_ci.approval SET consumed=false,document=%s WHERE pin=%s",(v.canonical(d),pin))
     with pytest.raises(ValueError,match='APPROVAL_PIN_MISMATCH'):consume(pin,r)
     assert counts()==(1,2,0)
+
+
+# The bridge tests use synthetic witness claims, not actual host attestation.
+from scripts import naruv_receipt_witness_bridge_review as bridge
+from scripts import naruv_runner_evidence_review as capture
+
+def witness_fixture(monkeypatch):
+    raw,_,_=fixture()
+    doc=v.decode(raw)
+    signer=Ed25519PrivateKey.generate()
+    witness=Ed25519PrivateKey.generate()
+    doc['public_key']=signer.public_key().public_bytes_raw().hex()
+    raw=v.canonical(doc)
+    pin,_=m.parse_approval(raw)
+    policy=v.canonical(dict(approval_pin=pin,witness_public_key=witness.public_key().public_bytes_raw().hex()))
+    monkeypatch.setenv('NARUV_WITNESS_BRIDGE_CI','1')
+    monkeypatch.setenv('NARUV_EXPECTED_WITNESS_POLICY_SHA256',bridge.digest(policy))
+    observations={}
+    witnesses={}
+    for s in v.SCOPES:
+        b=doc['expected'][s]
+        report=dict(owner_site_restore='PASS_ELEVEN_OWNER_SITE_CIPHERS',
+                    normalized_catalog_comparison='PASS_11_SCOPED_CATALOG_CHECKPOINTS',
+                    normalized_archive_comparison='PASS_11_ARCHIVE_CHECKPOINTS',
+                    disposable_pg17_removed='PASS',review_cleanup_absence_verified=True,
+                    b2_staged_scope_bound=True,owner_scope_pin_checked=True,
+                    decrypted_dump_written_to_host=False,verified_provider_cipher_count=11,
+                    restored_pg17_archive_count=11,restored_65_table_archive_count=11,restore_failures=0)
+        observations[s]=v.canonical(capture.finish(v.canonical(b),b['archives'],report))
+        w=dict(version=1,approval_pin=pin,binding_sha256=bridge.digest(v.canonical(b)),
+               observation_sha256=bridge.digest(observations[s]),started_at='2026-11-27T00:00:01Z',
+               ended_at='2026-11-27T00:00:02Z',environment=dict.fromkeys(v.ENV,True),cleanup=dict.fromkeys(v.CLEANUP,True))
+        witnesses[s]=v.canonical(dict(payload=w,signature_hex=witness.sign(bridge.DOMAIN+v.canonical(w)).hex()))
+    return raw,policy,observations,witnesses,signer,witness
+
+def test_witness_bridge_atomic_pg17(monkeypatch):
+    raw,policy,obs,wit,signer,_=witness_fixture(monkeypatch)
+    pin=register(raw)
+    pair,proof=bridge.build_pair(raw,policy,obs,wit,signer)
+    assert proof['witness_claims']=='PASS_SIGNATURE_AND_BINDING_ONLY'
+    assert proof['actual_host_isolation']=='NOT_ATTESTED' and proof['independent_witness_control']=='NOT_ATTESTED'
+    assert proof['witness_sha256']=={s:bridge.digest(wit[s]) for s in v.SCOPES}
+    result=consume(pin,pair)
+    assert result['receipt_consumption']=='PASS_ATOMIC_PG17_REVIEW'
+    assert result['gate5']=='BLOCKED' and counts()==(1,2,2)
+    assert status(pin)['receipt_sha256']=={s:bridge.digest(pair[s]) for s in v.SCOPES}
+    with pytest.raises(ValueError,match='UNREGISTERED_OR_CONSUMED'):
+        consume(pin,pair)
+    assert counts()==(1,2,2)
+
+@pytest.mark.parametrize('bad,code',[
+ ('missing','WITNESS_SCOPES'),('wrong_key','WITNESS_SIGNATURE_INVALID'),
+ ('swap','WITNESS_BINDING'),('different_observation','WITNESS_BINDING'),
+ ('false_flag','WITNESS_STATUS_NOT_PASS'),('late','WITNESS_WINDOW'),
+ ('forged_observation','OBSERVATION_STATUS'),('wrong_policy','WITNESS_POLICY_PIN'),
+ ('same_key','WITNESS_KEY_SEPARATION'),('wrong_signer','RECEIPT_SIGNER_KEY'),
+ ('bad_archive','OBSERVATION_ARCHIVES'),('wrong_approval','WITNESS_APPROVAL_PIN'),
+ ('disabled','WITNESS_BRIDGE_CI_ONLY')])
+def test_witness_bridge_rejects_invalid_claims(monkeypatch,bad,code):
+    raw,policy,obs,wit,signer,witness=witness_fixture(monkeypatch)
+    pin=register(raw)
+    d=v.decode(wit['staged'])['payload']
+    def sign_witness(key=witness):
+        wit['staged']=v.canonical(dict(payload=d,signature_hex=key.sign(bridge.DOMAIN+v.canonical(d)).hex()))
+    def policy_change(**changes):
+        p=v.decode(policy);p.update(changes)
+        return v.canonical(p)
+    if bad=='missing':wit.pop('staged')
+    elif bad=='wrong_key':sign_witness(Ed25519PrivateKey.generate())
+    elif bad=='swap':wit['staged']=wit['legacy']
+    elif bad=='different_observation':
+        d['observation_sha256']='0'*64;sign_witness()
+    elif bad=='false_flag':
+        d['environment']['swap_disabled']=False;sign_witness()
+    elif bad=='late':
+        d['ended_at']='2026-11-28T00:00:00Z';sign_witness()
+    elif bad=='forged_observation':
+        o=v.decode(obs['staged']);o['host_isolation']='PASS';obs['staged']=v.canonical(o)
+    elif bad=='wrong_policy':policy=policy_change(witness_public_key='1'*64)
+    elif bad=='same_key':
+        policy=policy_change(witness_public_key=signer.public_key().public_bytes_raw().hex())
+        monkeypatch.setenv('NARUV_EXPECTED_WITNESS_POLICY_SHA256',bridge.digest(policy))
+    elif bad=='wrong_signer':signer=Ed25519PrivateKey.generate()
+    elif bad=='bad_archive':
+        o=v.decode(obs['staged']);o['archive_results'][0]['restored']=False;obs['staged']=v.canonical(o)
+    elif bad=='wrong_approval':
+        policy=policy_change(approval_pin='f'*64)
+        monkeypatch.setenv('NARUV_EXPECTED_WITNESS_POLICY_SHA256',bridge.digest(policy))
+    elif bad=='disabled':monkeypatch.delenv('NARUV_WITNESS_BRIDGE_CI')
+    with pytest.raises(ValueError,match=code):
+        bridge.build_pair(raw,policy,obs,wit,signer)
+    assert status(pin)['state']=='REGISTERED' and counts()==(1,2,0)
