@@ -83,29 +83,37 @@ def run(ca):
             require(e.sqlstate in codes, "UNEXPECTED_DENIAL_SQLSTATE")
         else:
             raise RuntimeError("UNEXPECTED_ACCEPTANCE")
+    phase = 'ADMIN_CONNECT'
     prepared = False
     failure = None
     cleanup = False
     try:
         with connect("postgres",admin_pw) as a:
+            phase = "BASELINE"
             baseline(a)
             require(a.execute("SELECT count(*) FROM pg_roles WHERE rolname=ANY(%s)",(list(names),)).fetchone()==(0,), "NAME_COLLISION")
             prepared = True
             with a.transaction():
                 expiry = a.execute("SELECT clock_timestamp()+interval '1 hour'").fetchone()[0]
                 for n,p,s in zip(names,passwords,STAGES):
-                    a.execute(sql.SQL("CREATE ROLE {} LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION CONNECTION LIMIT 4 PASSWORD {} VALID UNTIL {}").format(sql.Identifier(n),sql.Literal(scram_verifier(p)),sql.Literal(expiry)))
+                    phase = "CREATE_TEMP_ROLE"
+                    a.execute(sql.SQL("CREATE ROLE {} LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOREPLICATION CONNECTION LIMIT 4 PASSWORD {} VALID UNTIL {}").format(sql.Identifier(n),sql.Literal(scram_verifier(p)),sql.Literal(expiry.isoformat())))
+                    phase = "ROLE_TIMEOUTS"
                     a.execute(sql.SQL("ALTER ROLE {} SET statement_timeout TO '10s'").format(sql.Identifier(n)))
                     a.execute(sql.SQL("ALTER ROLE {} SET idle_in_transaction_session_timeout TO '30s'").format(sql.Identifier(n)))
                     a.execute(sql.SQL("ALTER ROLE {} SET idle_session_timeout TO '60s'").format(sql.Identifier(n)))
+                    phase = "GRANT_ROLE"
                     a.execute(sql.SQL("GRANT {} TO {} WITH ADMIN FALSE, INHERIT FALSE, SET TRUE").format(sql.Identifier(s),sql.Identifier(n)))
+                phase = "ROLE_FLAGS"
                 require(a.execute("""SELECT count(*) FROM pg_authid WHERE rolname=ANY(%s)
                     AND rolcanlogin AND rolpassword LIKE 'SCRAM-SHA-256$%%' AND rolvaliduntil>clock_timestamp()
                     AND NOT rolinherit AND NOT rolsuper AND NOT rolbypassrls AND NOT rolcreaterole
                     AND NOT rolcreatedb AND NOT rolreplication AND rolconnlimit=4""",(list(names),)).fetchone()==(3,), "ROLE_FLAGS")
             print("TEMP_ROLE_COMMIT_PASS 3 names="+",".join(names),flush=True)
         for n,p,s in zip(names,passwords,STAGES):
+            phase = "LOGIN_"+s
             with connect(n,p) as c:
+                phase = "BOUNDARY_"+s
                 with c.transaction(force_rollback=True):
                     c.execute("SET TRANSACTION READ ONLY")
                     require(c.execute("SELECT pg_has_role(session_user,%s,'SET'),pg_has_role(session_user,%s,'USAGE')",(s,s)).fetchone()==(True,False),"ROLE_MEMBERSHIP")
@@ -125,7 +133,13 @@ def run(ca):
                         denied(c,"SELECT naruv_native_review.read_source(%s,%s,%s)",("qa-invalid","item","missing-session"))
                 print("INDEPENDENT_LOGIN_ROLE_BOUNDARY_PASS "+s,flush=True)
     except BaseException as e:
-        failure = type(e).__name__ + ":" + (str(e) if type(e) is RuntimeError else str(getattr(e,"sqlstate",None) or "REDACTED"))
+        failure = phase + ":" + type(e).__name__ + ":" + str(getattr(e,"sqlstate",None) or "REDACTED")
+        if phase == "ADMIN_CONNECT" and isinstance(e, psycopg.OperationalError):
+            m = str(e).lower()
+            for needle,code in (("password authentication failed","PASSWORD_ERROR"),("tenant or user not found","TENANT_OR_USER_ERROR"),("certificate","TLS_CERT_ERROR"),("timeout","NETWORK_TIMEOUT")):
+                if needle in m:
+                    failure += ":"+code
+                    break
     finally:
         if prepared:
             # Reconnect independently; disable and remove only this run's random roles.
