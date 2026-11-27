@@ -105,6 +105,16 @@ def run(pw,src):
                 phase='INSTALL'
                 a.execute("CREATE SCHEMA naruv_qa_probe; CREATE TABLE naruv_qa_probe.fixture(id integer PRIMARY KEY); INSERT INTO naruv_qa_probe.fixture VALUES(1),(2); ALTER TABLE naruv_qa_probe.fixture ENABLE ROW LEVEL SECURITY; ALTER TABLE naruv_qa_probe.fixture FORCE ROW LEVEL SECURITY",prepare=False)
                 a.execute(install,prepare=False)
+                phase='POST_INSTALL_SESSION'
+                # Dump installer uses session-scoped SET row_security=off and
+                # check_function_bodies=false. SET LOCAL in its final audit
+                # does not restore those session defaults after COMMIT.
+                # Restore normal enforcement before any fixture DML.
+                a.execute("SET row_security=on")
+                a.execute("SET check_function_bodies=on")
+                a.execute("SET search_path=pg_catalog,pg_temp")
+                need(one(a,"SELECT current_setting('row_security'),current_setting('check_function_bodies')")==('on','on'),'INSTALL_SESSION_SECURITY')
+                print('POST_INSTALL_SESSION_SECURITY_PASS',flush=True)
                 need(one(a,"SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE (left(n.nspname,6)='naruv_' OR n.nspname='jw_dev' OR n.nspname=%s) AND c.relkind IN ('r','p') AND c.relrowsecurity AND c.relforcerowsecurity",(role('naruv_quote_fence'),))==(66,),'INSTALLED_RLS')
                 print('TEMP_SCHEMA_INSTALL_PASS',flush=True)
                 phase='LOGIN_SETUP'
@@ -122,11 +132,16 @@ def run(pw,src):
                 phase='SEED'
                 with a.transaction():
                     for org,actor,source,price,token,csrf in tenants.values():
+                        phase='SEED_ORGANIZATION'
                         a.execute("INSERT INTO jw_dev.organizations VALUES(%s,%s,clock_timestamp()::text)",(org,org))
+                        phase='SEED_USER'
                         a.execute("INSERT INTO jw_dev.users(id,org_id,email,password_hash,name,role,created_at) VALUES(%s,%s,%s,'synthetic-unused',%s,'admin',clock_timestamp()::text)",(actor,org,actor+'@invalid.test',actor))
+                        phase='SEED_CUSTOMER'
                         a.execute("INSERT INTO jw_dev.customers(id,org_id,name,created_at) VALUES(%s,%s,'Synthetic supplier',clock_timestamp()::text)",('vendor-'+org,org))
+                        phase='SEED_SOURCE'
                         a.execute("INSERT INTO jw_dev.naruv_review_sources(org_id,source_id,entity,revision,existing_ids) VALUES(%s,%s,'item','fixture',ARRAY[]::text[])",(org,source))
                         # Dedicated, transaction-local fixture policy on NEW DB only.
+                    phase='SEED_IDENTITY'
                     setrole(a,role('naruv_hid_owner'))
                     a.execute(sql.SQL("CREATE POLICY qa_seed_org ON naruv_hosted_identity_review.organizations FOR INSERT TO {} WITH CHECK (id IN ('qa-a','qa-b'))").format(sql.Identifier(role('naruv_hid_owner'))))
                     a.execute(sql.SQL("CREATE POLICY qa_seed_user ON naruv_hosted_identity_review.users FOR INSERT TO {} WITH CHECK ((id,org_id) IN (('qa-ua','qa-a'),('qa-ub','qa-b')))").format(sql.Identifier(role('naruv_hid_owner'))))
@@ -233,7 +248,7 @@ def run(pw,src):
     return 0
 def safe_reason(e):
     msg=str(e).lower()
-    for needle,code in [('placeholder','PARAMETER_ERROR'),('econnrefused','BACKEND_REFUSED'),('password authentication failed','PASSWORD_ERROR'),('tenant or user not found','ROUTE_OR_USER_ERROR'),('certificate','TLS_ERROR'),('circuit breaker','PROTECTION_ACTIVE'),('timeout','TIMEOUT')]:
+    for needle,code in [('query would be affected by row-level security policy','SESSION_RLS_OFF'),('new row violates row-level security policy','RLS_WRITE_DENIED'),('permission denied for','OBJECT_PRIVILEGE_DENIED'),('placeholder','PARAMETER_ERROR'),('econnrefused','BACKEND_REFUSED'),('password authentication failed','PASSWORD_ERROR'),('tenant or user not found','ROUTE_OR_USER_ERROR'),('certificate','TLS_ERROR'),('circuit breaker','PROTECTION_ACTIVE'),('timeout','TIMEOUT')]:
         if needle in msg:return code
     return 'UNCLASSIFIED'
 def selftest():
