@@ -124,7 +124,7 @@ END $guard$;"""]
         need(role in CUSTOM and member in CUSTOM and grantor=='postgres' and not a and not i and z,'MANAGED_RUNTIME_ROLE_GRAPH')
         q.append('GRANT '+ident(role)+' TO '+ident(member)+' WITH INHERIT FALSE, SET TRUE;')
     return '\n'.join(q)+'\n'
-def audit_target(c,source,roles,members,platform):
+def audit_target(c,source,roles,members,platform,root):
     need(platform_snapshot(c)==platform,'MANAGED_PLATFORM_DRIFT')
     target=p.catalog(c)
     for key in source:
@@ -142,8 +142,15 @@ def audit_target(c,source,roles,members,platform):
     tables=c.execute("""SELECT n.nspname,t.relname,t.relrowsecurity,t.relforcerowsecurity FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace
      WHERE n.nspname=ANY(%s) AND t.relkind IN ('r','p')""",(p.SCHEMAS,)).fetchall()
     need(len(tables)==65 and all(r and f for _,_,r,f in tables),'MANAGED_FORCE_RLS')
-    for schema,table,_,_ in tables:
-        need(c.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(schema,table))).fetchone()==(0,),'MANAGED_SOURCE_ROWS')
+    # The non-superuser installer has no blanket SELECT/USAGE. The separate
+    # disposable CI bootstrap auditor verifies physical emptiness, not RLS-visible rows.
+    need(c.execute("SELECT has_schema_privilege(current_user,'naruv_auth_fence','USAGE')").fetchone()==(False,),'MANAGED_INSTALLER_SCOPE')
+    with psycopg.connect(root) as audit:
+        audit.execute('SET TRANSACTION READ ONLY')
+        need(audit.execute("SELECT current_user,rolsuper FROM pg_roles WHERE rolname=current_user").fetchone()==(ROOT,True),'MANAGED_CI_AUDITOR_SCOPE')
+        for schema,table,_,_ in tables:
+            need(audit.execute(sql.SQL('SELECT count(*) FROM {}').format(sql.Identifier(schema,table))).fetchone()==(0,),'MANAGED_SOURCE_ROWS')
+    print('MANAGED_EMPTY_TABLE_AUDIT_PASS tables='+str(len(tables))+' installer_grants_unchanged=true',flush=True)
     need(c.execute("""SELECT count(*) FROM pg_class t JOIN pg_namespace n ON n.oid=t.relnamespace CROSS JOIN unnest(ARRAY['anon','authenticated','service_role','authenticator']) r
     WHERE n.nspname=ANY(%s) AND t.relkind IN ('r','p') AND (has_table_privilege(r,t.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR has_any_column_privilege(r,t.oid,'SELECT,INSERT,UPDATE,REFERENCES'))""",(p.SCHEMAS,)).fetchone()==(0,),'MANAGED_EXTERNAL_TABLE_GRANT')
     return len(tables)
@@ -212,7 +219,7 @@ def main():
     # psql runs one transaction: roles, DDL, owner and ACL application.
     package=role_commands(members)+plain+'\n'+owner_commands(source)
     p.execute_container(p.TARGET_CONTAINER,'psql','-X','-U','postgres','-d','postgres','--single-transaction','-v','ON_ERROR_STOP=1','-c',"SET naruv.managed_rehearsal='DISPOSABLE_CI_ONLY'",'-f','-',input=package.encode(),stdout=subprocess.PIPE)
-    with psycopg.connect(p.TARGET) as c:tables=audit_target(c,source,roles,members,platform)
+    with psycopg.connect(p.TARGET) as c:tables=audit_target(c,source,roles,members,platform,root)
     print('MANAGED_PACKAGE_RESTORE_PASS schemas=16 tables='+str(tables)+' custom_roles='+str(len(CUSTOM))+' catalog_sections='+str(len(source))+' platform_unchanged=true admin_superuser=false',flush=True)
     load=load_review(root)
     dest=Path(os.environ['NARUV_PORTABLE_OUTPUT']).resolve()
