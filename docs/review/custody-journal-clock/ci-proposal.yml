@@ -1,0 +1,67 @@
+# Inactive; targeted no-database dependency integration, separate CI authorization.
+name: NARUV custody clock targeted integration
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths: ['.github/workflows/naruv-custody-clock-review.yml']
+permissions:
+  contents: read
+jobs:
+  custody-clock:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: df6aaa4f07bb66f5b26b03700958e16d3f343475
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install existing source cryptography dependency and test runner
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python -m pip install 'cryptography>=50.0.2,<51' 'pytest>=8,<10'
+      - name: Verify changed custody consumer with complete dependencies
+        working-directory: source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C ../review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD)" = df6aaa4f07bb66f5b26b03700958e16d3f343475
+          python scripts/naruv_v223_source_custody.py
+          git diff --exit-code
+          p=../review/docs/review/custody-journal-clock
+          test "$(git hash-object app/naruv_operational_readiness.py)" = e05f1f5b6107a6e8318147ef3ca17229bffdb0e0
+          test "$(git hash-object tests/test_naruv_operational_readiness.py)" = 66cd962ad24a8f570ac5011d591573cdba87245b
+          test "$(git hash-object "$p/candidate.py")" = e3119dba5423ad50947b62a5d112472b2b4ce59f
+          test "$(git hash-object "$p/test_operational_readiness_candidate.py")" = 38a9e257c41dce9cf8fa5bcffa18d5bb46983890
+          test "$(git hash-object "$p/test_clock_deterministic.py")" = 09b02e2e4a292f03941f7ac4ecae415818250ea5
+          test "$(git hash-object ../review/docs/review/custody-journal-path/test_candidate.py)" = 095c5a6ed2be215fa5f22d1ca4b4241d2d652f63
+          restore() {
+            git restore --source=HEAD -- app/naruv_operational_readiness.py tests/test_naruv_operational_readiness.py
+            git diff --exit-code
+          }
+          trap restore EXIT
+          cp "$p/candidate.py" app/naruv_operational_readiness.py
+          cp "$p/test_operational_readiness_candidate.py" tests/test_naruv_operational_readiness.py
+          export PYTHONPATH="$PWD"
+          python -m py_compile app/naruv_operational_readiness.py tests/test_naruv_operational_readiness.py "$p/test_clock_deterministic.py"
+          python -m pytest -q --strict-markers tests/test_naruv_operational_readiness.py ../review/docs/review/custody-journal-path/test_candidate.py::CustodyJournalPathTests::test_ancestor_path_rejection_and_no_consumption "$p/test_clock_deterministic.py"
+          restore
+          trap - EXIT
+          python scripts/naruv_v223_source_custody.py
+          echo CUSTODY_CLOCK_FULL_DEPENDENCY_PASS
