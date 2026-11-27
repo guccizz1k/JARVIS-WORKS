@@ -73,6 +73,9 @@ import pytest
 @pytest.mark.parametrize("selected_scope",["legacy","staged"])
 @pytest.mark.parametrize("owner_controlled",[False,True])
 def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path,selected_scope,owner_controlled):
+    _b2_staged_scope(monkeypatch,tmp_path,selected_scope,owner_controlled)
+
+def _b2_staged_scope(monkeypatch,tmp_path,selected_scope,owner_controlled,review_capture=False):
     import hashlib,json
     from scripts import naruv_b2_offline_stage as stage
     from tests.test_p1_external_custodian_pg17_v223 import cipher
@@ -127,8 +130,25 @@ def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path
         def forbid(*args):raise AssertionError("GitHub access forbidden")
         monkeypatch.setattr(clean,"_head_tree",forbid)
         monkeypatch.setattr(clean,"_download",forbid)
+        extra={}
+        if review_capture:
+            import os
+            from scripts import naruv_future_receipt_review as v
+            binding=dict(scope=selected_scope,run_id=("1" if selected_scope=="legacy" else "2")*32,
+                         challenge=("3" if selected_scope=="legacy" else "4")*64,
+                         manifest_sha256=pin,reference_sha256=hashlib.sha256(reference).hexdigest(),
+                         runner_commit=os.environ["NARUV_EXPECTED_RUNNER_SHA"],archives=sorted(h for _,h in pairs))
+            extra["review_binding"]=v.canonical(binding)
         report=ext.run(reference,hashlib.sha256(reference).hexdigest(),catalog_required=True,
-                       staged=(raw,pin,directory,selected_scope),owner_controlled=owner_controlled)
+                       staged=(raw,pin,directory,selected_scope),owner_controlled=owner_controlled,**extra)
+        if review_capture:
+            ev=report["future_archive_evidence"]
+            assert ev["status"]=="PASS_ARCHIVE_OBSERVATIONS_ONLY",report
+            assert ev["binding_sha256"]==hashlib.sha256(extra["review_binding"]).hexdigest()
+            assert ev["archive_results"]==[dict(archive_sha256=h,authenticated=True,restored=True,rows_match=True,catalog_match=True) for h in binding["archives"]]
+            assert ev["host_isolation"]=="NOT_ATTESTED" and ev["signature"]=="NOT_CREATED"
+        else:
+            assert "future_archive_evidence" not in report
         if owner_controlled:
             assert report["owner_site_restore"]=="PASS_ELEVEN_OWNER_SITE_CIPHERS",report
             assert report["external_pg17_restore"]=="NOT_APPLICABLE_OWNER_SITE"
@@ -141,3 +161,8 @@ def test_b2_staged_scope_actual_pg17_catalog_without_github(monkeypatch,tmp_path
         assert report["overall"]=="BLOCKED"
     finally:
         docker("exec",SOURCE_CONTAINER,"dropdb","-U","postgres","--force",db)
+
+
+@pytest.mark.parametrize("selected_scope",["legacy","staged"])
+def test_future_archive_observation_pg17(monkeypatch,tmp_path,selected_scope):
+    _b2_staged_scope(monkeypatch,tmp_path,selected_scope,True,review_capture=True)
