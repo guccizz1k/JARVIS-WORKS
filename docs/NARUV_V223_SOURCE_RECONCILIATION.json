@@ -4466,7 +4466,7 @@
       "mode": "100644"
     },
     "app/naruv_native_write_review.py": {
-      "sha": "6ee3164ea1101cf318ed7769942c82ebee7c8240",
+      "sha": "a7c9ef6302d2fa69b487c4e440620de4f6fde918",
       "mode": "100644"
     },
     "app/naruv_payroll_draft.py": {
@@ -4734,7 +4734,7 @@
       "mode": "100644"
     },
     "db/review/naruv_valuation_ci.sql": {
-      "sha": "0351c73151be51612d563afd7c4e8e8af7bbdf36",
+      "sha": "53dda66945c6901f7924ec34cecb37ce223d76f9",
       "mode": "100644"
     },
     "db/review/v108_source_schema_fingerprints.json": {
@@ -8610,11 +8610,11 @@
       "mode": "100644"
     },
     "app/naruv_operational_readiness.py": {
-      "sha": "e05f1f5b6107a6e8318147ef3ca17229bffdb0e0",
+      "sha": "e3119dba5423ad50947b62a5d112472b2b4ce59f",
       "mode": "100644"
     },
     "tests/test_naruv_operational_readiness.py": {
-      "sha": "66cd962ad24a8f570ac5011d591573cdba87245b",
+      "sha": "38a9e257c41dce9cf8fa5bcffa18d5bb46983890",
       "mode": "100644"
     },
     "scripts/naruv_owner_live_upload.py": {
