@@ -78,38 +78,55 @@ def review_candidate(fixture,trade_dsn,tokens):
                 c.rollback()
                 result[who]=vals
         return result
-    def contention(expected):
+    def contention(expected,label):
         a_bill='load-0-0-bill'; z_bill='load-1-0-bill'
         with closing(psycopg.connect(trade_dsn)) as holder:
             b.bind(holder,tokens['A'])
+            holder_pid=holder.info.backend_pid
             b.cmd(holder,'naruv_finance',a_bill,'lock-probe-pay','pay',dict(amount=1,reference='lock-probe-ref'),fixture.CSRF['A'])
             def read(who,bill):
                 with psycopg.connect(trade_dsn,application_name='naruv-candidate-wait-'+who) as c:
                     c.execute("SET LOCAL statement_timeout='15s'")
+                    start=time.perf_counter()
                     b.bind(c,tokens[who])
-                    return reconcile(c,bill,fixture.CSRF[who])
+                    value=reconcile(c,bill,fixture.CSRF[who])
+                    return value,(time.perf_counter()-start)*1000
             with ThreadPoolExecutor(max_workers=2) as pool:
                 same=pool.submit(read,'A',a_bill)
                 other=pool.submit(read,'B',z_bill)
                 try:
-                    other.result(timeout=8)
-                    seen=False
+                    other_value,other_ms=other.result(timeout=8)
+                    need(other_value==expected['B'][0],'OTHER_TENANT_RESULT')
+                    observed=None
                     with psycopg.connect(fixture.root_dsn,autocommit=True) as obs:
                         end=time.monotonic()+3
                         while time.monotonic()<end:
-                            seen=obs.execute("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name='naruv-candidate-wait-A' AND wait_event_type='Lock')").fetchone()[0]
-                            if seen: break
-                            if same.done(): break
+                            observed=obs.execute("""SELECT a.wait_event,l.locktype,
+                                extract(epoch FROM clock_timestamp()-l.waitstart)*1000
+                                FROM pg_stat_activity a JOIN pg_locks l ON l.pid=a.pid
+                                WHERE a.datname=current_database()
+                                  AND a.application_name='naruv-candidate-wait-A'
+                                  AND a.wait_event_type='Lock' AND NOT l.granted
+                                  AND l.waitstart IS NOT NULL AND %s=ANY(pg_blocking_pids(a.pid))
+                                LIMIT 1""",(holder_pid,)).fetchone()
+                            if observed is not None or same.done(): break
                             time.sleep(.05)
-                    need(seen and not same.done(),'SAME_TENANT_LOCK_UNPROVEN')
+                    need(observed is not None and not same.done(),'EXACT_BLOCKER_UNPROVEN')
+                    need(observed[2]>=0,'WAIT_DURATION_INVALID')
                 finally:
                     holder.rollback()
-                need(same.result(timeout=8)==expected['A'][0],'ROLLED_BACK_PAYMENT_VISIBLE')
+                same_value,same_ms=same.result(timeout=8)
+                need(same_value==expected['A'][0],'ROLLED_BACK_PAYMENT_VISIBLE')
+                print('RECONCILE_LOCK_OBSERVED',json.dumps(dict(arm=label,wait_event=observed[0],
+                    lock_type=observed[1],observed_wait_ms=round(float(observed[2]),3),
+                    same_tenant_rpc_ms=round(same_ms,3),other_tenant_rpc_ms=round(other_ms,3),
+                    exact_blocker=True,rolled_back=True)),flush=True)
     baseline=snapshot()
+    contention(baseline,'baseline')
     apply(before,after)
     try:
         need(snapshot()==baseline,'RECONCILE_JSON_DRIFT')
-        contention(baseline)
+        contention(baseline,'candidate')
         need(snapshot()==baseline,'POST_CONTENTION_DRIFT')
         print('RECONCILE_CANDIDATE_LOCAL_PASS lifecycle_receipts=8 denials_per_arm=6 rollback_and_tenant_lock=true',flush=True)
     finally:
