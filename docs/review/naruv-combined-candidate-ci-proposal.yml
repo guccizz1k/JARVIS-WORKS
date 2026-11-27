@@ -1,0 +1,120 @@
+# Inactive review proposal; separate CI approval required.
+name: NARUV combined accepted optimization candidate
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths:
+      - '.github/workflows/naruv-combined-candidate-review.yml'
+permissions:
+  contents: read
+jobs:
+  erp-acl:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      NARUV_ERP_ACL_CI: SOURCE_PINNED_DISPOSABLE_ONLY
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
+          path: source
+          persist-credentials: false
+      - name: Verify exact source and review SHAs
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C source rev-parse HEAD)" = aa8894305dda413127e2994064f456a966d5e3c2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install exact source dependency sets
+        working-directory: source
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Start fresh disposable PG17 on loopback
+        run: |
+          set -euo pipefail
+          docker run --rm -d --name naruv-erp-acl-ci -p 127.0.0.1:5432:5432 --tmpfs /var/lib/postgresql/data:rw,size=1073741824 -e POSTGRES_PASSWORD=ci-only-ephemeral-test-password postgres:17
+          for i in $(seq 1 60); do
+            if docker exec naruv-erp-acl-ci sh -c 'test "$(cat /proc/1/comm)" = postgres && pg_isready -U postgres -q'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Enable disposable server TLS with isolated trust roots
+        run: |
+          set -euo pipefail
+          dir="$(mktemp -d)"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=naruv-ci-ca' -keyout "$dir/ca.key" -out "$dir/ca.crt" -addext 'basicConstraints=critical,CA:TRUE' -addext 'keyUsage=critical,keyCertSign,cRLSign'
+          openssl req -new -newkey rsa:2048 -nodes -subj '/CN=127.0.0.1' -keyout "$dir/server.key" -out "$dir/server.csr"
+          printf 'subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' > "$dir/ext"
+          openssl x509 -req -in "$dir/server.csr" -CA "$dir/ca.crt" -CAkey "$dir/ca.key" -CAcreateserial -days 1 -extfile "$dir/ext" -out "$dir/server.crt"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=unrelated-ci-ca' -keyout "$dir/bad.key" -out "$dir/bad.crt"
+          docker cp "$dir/server.key" naruv-erp-acl-ci:/tmp/server.key
+          docker cp "$dir/server.crt" naruv-erp-acl-ci:/tmp/server.crt
+          docker exec naruv-erp-acl-ci chown postgres:postgres /tmp/server.key /tmp/server.crt
+          docker exec naruv-erp-acl-ci chmod 600 /tmp/server.key
+          docker exec naruv-erp-acl-ci psql -U postgres -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='/tmp/server.crt'" -c "ALTER SYSTEM SET ssl_key_file='/tmp/server.key'" -c "ALTER SYSTEM SET ssl=on" -c 'SELECT pg_reload_conf()'
+          for i in $(seq 1 20); do
+            if [ "$(docker exec naruv-erp-acl-ci psql -U postgres -Atc 'SHOW ssl')" = on ]; then break; fi
+            sleep 1
+          done
+          test "$(docker exec naruv-erp-acl-ci psql -U postgres -Atc 'SHOW ssl')" = on
+          echo "NARUV_TLS_CA=$dir/ca.crt" >> "$GITHUB_ENV"
+          echo "NARUV_TLS_BAD_CA=$dir/bad.crt" >> "$GITHUB_ENV"
+          echo "NARUV_TLS_DIR=$dir" >> "$GITHUB_ENV"
+      - name: Exercise combined exact app and SQL candidates
+        working-directory: source
+        run: |
+          set -euo pipefail
+          export NARUV_ERP_SOURCE_ROOT="$PWD"
+          export PYTHONPATH="$PWD"
+          export PYTHONDONTWRITEBYTECODE=1
+          test "$(git hash-object ../review/scripts/naruv_combined_candidate_review.py)" = 4ce0f8310af9e00e2158a1b362e5c934fa4a5b01
+          test "$(git hash-object ../review/docs/review/ingest-short-transaction/candidate.py)" = d631b1ef84a7307c91006ca6f9f6e04dcaccb29b
+          test "$(git hash-object app/naruv_native_write_review.py)" = 6ee3164ea1101cf318ed7769942c82ebee7c8240
+          git diff --quiet
+          python - <<'PY'
+          from pathlib import Path
+          import ast
+          import subprocess
+          import sys
+          p=Path('app/naruv_native_write_review.py')
+          original=p.read_bytes()
+          candidate=Path('../review/docs/review/ingest-short-transaction/candidate.py').read_bytes()
+          start=original.index(b'def _stage(')
+          end=original.index(b'\ndef ',start+4)
+          assert original.count(b'def _stage(')==1
+          assert candidate.startswith(b'def _stage(') and candidate.endswith(b'\n')
+          assert [n.name for n in ast.parse(candidate).body]==['_stage']
+          modified=original[:start]+candidate+original[end:]
+          compile(modified,str(p),'exec')
+          compile(Path('../review/scripts/naruv_combined_candidate_review.py').read_bytes(),'combined_runner','exec')
+          try:
+              p.write_bytes(modified)
+              assert p.read_bytes()==modified
+              subprocess.run([sys.executable,'../review/scripts/naruv_combined_candidate_review.py'],check=True)
+          finally:
+              p.write_bytes(original)
+              assert p.read_bytes()==original
+              subprocess.run(['git','diff','--exit-code','--','app/naruv_native_write_review.py'],check=True)
+          print('COMBINED_SOURCE_RESTORE_PASS',flush=True)
+          PY
+          git diff --exit-code
+      - name: Confirm disposable database removed
+        if: always()
+        run: |
+          set -euo pipefail
+          if docker inspect naruv-erp-acl-ci >/dev/null 2>&1; then docker rm -f naruv-erp-acl-ci; fi
+          ! docker inspect naruv-erp-acl-ci >/dev/null 2>&1
+          if [ -n "${NARUV_TLS_DIR:-}" ]; then rm -rf -- "$NARUV_TLS_DIR"; fi
