@@ -175,7 +175,7 @@ def main():
             c.execute('BEGIN');b.bind(c,h);stock(c,csrf,'sync-business-rollback');c.execute('ROLLBACK')
             before=b.snapshot(fixture)
             a.execute('BEGIN');change(a,'ci-ua',False,'member')
-            c.execute('BEGIN');b.bind(c,h);denied_stock(c,csrf,'sync-denied-change','42501' if False else '55P03');c.execute('ROLLBACK')
+            c.execute('BEGIN');b.bind(c,h);denied_stock(c,csrf,'sync-denied-change','55P03');c.execute('ROLLBACK')
             a.execute('COMMIT')
             need(state(fixture,h)==(0,1,1,0),'SYNC_CHANGE_COMMIT')
             change(a,'ci-ua',True,'admin')
