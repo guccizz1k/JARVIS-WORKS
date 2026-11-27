@@ -1,0 +1,55 @@
+name: NARUV Gate 5 direct login ACL review
+on:
+  pull_request:
+    branches: [review/naruv-gate5-witness-ledger-20261127]
+    paths:
+      - 'scripts/naruv_witness_login_acl_review.py'
+      - 'scripts/naruv_pg_witness_ledger_review.py'
+      - 'tests/test_naruv_witness_login_acl_review.py'
+      - '.github/workflows/naruv-gate5-login-acl-review.yml'
+permissions:
+  contents: read
+jobs:
+  direct-login-acl:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      NARUV_SIGNED_PG17_CI: '1'
+      NARUV_WITNESS_LEDGER_CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Exact reviewed SHA
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pytest>=8,<10' 'psycopg[binary]>=3.2,<4' 'cryptography>=43,<47'
+      - name: Start disposable PG17 with SCRAM host authentication
+        run: |
+          set -euo pipefail
+          docker run --rm -d --name naruv-login-acl-ci -p 127.0.0.1:55439:5432 --tmpfs /var/lib/postgresql/data:rw,size=536870912 -e POSTGRES_PASSWORD=synthetic_review_only -e POSTGRES_HOST_AUTH_METHOD=scram-sha-256 -e POSTGRES_INITDB_ARGS=--auth-host=scram-sha-256 postgres:17
+          for i in $(seq 1 45); do
+            if docker exec naruv-login-acl-ci sh -c 'test "$(cat /proc/1/comm)" = postgres && pg_isready -U postgres -q'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Direct service login and prospective ACL drift tests
+        env:
+          NARUV_WITNESS_DIRECT_LOGIN_CI: '1'
+        run: |
+          python -m py_compile scripts/naruv_witness_login_acl_review.py scripts/naruv_pg_witness_ledger_review.py tests/test_naruv_witness_login_acl_review.py
+          python -m pytest --noconftest -q -v tests/test_naruv_witness_login_acl_review.py
+      - name: Affected legacy guard regression
+        run: python -m pytest --noconftest -q tests/test_naruv_pg_witness_ledger_review.py
+      - name: Verify disposable DB removed
+        if: always()
+        run: |
+          set -euo pipefail
+          if docker inspect naruv-login-acl-ci >/dev/null 2>&1; then docker rm -f naruv-login-acl-ci; fi
+          ! docker inspect naruv-login-acl-ci >/dev/null 2>&1
