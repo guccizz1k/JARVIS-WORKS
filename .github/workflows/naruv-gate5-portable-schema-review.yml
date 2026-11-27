@@ -1,0 +1,88 @@
+name: NARUV Gate 5 portable schema and messenger review
+on:
+  pull_request:
+    branches: [review/naruv-gate5-auth-owner-20261127]
+    paths:
+      - 'scripts/naruv_portable_schema_review.py'
+      - '.github/workflows/naruv-gate5-portable-schema-review.yml'
+permissions:
+  contents: read
+jobs:
+  erp-acl:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      NARUV_ERP_ACL_CI: SOURCE_PINNED_DISPOSABLE_ONLY
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: aa8894305dda413127e2994064f456a966d5e3c2
+          path: source
+          persist-credentials: false
+      - name: Verify exact source and review SHAs
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C source rev-parse HEAD)" = aa8894305dda413127e2994064f456a966d5e3c2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install exact source dependency sets
+        working-directory: source
+        run: python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5
+      - name: Start fresh disposable PG17 on loopback
+        run: |
+          set -euo pipefail
+          docker run --rm -d --name naruv-erp-acl-ci -p 127.0.0.1:5432:5432 --tmpfs /var/lib/postgresql/data:rw,size=1073741824 -e POSTGRES_PASSWORD=ci-only-ephemeral-test-password postgres:17
+          for i in $(seq 1 60); do
+            if docker exec naruv-erp-acl-ci sh -c 'test "$(cat /proc/1/comm)" = postgres && pg_isready -U postgres -q'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Start independent disposable restore target
+        run: |
+          set -euo pipefail
+          docker run --rm -d --name naruv-portable-target-ci -p 127.0.0.1:55440:5432 --tmpfs /var/lib/postgresql/data:rw,size=1073741824 -e POSTGRES_PASSWORD=ci-only-ephemeral-test-password postgres:17
+          for i in $(seq 1 60); do
+            if docker exec naruv-portable-target-ci sh -c 'test "$(cat /proc/1/comm)" = postgres && pg_isready -U postgres -q'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Build credential-free package and restore into independent PG17
+        working-directory: source
+        run: |
+          set -euo pipefail
+          export NARUV_ERP_SOURCE_ROOT="$PWD"
+          export PYTHONPATH="$PWD"
+          export NARUV_PORTABLE_OUTPUT="$RUNNER_TEMP/naruv-portable-schema-review"
+          export EXPECTED_SHA="$(git -C ../review rev-parse HEAD)"
+          python -m py_compile ../review/scripts/naruv_portable_schema_review.py
+          python ../review/scripts/naruv_portable_schema_review.py
+      - name: Retain verified credential-free review package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: naruv-portable-schema-review
+          path: ${{ runner.temp }}/naruv-portable-schema-review/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Confirm both disposable databases removed
+        if: always()
+        run: |
+          set -euo pipefail
+          if docker inspect naruv-erp-acl-ci >/dev/null 2>&1; then docker rm -f naruv-erp-acl-ci; fi
+          ! docker inspect naruv-erp-acl-ci >/dev/null 2>&1
+          if docker inspect naruv-portable-target-ci >/dev/null 2>&1; then docker rm -f naruv-portable-target-ci; fi
+          ! docker inspect naruv-portable-target-ci >/dev/null 2>&1
+          rm -rf -- "$RUNNER_TEMP/naruv-portable-schema-review"
