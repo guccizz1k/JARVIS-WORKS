@@ -1,0 +1,43 @@
+name: NARUV QA session pooler verified transport
+on:
+  pull_request:
+    branches: [review/naruv-gate5-native-workload-20261127]
+    paths: ['.github/workflows/naruv-gate5-session-pooler-review.yml']
+permissions:
+  contents: read
+jobs:
+  pooler-transport:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify exact dashboard IPv4 session endpoint and certificate
+        run: |
+          python3 - <<'PY'
+          import socket,ssl,struct,time
+          host='aws-0-ap-northeast-2.pooler.supabase.com'
+          port=5432
+          addrs=socket.getaddrinfo(host,port,socket.AF_INET,socket.SOCK_STREAM)
+          print('POOLER_IPV4_DNS_PASS addresses='+str(len(addrs)),flush=True)
+          def handshake(name):
+              ctx=ssl.create_default_context()
+              ctx.minimum_version=ssl.TLSVersion.TLSv1_2
+              with socket.create_connection((host,port),timeout=5) as raw:
+                  raw.sendall(struct.pack('!II',8,80877103))
+                  if raw.recv(1)!=b'S': raise RuntimeError('POOLER_SSL_REFUSED')
+                  with ctx.wrap_socket(raw,server_hostname=name) as tls:
+                      return tls.version()
+          try:
+              version=handshake(host)
+          except Exception as e:
+              print('POOLER_TLS_BLOCKED '+type(e).__name__+' '+str(e),flush=True)
+              raise
+          print('POOLER_IPV4_TLS_PASS version='+version+' hostname_verified=true',flush=True)
+          try:
+              handshake('wrong-host.invalid')
+          except ssl.SSLCertVerificationError:
+              print('POOLER_WRONG_HOST_DENIED_PASS',flush=True)
+          else:
+              raise RuntimeError('POOLER_HOSTNAME_VALIDATION_FAILED')
+          print('POOLER_TRANSPORT_REVIEW_PASS credentials_used=false login_tested=false production_authorized=false',flush=True)
+          PY
