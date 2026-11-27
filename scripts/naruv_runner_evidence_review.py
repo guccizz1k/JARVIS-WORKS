@@ -37,6 +37,7 @@ def finish(capture,observed,report):
             report.get('normalized_catalog_comparison')=='PASS_11_SCOPED_CATALOG_CHECKPOINTS' and
             report.get('normalized_archive_comparison')=='PASS_11_ARCHIVE_CHECKPOINTS' and
             report.get('disposable_pg17_removed')=='PASS' and
+            report.get('review_cleanup_absence_verified') is True and
             report.get('b2_staged_scope_bound') is True and
             report.get('owner_scope_pin_checked') is True and
             report.get('decrypted_dump_written_to_host') is False and
