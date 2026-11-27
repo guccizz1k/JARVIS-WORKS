@@ -35,7 +35,9 @@ def review_candidate(fixture,trade_dsn,tokens):
     def apply(expected,replacement):
         base.preflight()
         with psycopg.connect(fixture.root_dsn) as c:
-            need(c.execute("SELECT current_database(),session_user,inet_server_addr()::text").fetchone() in [('postgres','postgres','127.0.0.1/32'),('postgres','postgres','127.0.0.1')],'LOCAL_SCOPE')
+            # Docker NAT changes the server-side address; verify the actual
+            # client endpoint and the pinned disposable fixture instead.
+            need(c.info.host=='127.0.0.1' and c.info.port==5432 and c.execute("SELECT current_database(),session_user,current_setting('server_version_num')::int BETWEEN 170000 AND 179999").fetchone()==('postgres','postgres',True),'LOCAL_SCOPE')
             m=meta(c)
             need(m[2:5]==(True,'v',['search_path=pg_catalog']) and m[5]==expected,'CANDIDATE_SOURCE')
             definition=c.execute('SELECT pg_get_functiondef(%s::regprocedure)',(sig,)).fetchone()[0]
@@ -76,7 +78,7 @@ def review_candidate(fixture,trade_dsn,tokens):
                 c.rollback()
                 result[who]=vals
         return result
-    def contention():
+    def contention(expected):
         a_bill='load-0-0-bill'; z_bill='load-1-0-bill'
         with closing(psycopg.connect(trade_dsn)) as holder:
             b.bind(holder,tokens['A'])
@@ -102,12 +104,12 @@ def review_candidate(fixture,trade_dsn,tokens):
                     need(seen and not same.done(),'SAME_TENANT_LOCK_UNPROVEN')
                 finally:
                     holder.rollback()
-                same.result(timeout=8)
+                need(same.result(timeout=8)==expected['A'][0],'ROLLED_BACK_PAYMENT_VISIBLE')
     baseline=snapshot()
     apply(before,after)
     try:
         need(snapshot()==baseline,'RECONCILE_JSON_DRIFT')
-        contention()
+        contention(baseline)
         need(snapshot()==baseline,'POST_CONTENTION_DRIFT')
         print('RECONCILE_CANDIDATE_LOCAL_PASS lifecycle_receipts=8 denials_per_arm=6 rollback_and_tenant_lock=true',flush=True)
     finally:
