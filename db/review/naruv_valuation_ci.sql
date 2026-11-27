@@ -288,10 +288,6 @@ BEGIN
   CASE WHEN b.kind='purchase' THEN 'PURCHASE_CLEARING' ELSE 'INVENTORY' END))
  THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
  j:=naruv_accounting.inspect_bill(p_bill,p_csrf);
- SELECT coalesce(sum(l.debit::numeric-l.credit) FILTER(WHERE l.account='PURCHASE_CLEARING'),0),
- coalesce(sum(l.credit::numeric-l.debit) FILTER(WHERE l.account='SALES'),0)
- INTO clearing,sales FROM naruv_accounting.lines l JOIN naruv_accounting.journals h USING(org_id,event_id)
- WHERE h.org_id=a.org_id AND h.bill_id=p_bill;
  FOR ce IN SELECT * FROM naruv_finance.events z WHERE z.org_id=a.org_id AND z.bill_id=p_bill AND z.action='credit'
  ORDER BY (z.payload->>'prior_quantity')::bigint LOOP
   rq:=(ce.payload->>'quantity')::bigint;
@@ -321,10 +317,12 @@ BEGIN
  OR EXISTS(SELECT 1 FROM naruv_finance.events x WHERE x.org_id=a.org_id AND x.bill_id=p_bill AND x.action='refund'
  AND NOT EXISTS(SELECT 1 FROM naruv_finance.events z WHERE z.org_id=x.org_id AND z.bill_id=x.bill_id AND z.action='credit' AND z.request_id=x.payload->>'credit_request_id' AND z.payload->>'refund_id'=x.request_id))
  THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
- SELECT coalesce(sum(CASE WHEN b.kind='sale' AND l.account='VAT_OUTPUT' THEN l.credit-l.debit WHEN b.kind='purchase' AND l.account='VAT_INPUT' THEN l.debit-l.credit ELSE 0 END),0),
+ SELECT coalesce(sum(l.debit::numeric-l.credit) FILTER(WHERE l.account='PURCHASE_CLEARING'),0),
+ coalesce(sum(l.credit::numeric-l.debit) FILTER(WHERE l.account='SALES'),0),
+coalesce(sum(CASE WHEN b.kind='sale' AND l.account='VAT_OUTPUT' THEN l.credit-l.debit WHEN b.kind='purchase' AND l.account='VAT_INPUT' THEN l.debit-l.credit ELSE 0 END),0),
  coalesce(sum(CASE WHEN l.account='CASH_CLEARING' THEN CASE WHEN b.kind='sale' THEN l.debit-l.credit ELSE l.credit-l.debit END ELSE 0 END),0),
  coalesce(sum(CASE WHEN l.account='PURCHASE_COST_VARIANCE' THEN l.credit-l.debit ELSE 0 END),0)
- INTO vat_balance,cash_balance,variance_balance FROM naruv_accounting.lines l JOIN naruv_accounting.journals h USING(org_id,event_id)
+ INTO clearing,sales,vat_balance,cash_balance,variance_balance FROM naruv_accounting.lines l JOIN naruv_accounting.journals h USING(org_id,event_id)
  WHERE h.org_id=a.org_id AND h.bill_id=p_bill;
  IF vat_balance<>b.vat-rv OR cash_balance<>naruv_finance.paid(a.org_id,p_bill) OR variance_balance<>vs THEN RAISE EXCEPTION 'COST_INTEGRITY'; END IF;
  credited:=q=b.quantity;
