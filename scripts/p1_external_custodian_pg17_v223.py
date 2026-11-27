@@ -296,7 +296,10 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
             pin,key,pairs=clean._inputs()
         _require_owner_scope(pairs, os.environ.get("JW_WORM_OWNER_SCOPE_SHA256", ""))
         if capture is not None:
-            evidence.check_archive_set(capture,pairs)
+            try:
+                evidence.check_archive_set(capture,pairs)
+            except ValueError:
+                raise Blocked("REVIEW_ARCHIVE_SET_MISMATCH") from None
         result["owner_scope_pin_checked"]=True
         if reference_required:
             loader=catalog.load_reference if catalog_required else equivalence.load_reference
@@ -424,6 +427,15 @@ def run(reference_raw=None, reference_pin=None, *, catalog_required=False, stage
         result["external_pg17_restore"]="NOT_APPLICABLE_OWNER_SITE"
         result["independent_key_custody"]="DEFERRED_NOT_ATTESTED"
     if capture is not None:
+        # Confirm absence independently of rm's exit status. A daemon failure is not absence.
+        result["review_cleanup_absence_verified"]=False
+        if container and offline.SHA_RE.fullmatch(container) and result["disposable_pg17_removed"]=="PASS":
+            try:
+                remaining=offline._docker(["ps","--all","--no-trunc","--filter","id="+container,
+                                           "--format","{{.ID}}"],timeout=15)
+                result["review_cleanup_absence_verified"]=(remaining.returncode==0 and not remaining.stdout.strip())
+            except (OSError,subprocess.SubprocessError):
+                pass
         # No partial evidence is published. No signing key or environment claims are generated.
         result["future_archive_evidence"]=evidence.finish(capture,observed_hashes,result)
     # All necessary raw data and credentials are local to the external custodian.
