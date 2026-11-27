@@ -54,9 +54,9 @@ jobs:
       - name: Start independent disposable restore target
         run: |
           set -euo pipefail
-          docker run --rm -d --name naruv-portable-target-ci -p 127.0.0.1:55440:5432 --tmpfs /var/lib/postgresql/data:rw,size=1073741824 -e POSTGRES_PASSWORD=ci-only-ephemeral-test-password postgres:17
+          docker run --rm -d --name naruv-portable-target-ci -p 127.0.0.1:55440:5432 --tmpfs /var/lib/postgresql/data:rw,size=1073741824 -e POSTGRES_USER=naruv_platform_root -e POSTGRES_DB=postgres -e POSTGRES_PASSWORD=ci-only-ephemeral-test-password postgres:17
           for i in $(seq 1 60); do
-            if docker exec naruv-portable-target-ci sh -c 'test "$(cat /proc/1/comm)" = postgres && pg_isready -U postgres -q'; then exit 0; fi
+            if docker exec naruv-portable-target-ci sh -c 'test "$(cat /proc/1/comm)" = postgres && pg_isready -U naruv_platform_root -d postgres -q'; then exit 0; fi
             sleep 1
           done
           exit 1
