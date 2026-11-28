@@ -1,0 +1,92 @@
+name: NARUV wave7 focused PG17 and evidence integration
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths: ['.github/workflows/naruv-wave7-integrated-review.yml']
+permissions:
+  contents: read
+jobs:
+  integrated:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 386077c311f23d313f60678d3e23692b0e070fbf
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          path: wave5
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Install staged dependencies
+        run: |
+          set -euo pipefail
+          cd source
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5 reportlab==4.4.9 pytest==9.2.0 pytest-asyncio==1.5.0
+          python -m pip check
+      - name: Exact overlays and focused disposable PG17 integration
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C source rev-parse HEAD)" = 386077c311f23d313f60678d3e23692b0e070fbf
+          test "$(git -C wave5 rev-parse HEAD)" = 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          q="$PWD/review/docs/review/wave7-integrated"
+          test "$(git hash-object "$q/build_hr_overlay.py")" = 9e765f3b0149701cbc02a76a60a31c16d9ff866c
+          test "$(git hash-object "$q/review_gates.py")" = 293217dffcf17bffd2ca26ecec8922edf6a391bd
+          test "$(git hash-object "$q/document_candidates.py")" = 44b8fbd8fbeb7fd575057faf4911e0bed941fdf4
+          test "$(git hash-object "$q/test_integrated.py")" = 954cc9a12dd7db10db26cc183b7539af7fe86475
+          test "$(git hash-object wave5/docs/review/p0-p3-wave5/build.py)" = 328cea10578cec4a38a36c7fede355bb4d79c8d6
+          test "$(git hash-object source/app/naruv_document_review.py)" = 8b1701e62235752c1130ee27bca869f50002d4f2
+          test "$(git hash-object source/app/naruv_recovery_custody_review.py)" = 6aafed77f21a775cf9b478035d3b77ed2a8b31bd
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          c="$RUNNER_TEMP/naruv-wave7-overlay"
+          python wave5/docs/review/p0-p3-wave5/build.py wave5/docs/review/p0-p3-wave2 "$c"
+          python "$q/build_hr_overlay.py" source/app/naruv_draft_review.py "$c/draft-overlay.py"
+          restore() {
+            git -C source restore --source=HEAD -- app/naruv_kr_payroll_review.py app/erp_migration_xlsx.py app/naruv_draft_review.py
+            git -C source diff --exit-code
+          }
+          trap restore EXIT
+          cp "$c/payroll-statement-candidate.py" source/app/naruv_kr_payroll_review.py
+          cp "$c/xlsx-candidate.py" source/app/erp_migration_xlsx.py
+          cp "$c/draft-overlay.py" source/app/naruv_draft_review.py
+          (
+            cd source
+            export PYTHONPATH="$q:$PWD"
+            python -m py_compile app/naruv_draft_review.py app/naruv_kr_payroll_review.py app/erp_migration_xlsx.py "$q/review_gates.py" "$q/document_candidates.py" "$q/test_integrated.py"
+            python -m pytest -q -s --strict-markers -o asyncio_default_fixture_loop_scope=function -W error::pytest.PytestDeprecationWarning "$q/test_integrated.py" --junitxml="$RUNNER_TEMP/wave7.xml"
+          )
+          restore
+          trap - EXIT
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          echo WAVE7_FOCUSED_INTEGRATION_PASS
