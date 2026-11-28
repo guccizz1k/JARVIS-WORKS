@@ -1,0 +1,156 @@
+name: NARUV wave13 CI binding repair and first integration execution
+on:
+  pull_request:
+    branches: [review/naruv-wave13-integrated-20261128]
+    paths: ['.github/workflows/naruv-wave13-ci-repair.yml']
+permissions:
+  contents: read
+jobs:
+  integrated:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          fetch-depth: 3
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 386077c311f23d313f60678d3e23692b0e070fbf
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          path: wave5
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Scoped dependencies and actual Korean OCR engine
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo systemctl mask --runtime clamav-freshclam.service
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng fonts-nanum libseccomp2 clamav clamav-freshclam
+          /usr/bin/clamscan --version
+          /usr/bin/tesseract --version
+          /usr/bin/tesseract --list-langs
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+          cd source
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5 reportlab==4.4.9 pytest==9.2.0 pytest-asyncio==1.5.0 fastapi==0.165.0 starlette==1.10.0 httpx2==2.16.2 cryptography==50.0.2 pdfplumber==0.11.11 pdfminer.six==20260107 pypdfium2==5.15.2 pillow==13.0.0
+          python -m pip check
+      - name: Exact 26-file predecessor assembly and new module pins
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "CI_HEAD_BINDING_INVALID"; exit 1; }
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_HEAD" || { echo "CI_HEAD_CHECKOUT_MISMATCH"; exit 1; }
+          echo WAVE13_CI_HEAD_BINDING_PASS
+          test "$(git -C source rev-parse HEAD)" = 386077c311f23d313f60678d3e23692b0e070fbf
+          test "$(git -C wave5 rev-parse HEAD)" = 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          q="$PWD/review/docs/review/wave13-integrated"
+          while read -r expected file; do
+            test "$(git hash-object "$q/$file")" = "$expected" || { echo "WAVE13_BLOB_PIN_MISMATCH: $file"; exit 1; }
+          done <<'PINS'
+          56531f920d15f8410c901f4476b02c71b91b8bb9 candidate_lock.py
+          26d71568bccda80398dd378e8a79e3ef73cb850c cvd_verify_worker.py
+          fb4a82650a931a6cf5e891bcb2ba89a1f1ac5058 grid_process.py
+          8a40df5aebb149f533bf40c88f5ee8d83cb3ed50 grid_worker.py
+          c34026c730273c45358264f23f1ce00125f79e71 hosted_evidence.py
+          d0438deedfd73d083e351d4cbd17168740e0abbc ocr_grid.py
+          f8269006f5ac3c213d727be08addbed75638fde1 payroll_correction.py
+          8c7e3abf08785e9ec3f323db0a4eaac4a422c038 release_evidence.py
+          40955d44030b239be18b8cae1be0e93d2b045fb0 scan_snapshot.py
+          36775793baa6e327aa61e0709998d5087a0fde9f network_fence.py
+          293217dffcf17bffd2ca26ecec8922edf6a391bd review_gates.py
+          83a863e61e160d854719b94811fb084df3cc0355 korean_observations.py
+          8b1701e62235752c1130ee27bca869f50002d4f2 pinned/naruv_document_review.py
+          6aafed77f21a775cf9b478035d3b77ed2a8b31bd pinned/naruv_recovery_custody_review.py
+          677e1e98ab05e6b9ed8c2e92e840a5ec4296eef4 test_wave13_real.py
+          1d19be658e1ff9c745b261c4b112a391c13b34fc official_cvd_ci.py
+          PINS
+          # The exact predecessor must already exist within the depth-three checkout.
+          git -C review cat-file -e ba6dabce733c8059c08debdc0dcd54ea210d0237^{commit}
+          bundle="$RUNNER_TEMP/wave13-pinned"
+          python "$q/candidate_lock.py" "$PWD/review" "$bundle"
+          python - "$bundle/receipt.json" <<'PY'
+          import json,sys
+          r=json.load(open(sys.argv[1]))
+          assert len(r['files'])==26 and r['production_authorized'] is False
+          print('WAVE13_ACTUAL_GIT_26_BLOB_ASSEMBLY_PASS')
+          PY
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          c="$RUNNER_TEMP/wave13-overlay"
+          test "$(git hash-object wave5/docs/review/p0-p3-wave5/build.py)" = 328cea10578cec4a38a36c7fede355bb4d79c8d6
+          python wave5/docs/review/p0-p3-wave5/build.py wave5/docs/review/p0-p3-wave2 "$c"
+          test "$(sha256sum "$c/payroll-statement-candidate.py" | cut -d' ' -f1)" = 723641e7c655866ca04fbd5c72fbf33de1ba1fb0328d338bbe4f90b23c40a164
+      - name: New PG17 amendment and template OCR integration
+        env:
+          REVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          q="$PWD/review/docs/review/wave13-integrated"
+          bundle="$RUNNER_TEMP/wave13-pinned"
+          p="$bundle/wave11-integrated"
+          v="$bundle/wave12-integrated"
+          c="$RUNNER_TEMP/wave13-overlay"
+          export WAVE2_DIR="$PWD/wave5/docs/review/p0-p3-wave2"
+          restore() {
+            git -C source restore --source=HEAD -- app/naruv_kr_payroll_review.py
+            git -C source diff --exit-code
+          }
+          trap restore EXIT
+          cp "$c/payroll-statement-candidate.py" source/app/naruv_kr_payroll_review.py
+          (
+            cd source
+            export PYTHONPATH="$q:$p:$v:$PWD"
+            python -m py_compile "$q/"*.py "$q/pinned/"*.py app/naruv_kr_payroll_review.py
+            python -m pytest -q -s --strict-markers -o asyncio_default_fixture_loop_scope=function -W error::pytest.PytestDeprecationWarning -W error::starlette.exceptions.StarletteDeprecationWarning "$q/test_wave13_real.py" --junitxml="$RUNNER_TEMP/wave13.xml"
+            python - "$RUNNER_TEMP/wave13.xml" <<'PY'
+          import sys,xml.etree.ElementTree as E
+          s=E.parse(sys.argv[1]).getroot().find('testsuite')
+          assert s is not None and s.attrib['tests']=='4' and all(s.attrib[k]=='0' for k in ('failures','errors','skipped')),s.attrib
+          print('WAVE13_FOUR_NEW_INTEGRATION_CASES_PASS')
+          PY
+          )
+          restore
+          trap - EXIT
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          echo WAVE13_FOCUSED_INTEGRATION_PASS
+      - name: One bounded official CVD acquisition and engine review
+        run: |
+          set -euo pipefail
+          q="$PWD/review/docs/review/wave13-integrated"
+          # Public vendor signature download only, no deployment or user data.
+          # Acquisition may be refused; record BLOCKED distinctly, no synthetic fallback.
+          set +e
+          timeout --kill-after=5s 150s python "$q/official_cvd_ci.py"
+          rc=$?
+          set -e
+          if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+            echo WAVE13_OFFICIAL_CVD_BLOCKED_DEADLINE
+          elif [ "$rc" != 0 ]; then
+            exit "$rc"
+          fi
