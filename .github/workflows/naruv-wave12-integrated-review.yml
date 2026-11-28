@@ -1,0 +1,147 @@
+name: NARUV wave12 actual receipt API, OCR digest, scanner and signed ACL
+on:
+  pull_request:
+    branches: [review/naruv-wave11-integrated-20261128]
+    paths: ['.github/workflows/naruv-wave12-integrated-review.yml']
+permissions:
+  contents: read
+jobs:
+  integrated:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-ephemeral-test-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      JW_ENV: review
+      JW_PG_CI_ALLOW: ONLY_EPHEMERAL_LOCAL_DATABASE
+      JW_PG_CI_ROOT_DSN: postgresql://postgres:ci-only-ephemeral-test-password@127.0.0.1:5432/postgres
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 386077c311f23d313f60678d3e23692b0e070fbf
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          path: wave5
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Scoped dependencies and actual Korean OCR engine
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-kor tesseract-ocr-eng fonts-nanum libseccomp2 clamav
+          /usr/bin/clamscan --version
+          /usr/bin/tesseract --version
+          /usr/bin/tesseract --list-langs
+          test -f /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+          cd source
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5 reportlab==4.4.9 pytest==9.2.0 pytest-asyncio==1.5.0 fastapi==0.165.0 starlette==1.10.0 httpx2==2.16.2 cryptography==50.0.2 pdfplumber==0.11.11 pdfminer.six==20260107 pypdfium2==5.15.2 pillow==13.0.0
+          python -m pip check
+      - name: Pin and verify disposable source overlays
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C source rev-parse HEAD)" = 386077c311f23d313f60678d3e23692b0e070fbf
+          test "$(git -C wave5 rev-parse HEAD)" = 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          p="$PWD/review/docs/review/wave11-integrated"
+          q="$PWD/review/docs/review/wave12-integrated"
+          while read -r expected file; do
+            test "$(git hash-object "$p/$file")" = "$expected"
+          done <<'PINS'
+          a3d6175ef7bc40dd3d15fe7f1d4721394b05be00 payroll_receipts_ci.sql
+          d64f2ba63b98574ea458316ca06761e686208c43 pg_receipt_adapter.py
+          0912d70dd2ce40b7117156e7b3abcfc602968244 queue_bridge.py
+          2970965fab8d10b93b223b96c0b0a09c25a7b974 local_queue_store.py
+          a278117363ab3d6fc24cb4836d43a4b630865fc3 handoff.py
+          293217dffcf17bffd2ca26ecec8922edf6a391bd review_gates.py
+          8b1701e62235752c1130ee27bca869f50002d4f2 pinned/naruv_document_review.py
+          6aafed77f21a775cf9b478035d3b77ed2a8b31bd pinned/naruv_recovery_custody_review.py
+          69e3eca5f06fb7fedf8e7a34f43e4b80ad3b3263 isolated_document.py
+          23438d0fddb37f15e93d1257be5a2edd17c95a5a isolated_worker.py
+          83a863e61e160d854719b94811fb084df3cc0355 korean_observations.py
+          36775793baa6e327aa61e0709998d5087a0fde9f network_fence.py
+          a10225db246953ec2ead9da85b36e103c06e3fce ocr_id_views.py
+          b2468a989b90b1c727bf768738e2c1e762812e8f id_candidate.py
+          80acdc7930a4020840b32f06b33d73ed40114e13 queue_schema_ci.sql
+          f161f7fb101db98284081f1cbcc5592d00dd47f4 queue_result.py
+          d928cf2464f333691ef96adf7e7b8b155c8c28f5 test_wave11_db.py
+          PINS
+          while read -r expected file; do
+            test "$(git hash-object "$q/$file")" = "$expected"
+          done <<'NEWPINS'
+          430d31304741b6c7da88aa050fa00e4f3537e6be receipt_api.py
+          faf84065232a2f16936d4875448313d36243bd5f queue_integrity.py
+          67cc625fc7f2ac141f3e1c76d4992f43787a64a9 queue_result_digest_ci.sql
+          e46c1c2cd44f6a27c740ce010b086af348a25f6b load_evidence.py
+          1b4ed1d60ccf049a0b7e39a627a04c74aa4bc108 combined_recovery.py
+          537bc61dbba433f8a6f856c20734b0791a1600ed policy_approval.py
+          c66917848c022a305492dd1bcf5bd5f1abd56a28 prospective_acl.py
+          f5ba9c3df2e6c455434c7a830a39a19938c978ae clamav_fixture_scan.py
+          256c8001963652fb32e8966b645642461fd9614a test_wave12_real.py
+          NEWPINS
+          test "$(git hash-object review/scripts/jw_independent_security_v223.py)" = cb76e6943d87664d86b05fef42bc3ecd87730fe4
+          test "$(git hash-object review/scripts/jw_pg17_role_graph_v223.py)" = 2852064d95f8b0b43e5c7da4a5045993d20ffbfe
+          test "$(git hash-object source/app/pg_v112_ocr_queue.py)" = 4800e1c1d9739107190c99362691f9427c56a77c
+          test "$(git hash-object source/db/review/v112_ephemeral_only_pg.sql)" = 98ba3f66ce1c701e2ad30ca0ec0a882bf86d88c2
+          test "$(git hash-object source/db/review/naruv_draft_ci.sql)" = 2d6f0e606f22d42566fb9cc5722c21223b35ebc5
+          test "$(git hash-object source/db/review/naruv_hr_ci.sql)" = 5c15f11a87b6484d1a312c50fb8990081c5aff72
+          test "$(git hash-object wave5/docs/review/p0-p3-wave5/build.py)" = 328cea10578cec4a38a36c7fede355bb4d79c8d6
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          c="$RUNNER_TEMP/wave11-overlay"
+          python wave5/docs/review/p0-p3-wave5/build.py wave5/docs/review/p0-p3-wave2 "$c"
+          test "$(sha256sum "$c/payroll-statement-candidate.py" | cut -d' ' -f1)" = 723641e7c655866ca04fbd5c72fbf33de1ba1fb0328d338bbe4f90b23c40a164
+      - name: Real API, ClamAV fixture, OCR digest and actual catalog comparison
+        env:
+          REVIEW_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          p="$PWD/review/docs/review/wave11-integrated"
+          q="$PWD/review/docs/review/wave12-integrated"
+          export REVIEW_SCRIPTS="$PWD/review/scripts"
+          c="$RUNNER_TEMP/wave11-overlay"
+          export WAVE2_DIR="$PWD/wave5/docs/review/p0-p3-wave2"
+          restore() {
+            git -C source restore --source=HEAD -- app/naruv_kr_payroll_review.py
+            git -C source diff --exit-code
+          }
+          trap restore EXIT
+          cp "$c/payroll-statement-candidate.py" source/app/naruv_kr_payroll_review.py
+          (
+            cd source
+            export PYTHONPATH="$q:$p:$PWD"
+            python -m py_compile "$q/"*.py "$p/"*.py "$p/pinned/"*.py app/naruv_kr_payroll_review.py
+            python -m pytest -q -s --strict-markers -o asyncio_default_fixture_loop_scope=function -W error::pytest.PytestDeprecationWarning -W error::starlette.exceptions.StarletteDeprecationWarning "$q/test_wave12_real.py" --junitxml="$RUNNER_TEMP/wave12.xml"
+            python - "$RUNNER_TEMP/wave12.xml" <<'PY'
+          import sys,xml.etree.ElementTree as E
+          s=E.parse(sys.argv[1]).getroot().find('testsuite')
+          assert s is not None and s.attrib['tests']=='5' and all(s.attrib[k]=='0' for k in ('failures','errors','skipped')),s.attrib
+          print('WAVE12_FIVE_NEW_INTEGRATION_CASES_PASS')
+          PY
+          )
+          restore
+          trap - EXIT
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          echo WAVE12_FOCUSED_INTEGRATION_PASS
