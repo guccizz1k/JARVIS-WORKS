@@ -1,0 +1,134 @@
+name: NARUV wave8 actual source assembly and new integration
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths: ['.github/workflows/naruv-wave8-integrated-review.yml']
+permissions:
+  contents: read
+jobs:
+  integrated:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      JW_ENV: review
+      JW_NO_EXTERNAL_DATABASE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 386077c311f23d313f60678d3e23692b0e070fbf
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          path: wave5
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 99c3ba73ae3803cbc7e3f0495cd524c8536ac482
+          path: wave7
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 69c89c7c148ce4cd79d564d232c5bc0108482b4f
+          path: wave6
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Exact scoped test dependencies
+        run: |
+          set -euo pipefail
+          cd source
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt openpyxl==3.1.5 reportlab==4.4.9 pytest==9.2.0 pytest-asyncio==1.5.0 fastapi==0.165.0 starlette==1.10.0 httpx2==2.16.2 cryptography==50.0.2 pdfplumber==0.11.11 pdfminer.six==20260107 pypdfium2==5.15.2 pillow==13.0.0
+          python -m pip check
+      - name: Materialize exact Git objects and validate manifest
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C source rev-parse HEAD)" = 386077c311f23d313f60678d3e23692b0e070fbf
+          test "$(git -C wave5 rev-parse HEAD)" = 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          test "$(git -C wave7 rev-parse HEAD)" = 99c3ba73ae3803cbc7e3f0495cd524c8536ac482
+          test "$(git -C wave6 rev-parse HEAD)" = 69c89c7c148ce4cd79d564d232c5bc0108482b4f
+          q="$PWD/review/docs/review/wave8-integrated"
+          test "$(git hash-object "$q/assemble.py")" = c9ac969889c8c4c5fd19f46750ecd569ab3c7847
+          test "$(git hash-object "$q/handoff.py")" = a278117363ab3d6fc24cb4836d43a4b630865fc3
+          test "$(git hash-object "$q/bounded_pdf.py")" = c181aa800303d1a22965958555df35e027f43593
+          test "$(git hash-object "$q/pdf_worker.py")" = eb7e109654f1d44250d511ebfdec92747b42cb02
+          test "$(git hash-object "$q/test_new_integration.py")" = e9b7a5d9830c5d8190cba8ea740ef3bad1b23be8
+          git -C source fetch --no-tags --update-shallow "$PWD/wave5" 61adef8e3c4baeb9cfb2b1969cea712a14e68749
+          git -C source fetch --no-tags --update-shallow "$PWD/wave7" 99c3ba73ae3803cbc7e3f0495cd524c8536ac482
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          out="$RUNNER_TEMP/naruv-wave8-assembly"
+          python "$q/assemble.py" "$PWD/source" "$out"
+          export ASSEMBLED="$out"
+          python - <<'PY'
+          import json, os, hashlib
+          from pathlib import Path
+          base=Path('source');out=Path(os.environ['ASSEMBLED'])
+          m='docs/NARUV_V223_SOURCE_RECONCILIATION.json'
+          old=json.loads((base/m).read_bytes());new=json.loads((out/m).read_bytes())
+          paths={'app/naruv_kr_payroll_review.py','app/erp_migration_xlsx.py','app/naruv_draft_review.py'}
+          a=old['expected_blob_inventory'];b=new['expected_blob_inventory']
+          assert len(a)==len(b)==1189 and a.keys()==b.keys()
+          assert {k for k in a if a[k]!=b[k]}==paths
+          assert {k:v for k,v in old.items() if k!='expected_blob_inventory'}=={k:v for k,v in new.items() if k!='expected_blob_inventory'}
+          for p in paths:
+              raw=(out/p).read_bytes()
+              assert b[p]['sha']==hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+              assert b[p]['mode']==a[p]['mode']=='100644'
+          assert json.loads((out/'assembly-receipt.json').read_text())['production_authorized'] is False
+          print('WAVE8_ACTUAL_GIT_ASSEMBLY_MANIFEST_1189_PASS')
+          PY
+      - name: New cross-module integration and custody after restore
+        run: |
+          set -euo pipefail
+          q="$PWD/review/docs/review/wave8-integrated"
+          w7="$PWD/wave7/docs/review/wave7-integrated"
+          w6="$PWD/wave6/docs/review/wave6-defect"
+          out="$RUNNER_TEMP/naruv-wave8-assembly"
+          test "$(git hash-object "$w7/review_gates.py")" = 293217dffcf17bffd2ca26ecec8922edf6a391bd
+          test "$(git hash-object "$w7/document_candidates.py")" = 44b8fbd8fbeb7fd575057faf4911e0bed941fdf4
+          test "$(git hash-object "$w6/qa_probe.py")" = 789b25cd0a2b253a7b430a05bd360e9c33b38e73
+          test "$(git hash-object "$w6/tests/test_https_local.py")" = f9dadf2cef34afb24fb0b050fab8c23e3e48df5b
+          test "$(git hash-object source/app/naruv_document_review.py)" = 8b1701e62235752c1130ee27bca869f50002d4f2
+          test "$(git hash-object source/app/naruv_recovery_custody_review.py)" = 6aafed77f21a775cf9b478035d3b77ed2a8b31bd
+          work="$RUNNER_TEMP/naruv-wave8-new-tests"
+          mkdir -p "$work/pinned"
+          cp "$q/"*.py "$work/"
+          cp "$w7/review_gates.py" "$w7/document_candidates.py" "$work/"
+          cp source/app/naruv_document_review.py source/app/naruv_recovery_custody_review.py "$work/pinned/"
+          paths=(app/naruv_kr_payroll_review.py app/erp_migration_xlsx.py app/naruv_draft_review.py docs/NARUV_V223_SOURCE_RECONCILIATION.json)
+          restore() {
+            git -C source restore --source=HEAD -- "${paths[@]}"
+            git -C source diff --exit-code
+          }
+          trap restore EXIT
+          for p in "${paths[@]}"; do cp "$out/$p" "source/$p"; done
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          export WAVE2_DIR="$PWD/wave5/docs/review/p0-p3-wave2"
+          (
+            cd source
+            export PYTHONPATH="$work:$PWD:$w6:$w6/tests"
+            python -m py_compile "$work/"*.py app/naruv_kr_payroll_review.py app/erp_migration_xlsx.py app/naruv_draft_review.py
+            python -m pytest -q -s --strict-markers -o asyncio_default_fixture_loop_scope=function -W error::pytest.PytestDeprecationWarning -W error::starlette.exceptions.StarletteDeprecationWarning "$work/test_new_integration.py" --junitxml="$RUNNER_TEMP/wave8.xml"
+            python - "$RUNNER_TEMP/wave8.xml" <<'PY'
+          import sys,xml.etree.ElementTree as E
+          s=E.parse(sys.argv[1]).getroot().find('testsuite')
+          assert s is not None and s.attrib['tests']=='8' and all(s.attrib[k]=='0' for k in ('failures','errors','skipped')),s.attrib
+          print('WAVE8_EIGHT_NEW_CASES_PASS')
+          PY
+          )
+          restore
+          trap - EXIT
+          (cd source && python scripts/naruv_v223_source_custody.py)
+          echo WAVE8_FOCUSED_INTEGRATION_PASS
