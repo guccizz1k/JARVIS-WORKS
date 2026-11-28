@@ -1,0 +1,66 @@
+name: NARUV wave6 defect-first verification
+on:
+  pull_request:
+    branches: [review/naruv-gate5-qa-independent-login-20261127]
+    paths: ['.github/workflows/naruv-wave6-defect-review.yml']
+permissions:
+  contents: read
+jobs:
+  defect-first:
+    if: github.repository == 'guccizz1k/JARVIS-WORKS' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      JW_NO_EXTERNAL_DATABASE: '1'
+      JW_ENV: review
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: review
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 386077c311f23d313f60678d3e23692b0e070fbf
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - name: Pinned source and defect candidate integrity
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C review rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git -C source rev-parse HEAD)" = 386077c311f23d313f60678d3e23692b0e070fbf
+          test "$(git hash-object source/pytest.ini)" = 9470eb3cb2822bbc1665bee0ca78c6ba97a8e715
+          p="$PWD/review/docs/review/wave6-defect"
+          test "$(git hash-object "$p/qa_probe.py")" = 789b25cd0a2b253a7b430a05bd360e9c33b38e73
+          test "$(git hash-object "$p/tests/test_async_scope.py")" = 8ecb797eb990a569258f5e0e1c07ad4d8db482c6
+          test "$(git hash-object "$p/tests/test_https_local.py")" = f9dadf2cef34afb24fb0b050fab8c23e3e48df5b
+          test "$(git hash-object "$p/tests/test_qa_probe.py")" = d686f1983d705d35900896d184cb4ef7ee1131a8
+          (cd source && python scripts/naruv_v223_source_custody.py)
+      - name: Reproduce previous runner dependency versions
+        run: |
+          set -euo pipefail
+          cd source
+          python -m pip install -r requirements-dev.txt -r requirements-pg-stage.txt pytest==9.2.0 pytest-asyncio==1.5.0 openpyxl==3.1.5
+          python -m pip check
+          python -c 'import pytest,pytest_asyncio; print("pytest",pytest.__version__,"pytest-asyncio",pytest_asyncio.__version__)'
+      - name: Defect tests with scoped warning-as-error
+        run: |
+          set -euo pipefail
+          p="$PWD/review/docs/review/wave6-defect"
+          cd source
+          export PYTHONPATH="$p:$PWD"
+          python -m py_compile "$p/qa_probe.py"
+          python -m pytest -q --strict-markers -o asyncio_default_fixture_loop_scope=function -W error::pytest.PytestDeprecationWarning "$p/tests" --junitxml="$RUNNER_TEMP/wave6.xml"
+          git diff --exit-code
+          echo WAVE6_SCOPED_WARNING_AND_REGRESSION_PASS
+      - name: Required real Render HTTPS health and auth barrier
+        if: success()
+        run: |
+          set -euo pipefail
+          python review/docs/review/wave6-defect/qa_probe.py
